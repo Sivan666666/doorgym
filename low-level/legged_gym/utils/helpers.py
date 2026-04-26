@@ -191,6 +191,8 @@ def get_args(test=False):
         {"name": "--flat_terrain", "action": "store_true", "default": False,  "help": "Flat the terrain"},
         {"name": "--pitch_control", "action": "store_true", "default": False,  "help": "Control Pitch"},
         {"name": "--vel_obs", "action": "store_true", "default": False,  "help": "Control Pitch"},
+        {"name": "--fixed_vx", "type": float, "default": None, "help": "Override play-time forward command with a fixed value"},
+        {"name": "--fixed_yaw", "type": float, "default": None, "help": "Override play-time yaw command with a fixed value"},
         
         {"name": "--rows", "type": int, "help": "num_rows."},
         {"name": "--cols", "type": int, "help": "num_cols"},

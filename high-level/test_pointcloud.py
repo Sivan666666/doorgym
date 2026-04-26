@@ -70,7 +70,7 @@ def save_view(vis):
     return False
 
 if __name__ == "__main__":
-    directory = "../pybullet-URDF-models/urdf_models/models"
+    directory = "data/asset/obj_set"
     subdirectories = list_subdirectories(directory)
     input_filename = os.path.join(directory, random.choice(subdirectories), "textured.obj")
     print("loaded object: ", input_filename)

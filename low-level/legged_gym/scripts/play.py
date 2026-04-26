@@ -61,6 +61,15 @@ def play(args):
     if args.flat_terrain:
         env_cfg.terrain.height = [0.0, 0.0]
 
+    if args.fixed_vx is not None:
+        env_cfg.commands.curriculum = False
+        env_cfg.commands.ranges.lin_vel_x = [args.fixed_vx, args.fixed_vx]
+        env_cfg.commands.lin_vel_x_clip = min(env_cfg.commands.lin_vel_x_clip, max(0.01, abs(args.fixed_vx) * 0.5))
+    if args.fixed_yaw is not None:
+        env_cfg.commands.curriculum = False
+        env_cfg.commands.ranges.ang_vel_yaw = [args.fixed_yaw, args.fixed_yaw]
+        env_cfg.commands.ang_vel_yaw_clip = min(env_cfg.commands.ang_vel_yaw_clip, max(0.01, abs(args.fixed_yaw) * 0.5))
+
     # prepare environment
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
     obs = env.get_observations()
@@ -120,13 +129,23 @@ def play(args):
 
     # env.update_command_curriculum()
     env.reset()
+    if args.fixed_vx is not None or args.fixed_yaw is not None:
+        print("Using fixed play commands:", {"fixed_vx": args.fixed_vx, "fixed_yaw": args.fixed_yaw})
     for i in range(traj_length):
+        if args.fixed_vx is not None:
+            env.commands[:, 0] = args.fixed_vx
+        if args.fixed_yaw is not None:
+            env.commands[:, 2] = args.fixed_yaw
         start_time = time.time()
         if args.use_jit:
             actions = policy(torch.cat((obs[:, :env.cfg.env.num_proprio], obs[:, env.cfg.env.num_proprio+env.cfg.env.num_priv:]), dim=1))
         else:
             actions = policy(obs.detach(), hist_encoding=True)
         obs, _, rews, arm_rews, dones, infos = env.step(actions.detach())
+        if args.fixed_vx is not None:
+            env.commands[:, 0] = args.fixed_vx
+        if args.fixed_yaw is not None:
+            env.commands[:, 2] = args.fixed_yaw
         if args.record_video:
             imgs = env.render_record(mode='rgb_array')
             if imgs is not None:

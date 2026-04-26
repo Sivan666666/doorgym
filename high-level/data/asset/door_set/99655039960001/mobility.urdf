@@ -1,0 +1,65 @@
+<?xml version="1.0" ?>
+<robot name="right-pull-door">
+	<link name="base"/>
+	<link name="link_0">
+		<visual name="out-frame">
+			<origin xyz="0 0 0"/>
+			<geometry>
+				<mesh filename="texture_dae/frame.dae" scale="0.7847087474983032 0.7847087474983032 0.7847087474983032"/>
+			</geometry>
+		</visual>
+		<collision>
+			<origin xyz="0 0 0"/>
+			<geometry>
+				<mesh filename="texture_dae/frame.dae" scale="0.7847087474983032 0.7847087474983032 0.7847087474983032"/>
+			</geometry>
+		</collision>
+	</link>
+	<joint name="joint_0" type="fixed">
+		<origin rpy="1.570796326794897 0 -1.570796326794897" xyz="0 0 0"/>
+		<child link="link_0"/>
+		<parent link="base"/>
+	</joint>
+	<link name="link_1">
+		<visual name="surf-board">
+			<origin xyz="0.43772571625471257 -0.833918921540436 0"/>
+			<geometry>
+				<mesh filename="texture_dae/board.dae" scale="0.7847087474983032 0.7847087474983032 0.7847087474983032"/>
+			</geometry>
+		</visual>
+		<collision>
+			<origin xyz="0.43772571625471257 -0.833918921540436 0"/>
+			<geometry>
+				<mesh filename="texture_dae/board.dae" scale="0.7847087474983032 0.7847087474983032 0.7847087474983032"/>
+			</geometry>
+		</collision>
+	</link>
+	<joint name="joint_1" type="revolute">
+		<origin xyz="-0.43772571625471257 0.833918921540436 0"/>
+		<axis xyz="0 -1 0"/>
+		<child link="link_1"/>
+		<parent link="link_0"/>
+		<limit lower="0" upper="1.5079644737231006"/>
+	</joint>
+	<link name="link_2">
+		<visual name="handle">
+			<origin xyz="0 0 0"/>
+			<geometry>
+				<mesh filename="texture_dae/9960001.dae" scale="1.0506827922278985 1.0506827922278985 1.0506827922278985"/>
+			</geometry>
+		</visual>
+		<collision>
+			<origin xyz="0 0 0"/>
+			<geometry>
+				<mesh filename="texture_dae/9960001.dae" scale="1.0506827922278985 1.0506827922278985 1.0506827922278985"/>
+			</geometry>
+		</collision>
+	</link>
+	<joint name="joint_2" type="revolute">
+		<origin xyz="0.7961440756377498 -0.895323459131536 0.01616160859397324"/>
+		<child link="link_2"/>
+		<parent link="link_1"/>
+		<axis xyz="0 0 1"/>
+		<limit lower="0" upper="1.5079644737231006"/>
+	</joint>
+</robot>

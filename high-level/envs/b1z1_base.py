@@ -404,7 +404,7 @@ class B1Z1Base(RewardVecTask):
     
     def create_sim(self):
         self.up_axis_idx = 2 # Y=1, Z=2;
-        self.sim = super().create_sim(self.sim_id, self.sim_id, self.physics_engine, self.sim_params)
+        self.sim = super().create_sim(self.sim_id, self.graphics_device_id, self.physics_engine, self.sim_params)
         
         self._create_grond_plane()
         self._create_envs()
@@ -730,7 +730,7 @@ class B1Z1Base(RewardVecTask):
         low_actor_critic.load_state_dict(loaded_dict["model_state_dict"])
         low_actor_critic = low_actor_critic.to(self.device)
         low_actor_critic.eval()
-        print("Low level pretrained policy loaded!")
+        print(f"Low level pretrained policy loaded from: {policy_path}")
         if not stochastic:
             return low_actor_critic.act_inference
         else:

@@ -1,11 +1,13 @@
+import os
+
+os.environ.setdefault("TORCH_EXTENSIONS_DIR", "/tmp/torch_extensions")
+
 from isaacgym import gymapi
 from isaacgym import gymtorch
 from isaacgym.torch_utils import *
 
 import numpy as np
 import torch
-import os
-
 import torch.nn as nn
 
 from skrl.models.torch import Model, GaussianMixin, DeterministicMixin
@@ -27,6 +29,9 @@ def create_env(cfg, args):
     cfg["env"]["enableDebugVis"] = args.debugvis
     cfg["env"]["cameraMode"] = "full"
     cfg["env"]["smallValueSetZero"] = args.small_value_set_zero
+    if args.sim_device == "cpu":
+        cfg["sim"]["use_gpu_pipeline"] = False
+        cfg["sim"]["physx"]["use_gpu"] = False
     if args.last_commands:
         cfg["env"]["lastCommands"] = True
     if args.record_video:
@@ -34,8 +39,12 @@ def create_env(cfg, args):
     if args.control_freq is not None:
         cfg["env"]["controlFrequencyLow"] = int(args.control_freq)
     robot_start_pose = (-2.00, 0, 0.55)
+    if args.task == "B1Z1OpenDoor":
+        robot_start_pose = (1.75, 0, 0.55)
     if args.eval:
         robot_start_pose = (-0.85, 0, 0.55)
+        if args.task == "B1Z1OpenDoor":
+            robot_start_pose = (1.75, 0, 0.55)
     _env = eval(args.task)(cfg=cfg, rl_device=args.rl_device, sim_device=args.sim_device, 
                          graphics_device_id=args.graphics_device_id, headless=args.headless, 
                          use_roboinfo=args.roboinfo, observe_gait_commands=args.observe_gait_commands, no_feature=args.no_feature, mask_arm=args.mask_arm, pitch_control=args.pitch_control,
@@ -150,8 +159,8 @@ def get_trainer(is_eval=False):
     device = env.rl_device
     memory = RandomMemory(memory_size=24, num_envs=env.num_envs, device=device)
     
-    num_features = 0 if args.no_feature else 1024
-    encode_dim = 0 if args.no_feature else 128
+    num_features = getattr(env, "num_features", 0)
+    encode_dim = 128 if num_features > 0 else 0
     models_ppo = {}
     models_ppo["policy"] = Policy(env.observation_space, env.action_space, device, num_features=num_features, encode_dim=encode_dim, use_tanh=args.use_tanh, clip_actions=args.use_tanh, deterministic=args.eval)
     models_ppo["value"] = Value(env.observation_space, env.action_space, device, num_features=num_features, encode_dim=encode_dim)

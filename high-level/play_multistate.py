@@ -1,3 +1,7 @@
+import os
+
+os.environ.setdefault("TORCH_EXTENSIONS_DIR", "/tmp/torch_extensions")
+
 from skrl.utils import set_seed
 from train_multistate import get_trainer
 
