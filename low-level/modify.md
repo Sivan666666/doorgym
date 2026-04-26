@@ -39,3 +39,32 @@ TORCH_EXTENSIONS_DIR=/tmp/torch_extensions
 Purpose:
 
 - Avoid writing torch extension build artifacts into restricted or shared source directories during local testing.
+
+## 6D End-Effector Tracking Training
+
+Files:
+
+- `legged_gym/envs/manip_loco/manip_loco.py`
+- `legged_gym/envs/manip_loco/b1z1_config.py`
+- `legged_gym/envs/rewards/maniploco_rewards.py`
+
+Changes:
+
+- Replaced the zeroed target-orientation observation with the sampled orientation command:
+
+```python
+self.ee_goal_orn_delta_rpy
+```
+
+- Enabled orientation tracking reward:
+
+```python
+tracking_ee_orn = 0.4
+```
+
+- Reimplemented `_reward_tracking_ee_orn` by converting the current target quaternion and current EE quaternion to Euler angles, then computing wrapped Euler error.
+
+Purpose:
+
+- Train a low-level policy that observes and is rewarded for both end-effector position and orientation tracking.
+- Keep the observation dimensionality unchanged by replacing the existing 3 zero orientation channels with the 3D orientation command.

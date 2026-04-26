@@ -40,7 +40,8 @@ class ManipLoco_rewards:
     
     def _reward_tracking_ee_orn(self):
         ee_orn_euler = torch.stack(euler_from_quat(self.env.ee_orn), dim=-1)
-        orn_err = torch.sum(torch.abs(torch_wrap_to_pi_minuspi(self.env.ee_goal_orn_euler - ee_orn_euler)) * self.env.orn_error_scale, dim=1)
+        goal_orn_euler = torch.stack(euler_from_quat(self.env.ee_goal_orn_quat), dim=-1)
+        orn_err = torch.sum(torch.abs(torch_wrap_to_pi_minuspi(goal_orn_euler - ee_orn_euler)) * self.env.orn_error_scale, dim=1)
         return torch.exp(-orn_err/self.env.cfg.rewards.tracking_ee_sigma), orn_err
 
     def _reward_arm_energy_abs_sum(self):
