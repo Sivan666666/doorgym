@@ -39,6 +39,35 @@ from legged_gym.utils.math import quat_apply_yaw, wrap_to_pi, torch_rand_sqrt_fl
 import torch
 from typing import Tuple, Dict
 
+
+class ThickAxesGeometry(gymutil.LineGeometry):
+    def __init__(self, scale=1.0, thickness=0.006, pose=None):
+        offsets = {
+            0: [(0, 0, 0), (0, thickness, 0), (0, -thickness, 0), (0, 0, thickness), (0, 0, -thickness)],
+            1: [(0, 0, 0), (thickness, 0, 0), (-thickness, 0, 0), (0, 0, thickness), (0, 0, -thickness)],
+            2: [(0, 0, 0), (thickness, 0, 0), (-thickness, 0, 0), (0, thickness, 0), (0, -thickness, 0)],
+        }
+        axis_end = [(scale, 0, 0), (0, scale, 0), (0, 0, scale)]
+        axis_color = [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)]
+        verts = np.empty((15, 2), gymapi.Vec3.dtype)
+        colors = np.empty(15, gymapi.Vec3.dtype)
+        idx = 0
+        for axis in range(3):
+            for offset in offsets[axis]:
+                verts[idx][0] = offset
+                verts[idx][1] = tuple(axis_end[axis][j] + offset[j] for j in range(3))
+                colors[idx] = axis_color[axis]
+                idx += 1
+
+        self.verts = pose.transform_points(verts) if pose is not None else verts
+        self._colors = colors
+
+    def vertices(self):
+        return self.verts
+
+    def colors(self):
+        return self._colors
+
 from legged_gym.envs.base.legged_robot import LeggedRobot
 from legged_gym import LEGGED_GYM_ROOT_DIR
 from legged_gym.utils.helpers import class_to_dict
@@ -228,7 +257,7 @@ class ManipLoco(LeggedRobot):
                                     self.commands[:, :3] * self.commands_scale,  # dim 3
                                     # self.curr_ee_goal_sphere,  # dim 3 position
                                     ee_goal_local_cart,  # dim 3 position
-                                    self.ee_goal_orn_delta_rpy  # dim 3 orientation command
+                                    0 * self.ee_goal_orn_delta_rpy  # dim 3 orientation command
                                     ),dim=-1)
         if self.cfg.env.observe_gait_commands:
             obs_buf = torch.cat((obs_buf,
@@ -1153,7 +1182,7 @@ class ManipLoco(LeggedRobot):
         sphere_pose = gymapi.Transform(gymapi.Vec3(0, 0, 0), r=None)
         gymutil.draw_lines(sphere_geom_origin, self.gym, self.viewer, self.envs[0], sphere_pose)
 
-        axes_geom = gymutil.AxesGeometry(scale=0.2)
+        axes_geom = ThickAxesGeometry(scale=0.24, thickness=0.008)
 
         for i in range(self.num_envs):
             sphere_pose = gymapi.Transform(gymapi.Vec3(self.curr_ee_goal_cart_world[i, 0], self.curr_ee_goal_cart_world[i, 1], self.curr_ee_goal_cart_world[i, 2]), r=None)
@@ -1168,6 +1197,12 @@ class ManipLoco(LeggedRobot):
             pose = gymapi.Transform(gymapi.Vec3(self.curr_ee_goal_cart_world[i, 0], self.curr_ee_goal_cart_world[i, 1], self.curr_ee_goal_cart_world[i, 2]), 
                                     r=gymapi.Quat(self.ee_goal_orn_quat[i, 0], self.ee_goal_orn_quat[i, 1], self.ee_goal_orn_quat[i, 2], self.ee_goal_orn_quat[i, 3]))
             gymutil.draw_lines(axes_geom, self.gym, self.viewer, self.envs[i], pose)
+
+            ee_axis_pose = gymapi.Transform(
+                gymapi.Vec3(ee_pose[i, 0], ee_pose[i, 1], ee_pose[i, 2]),
+                r=gymapi.Quat(self.ee_orn[i, 0], self.ee_orn[i, 1], self.ee_orn[i, 2], self.ee_orn[i, 3]),
+            )
+            gymutil.draw_lines(axes_geom, self.gym, self.viewer, self.envs[i], ee_axis_pose)
 
     def _draw_ee_goal_traj(self):
         sphere_geom = gymutil.WireframeSphereGeometry(0.005, 8, 8, None, color=(1, 0, 0))

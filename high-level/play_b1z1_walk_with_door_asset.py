@@ -59,6 +59,7 @@ def _load_door_runtime(cfg_path):
         with open(door_set_root / spec["handle_bounding"], "r", encoding="utf-8") as f:
             handle_bounding_data.append(json.load(f))
 
+    env_cfg = cfg.get("env", {})
     return {
         "asset_root": str(asset_root),
         "asset_file_door": asset_file_door,
@@ -66,16 +67,70 @@ def _load_door_runtime(cfg_path):
         "door_asset_names": [item["name"] for item in door_asset_specs],
         "door_bounding_data": door_bounding_data,
         "handle_bounding_data": handle_bounding_data,
-        "door_lock_force": 150.0,
-        "door_open_resistance": 3.0,
-        "handle_unlock_ratio": 0.65,
-        "handle_spring_stiffness": 3.5,
-        "handle_spring_damping": 1.0,
+        "door_lock_force": float(env_cfg.get("doorLockForce", 150.0)),
+        "door_open_resistance": float(env_cfg.get("doorOpenResistance", 3.0)),
+        "door_open_damping": float(env_cfg.get("doorOpenDamping", 0.5)),
+        "handle_unlock_ratio": float(env_cfg.get("handleOpenThresholdRatio", 0.65)),
+        "handle_spring_stiffness": float(env_cfg.get("handleSpringStiffness", 40.0)),
+        "handle_spring_damping": float(env_cfg.get("handleSpringDamping", 2.0)),
+        "door_joint_friction": env_cfg.get("doorJointFriction", [6.0, 18.0]),
+        "door_joint_damping": env_cfg.get("doorJointDamping", [3.0, 10.0]),
+        "door_joint_effort": env_cfg.get("doorJointEffort", [200.0, 200.0]),
     }
+
+
+def _compute_robot_y_by_spec(robot_y, door_y, door_bounding_data, handle_bounding_data):
+    robot_y_by_spec = []
+    for handle_bounds in handle_bounding_data:
+        handle_center_y = 0.5 * (float(handle_bounds["handle_min"][1]) + float(handle_bounds["handle_max"][1]))
+        # Door actors are rotated 180 deg around Z, so asset-local handle Y contributes with a flipped sign in world Y.
+        handle_center_world_y = door_y - handle_center_y
+        robot_y_by_spec.append(float(robot_y + handle_center_world_y))
+    return robot_y_by_spec
 
 
 class ManipLocoDoorAsset(ManipLoco):
     """Low-level B1Z1 locomotion/manipulation env with an extra door actor."""
+
+    def handle_viewer_action_event(self, evt):
+        if evt.action == "free_cam" and evt.value > 0:
+            self.free_cam = not self.free_cam
+            return
+        super().handle_viewer_action_event(evt)
+
+    def _apply_gripper_shape_contact_props(self, robot_asset, shape_props):
+        try:
+            shape_ranges = self.gym.get_asset_rigid_body_shape_indices(robot_asset)
+        except Exception:
+            return shape_props
+
+        gripper_body_names = ("gripperStator", "gripperMover", self.cfg.asset.gripper_name)
+        for body_name in gripper_body_names:
+            body_idx = self.body_names_to_idx.get(body_name)
+            if body_idx is None or body_idx >= len(shape_ranges):
+                continue
+            shape_range = shape_ranges[body_idx]
+            start = getattr(shape_range, "start", None)
+            count = getattr(shape_range, "count", None)
+            if start is None or count is None:
+                continue
+            for shape_id in range(start, start + count):
+                prop = shape_props[shape_id]
+                prop.friction = DOOR_RUNTIME["gripper_shape_friction"]
+                if hasattr(prop, "rolling_friction"):
+                    prop.rolling_friction = DOOR_RUNTIME["gripper_shape_friction"]
+                if hasattr(prop, "torsion_friction"):
+                    prop.torsion_friction = DOOR_RUNTIME["gripper_shape_friction"]
+                if hasattr(prop, "rest_offset"):
+                    prop.rest_offset = DOOR_RUNTIME["gripper_shape_rest_offset"]
+                if hasattr(prop, "contact_offset"):
+                    prop.contact_offset = DOOR_RUNTIME["gripper_shape_contact_offset"]
+                if hasattr(prop, "physx"):
+                    if hasattr(prop.physx, "rest_offset"):
+                        prop.physx.rest_offset = DOOR_RUNTIME["gripper_shape_rest_offset"]
+                    if hasattr(prop.physx, "contact_offset"):
+                        prop.physx.contact_offset = DOOR_RUNTIME["gripper_shape_contact_offset"]
+        return shape_props
 
     def _get_env_origins(self):
         self.custom_origins = True
@@ -112,6 +167,9 @@ class ManipLocoDoorAsset(ManipLoco):
         asset_options.thickness = self.cfg.asset.thickness
         asset_options.disable_gravity = self.cfg.asset.disable_gravity
         asset_options.use_mesh_materials = True
+        asset_options.vhacd_enabled = True
+        asset_options.vhacd_params = gymapi.VhacdParams()
+        asset_options.vhacd_params.resolution = DOOR_RUNTIME["robot_vhacd_resolution"]
 
         robot_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
         self.num_dofs = self.gym.get_asset_dof_count(robot_asset)
@@ -120,9 +178,15 @@ class ManipLocoDoorAsset(ManipLoco):
         dof_props_asset["driveMode"][12:].fill(gymapi.DOF_MODE_POS)
         dof_props_asset["stiffness"][12:].fill(400.0)
         dof_props_asset["damping"][12:].fill(40.0)
-        rigid_shape_props_asset = self.gym.get_asset_rigid_shape_properties(robot_asset)
+        gripper_dofs = self.cfg.env.num_gripper_joints
+        if gripper_dofs > 0:
+            dof_props_asset["stiffness"][-gripper_dofs:].fill(DOOR_RUNTIME["gripper_stiffness"])
+            dof_props_asset["damping"][-gripper_dofs:].fill(DOOR_RUNTIME["gripper_damping"])
+            dof_props_asset["friction"][-gripper_dofs:].fill(DOOR_RUNTIME["gripper_joint_friction"])
         self.body_names = self.gym.get_asset_rigid_body_names(robot_asset)
         self.body_names_to_idx = self.gym.get_asset_rigid_body_dict(robot_asset)
+        rigid_shape_props_asset = self.gym.get_asset_rigid_shape_properties(robot_asset)
+        rigid_shape_props_asset = self._apply_gripper_shape_contact_props(robot_asset, rigid_shape_props_asset)
         self.dof_names = self.gym.get_asset_dof_names(robot_asset)
         self.dof_wo_gripper_names = self.dof_names[:-self.cfg.env.num_gripper_joints]
         self.dof_names_to_idx = self.gym.get_asset_dof_dict(robot_asset)
@@ -192,14 +256,14 @@ class ManipLocoDoorAsset(ManipLoco):
 
             pos = self.env_origins[i].clone()
             pos[0] += DOOR_RUNTIME["robot_x"]
-            pos[1] += DOOR_RUNTIME["robot_y"]
+            pos[1] += DOOR_RUNTIME["robot_y_by_spec"][i % len(self.door_asset_specs)]
             pos[2] += DOOR_RUNTIME["robot_z"]
-            pos[:2] += torch_rand_float(
+            pos[0] += torch_rand_float(
                 -self.cfg.init_state.origin_perturb_range,
                 self.cfg.init_state.origin_perturb_range,
-                (2, 1),
+                (1, 1),
                 device=self.device,
-            ).squeeze(1)
+            ).squeeze()
             robot_yaw = DOOR_RUNTIME["robot_yaw"] + self.cfg.init_state.rand_yaw_range * np.random.uniform(-1, 1)
             rand_yaw_quat = gymapi.Quat.from_euler_zyx(0.0, 0.0, robot_yaw)
             start_pose.r = rand_yaw_quat
@@ -321,7 +385,7 @@ class ManipLocoDoorAsset(ManipLoco):
         door_opts.disable_gravity = True
         door_opts.vhacd_enabled = True
         door_opts.vhacd_params = gymapi.VhacdParams()
-        door_opts.vhacd_params.resolution = 2048
+        door_opts.vhacd_params.resolution = DOOR_RUNTIME["door_vhacd_resolution"]
 
         for spec in self.door_asset_specs:
             door_asset = self.gym.load_asset(
@@ -369,12 +433,25 @@ class ManipLocoDoorAsset(ManipLoco):
 
         door_dof_props = self.gym.get_asset_dof_properties(door_asset)
         door_dof_props["driveMode"][:] = gymapi.DOF_MODE_EFFORT
+        num_cfg_dofs = min(self.gym.get_asset_dof_count(door_asset), len(DOOR_RUNTIME["door_joint_damping"]))
+        door_dof_props["damping"][:num_cfg_dofs] = np.asarray(DOOR_RUNTIME["door_joint_damping"][:num_cfg_dofs], dtype=np.float32)
+        door_dof_props["friction"][:num_cfg_dofs] = np.asarray(DOOR_RUNTIME["door_joint_friction"][:num_cfg_dofs], dtype=np.float32)
+        door_dof_props["effort"][:num_cfg_dofs] = np.asarray(DOOR_RUNTIME["door_joint_effort"][:num_cfg_dofs], dtype=np.float32)
         if len(door_dof_props["upper"]) >= 2:
             door_dof_props["upper"][1] = min(float(door_dof_props["upper"][1]), math.pi / 4)
         self.gym.set_actor_dof_properties(env_handle, door_handle, door_dof_props)
 
         self.door_handles.append(door_handle)
         self.door_actor_spec_ids.append(spec_id)
+
+    def _robot_spawn_y(self, env_ids):
+        if hasattr(self, "initial_handle_center_y"):
+            return self.initial_handle_center_y[env_ids] + DOOR_RUNTIME["robot_y"]
+        if hasattr(self, "door_asset_indices"):
+            spec_ids = self.door_asset_indices[env_ids]
+        else:
+            spec_ids = torch.tensor([self.door_actor_spec_ids[int(env_id)] for env_id in env_ids], device=self.device, dtype=torch.long)
+        return self.env_origins[env_ids, 1] + torch.tensor(DOOR_RUNTIME["robot_y_by_spec"], device=self.device, dtype=torch.float)[spec_ids]
 
     def _init_buffers(self):
         self.action_scale = torch.tensor(self.cfg.control.action_scale, device=self.device)
@@ -561,6 +638,7 @@ class ManipLocoDoorAsset(ManipLoco):
         self.handle_body_name = body_names[-1]
         self.door_body_idx = self.gym.find_actor_rigid_body_index(self.envs[0], self.door_handles[0], self.door_body_name, gymapi.DOMAIN_ENV)
         self.handle_body_idx = self.gym.find_actor_rigid_body_index(self.envs[0], self.door_handles[0], self.handle_body_name, gymapi.DOMAIN_ENV)
+        self.initial_handle_center_y = self._rigid_body_state[:, self.handle_body_idx, 1].clone()
         self.door_asset_indices = torch.tensor(self.door_actor_spec_ids, device=self.device, dtype=torch.long)
         self.door_hinge_limits_lower = torch.stack([limits[0] for limits in self.door_asset_dof_limits_lower], dim=0)
         self.door_hinge_limits_upper = torch.stack([limits[0] for limits in self.door_asset_dof_limits_upper], dim=0)
@@ -583,17 +661,8 @@ class ManipLocoDoorAsset(ManipLoco):
 
         door_angle = self._door_dof_pos[:, 0]
         handle_angle_from_lower = self._door_dof_pos[:, 1] - self.handle_limits_lower[self.door_asset_indices]
-        self.open_door_stage[:] = (handle_angle_from_lower >= self.handle_unlock_threshold) | (torch.abs(door_angle) > 0.01)
-        door_torques[:, 0] = torch.where(
-            self.open_door_stage,
-            -DOOR_RUNTIME["door_open_resistance"] * door_angle,
-            -torch.full_like(door_angle, DOOR_RUNTIME["door_lock_force"]),
-        )
-        door_torques[:, 1] = (
-            -DOOR_RUNTIME["handle_spring_stiffness"] * handle_angle_from_lower
-            - DOOR_RUNTIME["handle_spring_damping"] * self._door_dof_vel[:, 1]
-        )
-
+        unlock_now = (handle_angle_from_lower >= self.handle_unlock_threshold) | (torch.abs(door_angle) > 0.01)
+        self.open_door_stage[:] = self.open_door_stage | unlock_now
         hinge_range = torch.clamp(
             torch.maximum(
                 torch.abs(self.door_hinge_limits_upper[self.door_asset_indices]),
@@ -601,6 +670,22 @@ class ManipLocoDoorAsset(ManipLoco):
             ),
             min=1e-3,
         )
+        auto_open_active = torch.abs(door_angle) < DOOR_RUNTIME["door_auto_open_target_ratio"] * hinge_range
+        auto_open_torque = torch.where(
+            auto_open_active,
+            torch.full_like(door_angle, DOOR_RUNTIME["door_auto_open_force"] * DOOR_RUNTIME["door_auto_open_sign"]),
+            torch.zeros_like(door_angle),
+        )
+        door_torques[:, 0] = torch.where(
+            self.open_door_stage,
+            auto_open_torque - DOOR_RUNTIME["door_open_resistance"] * door_angle - DOOR_RUNTIME["door_open_damping"] * self._door_dof_vel[:, 0],
+            -torch.full_like(door_angle, DOOR_RUNTIME["door_lock_force"]),
+        )
+        door_torques[:, 1] = (
+            -DOOR_RUNTIME["handle_spring_stiffness"] * handle_angle_from_lower
+            - DOOR_RUNTIME["handle_spring_damping"] * self._door_dof_vel[:, 1]
+        )
+
         handle_range = torch.clamp(
             self.handle_limits_upper[self.door_asset_indices] - self.handle_limits_lower[self.door_asset_indices],
             min=1e-3,
@@ -635,6 +720,8 @@ class ManipLocoDoorAsset(ManipLoco):
         self.actions = actions.clone()
 
         dpos = self.curr_ee_goal_cart_world - self.ee_pos
+        if getattr(self, "external_ee_goal_control", False):
+            dpos *= getattr(self, "external_pos_gain", 1.0)
         drot = orientation_error(self.ee_goal_orn_quat, self.ee_orn / torch.norm(self.ee_orn, dim=-1).unsqueeze(-1))
         if getattr(self, "external_ee_goal_control", False):
             external_orn_gain = getattr(self, "external_orn_gain", 0.0)
@@ -645,6 +732,9 @@ class ManipLocoDoorAsset(ManipLoco):
         if freeze_arm_default is not None and torch.any(freeze_arm_default):
             arm_slice = slice(-(6 + self.cfg.env.num_gripper_joints), -self.cfg.env.num_gripper_joints)
             arm_pos_targets[freeze_arm_default] = self.default_dof_pos[arm_slice].unsqueeze(0)
+        freeze_arm_zero = getattr(self, "freeze_arm_zero", None)
+        if freeze_arm_zero is not None and torch.any(freeze_arm_zero):
+            arm_pos_targets[freeze_arm_zero] = 0.0
         all_pos_targets = torch.zeros_like(self.dof_pos)
         all_pos_targets[:, -(6 + self.cfg.env.num_gripper_joints) : -self.cfg.env.num_gripper_joints] = arm_pos_targets
         gripper_target = getattr(self, "external_gripper_target", None)
@@ -683,20 +773,23 @@ class ManipLocoDoorAsset(ManipLoco):
         self.dof_vel[env_ids] = 0.0
         self._door_dof_pos[env_ids] = 0.0
         self._door_dof_vel[env_ids] = 0.0
+        self.open_door_stage[env_ids] = False
+        self.door_open_ratio[env_ids] = 0.0
+        self.handle_open_ratio[env_ids] = 0.0
         self.gym.set_dof_state_tensor(self.sim, gymtorch.unwrap_tensor(self._full_dof_state_flat))
         self.gym.refresh_rigid_body_state_tensor(self.sim)
 
     def _reset_root_states(self, env_ids):
         self.root_states[env_ids] = self.base_init_state
         self.root_states[env_ids, 0] = self.env_origins[env_ids, 0] + DOOR_RUNTIME["robot_x"]
-        self.root_states[env_ids, 1] = self.env_origins[env_ids, 1] + DOOR_RUNTIME["robot_y"]
+        self.root_states[env_ids, 1] = self._robot_spawn_y(env_ids)
         self.root_states[env_ids, 2] = self.env_origins[env_ids, 2] + DOOR_RUNTIME["robot_z"]
-        self.root_states[env_ids, :2] += torch_rand_float(
+        self.root_states[env_ids, 0] += torch_rand_float(
             -self.cfg.init_state.origin_perturb_range,
             self.cfg.init_state.origin_perturb_range,
-            (len(env_ids), 2),
+            (len(env_ids), 1),
             device=self.device,
-        )
+        ).squeeze(1)
 
         self.box_root_state[env_ids, 0] = self.env_origins[env_ids, 0] + DOOR_RUNTIME["box_x"]
         self.box_root_state[env_ids, 1] = self.env_origins[env_ids, 1] + DOOR_RUNTIME["box_y"]
@@ -742,26 +835,79 @@ def parse_args():
     parser.add_argument("--yaw_min", type=float, default=0.0)
     parser.add_argument("--yaw_max", type=float, default=0.0)
     parser.add_argument("--resample_interval", type=int, default=90)
-    parser.add_argument("--stop_distance", type=float, default=0.50)
+    parser.add_argument("--stop_distance", type=float, default=0.75)
     parser.add_argument("--robot_front_offset", type=float, default=0.55)
-    parser.add_argument("--pregrasp_offset", type=float, default=0.22)
+    parser.add_argument("--pregrasp_offset", type=float, default=0.15)
     parser.add_argument("--grasp_offset", type=float, default=0.0)
+    parser.add_argument("--grasp_x_offset", type=float, default=-0.03)
+    parser.add_argument("--grasp_z_offset", type=float, default=-0.03)
+    parser.add_argument("--initial_hold_seconds", type=float, default=5.0)
     parser.add_argument("--approach_steps", type=int, default=240)
-    parser.add_argument("--grasp_steps", type=int, default=180)
+    parser.add_argument("--grasp_steps", type=int, default=150)
     parser.add_argument("--grasp_hold_steps", type=int, default=100)
     parser.add_argument("--gripper_close_steps", type=int, default=120)
-    parser.add_argument("--handle_rotate_steps", type=int, default=420)
-    parser.add_argument("--door_pull_steps", type=int, default=480)
+    parser.add_argument("--handle_rotate_steps", type=int, default=300)
+    parser.add_argument("--door_pull_steps", type=int, default=960)
     parser.add_argument("--lever_step_size", type=float, default=0.06)
+    parser.add_argument("--pull_base_vx", type=float, default=-0.3)
+    parser.add_argument("--pull_base_yaw", type=float, default=0.25)
+    parser.add_argument("--pass_open_angle_deg", type=float, default=80.0)
+    parser.add_argument("--pass_backoff_distance", type=float, default=0.50)
+    parser.add_argument("--pass_backoff_vx", type=float, default=-0.30)
+    parser.add_argument("--pass_front_distance", type=float, default=0.50)
+    parser.add_argument("--pass_through_distance", type=float, default=1.40)
+    parser.add_argument("--pass_align_vx", type=float, default=0.35)
+    parser.add_argument("--pass_forward_vx", type=float, default=0.45)
+    parser.add_argument("--pass_min_vx", type=float, default=0.12)
+    parser.add_argument("--pass_move_yaw_tol", type=float, default=0.35)
+    parser.add_argument("--pass_yaw_gain", type=float, default=1.5)
+    parser.add_argument("--pass_yaw_clip", type=float, default=0.6)
+    parser.add_argument("--pass_align_pos_tol", type=float, default=0.12)
+    parser.add_argument("--pass_yaw_tol", type=float, default=0.25)
+    parser.add_argument("--pass_center_y_offset", type=float, default=0.0)
+    parser.add_argument("--pass_left_offset", type=float, default=0.10)
+    parser.add_argument("--unidoor_style_pull", dest="unidoor_style_pull", action="store_true", default=True)
+    parser.add_argument("--no_unidoor_style_pull", dest="unidoor_style_pull", action="store_false")
     parser.add_argument("--handle_rotate_distance", type=float, default=0.28)
+    parser.add_argument("--handle_rotate_right_distance", type=float, default=0.03)
+    parser.add_argument("--handle_rotate_down_distance", type=float, default=0.03)
     parser.add_argument("--handle_rotate_angle", type=float, default=1.05)
     parser.add_argument("--handle_arc_radius", type=float, default=0.18)
-    parser.add_argument("--door_pull_distance", type=float, default=0.45)
+    parser.add_argument("--door_pull_distance", type=float, default=1.10)
     parser.add_argument("--gripper_open", type=float, default=-1.5707963267948966)
     parser.add_argument("--gripper_closed", type=float, default=0.0)
-    parser.add_argument("--external_orn_gain", type=float, default=0.00)
+    parser.add_argument("--gripper_close_ratio", type=float, default=0.8)
+    parser.add_argument("--gripper_stiffness", type=float, default=160.0)
+    parser.add_argument("--gripper_damping", type=float, default=16.0)
+    parser.add_argument("--gripper_joint_friction", type=float, default=120.0)
+    parser.add_argument("--handle_spring_stiffness", type=float, default=0.5)
+    parser.add_argument("--handle_spring_damping", type=float, default=0.1)
+    parser.add_argument("--handle_unlock_ratio", type=float, default=0.35)
+    parser.add_argument("--handle_joint_friction", type=float, default=0.05)
+    parser.add_argument("--handle_joint_damping", type=float, default=0.05)
+    parser.add_argument("--door_open_resistance", type=float, default=0.2)
+    parser.add_argument("--door_open_damping", type=float, default=0.05)
+    parser.add_argument("--door_joint_friction", type=float, default=0.5)
+    parser.add_argument("--door_joint_damping", type=float, default=0.2)
+    parser.add_argument("--door_auto_open_force", type=float, default=0.0)
+    parser.add_argument("--door_auto_open_sign", type=float, default=1.0)
+    parser.add_argument("--door_auto_open_target_ratio", type=float, default=0.95)
+    parser.add_argument("--robot_vhacd_resolution", type=int, default=300000)
+    parser.add_argument("--gripper_shape_contact_offset", type=float, default=0.018)
+    parser.add_argument("--gripper_shape_rest_offset", type=float, default=0.003)
+    parser.add_argument("--gripper_shape_friction", type=float, default=8.0)
+    parser.add_argument("--door_vhacd_resolution", type=int, default=100000)
+    parser.add_argument("--sim_substeps", type=int, default=2)
+    parser.add_argument("--sim_position_iterations", type=int, default=12)
+    parser.add_argument("--sim_velocity_iterations", type=int, default=4)
+    parser.add_argument("--sim_contact_offset", type=float, default=0.02)
+    parser.add_argument("--sim_rest_offset", type=float, default=0.002)
+    parser.add_argument("--sim_max_depenetration_velocity", type=float, default=0.5)
+    parser.add_argument("--external_pos_gain", type=float, default=1.5)
+    parser.add_argument("--external_orn_gain", type=float, default=1)
     parser.add_argument("--forward_ee_roll", type=float, default=math.pi / 2)
     parser.add_argument("--forward_ee_pitch", type=float, default=0.0)
+    parser.add_argument("--gripper_red_axis_rot", type=float, default=-math.pi / 2)
     parser.add_argument("--preview_trajectory_at_spawn", dest="preview_trajectory_at_spawn", action="store_true", default=True)
     parser.add_argument("--no_preview_trajectory_at_spawn", dest="preview_trajectory_at_spawn", action="store_false")
     parser.add_argument("--fixed_vx", type=float, default=None)
@@ -773,7 +919,7 @@ def parse_args():
     parser.add_argument("--robot_yaw", type=float, default=math.pi)
     parser.add_argument("--door_x", type=float, default=2.5)
     parser.add_argument("--door_y", type=float, default=0.0)
-    parser.add_argument("--door_z_offset", type=float, default=0)
+    parser.add_argument("--door_z_offset", type=float, default=0.01)
     parser.add_argument("--box_x", type=float, default=-3.0)
     parser.add_argument("--box_y", type=float, default=-3.0)
     parser.add_argument("--door_cfg", type=str, default=str(HIGH_LEVEL_ROOT / "data" / "cfg" / "b1z1_opendoor.yaml"))
@@ -836,13 +982,46 @@ def main():
     DOOR_RUNTIME["robot_yaw"] = args.robot_yaw
     DOOR_RUNTIME["door_x"] = args.door_x
     DOOR_RUNTIME["door_y"] = args.door_y
+    DOOR_RUNTIME["robot_y_by_spec"] = _compute_robot_y_by_spec(
+        args.robot_y,
+        args.door_y,
+        DOOR_RUNTIME["door_bounding_data"],
+        DOOR_RUNTIME["handle_bounding_data"],
+    )
     DOOR_RUNTIME["door_z_offset"] = args.door_z_offset
     DOOR_RUNTIME["box_x"] = args.box_x
     DOOR_RUNTIME["box_y"] = args.box_y
+    DOOR_RUNTIME["gripper_stiffness"] = args.gripper_stiffness
+    DOOR_RUNTIME["gripper_damping"] = args.gripper_damping
+    DOOR_RUNTIME["gripper_joint_friction"] = args.gripper_joint_friction
+    DOOR_RUNTIME["handle_spring_stiffness"] = args.handle_spring_stiffness
+    DOOR_RUNTIME["handle_spring_damping"] = args.handle_spring_damping
+    DOOR_RUNTIME["handle_unlock_ratio"] = args.handle_unlock_ratio
+    DOOR_RUNTIME["door_open_resistance"] = args.door_open_resistance
+    DOOR_RUNTIME["door_open_damping"] = args.door_open_damping
+    DOOR_RUNTIME["door_auto_open_force"] = args.door_auto_open_force
+    DOOR_RUNTIME["door_auto_open_sign"] = args.door_auto_open_sign
+    DOOR_RUNTIME["door_auto_open_target_ratio"] = args.door_auto_open_target_ratio
+    DOOR_RUNTIME["door_joint_friction"][0] = args.door_joint_friction
+    DOOR_RUNTIME["door_joint_damping"][0] = args.door_joint_damping
+    DOOR_RUNTIME["door_joint_friction"][1] = args.handle_joint_friction
+    DOOR_RUNTIME["door_joint_damping"][1] = args.handle_joint_damping
+    DOOR_RUNTIME["robot_vhacd_resolution"] = args.robot_vhacd_resolution
+    DOOR_RUNTIME["gripper_shape_contact_offset"] = args.gripper_shape_contact_offset
+    DOOR_RUNTIME["gripper_shape_rest_offset"] = args.gripper_shape_rest_offset
+    DOOR_RUNTIME["gripper_shape_friction"] = args.gripper_shape_friction
+    DOOR_RUNTIME["door_vhacd_resolution"] = args.door_vhacd_resolution
 
     low_args = build_low_level_args(args)
     env_cfg, train_cfg = task_registry.get_cfgs(name="b1z1")
     task_registry.register("b1z1_door_asset", ManipLocoDoorAsset, env_cfg, train_cfg, "b1z1")
+
+    env_cfg.sim.substeps = args.sim_substeps
+    env_cfg.sim.physx.num_position_iterations = args.sim_position_iterations
+    env_cfg.sim.physx.num_velocity_iterations = args.sim_velocity_iterations
+    env_cfg.sim.physx.contact_offset = args.sim_contact_offset
+    env_cfg.sim.physx.rest_offset = args.sim_rest_offset
+    env_cfg.sim.physx.max_depenetration_velocity = args.sim_max_depenetration_velocity
 
     env_cfg.env.num_envs = args.num_envs
     env_cfg.env.episode_length_s = args.episode_length_s
@@ -887,6 +1066,7 @@ def main():
         {
             "spacing": args.layout_spacing,
             "robot": [args.robot_x, args.robot_y, args.robot_z, args.robot_yaw],
+            "robot_y_by_spec": DOOR_RUNTIME["robot_y_by_spec"],
             "door": [args.door_x, args.door_y, args.door_z_offset],
             "hidden_box": [args.box_x, args.box_y],
         },
@@ -916,6 +1096,9 @@ def main():
         {
             "pregrasp_offset": args.pregrasp_offset,
             "grasp_offset": args.grasp_offset,
+            "grasp_x_offset": args.grasp_x_offset,
+            "grasp_z_offset": args.grasp_z_offset,
+            "initial_hold_seconds": args.initial_hold_seconds,
             "approach_steps": args.approach_steps,
             "grasp_steps": args.grasp_steps,
             "grasp_hold_steps": args.grasp_hold_steps,
@@ -923,21 +1106,73 @@ def main():
             "handle_rotate_steps": args.handle_rotate_steps,
             "door_pull_steps": args.door_pull_steps,
             "lever_step_size": args.lever_step_size,
+            "pull_base_vx": args.pull_base_vx,
+            "pull_base_yaw": args.pull_base_yaw,
+            "pass_open_angle_deg": args.pass_open_angle_deg,
+            "pass_backoff_distance": args.pass_backoff_distance,
+            "pass_backoff_vx": args.pass_backoff_vx,
+            "pass_front_distance": args.pass_front_distance,
+            "pass_through_distance": args.pass_through_distance,
+            "pass_align_vx": args.pass_align_vx,
+            "pass_forward_vx": args.pass_forward_vx,
+            "pass_min_vx": args.pass_min_vx,
+            "pass_move_yaw_tol": args.pass_move_yaw_tol,
+            "pass_yaw_gain": args.pass_yaw_gain,
+            "pass_yaw_clip": args.pass_yaw_clip,
+            "pass_align_pos_tol": args.pass_align_pos_tol,
+            "pass_yaw_tol": args.pass_yaw_tol,
+            "pass_center_y_offset": args.pass_center_y_offset,
+            "pass_left_offset": args.pass_left_offset,
+            "unidoor_style_pull": args.unidoor_style_pull,
+            "handle_rotate_distance": args.handle_rotate_distance,
+            "handle_rotate_right_distance": args.handle_rotate_right_distance,
+            "handle_rotate_down_distance": args.handle_rotate_down_distance,
             "handle_rotate_angle": args.handle_rotate_angle,
             "handle_arc_radius": args.handle_arc_radius,
             "door_pull_distance": args.door_pull_distance,
             "gripper_open": args.gripper_open,
             "gripper_closed": args.gripper_closed,
+            "gripper_close_ratio": args.gripper_close_ratio,
+            "gripper_stiffness": args.gripper_stiffness,
+            "gripper_damping": args.gripper_damping,
+            "gripper_joint_friction": args.gripper_joint_friction,
+            "handle_spring_stiffness": args.handle_spring_stiffness,
+            "handle_spring_damping": args.handle_spring_damping,
+            "door_open_resistance": args.door_open_resistance,
+            "door_open_damping": args.door_open_damping,
+            "door_joint_friction": args.door_joint_friction,
+            "door_joint_damping": args.door_joint_damping,
+            "door_auto_open_force": args.door_auto_open_force,
+            "door_auto_open_sign": args.door_auto_open_sign,
+            "door_auto_open_target_ratio": args.door_auto_open_target_ratio,
+            "handle_joint_friction": args.handle_joint_friction,
+            "handle_joint_damping": args.handle_joint_damping,
+            "robot_vhacd_resolution": args.robot_vhacd_resolution,
+            "gripper_shape_contact_offset": args.gripper_shape_contact_offset,
+            "gripper_shape_rest_offset": args.gripper_shape_rest_offset,
+            "gripper_shape_friction": args.gripper_shape_friction,
+            "door_vhacd_resolution": args.door_vhacd_resolution,
+            "sim_substeps": args.sim_substeps,
+            "sim_position_iterations": args.sim_position_iterations,
+            "sim_velocity_iterations": args.sim_velocity_iterations,
+            "sim_contact_offset": args.sim_contact_offset,
+            "sim_rest_offset": args.sim_rest_offset,
+            "sim_max_depenetration_velocity": args.sim_max_depenetration_velocity,
+            "external_pos_gain": args.external_pos_gain,
             "external_orn_gain": args.external_orn_gain,
             "forward_ee_roll": args.forward_ee_roll,
             "forward_ee_pitch": args.forward_ee_pitch,
+            "gripper_red_axis_rot": args.gripper_red_axis_rot,
             "preview_trajectory_at_spawn": args.preview_trajectory_at_spawn,
         },
     )
 
     env.reset()
     env.external_ee_goal_control = True
+    env.external_pos_gain = args.external_pos_gain
     env.external_orn_gain = args.external_orn_gain
+    initial_hold_steps = max(0, int(round(args.initial_hold_seconds / env.dt)))
+    print("Direct pregrasp hold:", {"seconds": args.initial_hold_seconds, "policy_steps": initial_hold_steps, "dt": env.dt})
     start_xy = env.root_states[:, :2].clone()
     commanded_vx = torch.zeros(args.num_envs, device=env.device)
     commanded_yaw = torch.zeros(args.num_envs, device=env.device)
@@ -946,7 +1181,17 @@ def main():
     forward_axis = torch.tensor([1.0, 0.0, 0.0], device=env.device).repeat(args.num_envs, 1)
     manip_started = torch.zeros(args.num_envs, device=env.device, dtype=torch.bool)
     manip_step = torch.zeros(args.num_envs, device=env.device, dtype=torch.long)
+    pass_started = torch.zeros(args.num_envs, device=env.device, dtype=torch.bool)
+    pass_backoff_done = torch.zeros(args.num_envs, device=env.device, dtype=torch.bool)
+    pass_arm_zero_snapped = torch.zeros(args.num_envs, device=env.device, dtype=torch.bool)
+    pass_align_done = torch.zeros(args.num_envs, device=env.device, dtype=torch.bool)
+    pass_done = torch.zeros(args.num_envs, device=env.device, dtype=torch.bool)
+    pass_side = torch.ones(args.num_envs, device=env.device)
+    pass_backoff_start_xy = env.root_states[:, :2].clone()
+    pass_pre_xy = env.root_states[:, :2].clone()
+    pass_through_xy = env.root_states[:, :2].clone()
     env.freeze_arm_default = torch.ones(args.num_envs, device=env.device, dtype=torch.bool)
+    env.freeze_arm_zero = torch.zeros(args.num_envs, device=env.device, dtype=torch.bool)
     env.external_gripper_target = torch.full(
         (args.num_envs, env.cfg.env.num_gripper_joints),
         args.gripper_open,
@@ -955,7 +1200,30 @@ def main():
     traj_anchor_pos = env.ee_pos.clone()
     manip_target_pos = env.ee_pos.clone()
     manip_target_quat = env.ee_orn.clone()
-    phase_name = ["walk_default", "approach", "grasp", "grasp_hold_open", "close_gripper", "rotate_handle", "pull_door", "hold"]
+    traj_pregrasp_pos = env.ee_pos.clone()
+    traj_grasp_pos = env.ee_pos.clone()
+    traj_rotate_center = env.ee_pos.clone()
+    traj_rotate_pos = env.ee_pos.clone()
+    traj_pull_pos = env.ee_pos.clone()
+    traj_rotate_tangent_dir = torch.zeros_like(env.ee_pos)
+    traj_down_arc_dir = torch.zeros_like(env.ee_pos)
+    traj_goal_quat = env.ee_orn.clone()
+    gripper_closed_target = args.gripper_open + (args.gripper_closed - args.gripper_open) * args.gripper_close_ratio
+    phase_name = [
+        "walk_default",
+        "initial_hold",
+        "approach",
+        "grasp",
+        "grasp_hold_open",
+        "close_gripper",
+        "rotate_handle",
+        "pull_door",
+        "hold",
+        "pass_backoff",
+        "pass_align",
+        "pass_through",
+        "pass_done",
+    ]
     phase_id = torch.zeros(args.num_envs, device=env.device, dtype=torch.long)
 
     def sample_commands():
@@ -989,14 +1257,156 @@ def main():
         x = torch.clamp(x, 0.0, 1.0)
         return x * x * (3.0 - 2.0 * x)
 
+    def wrap_angle(x):
+        return torch.remainder(x + math.pi, 2.0 * math.pi) - math.pi
+
+    def snap_arm_to_zero(env_mask):
+        if not torch.any(env_mask):
+            return
+        env_ids = torch.nonzero(env_mask, as_tuple=False).squeeze(-1)
+        num_gripper = env.cfg.env.num_gripper_joints
+        arm_start = env.num_dofs - num_gripper - 6
+        arm_end = env.num_dofs - num_gripper
+        arm_ids = torch.arange(arm_start, arm_end, device=env.device)
+        env.dof_pos[env_ids[:, None], arm_ids.unsqueeze(0)] = 0.0
+        env.dof_vel[env_ids[:, None], arm_ids.unsqueeze(0)] = 0.0
+        env.gym.set_dof_state_tensor(env.sim, gymtorch.unwrap_tensor(env._full_dof_state_flat))
+        env.gym.refresh_dof_state_tensor(env.sim)
+        env.gym.refresh_jacobian_tensors(env.sim)
+        env.gym.refresh_rigid_body_state_tensor(env.sim)
+
+    def door_center_xy(env_mask):
+        center_xy = env.door_root_state[env_mask, :2].clone()
+        center_xy[:, 1] = env.door_root_state[env_mask, 1] + args.pass_center_y_offset
+        return center_xy
+
+    def update_pass_state():
+        nonlocal pass_backoff_start_xy, pass_pre_xy, pass_through_xy
+
+        door_open_enough = torch.abs(env._door_dof_pos[:, 0]) >= math.radians(args.pass_open_angle_deg)
+        newly_passing = door_open_enough & (~pass_started)
+        if torch.any(newly_passing):
+            pass_started[newly_passing] = True
+            pass_backoff_done[newly_passing] = False
+            pass_arm_zero_snapped[newly_passing] = False
+            pass_align_done[newly_passing] = False
+            pass_done[newly_passing] = False
+            pass_backoff_start_xy[newly_passing] = env.root_states[newly_passing, :2]
+            side = torch.sign(env.root_states[newly_passing, 0] - env.door_root_state[newly_passing, 0])
+            side = torch.where(torch.abs(side) < 1e-6, torch.ones_like(side), side)
+            pass_side[newly_passing] = side
+
+            pre_xy = door_center_xy(newly_passing)
+            pre_xy[:, 0] += side * (args.pass_front_distance + args.robot_front_offset)
+            pre_xy[:, 1] -= side * args.pass_left_offset
+            pass_pre_xy[newly_passing] = pre_xy
+
+            through_xy = door_center_xy(newly_passing)
+            through_xy[:, 0] -= side * args.pass_through_distance
+            through_xy[:, 1] -= side * args.pass_left_offset
+            pass_through_xy[newly_passing] = through_xy
+
+        if torch.any(pass_done):
+            env.freeze_arm_default[pass_done] = False
+            env.freeze_arm_zero[pass_done] = True
+            env.external_gripper_target[pass_done] = args.gripper_open
+            env.curr_ee_goal_cart_world[pass_done] = env.ee_pos[pass_done]
+            env.ee_goal_orn_quat[pass_done] = env.ee_orn[pass_done]
+            env.ee_goal_orn_delta_rpy[pass_done] = 0.0
+            phase_id[pass_done] = 12
+
+        active = pass_started & (~pass_done)
+        if not torch.any(active):
+            return
+
+        backoff = active & (~pass_backoff_done)
+        if torch.any(backoff):
+            backoff_dist = torch.norm(env.root_states[backoff, :2] - pass_backoff_start_xy[backoff], dim=-1)
+            done_now = backoff_dist >= args.pass_backoff_distance
+            backoff_ids = torch.nonzero(backoff, as_tuple=False).squeeze(-1)
+            pass_backoff_done[backoff_ids[done_now]] = True
+            phase_id[backoff] = 9
+
+        post_backoff = active & pass_backoff_done
+        if not torch.any(post_backoff):
+            return
+
+        env.freeze_arm_default[post_backoff] = False
+        env.freeze_arm_zero[post_backoff] = True
+        env.external_gripper_target[post_backoff] = args.gripper_open
+        snap_now = post_backoff & (~pass_arm_zero_snapped)
+        if torch.any(snap_now):
+            snap_arm_to_zero(snap_now)
+            pass_arm_zero_snapped[snap_now] = True
+        env.curr_ee_goal_cart_world[post_backoff] = env.ee_pos[post_backoff]
+        env.ee_goal_orn_quat[post_backoff] = env.ee_orn[post_backoff]
+        env.ee_goal_orn_delta_rpy[post_backoff] = 0.0
+
+        to_pre = pass_pre_xy[post_backoff] - env.root_states[post_backoff, :2]
+        pre_dist = torch.norm(to_pre, dim=-1)
+        reached_pre = pre_dist <= args.pass_align_pos_tol
+        post_backoff_ids = torch.nonzero(post_backoff, as_tuple=False).squeeze(-1)
+        pass_align_done[post_backoff_ids[reached_pre]] = True
+
+        align = post_backoff & (~pass_align_done)
+        pass_through = post_backoff & pass_align_done
+        phase_id[align] = 10
+        phase_id[pass_through] = 11
+
+        if torch.any(pass_through):
+            through_dist = torch.norm(pass_through_xy[pass_through] - env.root_states[pass_through, :2], dim=-1)
+            done_now = through_dist <= args.pass_align_pos_tol
+            pass_ids = torch.nonzero(pass_through, as_tuple=False).squeeze(-1)
+            pass_done[pass_ids[done_now]] = True
+            phase_id[pass_ids[done_now]] = 12
+        phase_id[pass_done] = 12
+
+    def navigation_command(target_xy, vx):
+        to_target = target_xy - env.root_states[:, :2]
+        desired_yaw = torch.atan2(to_target[:, 1], to_target[:, 0])
+        base_yaw = euler_from_quat(env.root_states[:, 3:7])[2]
+        yaw_error = wrap_angle(desired_yaw - base_yaw)
+        yaw_cmd = torch.clamp(args.pass_yaw_gain * yaw_error, -args.pass_yaw_clip, args.pass_yaw_clip)
+        dist = torch.norm(to_target, dim=-1)
+        yaw_abs = torch.abs(yaw_error)
+        yaw_scale = 1.0 - torch.clamp(yaw_abs / max(args.pass_move_yaw_tol, 1e-4), 0.0, 1.0)
+        min_vx = min(args.pass_min_vx, vx)
+        vx_cmd = min_vx + (vx - min_vx) * yaw_scale
+        vx_cmd = torch.where(yaw_abs <= args.pass_move_yaw_tol, vx_cmd, torch.zeros_like(vx_cmd))
+        vx_cmd = torch.where(dist <= args.pass_align_pos_tol, torch.zeros_like(vx_cmd), vx_cmd)
+        return vx_cmd, yaw_cmd
+
     def forward_ee_quat():
         base_yaw = euler_from_quat(env.root_states[:, 3:7])[2]
         roll = torch.full_like(base_yaw, args.forward_ee_roll)
         pitch = torch.full_like(base_yaw, args.forward_ee_pitch)
-        return quat_from_euler_xyz(roll, pitch, base_yaw)
+        base_quat = quat_from_euler_xyz(roll, pitch, base_yaw)
+        red_axis_rot = torch.full_like(base_yaw, args.gripper_red_axis_rot)
+        zeros = torch.zeros_like(base_yaw)
+        red_axis_quat = quat_from_euler_xyz(red_axis_rot, zeros, zeros)
+        return quat_mul(base_quat, red_axis_quat)
+
+    def ee_goal_delta_rpy_from_quat(target_pos, target_quat):
+        goal_roll, goal_pitch, goal_yaw = euler_from_quat(target_quat)
+        center = env._get_ee_goal_spherical_center()
+        target_cart = target_pos - center
+        target_xy_len = torch.norm(target_cart[:, :2], dim=-1)
+        target_sphere_pitch = torch.atan2(target_cart[:, 2], target_xy_len)
+        default_pitch = -target_sphere_pitch + env.cfg.goal_ee.arm_induced_pitch
+        default_yaw = torch.atan2(target_cart[:, 1], target_cart[:, 0])
+        return torch.stack(
+            (
+                wrap_angle(goal_roll - math.pi / 2),
+                wrap_angle(goal_pitch - default_pitch),
+                wrap_angle(goal_yaw - default_yaw),
+            ),
+            dim=-1,
+        )
 
     def update_ee_trajectory():
         nonlocal traj_anchor_pos, manip_target_pos, manip_target_quat
+        nonlocal traj_pregrasp_pos, traj_grasp_pos, traj_rotate_center, traj_rotate_pos, traj_pull_pos
+        nonlocal traj_rotate_tangent_dir, traj_down_arc_dir, traj_goal_quat
 
         handle_state = env._rigid_body_state[:, env.handle_body_idx, :]
         handle_pos = handle_state[:, :3]
@@ -1008,7 +1418,17 @@ def main():
         pregrasp_pos = handle_goal + approach_dir * args.pregrasp_offset
         handle_arc_radius = max(args.handle_arc_radius, 1e-4)
         grasp_pos = handle_goal + approach_dir * args.grasp_offset
+        pregrasp_pos[:, 0] += args.grasp_x_offset
+        pregrasp_pos[:, 2] += args.grasp_z_offset
+        grasp_pos[:, 0] += args.grasp_x_offset
+        grasp_pos[:, 2] += args.grasp_z_offset
         goal_quat = forward_ee_quat()
+        handle_rot_axis = torch.zeros(args.num_envs, 3, device=env.device)
+        handle_rot_axis[:, 0] = 1.0
+        handle_turned_quat = quat_mul(
+            traj_goal_quat,
+            quat_from_angle_axis(torch.full((args.num_envs,), -args.handle_rotate_angle, device=env.device), handle_rot_axis),
+        )
         pull_dir = quat_axis(handle_rot, axis=2)
         pull_dir[:, 2] = 0.0
         fallback_pull_dir = torch.zeros_like(pull_dir)
@@ -1021,31 +1441,35 @@ def main():
             torch.ones_like(pull_dir_norm),
         )
         pull_dir = pull_dir * pull_sign
-        rotate_tangent_dir = pull_dir.clone()
-        rotate_tangent_dir[:, 0] = 0.0
+        rotate_tangent_dir = torch.zeros_like(pull_dir)
+        rotate_tangent_dir[:, 1] = args.handle_rotate_right_distance
+        rotate_tangent_dir[:, 2] = -args.handle_rotate_down_distance
         rotate_tangent_norm = torch.norm(rotate_tangent_dir, dim=-1, keepdim=True)
-        rotate_tangent_fallback = torch.zeros_like(rotate_tangent_dir)
-        rotate_tangent_fallback[:, 1] = torch.where(pull_dir[:, 1] < 0.0, -1.0, 1.0)
-        rotate_tangent_dir = torch.where(
-            rotate_tangent_norm > 1e-4,
-            rotate_tangent_dir / torch.clamp(rotate_tangent_norm, min=1e-6),
-            rotate_tangent_fallback,
-        )
+        rotate_tangent_dir = rotate_tangent_dir / torch.clamp(rotate_tangent_norm, min=1e-6)
         down_arc_dir = torch.zeros_like(pull_dir)
-        down_arc_dir[:, 2] = 1.0
-        rotate_center = grasp_pos - rotate_tangent_dir * handle_arc_radius
-        rotate_pos = rotate_center + handle_arc_radius * (
-            math.cos(args.handle_rotate_angle) * rotate_tangent_dir - math.sin(args.handle_rotate_angle) * down_arc_dir
-        )
+        down_arc_dir[:, 2] = -1.0
+        rotate_offset = torch.zeros_like(grasp_pos)
+        rotate_offset[:, 1] = args.handle_rotate_right_distance
+        rotate_offset[:, 2] = -args.handle_rotate_down_distance
+        rotate_center = grasp_pos
+        rotate_pos = grasp_pos + rotate_offset
         pull_pos = rotate_pos + pull_dir * args.door_pull_distance
 
         newly_started = stopped_by_door & (~manip_started)
         if torch.any(newly_started):
             manip_started[newly_started] = True
             manip_step[newly_started] = 0
-            traj_anchor_pos[newly_started] = env.ee_pos[newly_started]
-            manip_target_pos[newly_started] = env.ee_pos[newly_started]
+            traj_anchor_pos[newly_started] = pregrasp_pos[newly_started]
+            manip_target_pos[newly_started] = pregrasp_pos[newly_started]
             manip_target_quat[newly_started] = goal_quat[newly_started]
+            traj_pregrasp_pos[newly_started] = pregrasp_pos[newly_started]
+            traj_grasp_pos[newly_started] = grasp_pos[newly_started]
+            traj_rotate_center[newly_started] = rotate_center[newly_started]
+            traj_rotate_pos[newly_started] = rotate_pos[newly_started]
+            traj_pull_pos[newly_started] = pull_pos[newly_started]
+            traj_rotate_tangent_dir[newly_started] = rotate_tangent_dir[newly_started]
+            traj_down_arc_dir[newly_started] = down_arc_dir[newly_started]
+            traj_goal_quat[newly_started] = goal_quat[newly_started]
 
         walking = ~stopped_by_door
         if torch.any(walking):
@@ -1053,6 +1477,7 @@ def main():
             env.external_gripper_target[walking] = args.gripper_open
             env.curr_ee_goal_cart_world[walking] = env.ee_pos[walking]
             env.ee_goal_orn_quat[walking] = env.ee_orn[walking]
+            env.ee_goal_orn_delta_rpy[walking] = 0.0
             phase_id[walking] = 0
 
         active = stopped_by_door & manip_started
@@ -1060,74 +1485,97 @@ def main():
             return
 
         env.freeze_arm_default[active] = False
-        a_end = args.approach_steps
+        i_end = initial_hold_steps
+        a_end = i_end
         g_end = a_end + args.grasp_steps
         h_end = g_end + args.grasp_hold_steps
         c_end = h_end + args.gripper_close_steps
         r_end = c_end + args.handle_rotate_steps
         p_end = r_end + args.door_pull_steps
 
-        approach = active & (manip_step < a_end)
+        initial_hold = active & (manip_step < i_end)
+        if torch.any(initial_hold):
+            manip_target_pos[initial_hold] = traj_pregrasp_pos[initial_hold]
+            manip_target_quat[initial_hold] = traj_goal_quat[initial_hold]
+            env.external_gripper_target[initial_hold] = args.gripper_open
+            phase_id[initial_hold] = 1
+
+        approach = active & (manip_step >= i_end) & (manip_step < a_end)
         if torch.any(approach):
             denom = max(1, args.approach_steps)
-            t = smoothstep((manip_step[approach].to(torch.float) + 1.0) / denom)
-            manip_target_pos[approach] = lerp(traj_anchor_pos[approach], pregrasp_pos[approach], t)
-            manip_target_quat[approach] = goal_quat[approach]
+            t = smoothstep(((manip_step[approach] - i_end).to(torch.float) + 1.0) / denom)
+            manip_target_pos[approach] = lerp(traj_anchor_pos[approach], traj_pregrasp_pos[approach], t)
+            manip_target_quat[approach] = traj_goal_quat[approach]
             env.external_gripper_target[approach] = args.gripper_open
-            phase_id[approach] = 1
+            phase_id[approach] = 2
 
         grasp = active & (manip_step >= a_end) & (manip_step < g_end)
         if torch.any(grasp):
             denom = max(1, args.grasp_steps)
             t = smoothstep(((manip_step[grasp] - a_end).to(torch.float) + 1.0) / denom)
-            manip_target_pos[grasp] = lerp(pregrasp_pos[grasp], grasp_pos[grasp], t)
-            manip_target_quat[grasp] = goal_quat[grasp]
+            manip_target_pos[grasp] = lerp(traj_pregrasp_pos[grasp], traj_grasp_pos[grasp], t)
+            manip_target_quat[grasp] = traj_goal_quat[grasp]
             env.external_gripper_target[grasp] = args.gripper_open
-            phase_id[grasp] = 2
+            phase_id[grasp] = 3
 
         grasp_hold = active & (manip_step >= g_end) & (manip_step < h_end)
         if torch.any(grasp_hold):
-            manip_target_pos[grasp_hold] = grasp_pos[grasp_hold]
-            manip_target_quat[grasp_hold] = goal_quat[grasp_hold]
+            manip_target_pos[grasp_hold] = traj_grasp_pos[grasp_hold]
+            manip_target_quat[grasp_hold] = traj_goal_quat[grasp_hold]
             env.external_gripper_target[grasp_hold] = args.gripper_open
-            phase_id[grasp_hold] = 3
+            phase_id[grasp_hold] = 4
 
         close_gripper = active & (manip_step >= h_end) & (manip_step < c_end)
         if torch.any(close_gripper):
-            manip_target_pos[close_gripper] = grasp_pos[close_gripper]
-            manip_target_quat[close_gripper] = goal_quat[close_gripper]
-            env.external_gripper_target[close_gripper] = args.gripper_closed
-            phase_id[close_gripper] = 4
+            manip_target_pos[close_gripper] = traj_grasp_pos[close_gripper]
+            manip_target_quat[close_gripper] = traj_goal_quat[close_gripper]
+            denom = max(1, args.gripper_close_steps)
+            t = smoothstep(((manip_step[close_gripper] - h_end).to(torch.float) + 1.0) / denom)
+            gripper_target = args.gripper_open + (gripper_closed_target - args.gripper_open) * t
+            env.external_gripper_target[close_gripper] = gripper_target.unsqueeze(-1)
+            phase_id[close_gripper] = 5
 
         rotate = active & (manip_step >= c_end) & (manip_step < r_end)
         if torch.any(rotate):
-            env.external_gripper_target[rotate] = args.gripper_closed
+            env.external_gripper_target[rotate] = gripper_closed_target
             denom = max(1, args.handle_rotate_steps)
             t = smoothstep(((manip_step[rotate] - c_end).to(torch.float) + 1.0) / denom)
             theta = t * args.handle_rotate_angle
-            manip_target_pos[rotate] = rotate_center[rotate] + handle_arc_radius * (
-                torch.cos(theta)[:, None] * rotate_tangent_dir[rotate] - torch.sin(theta)[:, None] * down_arc_dir[rotate]
+            manip_target_pos[rotate] = lerp(traj_grasp_pos[rotate], traj_rotate_pos[rotate], t)
+            manip_target_quat[rotate] = quat_mul(
+                traj_goal_quat[rotate],
+                quat_from_angle_axis(-theta, handle_rot_axis[rotate]),
             )
-            manip_target_quat[rotate] = goal_quat[rotate]
-            phase_id[rotate] = 5
+            phase_id[rotate] = 6
 
         pull = active & (manip_step >= r_end) & (manip_step < p_end)
         if torch.any(pull):
-            env.external_gripper_target[pull] = args.gripper_closed
+            env.external_gripper_target[pull] = gripper_closed_target
             denom = max(1, args.door_pull_steps)
             t = smoothstep(((manip_step[pull] - r_end).to(torch.float) + 1.0) / denom)
-            manip_target_pos[pull] = lerp(rotate_pos[pull], pull_pos[pull], t)
-            manip_target_quat[pull] = goal_quat[pull]
-            phase_id[pull] = 6
+            if args.unidoor_style_pull:
+                pull_step_pos = env.ee_pos[pull] + pull_dir[pull] * args.lever_step_size
+                pull_max_pos = traj_rotate_pos[pull] + pull_dir[pull] * args.door_pull_distance
+                pull_progress = torch.sum((pull_step_pos - traj_rotate_pos[pull]) * pull_dir[pull], dim=-1)
+                manip_target_pos[pull] = torch.where(
+                    (pull_progress > args.door_pull_distance).unsqueeze(-1),
+                    pull_max_pos,
+                    pull_step_pos,
+                )
+            else:
+                manip_target_pos[pull] = lerp(traj_rotate_pos[pull], traj_pull_pos[pull], t)
+            manip_target_quat[pull] = handle_turned_quat[pull]
+            phase_id[pull] = 7
 
         hold = active & (manip_step >= p_end)
         if torch.any(hold):
-            manip_target_quat[hold] = goal_quat[hold]
-            env.external_gripper_target[hold] = args.gripper_closed
-            phase_id[hold] = 7
+            manip_target_quat[hold] = handle_turned_quat[hold]
+            env.external_gripper_target[hold] = gripper_closed_target
+            phase_id[hold] = 8
 
         env.curr_ee_goal_cart_world[active] = manip_target_pos[active]
         env.ee_goal_orn_quat[active] = manip_target_quat[active]
+        env.ee_goal_orn_delta_rpy[active] = ee_goal_delta_rpy_from_quat(manip_target_pos, manip_target_quat)[active]
         manip_step[active] += 1
 
     red_target_geom = gymutil.WireframeSphereGeometry(0.035, 8, 8, None, color=(1, 0, 0))
@@ -1150,9 +1598,57 @@ def main():
         else:
             update_stop_mask()
         update_ee_trajectory()
-        env.commands[:, 0] = torch.where(stopped_by_door, torch.zeros_like(commanded_vx), commanded_vx)
+        update_pass_state()
+
+        pass_backoff = pass_started & (~pass_backoff_done) & (~pass_done)
+        pass_align = pass_started & pass_backoff_done & (~pass_align_done) & (~pass_done)
+        pass_through = pass_started & pass_backoff_done & pass_align_done & (~pass_done)
+        align_vx, align_yaw = navigation_command(pass_pre_xy, args.pass_align_vx)
+        through_vx, through_yaw = navigation_command(pass_through_xy, args.pass_forward_vx)
+        pull_base = (phase_id == 7) & (~pass_started)
+        env.commands[:, 0] = torch.where(
+            pass_backoff,
+            torch.full_like(commanded_vx, args.pass_backoff_vx),
+            torch.where(
+                pass_align,
+                align_vx,
+                torch.where(
+                    pass_through,
+                    through_vx,
+                    torch.where(
+                        pass_done,
+                        torch.zeros_like(commanded_vx),
+                        torch.where(
+                            pull_base,
+                            torch.full_like(commanded_vx, args.pull_base_vx),
+                            torch.where(stopped_by_door, torch.zeros_like(commanded_vx), commanded_vx),
+                        ),
+                    ),
+                ),
+            ),
+        )
         env.commands[:, 1] = 0.0
-        env.commands[:, 2] = torch.where(stopped_by_door, torch.zeros_like(commanded_yaw), commanded_yaw)
+        env.commands[:, 2] = torch.where(
+            pass_backoff,
+            torch.zeros_like(commanded_yaw),
+            torch.where(
+                pass_align,
+                align_yaw,
+                torch.where(
+                    pass_through,
+                    through_yaw,
+                    torch.where(
+                        pass_done,
+                        torch.zeros_like(commanded_yaw),
+                        torch.where(
+                            pull_base,
+                            torch.full_like(commanded_yaw, args.pull_base_yaw),
+                            torch.where(stopped_by_door, torch.zeros_like(commanded_yaw), commanded_yaw),
+                        ),
+                    ),
+                ),
+            ),
+        )
         actions = policy(obs.detach(), hist_encoding=True)
         obs, _, _, _, dones, infos = env.step(actions.detach())
         draw_ee_target()
@@ -1160,7 +1656,13 @@ def main():
             stopped_by_door[dones] = False
             manip_started[dones] = False
             manip_step[dones] = 0
+            pass_started[dones] = False
+            pass_backoff_done[dones] = False
+            pass_arm_zero_snapped[dones] = False
+            pass_align_done[dones] = False
+            pass_done[dones] = False
             env.freeze_arm_default[dones] = True
+            env.freeze_arm_zero[dones] = False
             env.external_gripper_target[dones] = args.gripper_open
         if step % 30 == 0:
             shown_phase = [phase_name[int(i)] for i in phase_id[: min(args.num_envs, 4)].detach().cpu().tolist()]
@@ -1178,8 +1680,27 @@ def main():
                     "front_to_door_distance": front_to_door_distance[: min(args.num_envs, 4)].detach().cpu().tolist(),
                     "stopped_by_door": stopped_by_door[: min(args.num_envs, 4)].detach().cpu().tolist(),
                     "arm_phase": shown_phase,
+                    "pass_started": pass_started[: min(args.num_envs, 4)].detach().cpu().tolist(),
+                    "pass_backoff_done": pass_backoff_done[: min(args.num_envs, 4)].detach().cpu().tolist(),
+                    "pass_arm_zero_snapped": pass_arm_zero_snapped[: min(args.num_envs, 4)].detach().cpu().tolist(),
+                    "pass_backoff_dist": torch.norm(
+                        env.root_states[: min(args.num_envs, 4), :2] - pass_backoff_start_xy[: min(args.num_envs, 4)],
+                        dim=-1,
+                    ).detach().cpu().tolist(),
+                    "pass_align_done": pass_align_done[: min(args.num_envs, 4)].detach().cpu().tolist(),
+                    "pass_done": pass_done[: min(args.num_envs, 4)].detach().cpu().tolist(),
+                    "pass_pre_xy": pass_pre_xy[: min(args.num_envs, 4)].detach().cpu().tolist(),
+                    "pass_through_xy": pass_through_xy[: min(args.num_envs, 4)].detach().cpu().tolist(),
                     "ee_target": env.curr_ee_goal_cart_world[: min(args.num_envs, 4)].detach().cpu().tolist(),
+                    "ee_pos": env.ee_pos[: min(args.num_envs, 4)].detach().cpu().tolist(),
+                    "ee_z_error": (
+                        env.curr_ee_goal_cart_world[: min(args.num_envs, 4), 2] - env.ee_pos[: min(args.num_envs, 4), 2]
+                    )
+                    .detach()
+                    .cpu()
+                    .tolist(),
                     "door_dof": env._door_dof_pos[: min(args.num_envs, 4)].detach().cpu().tolist(),
+                    "door_open_deg": torch.rad2deg(env._door_dof_pos[: min(args.num_envs, 4), 0]).detach().cpu().tolist(),
                     "door_open_stage": env.open_door_stage[: min(args.num_envs, 4)].detach().cpu().tolist(),
                     "door_open_ratio": env.door_open_ratio[: min(args.num_envs, 4)].detach().cpu().tolist(),
                     "handle_open_ratio": env.handle_open_ratio[: min(args.num_envs, 4)].detach().cpu().tolist(),

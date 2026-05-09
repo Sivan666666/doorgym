@@ -40,6 +40,22 @@ Purpose:
 
 - Avoid writing torch extension build artifacts into restricted or shared source directories during local testing.
 
+## End-Effector Pose Debug Visualization
+
+File:
+
+- `legged_gym/envs/manip_loco/manip_loco.py`
+
+Changes:
+
+- Added a local `ThickAxesGeometry` line geometry to make EE orientation axes easier to see in Isaac Gym viewer.
+- In `_draw_ee_goal_curr`, draw thick target EE axes at `curr_ee_goal_cart_world` using `ee_goal_orn_quat`.
+- Also draw thick current EE axes at the current gripper pose using `ee_orn`.
+
+Purpose:
+
+- When running `legged_gym/scripts/play.py`, visually compare whether the current EE frame is aligned with the target EE frame.
+
 ## 6D End-Effector Tracking Training
 
 Files:
