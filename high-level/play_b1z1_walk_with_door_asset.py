@@ -28,6 +28,12 @@ from legged_gym.utils import task_registry  # noqa: E402
 
 
 DOOR_RUNTIME = {}
+DEFAULT_DOOR_ASSET_NAMES = (
+    "99650089960001",
+    "99650089960006",
+    "99655039960001",
+    "99655039960006",
+)
 
 
 def _sorted_asset_items(asset_dict):
@@ -79,14 +85,109 @@ def _load_door_runtime(cfg_path):
     }
 
 
-def _compute_robot_y_by_spec(robot_y, door_y, door_bounding_data, handle_bounding_data):
+def _compute_robot_y_by_spec(robot_y, door_y, door_bounding_data, handle_bounding_data, door_actor_scale=1.0):
     robot_y_by_spec = []
     for handle_bounds in handle_bounding_data:
         handle_center_y = 0.5 * (float(handle_bounds["handle_min"][1]) + float(handle_bounds["handle_max"][1]))
         # Door actors are rotated 180 deg around Z, so asset-local handle Y contributes with a flipped sign in world Y.
-        handle_center_world_y = door_y - handle_center_y
+        handle_center_world_y = door_y - door_actor_scale * handle_center_y
         robot_y_by_spec.append(float(robot_y + handle_center_world_y))
     return robot_y_by_spec
+
+
+_LOG_COLORS = {
+    "reset": "\033[0m",
+    "blue": "\033[94m",
+    "cyan": "\033[96m",
+    "green": "\033[92m",
+    "yellow": "\033[93m",
+    "magenta": "\033[95m",
+    "gray": "\033[90m",
+}
+
+
+def _c(text, color):
+    return f"{_LOG_COLORS[color]}{text}{_LOG_COLORS['reset']}"
+
+
+def _round_for_log(value):
+    if isinstance(value, float):
+        return round(value, 4)
+    if isinstance(value, list):
+        return [_round_for_log(v) for v in value]
+    if isinstance(value, tuple):
+        return tuple(_round_for_log(v) for v in value)
+    return value
+
+
+def _door_dimension_summary(door_asset_names, door_bounding_data, door_actor_scale):
+    dims = []
+    for name, bounds in zip(door_asset_names, door_bounding_data):
+        extents = [float(bounds["max"][i]) - float(bounds["min"][i]) for i in range(3)]
+        dims.append(
+            {
+                "name": name,
+                "width_m": round(extents[0] * door_actor_scale, 4),
+                "thickness_m": round(extents[1] * door_actor_scale, 4),
+                "height_m": round(extents[2] * door_actor_scale, 4),
+            }
+        )
+    return dims
+
+
+def _filter_door_runtime_by_names(runtime, names):
+    selected = []
+    available = {spec["name"]: i for i, spec in enumerate(runtime["door_asset_specs"])}
+    missing = [name for name in names if name not in available]
+    if missing:
+        print("Warning: default door assets missing from cfg:", missing)
+    for name in names:
+        if name in available:
+            selected.append(available[name])
+    if not selected:
+        return
+    for key in ("door_asset_specs", "door_asset_names", "door_bounding_data", "handle_bounding_data"):
+        runtime[key] = [runtime[key][i] for i in selected]
+
+
+def _format_step_log(step, data):
+    groups = [
+        ("command", "cyan", ["command_x", "command_yaw", "base_lin_vel_x", "base_ang_vel_z"]),
+        ("base", "green", ["base_height", "base_xy", "door_xy", "front_to_door_distance", "traveled_xy"]),
+        (
+            "phase",
+            "yellow",
+            [
+                "stopped_by_door",
+                "arm_phase",
+                "pass_started",
+                "pass_backoff_done",
+                "pass_arm_zero_snapped",
+                "pass_backoff_dist",
+                "pass_align_done",
+                "pass_done",
+            ],
+        ),
+        ("ee", "magenta", ["ee_target", "ee_pos", "ee_z_error"]),
+        ("door", "blue", ["door_dof", "door_open_deg", "signed_push_open_deg", "door_open_stage", "door_open_ratio", "handle_open_ratio"]),
+        ("episode", "gray", ["episode_length", "time_out", "reset"]),
+    ]
+    lines = [f"\n{_c(f'[step {step:04d}]', 'blue')}"]
+    used = set()
+    for title, color, keys in groups:
+        present = [key for key in keys if key in data]
+        if not present:
+            continue
+        lines.append(f"  {_c(title, color)}")
+        for key in present:
+            used.add(key)
+            lines.append(f"    {key}: {_round_for_log(data[key])}")
+    extra = [key for key in data if key not in used]
+    if extra:
+        lines.append(f"  {_c('extra', 'gray')}")
+        for key in extra:
+            lines.append(f"    {key}: {_round_for_log(data[key])}")
+    return "\n".join(lines)
 
 
 class ManipLocoDoorAsset(ManipLoco):
@@ -426,10 +527,12 @@ class ManipLocoDoorAsset(ManipLoco):
         door_pose.p = gymapi.Vec3(
             float(origin[0] + DOOR_RUNTIME["door_x"]),
             float(origin[1] + DOOR_RUNTIME["door_y"]),
-            float(origin[2] - door_bounds["min"][2] + DOOR_RUNTIME["door_z_offset"]),
+            float(origin[2] - door_bounds["min"][2] * DOOR_RUNTIME["door_actor_scale"] + DOOR_RUNTIME["door_z_offset"]),
         )
         door_pose.r = gymapi.Quat(0.0, 0.0, 1.0, 0.0)
         door_handle = self.gym.create_actor(env_handle, door_asset, door_pose, "door", env_i, 0, 1)
+        if abs(DOOR_RUNTIME["door_actor_scale"] - 1.0) > 1e-6:
+            self.gym.set_actor_scale(env_handle, door_handle, DOOR_RUNTIME["door_actor_scale"])
 
         door_dof_props = self.gym.get_asset_dof_properties(door_asset)
         door_dof_props["driveMode"][:] = gymapi.DOF_MODE_EFFORT
@@ -644,7 +747,7 @@ class ManipLocoDoorAsset(ManipLoco):
         self.door_hinge_limits_upper = torch.stack([limits[0] for limits in self.door_asset_dof_limits_upper], dim=0)
         self.handle_limits_lower = torch.stack([limits[1] for limits in self.door_asset_dof_limits_lower], dim=0)
         self.handle_limits_upper = torch.stack([limits[1] for limits in self.door_asset_dof_limits_upper], dim=0)
-        goal_pos_offsets = [item["goal_pos"] for item in self.handle_bounding_data]
+        goal_pos_offsets = [[DOOR_RUNTIME["door_actor_scale"] * float(v) for v in item["goal_pos"]] for item in self.handle_bounding_data]
         self.goal_pos_offset_tensor = torch.tensor(goal_pos_offsets, device=self.device, dtype=torch.float)[self.door_asset_indices]
         self.handle_unlock_threshold = (
             DOOR_RUNTIME["handle_unlock_ratio"]
@@ -908,7 +1011,7 @@ def parse_args():
     parser.add_argument("--forward_ee_roll", type=float, default=math.pi / 2)
     parser.add_argument("--forward_ee_pitch", type=float, default=0.0)
     parser.add_argument("--gripper_red_axis_rot", type=float, default=-math.pi / 2)
-    parser.add_argument("--preview_trajectory_at_spawn", dest="preview_trajectory_at_spawn", action="store_true", default=True)
+    parser.add_argument("--preview_trajectory_at_spawn", dest="preview_trajectory_at_spawn", action="store_true", default=False)
     parser.add_argument("--no_preview_trajectory_at_spawn", dest="preview_trajectory_at_spawn", action="store_false")
     parser.add_argument("--fixed_vx", type=float, default=None)
     parser.add_argument("--fixed_yaw", type=float, default=None)
@@ -920,9 +1023,11 @@ def parse_args():
     parser.add_argument("--door_x", type=float, default=2.5)
     parser.add_argument("--door_y", type=float, default=0.0)
     parser.add_argument("--door_z_offset", type=float, default=0.01)
+    parser.add_argument("--door_actor_scale", type=float, default=1.2)
     parser.add_argument("--box_x", type=float, default=-3.0)
     parser.add_argument("--box_y", type=float, default=-3.0)
     parser.add_argument("--door_cfg", type=str, default=str(HIGH_LEVEL_ROOT / "data" / "cfg" / "b1z1_opendoor.yaml"))
+    parser.add_argument("--use_all_door_assets", action="store_true")
     parser.add_argument("--log_dir", type=str, default=str(LOW_LEVEL_ROOT / "logs" / "b1z1-low" / "b1z1_locomanip"))
     parser.add_argument("--checkpoint", type=int, default=45000)
     return parser.parse_args()
@@ -975,6 +1080,14 @@ def main():
     os.chdir(ROOT)
 
     DOOR_RUNTIME.update(_load_door_runtime(args.door_cfg))
+    if not args.use_all_door_assets:
+        _filter_door_runtime_by_names(DOOR_RUNTIME, DEFAULT_DOOR_ASSET_NAMES)
+    total_door_assets = len(DOOR_RUNTIME["door_asset_specs"])
+    door_asset_count = min(max(1, args.num_envs), total_door_assets)
+    for key in ("door_asset_specs", "door_asset_names", "door_bounding_data", "handle_bounding_data"):
+        DOOR_RUNTIME[key] = DOOR_RUNTIME[key][:door_asset_count]
+    DOOR_RUNTIME["total_door_asset_count"] = total_door_assets
+    DOOR_RUNTIME["loaded_door_asset_count"] = door_asset_count
     DOOR_RUNTIME["layout_spacing"] = args.layout_spacing
     DOOR_RUNTIME["robot_x"] = args.robot_x
     DOOR_RUNTIME["robot_y"] = args.robot_y
@@ -982,11 +1095,13 @@ def main():
     DOOR_RUNTIME["robot_yaw"] = args.robot_yaw
     DOOR_RUNTIME["door_x"] = args.door_x
     DOOR_RUNTIME["door_y"] = args.door_y
+    DOOR_RUNTIME["door_actor_scale"] = args.door_actor_scale
     DOOR_RUNTIME["robot_y_by_spec"] = _compute_robot_y_by_spec(
         args.robot_y,
         args.door_y,
         DOOR_RUNTIME["door_bounding_data"],
         DOOR_RUNTIME["handle_bounding_data"],
+        args.door_actor_scale,
     )
     DOOR_RUNTIME["door_z_offset"] = args.door_z_offset
     DOOR_RUNTIME["box_x"] = args.box_x
@@ -1058,6 +1173,11 @@ def main():
 
     print("Loaded low-level walking policy from:", os.path.join(args.log_dir, f"model_{args.checkpoint}.pt"))
     print("Loaded door assets:", env.door_asset_names)
+    print(
+        "Door asset selection:",
+        {"loaded": DOOR_RUNTIME["loaded_door_asset_count"], "available": DOOR_RUNTIME["total_door_asset_count"]},
+    )
+    print("Door dimensions in simulator:", _door_dimension_summary(env.door_asset_names, env.door_bounding_data, args.door_actor_scale))
     print("Door actor count:", len(env.door_handles))
     print("Door DOF count:", env.num_door_dofs)
     print("Door body / handle body:", env.door_body_name, env.handle_body_name)
@@ -1068,6 +1188,7 @@ def main():
             "robot": [args.robot_x, args.robot_y, args.robot_z, args.robot_yaw],
             "robot_y_by_spec": DOOR_RUNTIME["robot_y_by_spec"],
             "door": [args.door_x, args.door_y, args.door_z_offset],
+            "door_actor_scale": args.door_actor_scale,
             "hidden_box": [args.box_x, args.box_y],
         },
     )
@@ -1668,8 +1789,9 @@ def main():
             shown_phase = [phase_name[int(i)] for i in phase_id[: min(args.num_envs, 4)].detach().cpu().tolist()]
             traveled = torch.norm(env.root_states[:, :2] - start_xy, dim=-1)
             print(
-                f"[step {step:04d}]",
-                {
+                _format_step_log(
+                    step,
+                    {
                     "command_x": env.commands[: min(args.num_envs, 4), 0].detach().cpu().tolist(),
                     "command_yaw": env.commands[: min(args.num_envs, 4), 2].detach().cpu().tolist(),
                     "base_lin_vel_x": env.base_lin_vel[: min(args.num_envs, 4), 0].detach().cpu().tolist(),
@@ -1708,7 +1830,8 @@ def main():
                     "time_out": env.time_out_buf[: min(args.num_envs, 4)].detach().cpu().tolist(),
                     "traveled_xy": traveled[: min(args.num_envs, 4)].detach().cpu().tolist(),
                     "reset": dones[: min(args.num_envs, 4)].detach().cpu().tolist(),
-                },
+                    },
+                )
             )
 
 

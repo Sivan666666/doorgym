@@ -257,7 +257,7 @@ class ManipLoco(LeggedRobot):
                                     self.commands[:, :3] * self.commands_scale,  # dim 3
                                     # self.curr_ee_goal_sphere,  # dim 3 position
                                     ee_goal_local_cart,  # dim 3 position
-                                    0 * self.ee_goal_orn_delta_rpy  # dim 3 orientation command
+                                    self.ee_goal_orn_delta_rpy  # dim 3 orientation command
                                     ),dim=-1)
         if self.cfg.env.observe_gait_commands:
             obs_buf = torch.cat((obs_buf,

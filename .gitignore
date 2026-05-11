@@ -23,6 +23,27 @@ IsaacGymEnvs/
 **/.vscode
 **/legged_gym/logs
 
+# Door DP generated datasets and visualization artifacts
+/data/door_dp_raw/
+/data/lerobot/
+/data/lerobot_viz/
+/high-level/data/door_dp_raw/
+/high-level/data/lerobot/
+/high-level/data/lerobot_viz/
+/high-level/logs/door-dp/
+*.npz
+*.rrd
+*.zarr/
+*.safetensors
+
+# Local/generated door asset dumps; keep the small tracked default assets only.
+/high-level/data/asset/aigc_reference_export_fixed/
+/high-level/data/asset/door_set/*/
+!/high-level/data/asset/door_set/99650089960001/
+!/high-level/data/asset/door_set/99650089960006/
+!/high-level/data/asset/door_set/99655039960001/
+!/high-level/data/asset/door_set/99655039960006/
+
 # Node artifact files
 node_modules/
 dist/
@@ -66,4 +87,3 @@ Thumbs.db
 *.flv
 *.mov
 *.wmv
-
