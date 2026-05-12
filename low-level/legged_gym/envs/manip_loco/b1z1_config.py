@@ -399,7 +399,7 @@ class B1Z1RoughCfgPPO(LeggedRobotCfgPPO):
         policy_class_name = 'ActorCritic'
         algorithm_class_name = 'PPO'
         num_steps_per_env = 24
-        max_iterations = 45000 # number of policy updates
+        max_iterations = 80000 # number of policy updates
         # logging
         save_interval = 200 # check for potential saves every this many iterations
         experiment_name = 'b1z1_v2'

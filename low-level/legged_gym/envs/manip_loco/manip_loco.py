@@ -905,8 +905,30 @@ class ManipLoco(LeggedRobot):
                     raise Exception(f"PD gain of joint {name} were not defined, setting them to zero")
         # self.default_dof_pos = self.default_dof_pos.unsqueeze(0)
         self.default_dof_pos_wo_gripper = self.default_dof_pos[:-self.cfg.env.num_gripper_joints]
+        self.default_ee_orn_local_quat = self._compute_default_ee_orn_local_quat()
         
         self.global_steps = 0
+
+    def _compute_default_ee_orn_local_quat(self):
+        old_dof_pos = self.dof_pos.clone()
+        old_dof_vel = self.dof_vel.clone()
+        self.dof_pos[:] = self.default_dof_pos
+        self.dof_vel[:] = 0.0
+        self.gym.set_dof_state_tensor(self.sim, gymtorch.unwrap_tensor(self.dof_state))
+        self.gym.refresh_rigid_body_state_tensor(self.sim)
+
+        default_ee_orn_world = self.rigid_body_state[:, self.gripper_idx, 3:7]
+        default_ee_orn_world = default_ee_orn_world / torch.clamp(torch.norm(default_ee_orn_world, dim=-1, keepdim=True), min=1e-6)
+        base_quat = self.root_states[:, 3:7]
+        base_quat = base_quat / torch.clamp(torch.norm(base_quat, dim=-1, keepdim=True), min=1e-6)
+        default_ee_orn_local = quat_mul(quat_conjugate(base_quat), default_ee_orn_world)
+        default_ee_orn_local = default_ee_orn_local / torch.clamp(torch.norm(default_ee_orn_local, dim=-1, keepdim=True), min=1e-6)
+
+        self.dof_pos[:] = old_dof_pos
+        self.dof_vel[:] = old_dof_vel
+        self.gym.set_dof_state_tensor(self.sim, gymtorch.unwrap_tensor(self.dof_state))
+        self.gym.refresh_rigid_body_state_tensor(self.sim)
+        return default_ee_orn_local.clone()
 
     def _reset_root_states(self, env_ids):
         """ Resets ROOT states position and velocities of selected environmments
@@ -1302,9 +1324,14 @@ class ManipLoco(LeggedRobot):
         self.curr_ee_goal_cart_world = self._get_ee_goal_spherical_center() + ee_goal_cart_yaw_global
         
         # TODO: for the teleop mode, we need to directly update self.ee_goal_orn_quat using VR controller.
-        default_yaw = torch.atan2(ee_goal_cart_yaw_global[:, 1], ee_goal_cart_yaw_global[:, 0])
-        default_pitch = -self.curr_ee_goal_sphere[:, 1] + self.cfg.goal_ee.arm_induced_pitch
-        self.ee_goal_orn_quat = quat_from_euler_xyz(self.ee_goal_orn_delta_rpy[:, 0] + np.pi / 2, default_pitch + self.ee_goal_orn_delta_rpy[:, 1], self.ee_goal_orn_delta_rpy[:, 2] + default_yaw)
+        base_quat = self.base_quat / torch.clamp(torch.norm(self.base_quat, dim=-1, keepdim=True), min=1e-6)
+        default_ee_orn_world = quat_mul(base_quat, self.default_ee_orn_local_quat)
+        delta_orn_quat = quat_from_euler_xyz(
+            self.ee_goal_orn_delta_rpy[:, 0],
+            self.ee_goal_orn_delta_rpy[:, 1],
+            self.ee_goal_orn_delta_rpy[:, 2],
+        )
+        self.ee_goal_orn_quat = quat_mul(default_ee_orn_world, delta_orn_quat)
         
         self.goal_timer += 1
         resample_id = (self.goal_timer > self.traj_total_timesteps).nonzero(as_tuple=False).flatten()
