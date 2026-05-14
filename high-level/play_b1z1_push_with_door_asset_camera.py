@@ -34,23 +34,31 @@ from legged_gym.envs.manip_loco.manip_loco import ManipLoco  # noqa: E402
 from legged_gym.utils import task_registry  # noqa: E402
 
 try:
-    from door_dp_common import (
+    from dp.door_dp_common import (
+        DoorDPJsonlLogger,
         DoorDPPolicyController,
         RawDoorDPRecorder,
         apply_door_dp_action,
+        dp_image_inputs_from_camera_tensors,
         get_door_dp_action,
         get_door_dp_state,
         images_from_camera_tensors,
+        make_door_dp_log_record,
         make_state_feature_names,
+        print_door_dp_log_record,
     )
 except Exception:
+    DoorDPJsonlLogger = None
     DoorDPPolicyController = None
     RawDoorDPRecorder = None
     apply_door_dp_action = None
+    dp_image_inputs_from_camera_tensors = None
     get_door_dp_action = None
     get_door_dp_state = None
     images_from_camera_tensors = None
+    make_door_dp_log_record = None
     make_state_feature_names = None
+    print_door_dp_log_record = None
 
 
 DOOR_RUNTIME = {}
@@ -144,6 +152,16 @@ def _load_door_runtime(cfg_path):
                 "resolution": [96, 54],
                 "position": [0.0955, 0.22, -0.03175],
                 "rotation": [-1.57, 0.0, -0.87],
+                "rand_position": [0.0, 0.0, 0.0],
+            },
+        ),
+        "front_camera_cfg": sensor_cfg.get(
+            "onboard_camera",
+            {
+                "horizontal_fov": 69,
+                "resolution": [96, 54],
+                "position": [0.425, 0.04, 0.12],
+                "rotation": [0.0, 0.0, 0.0],
                 "rand_position": [0.0, 0.0, 0.0],
             },
         ),
@@ -414,6 +432,7 @@ class ManipLocoDoorAsset(ManipLoco):
         self.door_handles = []
         self.door_actor_spec_ids = []
         self.wrist_camera_handles = []
+        self.front_camera_handles = []
         self.envs = []
         self.mass_params_tensor = torch.zeros(self.num_envs, 5, dtype=torch.float, device=self.device, requires_grad=False)
 
@@ -449,6 +468,8 @@ class ManipLocoDoorAsset(ManipLoco):
             self.mass_params_tensor[i, :] = torch.from_numpy(mass_params).to(self.device)
             if DOOR_RUNTIME["enable_wrist_camera"]:
                 self.wrist_camera_handles.append(self._create_wrist_camera(env_handle, robot_dog_handle, i))
+            if DOOR_RUNTIME["enable_front_camera"]:
+                self.front_camera_handles.append(self._create_front_camera(env_handle, robot_dog_handle, i))
 
             box_pos = self.env_origins[i].clone()
             box_pos[0] += DOOR_RUNTIME["box_x"]
@@ -691,15 +712,71 @@ class ManipLocoDoorAsset(ManipLoco):
         self.wrist_camera_local_quat.append([local_transform.r.x, local_transform.r.y, local_transform.r.z, local_transform.r.w])
         return camera_handle
 
+    def _create_front_camera(self, env_handle, actor_handle, env_i):
+        front_body_handle = self.gym.find_actor_rigid_body_handle(env_handle, actor_handle, "trunk")
+        if front_body_handle < 0:
+            front_body_handle = actor_handle
+
+        front_cfg = DOOR_RUNTIME["front_camera_cfg"]
+        camera_props = gymapi.CameraProperties()
+        camera_props.enable_tensors = True
+        camera_props.width = int(front_cfg.get("resolution", [96, 54])[0])
+        camera_props.height = int(front_cfg.get("resolution", [96, 54])[1])
+        if front_cfg.get("horizontal_fov", None) is not None:
+            horizontal_fov = front_cfg["horizontal_fov"]
+            camera_props.horizontal_fov = (
+                np.random.uniform(horizontal_fov[0], horizontal_fov[1])
+                if isinstance(horizontal_fov, (list, tuple))
+                else horizontal_fov
+            )
+
+        local_pos = list(front_cfg.get("position", [0.425, 0.04, 0.12]))
+        rand_position = front_cfg.get("rand_position", [0.0, 0.0, 0.0])
+        local_pos[0] += np.random.uniform(-rand_position[0], rand_position[0])
+        local_pos[1] += np.random.uniform(-rand_position[1], rand_position[1])
+        local_pos[2] += np.random.uniform(-rand_position[2], rand_position[2])
+        local_rot = list(front_cfg.get("rotation", [0.0, 0.0, 0.0]))
+        # gymapi.Quat.from_euler_zyx expects [yaw_z, pitch_y, roll_x].
+        local_rot[0] = np.deg2rad(DOOR_RUNTIME["front_camera_yaw_deg"])
+        local_rot[1] = np.deg2rad(DOOR_RUNTIME["front_camera_pitch_deg"])
+        local_rot[2] = np.deg2rad(DOOR_RUNTIME["front_camera_roll_deg"])
+
+        local_transform = gymapi.Transform()
+        local_transform.p = gymapi.Vec3(*local_pos)
+        local_transform.r = gymapi.Quat.from_euler_zyx(*local_rot)
+        camera_handle = self.gym.create_camera_sensor(env_handle, camera_props)
+        if camera_handle < 0:
+            if not getattr(self, "_front_camera_create_warned", False):
+                print("Front camera sensor creation failed; front camera tensors will be disabled for this run.")
+                self._front_camera_create_warned = True
+            return camera_handle
+        self.gym.attach_camera_to_body(
+            camera_handle,
+            env_handle,
+            front_body_handle,
+            local_transform,
+            gymapi.FOLLOW_TRANSFORM,
+        )
+        if not hasattr(self, "front_camera_local_pos"):
+            self.front_camera_local_pos = []
+            self.front_camera_local_quat = []
+        self.front_camera_local_pos.append(local_pos)
+        self.front_camera_local_quat.append([local_transform.r.x, local_transform.r.y, local_transform.r.z, local_transform.r.w])
+        return camera_handle
+
     def _init_wrist_camera_tensors(self):
         self.wrist_camera_tensors = {}
-        if not DOOR_RUNTIME["enable_wrist_camera"]:
-            return
-        if any(camera_handle < 0 for camera_handle in self.wrist_camera_handles):
+        self.front_camera_tensors = {}
+        if DOOR_RUNTIME["enable_wrist_camera"] and any(camera_handle < 0 for camera_handle in self.wrist_camera_handles):
             if not getattr(self, "_wrist_camera_tensor_warned", False):
                 print("Wrist camera handles are invalid; skipping wrist camera tensor access.")
                 self._wrist_camera_tensor_warned = True
-            return
+            self.wrist_camera_handles = []
+        if DOOR_RUNTIME["enable_front_camera"] and any(camera_handle < 0 for camera_handle in self.front_camera_handles):
+            if not getattr(self, "_front_camera_tensor_warned", False):
+                print("Front camera handles are invalid; skipping front camera tensor access.")
+                self._front_camera_tensor_warned = True
+            self.front_camera_handles = []
         image_types = {
             "rgb": gymapi.IMAGE_COLOR,
             "depth": gymapi.IMAGE_DEPTH,
@@ -708,20 +785,33 @@ class ManipLocoDoorAsset(ManipLoco):
         for name, image_type in image_types.items():
             if not DOOR_RUNTIME[f"camera_{name}"]:
                 continue
-            self.wrist_camera_tensors[name] = [
-                gymtorch.wrap_tensor(
-                    self.gym.get_camera_image_gpu_tensor(
-                        self.sim,
-                        env_handle,
-                        self.wrist_camera_handles[env_i],
-                        image_type,
+            if DOOR_RUNTIME["enable_wrist_camera"] and self.wrist_camera_handles:
+                self.wrist_camera_tensors[name] = [
+                    gymtorch.wrap_tensor(
+                        self.gym.get_camera_image_gpu_tensor(
+                            self.sim,
+                            env_handle,
+                            self.wrist_camera_handles[env_i],
+                            image_type,
+                        )
                     )
-                )
-                for env_i, env_handle in enumerate(self.envs)
-            ]
+                    for env_i, env_handle in enumerate(self.envs)
+                ]
+            if DOOR_RUNTIME["enable_front_camera"] and self.front_camera_handles:
+                self.front_camera_tensors[name] = [
+                    gymtorch.wrap_tensor(
+                        self.gym.get_camera_image_gpu_tensor(
+                            self.sim,
+                            env_handle,
+                            self.front_camera_handles[env_i],
+                            image_type,
+                        )
+                    )
+                    for env_i, env_handle in enumerate(self.envs)
+                ]
 
     def capture_wrist_camera_images(self):
-        if not DOOR_RUNTIME["enable_wrist_camera"] or not getattr(self, "wrist_camera_tensors", None):
+        if not getattr(self, "wrist_camera_tensors", None) and not getattr(self, "front_camera_tensors", None):
             return {}
 
         self.gym.step_graphics(self.sim)
@@ -731,26 +821,39 @@ class ManipLocoDoorAsset(ManipLoco):
         try:
             for name, tensors in self.wrist_camera_tensors.items():
                 images[name] = torch.stack([tensor.clone() for tensor in tensors], dim=0)
+                images[f"wrist_{name}"] = images[name]
+            for name, tensors in self.front_camera_tensors.items():
+                images[f"front_{name}"] = torch.stack([tensor.clone() for tensor in tensors], dim=0)
         finally:
             self.gym.end_access_image_tensors(self.sim)
-        if "seg" in images:
-            handle_mask = images["seg"] == DOOR_RUNTIME["handle_seg_id"]
-            images["handle_mask"] = handle_mask.to(torch.float32)
-            if "depth" in images:
-                depth_image = images["depth"].clone().to(torch.float32)
+        for prefix in ("wrist", "front"):
+            seg_key = "seg" if prefix == "wrist" and "seg" in images else f"{prefix}_seg"
+            depth_key = "depth" if prefix == "wrist" and "depth" in images else f"{prefix}_depth"
+            if seg_key not in images:
+                continue
+            handle_mask = images[seg_key] == DOOR_RUNTIME["handle_seg_id"]
+            images[f"{prefix}_handle_mask"] = handle_mask.to(torch.float32)
+            if prefix == "wrist":
+                images["handle_mask"] = images[f"{prefix}_handle_mask"]
+            if depth_key in images:
+                depth_image = images[depth_key].clone().to(torch.float32)
                 depth_image = torch.nan_to_num(depth_image, nan=0.0, posinf=0.0, neginf=0.0)
                 depth_image = torch.abs(depth_image)
                 depth_image[depth_image < DOOR_RUNTIME["camera_depth_clip_lower"]] = 0
                 depth_image = torch.clamp(depth_image, 0.0, DOOR_RUNTIME["camera_depth_clip_far"])
                 normalized_depth = depth_image / DOOR_RUNTIME["camera_depth_clip_far"]
-                images["depth_meters"] = depth_image
-                images["normalized_depth"] = normalized_depth
-                images["handle_masked_depth"] = depth_image * images["handle_mask"]
+                images[f"{prefix}_depth_meters"] = depth_image
+                images[f"{prefix}_normalized_depth"] = normalized_depth
+                images[f"{prefix}_handle_masked_depth"] = depth_image * images[f"{prefix}_handle_mask"]
+                if prefix == "wrist":
+                    images["depth_meters"] = depth_image
+                    images["normalized_depth"] = normalized_depth
+                    images["handle_masked_depth"] = images[f"{prefix}_handle_masked_depth"]
         self.last_wrist_camera_images = images
         return images
 
     def show_wrist_seg(self, images, env_id=0):
-        if not DOOR_RUNTIME["show_seg"] or "handle_mask" not in images:
+        if not DOOR_RUNTIME["show_seg"]:
             return
         if cv2 is None:
             if not getattr(self, "_cv2_missing_warned", False):
@@ -758,15 +861,28 @@ class ManipLocoDoorAsset(ManipLoco):
                 self._cv2_missing_warned = True
             return
 
-        env_id = int(np.clip(env_id, 0, images["handle_mask"].shape[0] - 1))
+        mask_key = "wrist_handle_mask" if "wrist_handle_mask" in images else "handle_mask"
+        if mask_key not in images:
+            return
+        env_id = int(np.clip(env_id, 0, images[mask_key].shape[0] - 1))
         display_scale = max(1, int(DOOR_RUNTIME["camera_display_scale"]))
-        mask_image = np.squeeze(images["handle_mask"][env_id].detach().cpu().numpy()).astype(np.float32)
-        mask_vis = (255.0 * mask_image).astype(np.uint8)
-        if display_scale > 1:
-            mask_vis = cv2.resize(mask_vis, None, fx=display_scale, fy=display_scale, interpolation=cv2.INTER_NEAREST)
-        cv2.imshow("Wrist Handle Mask", mask_vis)
-        if "handle_masked_depth" in images:
-            masked_depth = np.squeeze(images["handle_masked_depth"][env_id].detach().cpu().numpy()).astype(np.float32)
+        for prefix, title in (("wrist", "Wrist"), ("front", "Front")):
+            local_mask_key = f"{prefix}_handle_mask" if f"{prefix}_handle_mask" in images else ("handle_mask" if prefix == "wrist" else None)
+            local_depth_key = (
+                f"{prefix}_handle_masked_depth"
+                if f"{prefix}_handle_masked_depth" in images
+                else ("handle_masked_depth" if prefix == "wrist" else None)
+            )
+            if local_mask_key is None or local_mask_key not in images:
+                continue
+            mask_image = np.squeeze(images[local_mask_key][env_id].detach().cpu().numpy()).astype(np.float32)
+            mask_vis = (255.0 * mask_image).astype(np.uint8)
+            if display_scale > 1:
+                mask_vis = cv2.resize(mask_vis, None, fx=display_scale, fy=display_scale, interpolation=cv2.INTER_NEAREST)
+            cv2.imshow(f"{title} Handle Mask", mask_vis)
+            if local_depth_key is None or local_depth_key not in images:
+                continue
+            masked_depth = np.squeeze(images[local_depth_key][env_id].detach().cpu().numpy()).astype(np.float32)
             masked_depth_vis = np.zeros_like(masked_depth, dtype=np.uint8)
             valid_depth = masked_depth[mask_image > 0.5]
             valid_depth = valid_depth[np.isfinite(valid_depth) & (valid_depth > 0.0)]
@@ -780,29 +896,33 @@ class ManipLocoDoorAsset(ManipLoco):
                 masked_depth_vis = (255.0 * np.clip(depth_scaled, 0.0, 1.0) * mask_image).astype(np.uint8)
             if display_scale > 1:
                 masked_depth_vis = cv2.resize(masked_depth_vis, None, fx=display_scale, fy=display_scale, interpolation=cv2.INTER_NEAREST)
-            cv2.imshow("Wrist Handle Masked Depth", masked_depth_vis)
+            cv2.imshow(f"{title} Handle Masked Depth", masked_depth_vis)
         cv2.waitKey(1)
 
     def draw_wrist_camera_axes(self, scale=0.10, thickness=0.004):
-        if not DOOR_RUNTIME["enable_wrist_camera"] or getattr(self, "viewer", None) is None:
+        if getattr(self, "viewer", None) is None:
             return
-        if not hasattr(self, "wrist_camera_local_pos"):
-            return
-        wrist_body_idx = self.body_names_to_idx.get("link06")
-        if wrist_body_idx is None:
-            return
-        local_pos = torch.tensor(self.wrist_camera_local_pos, device=self.device, dtype=torch.float32)
-        local_quat = torch.tensor(self.wrist_camera_local_quat, device=self.device, dtype=torch.float32)
-        wrist_pos = self.rigid_body_state[:, wrist_body_idx, :3]
-        wrist_quat = self.rigid_body_state[:, wrist_body_idx, 3:7]
-        camera_pos = wrist_pos + quat_apply(wrist_quat, local_pos)
-        camera_quat = quat_mul(wrist_quat, local_quat)
-        for env_i in range(self.num_envs):
-            pos = camera_pos[env_i].detach().cpu().tolist()
-            quat = camera_quat[env_i].detach().cpu().tolist()
-            pose = gymapi.Transform(gymapi.Vec3(*pos), gymapi.Quat(*quat))
-            axes_geom = ThickAxesGeometry(scale=scale, thickness=thickness, pose=pose)
-            gymutil.draw_lines(axes_geom, self.gym, self.viewer, self.envs[env_i], gymapi.Transform())
+        camera_specs = []
+        if DOOR_RUNTIME["enable_wrist_camera"] and hasattr(self, "wrist_camera_local_pos"):
+            camera_specs.append(("link06", self.wrist_camera_local_pos, self.wrist_camera_local_quat))
+        if DOOR_RUNTIME["enable_front_camera"] and hasattr(self, "front_camera_local_pos"):
+            camera_specs.append(("trunk", self.front_camera_local_pos, self.front_camera_local_quat))
+        for body_name, local_pos_list, local_quat_list in camera_specs:
+            body_idx = self.body_names_to_idx.get(body_name)
+            if body_idx is None:
+                continue
+            local_pos = torch.tensor(local_pos_list, device=self.device, dtype=torch.float32)
+            local_quat = torch.tensor(local_quat_list, device=self.device, dtype=torch.float32)
+            body_pos = self.rigid_body_state[:, body_idx, :3]
+            body_quat = self.rigid_body_state[:, body_idx, 3:7]
+            camera_pos = body_pos + quat_apply(body_quat, local_pos)
+            camera_quat = quat_mul(body_quat, local_quat)
+            for env_i in range(self.num_envs):
+                pos = camera_pos[env_i].detach().cpu().tolist()
+                quat = camera_quat[env_i].detach().cpu().tolist()
+                pose = gymapi.Transform(gymapi.Vec3(*pos), gymapi.Quat(*quat))
+                axes_geom = ThickAxesGeometry(scale=scale, thickness=thickness, pose=pose)
+                gymutil.draw_lines(axes_geom, self.gym, self.viewer, self.envs[env_i], gymapi.Transform())
 
     def _init_buffers(self):
         self.action_scale = torch.tensor(self.cfg.control.action_scale, device=self.device)
@@ -982,6 +1102,7 @@ class ManipLocoDoorAsset(ManipLoco):
                 if self.cfg.control.control_type in ["P", "V"]:
                     raise Exception(f"PD gain of joint {name} were not defined, setting them to zero")
         self.default_dof_pos_wo_gripper = self.default_dof_pos[:-self.cfg.env.num_gripper_joints]
+        self.default_ee_orn_local_quat = self._compute_default_ee_orn_local_quat()
         self.global_steps = 0
 
     def _init_door_tensors(self):
@@ -1285,6 +1406,8 @@ def parse_args():
     parser.add_argument("--checkpoint", type=int, default=45000)
     parser.add_argument("--enable_wrist_camera", dest="enable_wrist_camera", action="store_true", default=True)
     parser.add_argument("--no_enable_wrist_camera", dest="enable_wrist_camera", action="store_false")
+    parser.add_argument("--enable_front_camera", dest="enable_front_camera", action="store_true", default=True)
+    parser.add_argument("--no_enable_front_camera", dest="enable_front_camera", action="store_false")
     parser.add_argument("--camera_rgb", action="store_true")
     parser.add_argument("--camera_depth", dest="camera_depth", action="store_true", default=True)
     parser.add_argument("--no_camera_depth", dest="camera_depth", action="store_false")
@@ -1298,6 +1421,9 @@ def parse_args():
     parser.add_argument("--camera_depth_clip_far", type=float, default=2.0)
     parser.add_argument("--camera_display_scale", type=int, default=5)
     parser.add_argument("--wrist_camera_down_tilt", type=float, default=0.20)
+    parser.add_argument("--front_camera_yaw_deg", type=float, default=0.0)
+    parser.add_argument("--front_camera_pitch_deg", type=float, default=-60.0)
+    parser.add_argument("--front_camera_roll_deg", type=float, default=0.0)
     parser.add_argument("--camera_axis_scale", type=float, default=0.10)
     parser.add_argument("--camera_axis_thickness", type=float, default=0.004)
     parser.add_argument("--record_dp_dataset", action="store_true")
@@ -1313,6 +1439,9 @@ def parse_args():
     parser.add_argument("--dp_control_env_id", type=int, default=0)
     parser.add_argument("--dp_inference_steps", type=int, default=100)
     parser.add_argument("--dp_action_horizon", type=int, default=None)
+    parser.add_argument("--dp_log_path", type=str, default=None)
+    parser.add_argument("--dp_log_interval", type=int, default=25)
+    parser.add_argument("--no_dp_print", dest="dp_print", action="store_false", default=True)
     return parser.parse_args()
 
 
@@ -1411,6 +1540,7 @@ def main():
     DOOR_RUNTIME["gripper_shape_friction"] = args.gripper_shape_friction
     DOOR_RUNTIME["door_vhacd_resolution"] = args.door_vhacd_resolution
     DOOR_RUNTIME["enable_wrist_camera"] = args.enable_wrist_camera
+    DOOR_RUNTIME["enable_front_camera"] = args.enable_front_camera
     DOOR_RUNTIME["camera_rgb"] = args.camera_rgb
     DOOR_RUNTIME["camera_depth"] = args.camera_depth
     DOOR_RUNTIME["camera_seg"] = args.camera_seg
@@ -1420,6 +1550,9 @@ def main():
     DOOR_RUNTIME["camera_depth_clip_far"] = args.camera_depth_clip_far
     DOOR_RUNTIME["camera_display_scale"] = args.camera_display_scale
     DOOR_RUNTIME["wrist_camera_down_tilt"] = args.wrist_camera_down_tilt
+    DOOR_RUNTIME["front_camera_yaw_deg"] = args.front_camera_yaw_deg
+    DOOR_RUNTIME["front_camera_pitch_deg"] = args.front_camera_pitch_deg
+    DOOR_RUNTIME["front_camera_roll_deg"] = args.front_camera_roll_deg
 
     low_args = build_low_level_args(args)
     env_cfg, train_cfg = task_registry.get_cfgs(name="b1z1")
@@ -1479,6 +1612,7 @@ def main():
         "Wrist camera:",
         {
             "enabled": args.enable_wrist_camera,
+            "front_enabled": args.enable_front_camera,
             "rgb": args.camera_rgb,
             "depth": args.camera_depth,
             "seg": args.camera_seg,
@@ -1486,9 +1620,13 @@ def main():
             "display_env": args.camera_env_id,
             "handle_seg_id": args.handle_seg_id,
             "down_tilt": args.wrist_camera_down_tilt,
+            "front_yaw_deg": args.front_camera_yaw_deg,
+            "front_pitch_deg": args.front_camera_pitch_deg,
+            "front_roll_deg": args.front_camera_roll_deg,
             "display_scale": args.camera_display_scale,
             "depth_clip": [args.camera_depth_clip_lower, args.camera_depth_clip_far],
             "cfg": DOOR_RUNTIME["wrist_camera_cfg"],
+            "front_cfg": DOOR_RUNTIME["front_camera_cfg"],
         },
     )
     print(
@@ -1683,6 +1821,7 @@ def main():
             f"env_ids={record_env_ids} success_angle_deg={args.pass_open_angle_deg}"
         )
     dp_controller = None
+    dp_logger = None
     if args.dp_policy_checkpoint:
         if DoorDPPolicyController is None:
             raise RuntimeError("DP inference requires diffusers and the Door DP model code.")
@@ -1695,6 +1834,15 @@ def main():
             action_horizon=args.dp_action_horizon,
         )
         print(f"Loaded Door DP policy from {args.dp_policy_checkpoint}")
+        print(
+            f"Door DP controls only env {args.dp_control_env_id}; other envs keep the scripted target trajectory.",
+            flush=True,
+        )
+        if args.dp_log_path:
+            if DoorDPJsonlLogger is None:
+                raise RuntimeError("DP logging requires door_dp_common.py")
+            dp_logger = DoorDPJsonlLogger(args.dp_log_path)
+            print(f"Door DP log: {args.dp_log_path}", flush=True)
 
     def sample_commands():
         if args.fixed_vx is not None:
@@ -1856,9 +2004,13 @@ def main():
         red_axis_quat = quat_from_euler_xyz(red_axis_rot, zeros, zeros)
         return quat_mul(base_quat, red_axis_quat)
 
-    def ee_goal_delta_rpy_from_quat(target_pos, target_quat):
+    def ee_goal_delta_rpy_from_quat(target_pos, target_quat, env_ids=None):
         goal_roll, goal_pitch, goal_yaw = euler_from_quat(target_quat)
         center = env._get_ee_goal_spherical_center()
+        if env_ids is not None:
+            center = center[env_ids]
+        elif center.shape[0] != target_pos.shape[0]:
+            center = center[: target_pos.shape[0]]
         target_cart = target_pos - center
         target_xy_len = torch.norm(target_cart[:, :2], dim=-1)
         target_sphere_pitch = torch.atan2(target_cart[:, 2], target_xy_len)
@@ -2143,14 +2295,39 @@ def main():
         if dp_controller is not None:
             dp_env_id = args.dp_control_env_id
             dp_camera_images = env.capture_wrist_camera_images()
-            mask_rgb, masked_depth_rgb = images_from_camera_tensors(dp_camera_images, dp_env_id)
+            mask_rgb, masked_depth_rgb, front_mask_rgb, front_masked_depth_rgb = dp_image_inputs_from_camera_tensors(dp_camera_images, dp_env_id)
             if mask_rgb is not None and masked_depth_rgb is not None:
                 dp_action = dp_controller.act(
                     get_door_dp_state(env, phase_id, phase_name, dp_env_id),
                     mask_rgb,
                     masked_depth_rgb,
+                    front_mask_rgb,
+                    front_masked_depth_rgb,
                 )
                 apply_door_dp_action(env, dp_action, dp_env_id, ee_goal_delta_rpy_from_quat)
+                if make_door_dp_log_record is not None:
+                    dp_extra = {
+                        "stopped_by_door": bool(stopped_by_door[dp_env_id].item()),
+                        "front_to_door_distance": float(front_to_door_distance[dp_env_id].item()),
+                        "pass_started": bool(pass_started[dp_env_id].item()),
+                        "pass_done": bool(pass_done[dp_env_id].item()),
+                        "door_open_stage": bool(env.open_door_stage[dp_env_id].item()),
+                        "handle_open_ratio": float(env.handle_open_ratio[dp_env_id].item()),
+                        "door_open_ratio": float(env.door_open_ratio[dp_env_id].item()),
+                    }
+                    dp_record = make_door_dp_log_record(
+                        env,
+                        step,
+                        dp_action,
+                        dp_env_id,
+                        phase_id=phase_id,
+                        phase_names=phase_name,
+                        extra=dp_extra,
+                    )
+                    if dp_logger is not None:
+                        dp_logger.write(dp_record)
+                    if args.dp_print and step % max(1, args.dp_log_interval) == 0:
+                        print_door_dp_log_record(dp_record)
         actions = policy(obs.detach(), hist_encoding=True)
         obs, _, _, _, dones, infos = env.step(actions.detach())
         camera_images = env.capture_wrist_camera_images()
@@ -2160,7 +2337,7 @@ def main():
             for env_id, recorder in dp_recorders.items():
                 if bool(dp_record_closed[env_id].item()):
                     continue
-                mask_rgb, masked_depth_rgb = images_from_camera_tensors(camera_images, env_id)
+                mask_rgb, masked_depth_rgb, front_mask_rgb, front_masked_depth_rgb = dp_image_inputs_from_camera_tensors(camera_images, env_id)
                 if mask_rgb is None or masked_depth_rgb is None:
                     if not dp_record_warned_no_camera:
                         print("Warning: skipped DP frame because wrist camera images are unavailable.")
@@ -2172,6 +2349,8 @@ def main():
                     masked_depth_rgb,
                     get_door_dp_action(env, env_id),
                     int(phase_id[env_id].detach().cpu().item()),
+                    front_mask_rgb=front_mask_rgb,
+                    front_masked_depth_rgb=front_masked_depth_rgb,
                 )
                 should_close = bool(pass_done[env_id].item()) or step == args.steps - 1
                 if should_close:
@@ -2249,6 +2428,8 @@ def main():
             saved_count = int(torch.sum(dp_record_success[list(dp_recorders.keys())]).detach().cpu().item())
             print(f"Finished raw Door DP recording: saved_successful={saved_count}/{len(dp_recorders)}")
             break
+    if dp_logger is not None:
+        dp_logger.close()
 
 
 if __name__ == "__main__":

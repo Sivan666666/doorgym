@@ -45,25 +45,3340 @@ env:
     trainAssets:
       opensource_leverdoor:
         "0":
+          bounding_box: "99650069960001/bounding_box.json"
+          handle_bounding: "99650069960001/handle_bounding.json"
+          name: "99650069960001"
+          path: "99650069960001/mobility.urdf"
+        "1":
+          bounding_box: "99650069960003/bounding_box.json"
+          handle_bounding: "99650069960003/handle_bounding.json"
+          name: "99650069960003"
+          path: "99650069960003/mobility.urdf"
+        "2":
+          bounding_box: "99650069960006/bounding_box.json"
+          handle_bounding: "99650069960006/handle_bounding.json"
+          name: "99650069960006"
+          path: "99650069960006/mobility.urdf"
+        "3":
+          bounding_box: "99650069960010/bounding_box.json"
+          handle_bounding: "99650069960010/handle_bounding.json"
+          name: "99650069960010"
+          path: "99650069960010/mobility.urdf"
+        "4":
+          bounding_box: "99650069960011/bounding_box.json"
+          handle_bounding: "99650069960011/handle_bounding.json"
+          name: "99650069960011"
+          path: "99650069960011/mobility.urdf"
+        "5":
+          bounding_box: "99650069960012/bounding_box.json"
+          handle_bounding: "99650069960012/handle_bounding.json"
+          name: "99650069960012"
+          path: "99650069960012/mobility.urdf"
+        "6":
+          bounding_box: "99650069960014/bounding_box.json"
+          handle_bounding: "99650069960014/handle_bounding.json"
+          name: "99650069960014"
+          path: "99650069960014/mobility.urdf"
+        "7":
+          bounding_box: "99650069960017/bounding_box.json"
+          handle_bounding: "99650069960017/handle_bounding.json"
+          name: "99650069960017"
+          path: "99650069960017/mobility.urdf"
+        "8":
+          bounding_box: "99650069960018/bounding_box.json"
+          handle_bounding: "99650069960018/handle_bounding.json"
+          name: "99650069960018"
+          path: "99650069960018/mobility.urdf"
+        "9":
+          bounding_box: "99650069960019/bounding_box.json"
+          handle_bounding: "99650069960019/handle_bounding.json"
+          name: "99650069960019"
+          path: "99650069960019/mobility.urdf"
+        "10":
+          bounding_box: "99650069960021/bounding_box.json"
+          handle_bounding: "99650069960021/handle_bounding.json"
+          name: "99650069960021"
+          path: "99650069960021/mobility.urdf"
+        "11":
+          bounding_box: "99650069960022/bounding_box.json"
+          handle_bounding: "99650069960022/handle_bounding.json"
+          name: "99650069960022"
+          path: "99650069960022/mobility.urdf"
+        "12":
+          bounding_box: "99650069960024/bounding_box.json"
+          handle_bounding: "99650069960024/handle_bounding.json"
+          name: "99650069960024"
+          path: "99650069960024/mobility.urdf"
+        "13":
+          bounding_box: "99650069960025/bounding_box.json"
+          handle_bounding: "99650069960025/handle_bounding.json"
+          name: "99650069960025"
+          path: "99650069960025/mobility.urdf"
+        "14":
+          bounding_box: "99650069960028/bounding_box.json"
+          handle_bounding: "99650069960028/handle_bounding.json"
+          name: "99650069960028"
+          path: "99650069960028/mobility.urdf"
+        "15":
+          bounding_box: "99650069960030/bounding_box.json"
+          handle_bounding: "99650069960030/handle_bounding.json"
+          name: "99650069960030"
+          path: "99650069960030/mobility.urdf"
+        "16":
+          bounding_box: "99650069960032/bounding_box.json"
+          handle_bounding: "99650069960032/handle_bounding.json"
+          name: "99650069960032"
+          path: "99650069960032/mobility.urdf"
+        "17":
+          bounding_box: "99650069960034/bounding_box.json"
+          handle_bounding: "99650069960034/handle_bounding.json"
+          name: "99650069960034"
+          path: "99650069960034/mobility.urdf"
+        "18":
+          bounding_box: "99650069960035/bounding_box.json"
+          handle_bounding: "99650069960035/handle_bounding.json"
+          name: "99650069960035"
+          path: "99650069960035/mobility.urdf"
+        "19":
+          bounding_box: "99650069960036/bounding_box.json"
+          handle_bounding: "99650069960036/handle_bounding.json"
+          name: "99650069960036"
+          path: "99650069960036/mobility.urdf"
+        "20":
+          bounding_box: "99650069960045/bounding_box.json"
+          handle_bounding: "99650069960045/handle_bounding.json"
+          name: "99650069960045"
+          path: "99650069960045/mobility.urdf"
+        "21":
+          bounding_box: "99650069960046/bounding_box.json"
+          handle_bounding: "99650069960046/handle_bounding.json"
+          name: "99650069960046"
+          path: "99650069960046/mobility.urdf"
+        "22":
+          bounding_box: "99650069960048/bounding_box.json"
+          handle_bounding: "99650069960048/handle_bounding.json"
+          name: "99650069960048"
+          path: "99650069960048/mobility.urdf"
+        "23":
           bounding_box: "99650089960001/bounding_box.json"
           handle_bounding: "99650089960001/handle_bounding.json"
           name: "99650089960001"
           path: "99650089960001/mobility.urdf"
-        "1":
+        "24":
+          bounding_box: "99650089960003/bounding_box.json"
+          handle_bounding: "99650089960003/handle_bounding.json"
+          name: "99650089960003"
+          path: "99650089960003/mobility.urdf"
+        "25":
           bounding_box: "99650089960006/bounding_box.json"
           handle_bounding: "99650089960006/handle_bounding.json"
           name: "99650089960006"
           path: "99650089960006/mobility.urdf"
-        "2":
+        "26":
+          bounding_box: "99650089960010/bounding_box.json"
+          handle_bounding: "99650089960010/handle_bounding.json"
+          name: "99650089960010"
+          path: "99650089960010/mobility.urdf"
+        "27":
+          bounding_box: "99650089960011/bounding_box.json"
+          handle_bounding: "99650089960011/handle_bounding.json"
+          name: "99650089960011"
+          path: "99650089960011/mobility.urdf"
+        "28":
+          bounding_box: "99650089960012/bounding_box.json"
+          handle_bounding: "99650089960012/handle_bounding.json"
+          name: "99650089960012"
+          path: "99650089960012/mobility.urdf"
+        "29":
+          bounding_box: "99650089960014/bounding_box.json"
+          handle_bounding: "99650089960014/handle_bounding.json"
+          name: "99650089960014"
+          path: "99650089960014/mobility.urdf"
+        "30":
+          bounding_box: "99650089960017/bounding_box.json"
+          handle_bounding: "99650089960017/handle_bounding.json"
+          name: "99650089960017"
+          path: "99650089960017/mobility.urdf"
+        "31":
+          bounding_box: "99650089960018/bounding_box.json"
+          handle_bounding: "99650089960018/handle_bounding.json"
+          name: "99650089960018"
+          path: "99650089960018/mobility.urdf"
+        "32":
+          bounding_box: "99650089960019/bounding_box.json"
+          handle_bounding: "99650089960019/handle_bounding.json"
+          name: "99650089960019"
+          path: "99650089960019/mobility.urdf"
+        "33":
+          bounding_box: "99650089960021/bounding_box.json"
+          handle_bounding: "99650089960021/handle_bounding.json"
+          name: "99650089960021"
+          path: "99650089960021/mobility.urdf"
+        "34":
+          bounding_box: "99650089960022/bounding_box.json"
+          handle_bounding: "99650089960022/handle_bounding.json"
+          name: "99650089960022"
+          path: "99650089960022/mobility.urdf"
+        "35":
+          bounding_box: "99650089960024/bounding_box.json"
+          handle_bounding: "99650089960024/handle_bounding.json"
+          name: "99650089960024"
+          path: "99650089960024/mobility.urdf"
+        "36":
+          bounding_box: "99650089960025/bounding_box.json"
+          handle_bounding: "99650089960025/handle_bounding.json"
+          name: "99650089960025"
+          path: "99650089960025/mobility.urdf"
+        "37":
+          bounding_box: "99650089960028/bounding_box.json"
+          handle_bounding: "99650089960028/handle_bounding.json"
+          name: "99650089960028"
+          path: "99650089960028/mobility.urdf"
+        "38":
+          bounding_box: "99650089960030/bounding_box.json"
+          handle_bounding: "99650089960030/handle_bounding.json"
+          name: "99650089960030"
+          path: "99650089960030/mobility.urdf"
+        "39":
+          bounding_box: "99650089960032/bounding_box.json"
+          handle_bounding: "99650089960032/handle_bounding.json"
+          name: "99650089960032"
+          path: "99650089960032/mobility.urdf"
+        "40":
+          bounding_box: "99650089960034/bounding_box.json"
+          handle_bounding: "99650089960034/handle_bounding.json"
+          name: "99650089960034"
+          path: "99650089960034/mobility.urdf"
+        "41":
+          bounding_box: "99650089960035/bounding_box.json"
+          handle_bounding: "99650089960035/handle_bounding.json"
+          name: "99650089960035"
+          path: "99650089960035/mobility.urdf"
+        "42":
+          bounding_box: "99650089960036/bounding_box.json"
+          handle_bounding: "99650089960036/handle_bounding.json"
+          name: "99650089960036"
+          path: "99650089960036/mobility.urdf"
+        "43":
+          bounding_box: "99650089960045/bounding_box.json"
+          handle_bounding: "99650089960045/handle_bounding.json"
+          name: "99650089960045"
+          path: "99650089960045/mobility.urdf"
+        "44":
+          bounding_box: "99650089960046/bounding_box.json"
+          handle_bounding: "99650089960046/handle_bounding.json"
+          name: "99650089960046"
+          path: "99650089960046/mobility.urdf"
+        "45":
+          bounding_box: "99650089960048/bounding_box.json"
+          handle_bounding: "99650089960048/handle_bounding.json"
+          name: "99650089960048"
+          path: "99650089960048/mobility.urdf"
+        "46":
           bounding_box: "99655039960001/bounding_box.json"
           handle_bounding: "99655039960001/handle_bounding.json"
           name: "99655039960001"
           path: "99655039960001/mobility.urdf"
-        "3":
+        "47":
+          bounding_box: "99655039960003/bounding_box.json"
+          handle_bounding: "99655039960003/handle_bounding.json"
+          name: "99655039960003"
+          path: "99655039960003/mobility.urdf"
+        "48":
           bounding_box: "99655039960006/bounding_box.json"
           handle_bounding: "99655039960006/handle_bounding.json"
           name: "99655039960006"
           path: "99655039960006/mobility.urdf"
+        "49":
+          bounding_box: "99655039960010/bounding_box.json"
+          handle_bounding: "99655039960010/handle_bounding.json"
+          name: "99655039960010"
+          path: "99655039960010/mobility.urdf"
+        "50":
+          bounding_box: "99655039960011/bounding_box.json"
+          handle_bounding: "99655039960011/handle_bounding.json"
+          name: "99655039960011"
+          path: "99655039960011/mobility.urdf"
+        "51":
+          bounding_box: "99655039960012/bounding_box.json"
+          handle_bounding: "99655039960012/handle_bounding.json"
+          name: "99655039960012"
+          path: "99655039960012/mobility.urdf"
+        "52":
+          bounding_box: "99655039960014/bounding_box.json"
+          handle_bounding: "99655039960014/handle_bounding.json"
+          name: "99655039960014"
+          path: "99655039960014/mobility.urdf"
+        "53":
+          bounding_box: "99655039960017/bounding_box.json"
+          handle_bounding: "99655039960017/handle_bounding.json"
+          name: "99655039960017"
+          path: "99655039960017/mobility.urdf"
+        "54":
+          bounding_box: "99655039960018/bounding_box.json"
+          handle_bounding: "99655039960018/handle_bounding.json"
+          name: "99655039960018"
+          path: "99655039960018/mobility.urdf"
+        "55":
+          bounding_box: "99655039960019/bounding_box.json"
+          handle_bounding: "99655039960019/handle_bounding.json"
+          name: "99655039960019"
+          path: "99655039960019/mobility.urdf"
+        "56":
+          bounding_box: "99655039960021/bounding_box.json"
+          handle_bounding: "99655039960021/handle_bounding.json"
+          name: "99655039960021"
+          path: "99655039960021/mobility.urdf"
+        "57":
+          bounding_box: "99655039960022/bounding_box.json"
+          handle_bounding: "99655039960022/handle_bounding.json"
+          name: "99655039960022"
+          path: "99655039960022/mobility.urdf"
+        "58":
+          bounding_box: "99655039960024/bounding_box.json"
+          handle_bounding: "99655039960024/handle_bounding.json"
+          name: "99655039960024"
+          path: "99655039960024/mobility.urdf"
+        "59":
+          bounding_box: "99655039960025/bounding_box.json"
+          handle_bounding: "99655039960025/handle_bounding.json"
+          name: "99655039960025"
+          path: "99655039960025/mobility.urdf"
+        "60":
+          bounding_box: "99655039960028/bounding_box.json"
+          handle_bounding: "99655039960028/handle_bounding.json"
+          name: "99655039960028"
+          path: "99655039960028/mobility.urdf"
+        "61":
+          bounding_box: "99655039960030/bounding_box.json"
+          handle_bounding: "99655039960030/handle_bounding.json"
+          name: "99655039960030"
+          path: "99655039960030/mobility.urdf"
+        "62":
+          bounding_box: "99655039960032/bounding_box.json"
+          handle_bounding: "99655039960032/handle_bounding.json"
+          name: "99655039960032"
+          path: "99655039960032/mobility.urdf"
+        "63":
+          bounding_box: "99655039960034/bounding_box.json"
+          handle_bounding: "99655039960034/handle_bounding.json"
+          name: "99655039960034"
+          path: "99655039960034/mobility.urdf"
+        "64":
+          bounding_box: "99655039960035/bounding_box.json"
+          handle_bounding: "99655039960035/handle_bounding.json"
+          name: "99655039960035"
+          path: "99655039960035/mobility.urdf"
+        "65":
+          bounding_box: "99655039960036/bounding_box.json"
+          handle_bounding: "99655039960036/handle_bounding.json"
+          name: "99655039960036"
+          path: "99655039960036/mobility.urdf"
+        "66":
+          bounding_box: "99655039960045/bounding_box.json"
+          handle_bounding: "99655039960045/handle_bounding.json"
+          name: "99655039960045"
+          path: "99655039960045/mobility.urdf"
+        "67":
+          bounding_box: "99655039960046/bounding_box.json"
+          handle_bounding: "99655039960046/handle_bounding.json"
+          name: "99655039960046"
+          path: "99655039960046/mobility.urdf"
+        "68":
+          bounding_box: "99655039960048/bounding_box.json"
+          handle_bounding: "99655039960048/handle_bounding.json"
+          name: "99655039960048"
+          path: "99655039960048/mobility.urdf"
+        "69":
+          bounding_box: "99655049960001/bounding_box.json"
+          handle_bounding: "99655049960001/handle_bounding.json"
+          name: "99655049960001"
+          path: "99655049960001/mobility.urdf"
+        "70":
+          bounding_box: "99655049960003/bounding_box.json"
+          handle_bounding: "99655049960003/handle_bounding.json"
+          name: "99655049960003"
+          path: "99655049960003/mobility.urdf"
+        "71":
+          bounding_box: "99655049960006/bounding_box.json"
+          handle_bounding: "99655049960006/handle_bounding.json"
+          name: "99655049960006"
+          path: "99655049960006/mobility.urdf"
+        "72":
+          bounding_box: "99655049960010/bounding_box.json"
+          handle_bounding: "99655049960010/handle_bounding.json"
+          name: "99655049960010"
+          path: "99655049960010/mobility.urdf"
+        "73":
+          bounding_box: "99655049960011/bounding_box.json"
+          handle_bounding: "99655049960011/handle_bounding.json"
+          name: "99655049960011"
+          path: "99655049960011/mobility.urdf"
+        "74":
+          bounding_box: "99655049960012/bounding_box.json"
+          handle_bounding: "99655049960012/handle_bounding.json"
+          name: "99655049960012"
+          path: "99655049960012/mobility.urdf"
+        "75":
+          bounding_box: "99655049960014/bounding_box.json"
+          handle_bounding: "99655049960014/handle_bounding.json"
+          name: "99655049960014"
+          path: "99655049960014/mobility.urdf"
+        "76":
+          bounding_box: "99655049960017/bounding_box.json"
+          handle_bounding: "99655049960017/handle_bounding.json"
+          name: "99655049960017"
+          path: "99655049960017/mobility.urdf"
+        "77":
+          bounding_box: "99655049960018/bounding_box.json"
+          handle_bounding: "99655049960018/handle_bounding.json"
+          name: "99655049960018"
+          path: "99655049960018/mobility.urdf"
+        "78":
+          bounding_box: "99655049960019/bounding_box.json"
+          handle_bounding: "99655049960019/handle_bounding.json"
+          name: "99655049960019"
+          path: "99655049960019/mobility.urdf"
+        "79":
+          bounding_box: "99655049960021/bounding_box.json"
+          handle_bounding: "99655049960021/handle_bounding.json"
+          name: "99655049960021"
+          path: "99655049960021/mobility.urdf"
+        "80":
+          bounding_box: "99655049960022/bounding_box.json"
+          handle_bounding: "99655049960022/handle_bounding.json"
+          name: "99655049960022"
+          path: "99655049960022/mobility.urdf"
+        "81":
+          bounding_box: "99655049960024/bounding_box.json"
+          handle_bounding: "99655049960024/handle_bounding.json"
+          name: "99655049960024"
+          path: "99655049960024/mobility.urdf"
+        "82":
+          bounding_box: "99655049960025/bounding_box.json"
+          handle_bounding: "99655049960025/handle_bounding.json"
+          name: "99655049960025"
+          path: "99655049960025/mobility.urdf"
+        "83":
+          bounding_box: "99655049960028/bounding_box.json"
+          handle_bounding: "99655049960028/handle_bounding.json"
+          name: "99655049960028"
+          path: "99655049960028/mobility.urdf"
+        "84":
+          bounding_box: "99655049960030/bounding_box.json"
+          handle_bounding: "99655049960030/handle_bounding.json"
+          name: "99655049960030"
+          path: "99655049960030/mobility.urdf"
+        "85":
+          bounding_box: "99655049960032/bounding_box.json"
+          handle_bounding: "99655049960032/handle_bounding.json"
+          name: "99655049960032"
+          path: "99655049960032/mobility.urdf"
+        "86":
+          bounding_box: "99655049960034/bounding_box.json"
+          handle_bounding: "99655049960034/handle_bounding.json"
+          name: "99655049960034"
+          path: "99655049960034/mobility.urdf"
+        "87":
+          bounding_box: "99655049960035/bounding_box.json"
+          handle_bounding: "99655049960035/handle_bounding.json"
+          name: "99655049960035"
+          path: "99655049960035/mobility.urdf"
+        "88":
+          bounding_box: "99655049960036/bounding_box.json"
+          handle_bounding: "99655049960036/handle_bounding.json"
+          name: "99655049960036"
+          path: "99655049960036/mobility.urdf"
+        "89":
+          bounding_box: "99655049960045/bounding_box.json"
+          handle_bounding: "99655049960045/handle_bounding.json"
+          name: "99655049960045"
+          path: "99655049960045/mobility.urdf"
+        "90":
+          bounding_box: "99655049960046/bounding_box.json"
+          handle_bounding: "99655049960046/handle_bounding.json"
+          name: "99655049960046"
+          path: "99655049960046/mobility.urdf"
+        "91":
+          bounding_box: "99655049960048/bounding_box.json"
+          handle_bounding: "99655049960048/handle_bounding.json"
+          name: "99655049960048"
+          path: "99655049960048/mobility.urdf"
+        "92":
+          bounding_box: "99655059960001/bounding_box.json"
+          handle_bounding: "99655059960001/handle_bounding.json"
+          name: "99655059960001"
+          path: "99655059960001/mobility.urdf"
+        "93":
+          bounding_box: "99655059960003/bounding_box.json"
+          handle_bounding: "99655059960003/handle_bounding.json"
+          name: "99655059960003"
+          path: "99655059960003/mobility.urdf"
+        "94":
+          bounding_box: "99655059960006/bounding_box.json"
+          handle_bounding: "99655059960006/handle_bounding.json"
+          name: "99655059960006"
+          path: "99655059960006/mobility.urdf"
+        "95":
+          bounding_box: "99655059960010/bounding_box.json"
+          handle_bounding: "99655059960010/handle_bounding.json"
+          name: "99655059960010"
+          path: "99655059960010/mobility.urdf"
+        "96":
+          bounding_box: "99655059960011/bounding_box.json"
+          handle_bounding: "99655059960011/handle_bounding.json"
+          name: "99655059960011"
+          path: "99655059960011/mobility.urdf"
+        "97":
+          bounding_box: "99655059960012/bounding_box.json"
+          handle_bounding: "99655059960012/handle_bounding.json"
+          name: "99655059960012"
+          path: "99655059960012/mobility.urdf"
+        "98":
+          bounding_box: "99655059960014/bounding_box.json"
+          handle_bounding: "99655059960014/handle_bounding.json"
+          name: "99655059960014"
+          path: "99655059960014/mobility.urdf"
+        "99":
+          bounding_box: "99655059960017/bounding_box.json"
+          handle_bounding: "99655059960017/handle_bounding.json"
+          name: "99655059960017"
+          path: "99655059960017/mobility.urdf"
+        "100":
+          bounding_box: "99655059960018/bounding_box.json"
+          handle_bounding: "99655059960018/handle_bounding.json"
+          name: "99655059960018"
+          path: "99655059960018/mobility.urdf"
+        "101":
+          bounding_box: "99655059960019/bounding_box.json"
+          handle_bounding: "99655059960019/handle_bounding.json"
+          name: "99655059960019"
+          path: "99655059960019/mobility.urdf"
+        "102":
+          bounding_box: "99655059960021/bounding_box.json"
+          handle_bounding: "99655059960021/handle_bounding.json"
+          name: "99655059960021"
+          path: "99655059960021/mobility.urdf"
+        "103":
+          bounding_box: "99655059960022/bounding_box.json"
+          handle_bounding: "99655059960022/handle_bounding.json"
+          name: "99655059960022"
+          path: "99655059960022/mobility.urdf"
+        "104":
+          bounding_box: "99655059960024/bounding_box.json"
+          handle_bounding: "99655059960024/handle_bounding.json"
+          name: "99655059960024"
+          path: "99655059960024/mobility.urdf"
+        "105":
+          bounding_box: "99655059960025/bounding_box.json"
+          handle_bounding: "99655059960025/handle_bounding.json"
+          name: "99655059960025"
+          path: "99655059960025/mobility.urdf"
+        "106":
+          bounding_box: "99655059960028/bounding_box.json"
+          handle_bounding: "99655059960028/handle_bounding.json"
+          name: "99655059960028"
+          path: "99655059960028/mobility.urdf"
+        "107":
+          bounding_box: "99655059960030/bounding_box.json"
+          handle_bounding: "99655059960030/handle_bounding.json"
+          name: "99655059960030"
+          path: "99655059960030/mobility.urdf"
+        "108":
+          bounding_box: "99655059960032/bounding_box.json"
+          handle_bounding: "99655059960032/handle_bounding.json"
+          name: "99655059960032"
+          path: "99655059960032/mobility.urdf"
+        "109":
+          bounding_box: "99655059960034/bounding_box.json"
+          handle_bounding: "99655059960034/handle_bounding.json"
+          name: "99655059960034"
+          path: "99655059960034/mobility.urdf"
+        "110":
+          bounding_box: "99655059960035/bounding_box.json"
+          handle_bounding: "99655059960035/handle_bounding.json"
+          name: "99655059960035"
+          path: "99655059960035/mobility.urdf"
+        "111":
+          bounding_box: "99655059960036/bounding_box.json"
+          handle_bounding: "99655059960036/handle_bounding.json"
+          name: "99655059960036"
+          path: "99655059960036/mobility.urdf"
+        "112":
+          bounding_box: "99655059960045/bounding_box.json"
+          handle_bounding: "99655059960045/handle_bounding.json"
+          name: "99655059960045"
+          path: "99655059960045/mobility.urdf"
+        "113":
+          bounding_box: "99655059960046/bounding_box.json"
+          handle_bounding: "99655059960046/handle_bounding.json"
+          name: "99655059960046"
+          path: "99655059960046/mobility.urdf"
+        "114":
+          bounding_box: "99655059960048/bounding_box.json"
+          handle_bounding: "99655059960048/handle_bounding.json"
+          name: "99655059960048"
+          path: "99655059960048/mobility.urdf"
+        "115":
+          bounding_box: "99655079960001/bounding_box.json"
+          handle_bounding: "99655079960001/handle_bounding.json"
+          name: "99655079960001"
+          path: "99655079960001/mobility.urdf"
+        "116":
+          bounding_box: "99655079960003/bounding_box.json"
+          handle_bounding: "99655079960003/handle_bounding.json"
+          name: "99655079960003"
+          path: "99655079960003/mobility.urdf"
+        "117":
+          bounding_box: "99655079960006/bounding_box.json"
+          handle_bounding: "99655079960006/handle_bounding.json"
+          name: "99655079960006"
+          path: "99655079960006/mobility.urdf"
+        "118":
+          bounding_box: "99655079960010/bounding_box.json"
+          handle_bounding: "99655079960010/handle_bounding.json"
+          name: "99655079960010"
+          path: "99655079960010/mobility.urdf"
+        "119":
+          bounding_box: "99655079960011/bounding_box.json"
+          handle_bounding: "99655079960011/handle_bounding.json"
+          name: "99655079960011"
+          path: "99655079960011/mobility.urdf"
+        "120":
+          bounding_box: "99655079960012/bounding_box.json"
+          handle_bounding: "99655079960012/handle_bounding.json"
+          name: "99655079960012"
+          path: "99655079960012/mobility.urdf"
+        "121":
+          bounding_box: "99655079960014/bounding_box.json"
+          handle_bounding: "99655079960014/handle_bounding.json"
+          name: "99655079960014"
+          path: "99655079960014/mobility.urdf"
+        "122":
+          bounding_box: "99655079960017/bounding_box.json"
+          handle_bounding: "99655079960017/handle_bounding.json"
+          name: "99655079960017"
+          path: "99655079960017/mobility.urdf"
+        "123":
+          bounding_box: "99655079960018/bounding_box.json"
+          handle_bounding: "99655079960018/handle_bounding.json"
+          name: "99655079960018"
+          path: "99655079960018/mobility.urdf"
+        "124":
+          bounding_box: "99655079960019/bounding_box.json"
+          handle_bounding: "99655079960019/handle_bounding.json"
+          name: "99655079960019"
+          path: "99655079960019/mobility.urdf"
+        "125":
+          bounding_box: "99655079960021/bounding_box.json"
+          handle_bounding: "99655079960021/handle_bounding.json"
+          name: "99655079960021"
+          path: "99655079960021/mobility.urdf"
+        "126":
+          bounding_box: "99655079960022/bounding_box.json"
+          handle_bounding: "99655079960022/handle_bounding.json"
+          name: "99655079960022"
+          path: "99655079960022/mobility.urdf"
+        "127":
+          bounding_box: "99655079960024/bounding_box.json"
+          handle_bounding: "99655079960024/handle_bounding.json"
+          name: "99655079960024"
+          path: "99655079960024/mobility.urdf"
+        "128":
+          bounding_box: "99655079960025/bounding_box.json"
+          handle_bounding: "99655079960025/handle_bounding.json"
+          name: "99655079960025"
+          path: "99655079960025/mobility.urdf"
+        "129":
+          bounding_box: "99655079960028/bounding_box.json"
+          handle_bounding: "99655079960028/handle_bounding.json"
+          name: "99655079960028"
+          path: "99655079960028/mobility.urdf"
+        "130":
+          bounding_box: "99655079960030/bounding_box.json"
+          handle_bounding: "99655079960030/handle_bounding.json"
+          name: "99655079960030"
+          path: "99655079960030/mobility.urdf"
+        "131":
+          bounding_box: "99655079960032/bounding_box.json"
+          handle_bounding: "99655079960032/handle_bounding.json"
+          name: "99655079960032"
+          path: "99655079960032/mobility.urdf"
+        "132":
+          bounding_box: "99655079960034/bounding_box.json"
+          handle_bounding: "99655079960034/handle_bounding.json"
+          name: "99655079960034"
+          path: "99655079960034/mobility.urdf"
+        "133":
+          bounding_box: "99655079960035/bounding_box.json"
+          handle_bounding: "99655079960035/handle_bounding.json"
+          name: "99655079960035"
+          path: "99655079960035/mobility.urdf"
+        "134":
+          bounding_box: "99655079960036/bounding_box.json"
+          handle_bounding: "99655079960036/handle_bounding.json"
+          name: "99655079960036"
+          path: "99655079960036/mobility.urdf"
+        "135":
+          bounding_box: "99655079960045/bounding_box.json"
+          handle_bounding: "99655079960045/handle_bounding.json"
+          name: "99655079960045"
+          path: "99655079960045/mobility.urdf"
+        "136":
+          bounding_box: "99655079960046/bounding_box.json"
+          handle_bounding: "99655079960046/handle_bounding.json"
+          name: "99655079960046"
+          path: "99655079960046/mobility.urdf"
+        "137":
+          bounding_box: "99655079960048/bounding_box.json"
+          handle_bounding: "99655079960048/handle_bounding.json"
+          name: "99655079960048"
+          path: "99655079960048/mobility.urdf"
+        "138":
+          bounding_box: "99655089960001/bounding_box.json"
+          handle_bounding: "99655089960001/handle_bounding.json"
+          name: "99655089960001"
+          path: "99655089960001/mobility.urdf"
+        "139":
+          bounding_box: "99655089960003/bounding_box.json"
+          handle_bounding: "99655089960003/handle_bounding.json"
+          name: "99655089960003"
+          path: "99655089960003/mobility.urdf"
+        "140":
+          bounding_box: "99655089960006/bounding_box.json"
+          handle_bounding: "99655089960006/handle_bounding.json"
+          name: "99655089960006"
+          path: "99655089960006/mobility.urdf"
+        "141":
+          bounding_box: "99655089960010/bounding_box.json"
+          handle_bounding: "99655089960010/handle_bounding.json"
+          name: "99655089960010"
+          path: "99655089960010/mobility.urdf"
+        "142":
+          bounding_box: "99655089960011/bounding_box.json"
+          handle_bounding: "99655089960011/handle_bounding.json"
+          name: "99655089960011"
+          path: "99655089960011/mobility.urdf"
+        "143":
+          bounding_box: "99655089960012/bounding_box.json"
+          handle_bounding: "99655089960012/handle_bounding.json"
+          name: "99655089960012"
+          path: "99655089960012/mobility.urdf"
+        "144":
+          bounding_box: "99655089960014/bounding_box.json"
+          handle_bounding: "99655089960014/handle_bounding.json"
+          name: "99655089960014"
+          path: "99655089960014/mobility.urdf"
+        "145":
+          bounding_box: "99655089960017/bounding_box.json"
+          handle_bounding: "99655089960017/handle_bounding.json"
+          name: "99655089960017"
+          path: "99655089960017/mobility.urdf"
+        "146":
+          bounding_box: "99655089960018/bounding_box.json"
+          handle_bounding: "99655089960018/handle_bounding.json"
+          name: "99655089960018"
+          path: "99655089960018/mobility.urdf"
+        "147":
+          bounding_box: "99655089960019/bounding_box.json"
+          handle_bounding: "99655089960019/handle_bounding.json"
+          name: "99655089960019"
+          path: "99655089960019/mobility.urdf"
+        "148":
+          bounding_box: "99655089960021/bounding_box.json"
+          handle_bounding: "99655089960021/handle_bounding.json"
+          name: "99655089960021"
+          path: "99655089960021/mobility.urdf"
+        "149":
+          bounding_box: "99655089960022/bounding_box.json"
+          handle_bounding: "99655089960022/handle_bounding.json"
+          name: "99655089960022"
+          path: "99655089960022/mobility.urdf"
+        "150":
+          bounding_box: "99655089960024/bounding_box.json"
+          handle_bounding: "99655089960024/handle_bounding.json"
+          name: "99655089960024"
+          path: "99655089960024/mobility.urdf"
+        "151":
+          bounding_box: "99655089960025/bounding_box.json"
+          handle_bounding: "99655089960025/handle_bounding.json"
+          name: "99655089960025"
+          path: "99655089960025/mobility.urdf"
+        "152":
+          bounding_box: "99655089960028/bounding_box.json"
+          handle_bounding: "99655089960028/handle_bounding.json"
+          name: "99655089960028"
+          path: "99655089960028/mobility.urdf"
+        "153":
+          bounding_box: "99655089960030/bounding_box.json"
+          handle_bounding: "99655089960030/handle_bounding.json"
+          name: "99655089960030"
+          path: "99655089960030/mobility.urdf"
+        "154":
+          bounding_box: "99655089960032/bounding_box.json"
+          handle_bounding: "99655089960032/handle_bounding.json"
+          name: "99655089960032"
+          path: "99655089960032/mobility.urdf"
+        "155":
+          bounding_box: "99655089960034/bounding_box.json"
+          handle_bounding: "99655089960034/handle_bounding.json"
+          name: "99655089960034"
+          path: "99655089960034/mobility.urdf"
+        "156":
+          bounding_box: "99655089960035/bounding_box.json"
+          handle_bounding: "99655089960035/handle_bounding.json"
+          name: "99655089960035"
+          path: "99655089960035/mobility.urdf"
+        "157":
+          bounding_box: "99655089960036/bounding_box.json"
+          handle_bounding: "99655089960036/handle_bounding.json"
+          name: "99655089960036"
+          path: "99655089960036/mobility.urdf"
+        "158":
+          bounding_box: "99655089960045/bounding_box.json"
+          handle_bounding: "99655089960045/handle_bounding.json"
+          name: "99655089960045"
+          path: "99655089960045/mobility.urdf"
+        "159":
+          bounding_box: "99655089960046/bounding_box.json"
+          handle_bounding: "99655089960046/handle_bounding.json"
+          name: "99655089960046"
+          path: "99655089960046/mobility.urdf"
+        "160":
+          bounding_box: "99655089960048/bounding_box.json"
+          handle_bounding: "99655089960048/handle_bounding.json"
+          name: "99655089960048"
+          path: "99655089960048/mobility.urdf"
+        "161":
+          bounding_box: "99660019960001/bounding_box.json"
+          handle_bounding: "99660019960001/handle_bounding.json"
+          name: "99660019960001"
+          path: "99660019960001/mobility.urdf"
+        "162":
+          bounding_box: "99660019960003/bounding_box.json"
+          handle_bounding: "99660019960003/handle_bounding.json"
+          name: "99660019960003"
+          path: "99660019960003/mobility.urdf"
+        "163":
+          bounding_box: "99660019960006/bounding_box.json"
+          handle_bounding: "99660019960006/handle_bounding.json"
+          name: "99660019960006"
+          path: "99660019960006/mobility.urdf"
+        "164":
+          bounding_box: "99660019960010/bounding_box.json"
+          handle_bounding: "99660019960010/handle_bounding.json"
+          name: "99660019960010"
+          path: "99660019960010/mobility.urdf"
+        "165":
+          bounding_box: "99660019960011/bounding_box.json"
+          handle_bounding: "99660019960011/handle_bounding.json"
+          name: "99660019960011"
+          path: "99660019960011/mobility.urdf"
+        "166":
+          bounding_box: "99660019960012/bounding_box.json"
+          handle_bounding: "99660019960012/handle_bounding.json"
+          name: "99660019960012"
+          path: "99660019960012/mobility.urdf"
+        "167":
+          bounding_box: "99660019960014/bounding_box.json"
+          handle_bounding: "99660019960014/handle_bounding.json"
+          name: "99660019960014"
+          path: "99660019960014/mobility.urdf"
+        "168":
+          bounding_box: "99660019960017/bounding_box.json"
+          handle_bounding: "99660019960017/handle_bounding.json"
+          name: "99660019960017"
+          path: "99660019960017/mobility.urdf"
+        "169":
+          bounding_box: "99660019960018/bounding_box.json"
+          handle_bounding: "99660019960018/handle_bounding.json"
+          name: "99660019960018"
+          path: "99660019960018/mobility.urdf"
+        "170":
+          bounding_box: "99660019960019/bounding_box.json"
+          handle_bounding: "99660019960019/handle_bounding.json"
+          name: "99660019960019"
+          path: "99660019960019/mobility.urdf"
+        "171":
+          bounding_box: "99660019960021/bounding_box.json"
+          handle_bounding: "99660019960021/handle_bounding.json"
+          name: "99660019960021"
+          path: "99660019960021/mobility.urdf"
+        "172":
+          bounding_box: "99660019960022/bounding_box.json"
+          handle_bounding: "99660019960022/handle_bounding.json"
+          name: "99660019960022"
+          path: "99660019960022/mobility.urdf"
+        "173":
+          bounding_box: "99660019960024/bounding_box.json"
+          handle_bounding: "99660019960024/handle_bounding.json"
+          name: "99660019960024"
+          path: "99660019960024/mobility.urdf"
+        "174":
+          bounding_box: "99660019960025/bounding_box.json"
+          handle_bounding: "99660019960025/handle_bounding.json"
+          name: "99660019960025"
+          path: "99660019960025/mobility.urdf"
+        "175":
+          bounding_box: "99660019960028/bounding_box.json"
+          handle_bounding: "99660019960028/handle_bounding.json"
+          name: "99660019960028"
+          path: "99660019960028/mobility.urdf"
+        "176":
+          bounding_box: "99660019960030/bounding_box.json"
+          handle_bounding: "99660019960030/handle_bounding.json"
+          name: "99660019960030"
+          path: "99660019960030/mobility.urdf"
+        "177":
+          bounding_box: "99660019960032/bounding_box.json"
+          handle_bounding: "99660019960032/handle_bounding.json"
+          name: "99660019960032"
+          path: "99660019960032/mobility.urdf"
+        "178":
+          bounding_box: "99660019960034/bounding_box.json"
+          handle_bounding: "99660019960034/handle_bounding.json"
+          name: "99660019960034"
+          path: "99660019960034/mobility.urdf"
+        "179":
+          bounding_box: "99660019960035/bounding_box.json"
+          handle_bounding: "99660019960035/handle_bounding.json"
+          name: "99660019960035"
+          path: "99660019960035/mobility.urdf"
+        "180":
+          bounding_box: "99660019960036/bounding_box.json"
+          handle_bounding: "99660019960036/handle_bounding.json"
+          name: "99660019960036"
+          path: "99660019960036/mobility.urdf"
+        "181":
+          bounding_box: "99660019960045/bounding_box.json"
+          handle_bounding: "99660019960045/handle_bounding.json"
+          name: "99660019960045"
+          path: "99660019960045/mobility.urdf"
+        "182":
+          bounding_box: "99660019960046/bounding_box.json"
+          handle_bounding: "99660019960046/handle_bounding.json"
+          name: "99660019960046"
+          path: "99660019960046/mobility.urdf"
+        "183":
+          bounding_box: "99660019960048/bounding_box.json"
+          handle_bounding: "99660019960048/handle_bounding.json"
+          name: "99660019960048"
+          path: "99660019960048/mobility.urdf"
+        "184":
+          bounding_box: "99660039960001/bounding_box.json"
+          handle_bounding: "99660039960001/handle_bounding.json"
+          name: "99660039960001"
+          path: "99660039960001/mobility.urdf"
+        "185":
+          bounding_box: "99660039960003/bounding_box.json"
+          handle_bounding: "99660039960003/handle_bounding.json"
+          name: "99660039960003"
+          path: "99660039960003/mobility.urdf"
+        "186":
+          bounding_box: "99660039960006/bounding_box.json"
+          handle_bounding: "99660039960006/handle_bounding.json"
+          name: "99660039960006"
+          path: "99660039960006/mobility.urdf"
+        "187":
+          bounding_box: "99660039960010/bounding_box.json"
+          handle_bounding: "99660039960010/handle_bounding.json"
+          name: "99660039960010"
+          path: "99660039960010/mobility.urdf"
+        "188":
+          bounding_box: "99660039960011/bounding_box.json"
+          handle_bounding: "99660039960011/handle_bounding.json"
+          name: "99660039960011"
+          path: "99660039960011/mobility.urdf"
+        "189":
+          bounding_box: "99660039960012/bounding_box.json"
+          handle_bounding: "99660039960012/handle_bounding.json"
+          name: "99660039960012"
+          path: "99660039960012/mobility.urdf"
+        "190":
+          bounding_box: "99660039960014/bounding_box.json"
+          handle_bounding: "99660039960014/handle_bounding.json"
+          name: "99660039960014"
+          path: "99660039960014/mobility.urdf"
+        "191":
+          bounding_box: "99660039960017/bounding_box.json"
+          handle_bounding: "99660039960017/handle_bounding.json"
+          name: "99660039960017"
+          path: "99660039960017/mobility.urdf"
+        "192":
+          bounding_box: "99660039960018/bounding_box.json"
+          handle_bounding: "99660039960018/handle_bounding.json"
+          name: "99660039960018"
+          path: "99660039960018/mobility.urdf"
+        "193":
+          bounding_box: "99660039960019/bounding_box.json"
+          handle_bounding: "99660039960019/handle_bounding.json"
+          name: "99660039960019"
+          path: "99660039960019/mobility.urdf"
+        "194":
+          bounding_box: "99660039960021/bounding_box.json"
+          handle_bounding: "99660039960021/handle_bounding.json"
+          name: "99660039960021"
+          path: "99660039960021/mobility.urdf"
+        "195":
+          bounding_box: "99660039960022/bounding_box.json"
+          handle_bounding: "99660039960022/handle_bounding.json"
+          name: "99660039960022"
+          path: "99660039960022/mobility.urdf"
+        "196":
+          bounding_box: "99660039960024/bounding_box.json"
+          handle_bounding: "99660039960024/handle_bounding.json"
+          name: "99660039960024"
+          path: "99660039960024/mobility.urdf"
+        "197":
+          bounding_box: "99660039960025/bounding_box.json"
+          handle_bounding: "99660039960025/handle_bounding.json"
+          name: "99660039960025"
+          path: "99660039960025/mobility.urdf"
+        "198":
+          bounding_box: "99660039960028/bounding_box.json"
+          handle_bounding: "99660039960028/handle_bounding.json"
+          name: "99660039960028"
+          path: "99660039960028/mobility.urdf"
+        "199":
+          bounding_box: "99660039960030/bounding_box.json"
+          handle_bounding: "99660039960030/handle_bounding.json"
+          name: "99660039960030"
+          path: "99660039960030/mobility.urdf"
+        "200":
+          bounding_box: "99660039960032/bounding_box.json"
+          handle_bounding: "99660039960032/handle_bounding.json"
+          name: "99660039960032"
+          path: "99660039960032/mobility.urdf"
+        "201":
+          bounding_box: "99660039960034/bounding_box.json"
+          handle_bounding: "99660039960034/handle_bounding.json"
+          name: "99660039960034"
+          path: "99660039960034/mobility.urdf"
+        "202":
+          bounding_box: "99660039960035/bounding_box.json"
+          handle_bounding: "99660039960035/handle_bounding.json"
+          name: "99660039960035"
+          path: "99660039960035/mobility.urdf"
+        "203":
+          bounding_box: "99660039960036/bounding_box.json"
+          handle_bounding: "99660039960036/handle_bounding.json"
+          name: "99660039960036"
+          path: "99660039960036/mobility.urdf"
+        "204":
+          bounding_box: "99660039960045/bounding_box.json"
+          handle_bounding: "99660039960045/handle_bounding.json"
+          name: "99660039960045"
+          path: "99660039960045/mobility.urdf"
+        "205":
+          bounding_box: "99660039960046/bounding_box.json"
+          handle_bounding: "99660039960046/handle_bounding.json"
+          name: "99660039960046"
+          path: "99660039960046/mobility.urdf"
+        "206":
+          bounding_box: "99660039960048/bounding_box.json"
+          handle_bounding: "99660039960048/handle_bounding.json"
+          name: "99660039960048"
+          path: "99660039960048/mobility.urdf"
+        "207":
+          bounding_box: "99660059960001/bounding_box.json"
+          handle_bounding: "99660059960001/handle_bounding.json"
+          name: "99660059960001"
+          path: "99660059960001/mobility.urdf"
+        "208":
+          bounding_box: "99660059960003/bounding_box.json"
+          handle_bounding: "99660059960003/handle_bounding.json"
+          name: "99660059960003"
+          path: "99660059960003/mobility.urdf"
+        "209":
+          bounding_box: "99660059960006/bounding_box.json"
+          handle_bounding: "99660059960006/handle_bounding.json"
+          name: "99660059960006"
+          path: "99660059960006/mobility.urdf"
+        "210":
+          bounding_box: "99660059960010/bounding_box.json"
+          handle_bounding: "99660059960010/handle_bounding.json"
+          name: "99660059960010"
+          path: "99660059960010/mobility.urdf"
+        "211":
+          bounding_box: "99660059960011/bounding_box.json"
+          handle_bounding: "99660059960011/handle_bounding.json"
+          name: "99660059960011"
+          path: "99660059960011/mobility.urdf"
+        "212":
+          bounding_box: "99660059960012/bounding_box.json"
+          handle_bounding: "99660059960012/handle_bounding.json"
+          name: "99660059960012"
+          path: "99660059960012/mobility.urdf"
+        "213":
+          bounding_box: "99660059960014/bounding_box.json"
+          handle_bounding: "99660059960014/handle_bounding.json"
+          name: "99660059960014"
+          path: "99660059960014/mobility.urdf"
+        "214":
+          bounding_box: "99660059960017/bounding_box.json"
+          handle_bounding: "99660059960017/handle_bounding.json"
+          name: "99660059960017"
+          path: "99660059960017/mobility.urdf"
+        "215":
+          bounding_box: "99660059960018/bounding_box.json"
+          handle_bounding: "99660059960018/handle_bounding.json"
+          name: "99660059960018"
+          path: "99660059960018/mobility.urdf"
+        "216":
+          bounding_box: "99660059960019/bounding_box.json"
+          handle_bounding: "99660059960019/handle_bounding.json"
+          name: "99660059960019"
+          path: "99660059960019/mobility.urdf"
+        "217":
+          bounding_box: "99660059960021/bounding_box.json"
+          handle_bounding: "99660059960021/handle_bounding.json"
+          name: "99660059960021"
+          path: "99660059960021/mobility.urdf"
+        "218":
+          bounding_box: "99660059960022/bounding_box.json"
+          handle_bounding: "99660059960022/handle_bounding.json"
+          name: "99660059960022"
+          path: "99660059960022/mobility.urdf"
+        "219":
+          bounding_box: "99660059960024/bounding_box.json"
+          handle_bounding: "99660059960024/handle_bounding.json"
+          name: "99660059960024"
+          path: "99660059960024/mobility.urdf"
+        "220":
+          bounding_box: "99660059960025/bounding_box.json"
+          handle_bounding: "99660059960025/handle_bounding.json"
+          name: "99660059960025"
+          path: "99660059960025/mobility.urdf"
+        "221":
+          bounding_box: "99660059960028/bounding_box.json"
+          handle_bounding: "99660059960028/handle_bounding.json"
+          name: "99660059960028"
+          path: "99660059960028/mobility.urdf"
+        "222":
+          bounding_box: "99660059960030/bounding_box.json"
+          handle_bounding: "99660059960030/handle_bounding.json"
+          name: "99660059960030"
+          path: "99660059960030/mobility.urdf"
+        "223":
+          bounding_box: "99660059960032/bounding_box.json"
+          handle_bounding: "99660059960032/handle_bounding.json"
+          name: "99660059960032"
+          path: "99660059960032/mobility.urdf"
+        "224":
+          bounding_box: "99660059960034/bounding_box.json"
+          handle_bounding: "99660059960034/handle_bounding.json"
+          name: "99660059960034"
+          path: "99660059960034/mobility.urdf"
+        "225":
+          bounding_box: "99660059960035/bounding_box.json"
+          handle_bounding: "99660059960035/handle_bounding.json"
+          name: "99660059960035"
+          path: "99660059960035/mobility.urdf"
+        "226":
+          bounding_box: "99660059960036/bounding_box.json"
+          handle_bounding: "99660059960036/handle_bounding.json"
+          name: "99660059960036"
+          path: "99660059960036/mobility.urdf"
+        "227":
+          bounding_box: "99660059960045/bounding_box.json"
+          handle_bounding: "99660059960045/handle_bounding.json"
+          name: "99660059960045"
+          path: "99660059960045/mobility.urdf"
+        "228":
+          bounding_box: "99660059960046/bounding_box.json"
+          handle_bounding: "99660059960046/handle_bounding.json"
+          name: "99660059960046"
+          path: "99660059960046/mobility.urdf"
+        "229":
+          bounding_box: "99660059960048/bounding_box.json"
+          handle_bounding: "99660059960048/handle_bounding.json"
+          name: "99660059960048"
+          path: "99660059960048/mobility.urdf"
+        "230":
+          bounding_box: "99660079960001/bounding_box.json"
+          handle_bounding: "99660079960001/handle_bounding.json"
+          name: "99660079960001"
+          path: "99660079960001/mobility.urdf"
+        "231":
+          bounding_box: "99660079960003/bounding_box.json"
+          handle_bounding: "99660079960003/handle_bounding.json"
+          name: "99660079960003"
+          path: "99660079960003/mobility.urdf"
+        "232":
+          bounding_box: "99660079960006/bounding_box.json"
+          handle_bounding: "99660079960006/handle_bounding.json"
+          name: "99660079960006"
+          path: "99660079960006/mobility.urdf"
+        "233":
+          bounding_box: "99660079960010/bounding_box.json"
+          handle_bounding: "99660079960010/handle_bounding.json"
+          name: "99660079960010"
+          path: "99660079960010/mobility.urdf"
+        "234":
+          bounding_box: "99660079960011/bounding_box.json"
+          handle_bounding: "99660079960011/handle_bounding.json"
+          name: "99660079960011"
+          path: "99660079960011/mobility.urdf"
+        "235":
+          bounding_box: "99660079960012/bounding_box.json"
+          handle_bounding: "99660079960012/handle_bounding.json"
+          name: "99660079960012"
+          path: "99660079960012/mobility.urdf"
+        "236":
+          bounding_box: "99660079960014/bounding_box.json"
+          handle_bounding: "99660079960014/handle_bounding.json"
+          name: "99660079960014"
+          path: "99660079960014/mobility.urdf"
+        "237":
+          bounding_box: "99660079960017/bounding_box.json"
+          handle_bounding: "99660079960017/handle_bounding.json"
+          name: "99660079960017"
+          path: "99660079960017/mobility.urdf"
+        "238":
+          bounding_box: "99660079960018/bounding_box.json"
+          handle_bounding: "99660079960018/handle_bounding.json"
+          name: "99660079960018"
+          path: "99660079960018/mobility.urdf"
+        "239":
+          bounding_box: "99660079960019/bounding_box.json"
+          handle_bounding: "99660079960019/handle_bounding.json"
+          name: "99660079960019"
+          path: "99660079960019/mobility.urdf"
+        "240":
+          bounding_box: "99660079960021/bounding_box.json"
+          handle_bounding: "99660079960021/handle_bounding.json"
+          name: "99660079960021"
+          path: "99660079960021/mobility.urdf"
+        "241":
+          bounding_box: "99660079960022/bounding_box.json"
+          handle_bounding: "99660079960022/handle_bounding.json"
+          name: "99660079960022"
+          path: "99660079960022/mobility.urdf"
+        "242":
+          bounding_box: "99660079960024/bounding_box.json"
+          handle_bounding: "99660079960024/handle_bounding.json"
+          name: "99660079960024"
+          path: "99660079960024/mobility.urdf"
+        "243":
+          bounding_box: "99660079960025/bounding_box.json"
+          handle_bounding: "99660079960025/handle_bounding.json"
+          name: "99660079960025"
+          path: "99660079960025/mobility.urdf"
+        "244":
+          bounding_box: "99660079960028/bounding_box.json"
+          handle_bounding: "99660079960028/handle_bounding.json"
+          name: "99660079960028"
+          path: "99660079960028/mobility.urdf"
+        "245":
+          bounding_box: "99660079960030/bounding_box.json"
+          handle_bounding: "99660079960030/handle_bounding.json"
+          name: "99660079960030"
+          path: "99660079960030/mobility.urdf"
+        "246":
+          bounding_box: "99660079960032/bounding_box.json"
+          handle_bounding: "99660079960032/handle_bounding.json"
+          name: "99660079960032"
+          path: "99660079960032/mobility.urdf"
+        "247":
+          bounding_box: "99660079960034/bounding_box.json"
+          handle_bounding: "99660079960034/handle_bounding.json"
+          name: "99660079960034"
+          path: "99660079960034/mobility.urdf"
+        "248":
+          bounding_box: "99660079960035/bounding_box.json"
+          handle_bounding: "99660079960035/handle_bounding.json"
+          name: "99660079960035"
+          path: "99660079960035/mobility.urdf"
+        "249":
+          bounding_box: "99660079960036/bounding_box.json"
+          handle_bounding: "99660079960036/handle_bounding.json"
+          name: "99660079960036"
+          path: "99660079960036/mobility.urdf"
+        "250":
+          bounding_box: "99660079960045/bounding_box.json"
+          handle_bounding: "99660079960045/handle_bounding.json"
+          name: "99660079960045"
+          path: "99660079960045/mobility.urdf"
+        "251":
+          bounding_box: "99660079960046/bounding_box.json"
+          handle_bounding: "99660079960046/handle_bounding.json"
+          name: "99660079960046"
+          path: "99660079960046/mobility.urdf"
+        "252":
+          bounding_box: "99660079960048/bounding_box.json"
+          handle_bounding: "99660079960048/handle_bounding.json"
+          name: "99660079960048"
+          path: "99660079960048/mobility.urdf"
+        "253":
+          bounding_box: "99660089960001/bounding_box.json"
+          handle_bounding: "99660089960001/handle_bounding.json"
+          name: "99660089960001"
+          path: "99660089960001/mobility.urdf"
+        "254":
+          bounding_box: "99660089960003/bounding_box.json"
+          handle_bounding: "99660089960003/handle_bounding.json"
+          name: "99660089960003"
+          path: "99660089960003/mobility.urdf"
+        "255":
+          bounding_box: "99660089960006/bounding_box.json"
+          handle_bounding: "99660089960006/handle_bounding.json"
+          name: "99660089960006"
+          path: "99660089960006/mobility.urdf"
+        "256":
+          bounding_box: "99660089960010/bounding_box.json"
+          handle_bounding: "99660089960010/handle_bounding.json"
+          name: "99660089960010"
+          path: "99660089960010/mobility.urdf"
+        "257":
+          bounding_box: "99660089960011/bounding_box.json"
+          handle_bounding: "99660089960011/handle_bounding.json"
+          name: "99660089960011"
+          path: "99660089960011/mobility.urdf"
+        "258":
+          bounding_box: "99660089960012/bounding_box.json"
+          handle_bounding: "99660089960012/handle_bounding.json"
+          name: "99660089960012"
+          path: "99660089960012/mobility.urdf"
+        "259":
+          bounding_box: "99660089960014/bounding_box.json"
+          handle_bounding: "99660089960014/handle_bounding.json"
+          name: "99660089960014"
+          path: "99660089960014/mobility.urdf"
+        "260":
+          bounding_box: "99660089960017/bounding_box.json"
+          handle_bounding: "99660089960017/handle_bounding.json"
+          name: "99660089960017"
+          path: "99660089960017/mobility.urdf"
+        "261":
+          bounding_box: "99660089960018/bounding_box.json"
+          handle_bounding: "99660089960018/handle_bounding.json"
+          name: "99660089960018"
+          path: "99660089960018/mobility.urdf"
+        "262":
+          bounding_box: "99660089960019/bounding_box.json"
+          handle_bounding: "99660089960019/handle_bounding.json"
+          name: "99660089960019"
+          path: "99660089960019/mobility.urdf"
+        "263":
+          bounding_box: "99660089960021/bounding_box.json"
+          handle_bounding: "99660089960021/handle_bounding.json"
+          name: "99660089960021"
+          path: "99660089960021/mobility.urdf"
+        "264":
+          bounding_box: "99660089960022/bounding_box.json"
+          handle_bounding: "99660089960022/handle_bounding.json"
+          name: "99660089960022"
+          path: "99660089960022/mobility.urdf"
+        "265":
+          bounding_box: "99660089960024/bounding_box.json"
+          handle_bounding: "99660089960024/handle_bounding.json"
+          name: "99660089960024"
+          path: "99660089960024/mobility.urdf"
+        "266":
+          bounding_box: "99660089960025/bounding_box.json"
+          handle_bounding: "99660089960025/handle_bounding.json"
+          name: "99660089960025"
+          path: "99660089960025/mobility.urdf"
+        "267":
+          bounding_box: "99660089960028/bounding_box.json"
+          handle_bounding: "99660089960028/handle_bounding.json"
+          name: "99660089960028"
+          path: "99660089960028/mobility.urdf"
+        "268":
+          bounding_box: "99660089960030/bounding_box.json"
+          handle_bounding: "99660089960030/handle_bounding.json"
+          name: "99660089960030"
+          path: "99660089960030/mobility.urdf"
+        "269":
+          bounding_box: "99660089960032/bounding_box.json"
+          handle_bounding: "99660089960032/handle_bounding.json"
+          name: "99660089960032"
+          path: "99660089960032/mobility.urdf"
+        "270":
+          bounding_box: "99660089960034/bounding_box.json"
+          handle_bounding: "99660089960034/handle_bounding.json"
+          name: "99660089960034"
+          path: "99660089960034/mobility.urdf"
+        "271":
+          bounding_box: "99660089960035/bounding_box.json"
+          handle_bounding: "99660089960035/handle_bounding.json"
+          name: "99660089960035"
+          path: "99660089960035/mobility.urdf"
+        "272":
+          bounding_box: "99660089960036/bounding_box.json"
+          handle_bounding: "99660089960036/handle_bounding.json"
+          name: "99660089960036"
+          path: "99660089960036/mobility.urdf"
+        "273":
+          bounding_box: "99660089960045/bounding_box.json"
+          handle_bounding: "99660089960045/handle_bounding.json"
+          name: "99660089960045"
+          path: "99660089960045/mobility.urdf"
+        "274":
+          bounding_box: "99660089960046/bounding_box.json"
+          handle_bounding: "99660089960046/handle_bounding.json"
+          name: "99660089960046"
+          path: "99660089960046/mobility.urdf"
+        "275":
+          bounding_box: "99660089960048/bounding_box.json"
+          handle_bounding: "99660089960048/handle_bounding.json"
+          name: "99660089960048"
+          path: "99660089960048/mobility.urdf"
+        "276":
+          bounding_box: "99660099960001/bounding_box.json"
+          handle_bounding: "99660099960001/handle_bounding.json"
+          name: "99660099960001"
+          path: "99660099960001/mobility.urdf"
+        "277":
+          bounding_box: "99660099960003/bounding_box.json"
+          handle_bounding: "99660099960003/handle_bounding.json"
+          name: "99660099960003"
+          path: "99660099960003/mobility.urdf"
+        "278":
+          bounding_box: "99660099960006/bounding_box.json"
+          handle_bounding: "99660099960006/handle_bounding.json"
+          name: "99660099960006"
+          path: "99660099960006/mobility.urdf"
+        "279":
+          bounding_box: "99660099960010/bounding_box.json"
+          handle_bounding: "99660099960010/handle_bounding.json"
+          name: "99660099960010"
+          path: "99660099960010/mobility.urdf"
+        "280":
+          bounding_box: "99660099960011/bounding_box.json"
+          handle_bounding: "99660099960011/handle_bounding.json"
+          name: "99660099960011"
+          path: "99660099960011/mobility.urdf"
+        "281":
+          bounding_box: "99660099960012/bounding_box.json"
+          handle_bounding: "99660099960012/handle_bounding.json"
+          name: "99660099960012"
+          path: "99660099960012/mobility.urdf"
+        "282":
+          bounding_box: "99660099960014/bounding_box.json"
+          handle_bounding: "99660099960014/handle_bounding.json"
+          name: "99660099960014"
+          path: "99660099960014/mobility.urdf"
+        "283":
+          bounding_box: "99660099960017/bounding_box.json"
+          handle_bounding: "99660099960017/handle_bounding.json"
+          name: "99660099960017"
+          path: "99660099960017/mobility.urdf"
+        "284":
+          bounding_box: "99660099960018/bounding_box.json"
+          handle_bounding: "99660099960018/handle_bounding.json"
+          name: "99660099960018"
+          path: "99660099960018/mobility.urdf"
+        "285":
+          bounding_box: "99660099960019/bounding_box.json"
+          handle_bounding: "99660099960019/handle_bounding.json"
+          name: "99660099960019"
+          path: "99660099960019/mobility.urdf"
+        "286":
+          bounding_box: "99660099960021/bounding_box.json"
+          handle_bounding: "99660099960021/handle_bounding.json"
+          name: "99660099960021"
+          path: "99660099960021/mobility.urdf"
+        "287":
+          bounding_box: "99660099960022/bounding_box.json"
+          handle_bounding: "99660099960022/handle_bounding.json"
+          name: "99660099960022"
+          path: "99660099960022/mobility.urdf"
+        "288":
+          bounding_box: "99660099960024/bounding_box.json"
+          handle_bounding: "99660099960024/handle_bounding.json"
+          name: "99660099960024"
+          path: "99660099960024/mobility.urdf"
+        "289":
+          bounding_box: "99660099960025/bounding_box.json"
+          handle_bounding: "99660099960025/handle_bounding.json"
+          name: "99660099960025"
+          path: "99660099960025/mobility.urdf"
+        "290":
+          bounding_box: "99660099960028/bounding_box.json"
+          handle_bounding: "99660099960028/handle_bounding.json"
+          name: "99660099960028"
+          path: "99660099960028/mobility.urdf"
+        "291":
+          bounding_box: "99660099960030/bounding_box.json"
+          handle_bounding: "99660099960030/handle_bounding.json"
+          name: "99660099960030"
+          path: "99660099960030/mobility.urdf"
+        "292":
+          bounding_box: "99660099960032/bounding_box.json"
+          handle_bounding: "99660099960032/handle_bounding.json"
+          name: "99660099960032"
+          path: "99660099960032/mobility.urdf"
+        "293":
+          bounding_box: "99660099960034/bounding_box.json"
+          handle_bounding: "99660099960034/handle_bounding.json"
+          name: "99660099960034"
+          path: "99660099960034/mobility.urdf"
+        "294":
+          bounding_box: "99660099960035/bounding_box.json"
+          handle_bounding: "99660099960035/handle_bounding.json"
+          name: "99660099960035"
+          path: "99660099960035/mobility.urdf"
+        "295":
+          bounding_box: "99660099960036/bounding_box.json"
+          handle_bounding: "99660099960036/handle_bounding.json"
+          name: "99660099960036"
+          path: "99660099960036/mobility.urdf"
+        "296":
+          bounding_box: "99660099960045/bounding_box.json"
+          handle_bounding: "99660099960045/handle_bounding.json"
+          name: "99660099960045"
+          path: "99660099960045/mobility.urdf"
+        "297":
+          bounding_box: "99660099960046/bounding_box.json"
+          handle_bounding: "99660099960046/handle_bounding.json"
+          name: "99660099960046"
+          path: "99660099960046/mobility.urdf"
+        "298":
+          bounding_box: "99660099960048/bounding_box.json"
+          handle_bounding: "99660099960048/handle_bounding.json"
+          name: "99660099960048"
+          path: "99660099960048/mobility.urdf"
+        "299":
+          bounding_box: "99665019960001/bounding_box.json"
+          handle_bounding: "99665019960001/handle_bounding.json"
+          name: "99665019960001"
+          path: "99665019960001/mobility.urdf"
+        "300":
+          bounding_box: "99665019960003/bounding_box.json"
+          handle_bounding: "99665019960003/handle_bounding.json"
+          name: "99665019960003"
+          path: "99665019960003/mobility.urdf"
+        "301":
+          bounding_box: "99665019960006/bounding_box.json"
+          handle_bounding: "99665019960006/handle_bounding.json"
+          name: "99665019960006"
+          path: "99665019960006/mobility.urdf"
+        "302":
+          bounding_box: "99665019960010/bounding_box.json"
+          handle_bounding: "99665019960010/handle_bounding.json"
+          name: "99665019960010"
+          path: "99665019960010/mobility.urdf"
+        "303":
+          bounding_box: "99665019960011/bounding_box.json"
+          handle_bounding: "99665019960011/handle_bounding.json"
+          name: "99665019960011"
+          path: "99665019960011/mobility.urdf"
+        "304":
+          bounding_box: "99665019960012/bounding_box.json"
+          handle_bounding: "99665019960012/handle_bounding.json"
+          name: "99665019960012"
+          path: "99665019960012/mobility.urdf"
+        "305":
+          bounding_box: "99665019960014/bounding_box.json"
+          handle_bounding: "99665019960014/handle_bounding.json"
+          name: "99665019960014"
+          path: "99665019960014/mobility.urdf"
+        "306":
+          bounding_box: "99665019960017/bounding_box.json"
+          handle_bounding: "99665019960017/handle_bounding.json"
+          name: "99665019960017"
+          path: "99665019960017/mobility.urdf"
+        "307":
+          bounding_box: "99665019960018/bounding_box.json"
+          handle_bounding: "99665019960018/handle_bounding.json"
+          name: "99665019960018"
+          path: "99665019960018/mobility.urdf"
+        "308":
+          bounding_box: "99665019960019/bounding_box.json"
+          handle_bounding: "99665019960019/handle_bounding.json"
+          name: "99665019960019"
+          path: "99665019960019/mobility.urdf"
+        "309":
+          bounding_box: "99665019960021/bounding_box.json"
+          handle_bounding: "99665019960021/handle_bounding.json"
+          name: "99665019960021"
+          path: "99665019960021/mobility.urdf"
+        "310":
+          bounding_box: "99665019960022/bounding_box.json"
+          handle_bounding: "99665019960022/handle_bounding.json"
+          name: "99665019960022"
+          path: "99665019960022/mobility.urdf"
+        "311":
+          bounding_box: "99665019960024/bounding_box.json"
+          handle_bounding: "99665019960024/handle_bounding.json"
+          name: "99665019960024"
+          path: "99665019960024/mobility.urdf"
+        "312":
+          bounding_box: "99665019960025/bounding_box.json"
+          handle_bounding: "99665019960025/handle_bounding.json"
+          name: "99665019960025"
+          path: "99665019960025/mobility.urdf"
+        "313":
+          bounding_box: "99665019960028/bounding_box.json"
+          handle_bounding: "99665019960028/handle_bounding.json"
+          name: "99665019960028"
+          path: "99665019960028/mobility.urdf"
+        "314":
+          bounding_box: "99665019960030/bounding_box.json"
+          handle_bounding: "99665019960030/handle_bounding.json"
+          name: "99665019960030"
+          path: "99665019960030/mobility.urdf"
+        "315":
+          bounding_box: "99665019960032/bounding_box.json"
+          handle_bounding: "99665019960032/handle_bounding.json"
+          name: "99665019960032"
+          path: "99665019960032/mobility.urdf"
+        "316":
+          bounding_box: "99665019960034/bounding_box.json"
+          handle_bounding: "99665019960034/handle_bounding.json"
+          name: "99665019960034"
+          path: "99665019960034/mobility.urdf"
+        "317":
+          bounding_box: "99665019960035/bounding_box.json"
+          handle_bounding: "99665019960035/handle_bounding.json"
+          name: "99665019960035"
+          path: "99665019960035/mobility.urdf"
+        "318":
+          bounding_box: "99665019960036/bounding_box.json"
+          handle_bounding: "99665019960036/handle_bounding.json"
+          name: "99665019960036"
+          path: "99665019960036/mobility.urdf"
+        "319":
+          bounding_box: "99665019960045/bounding_box.json"
+          handle_bounding: "99665019960045/handle_bounding.json"
+          name: "99665019960045"
+          path: "99665019960045/mobility.urdf"
+        "320":
+          bounding_box: "99665019960046/bounding_box.json"
+          handle_bounding: "99665019960046/handle_bounding.json"
+          name: "99665019960046"
+          path: "99665019960046/mobility.urdf"
+        "321":
+          bounding_box: "99665019960048/bounding_box.json"
+          handle_bounding: "99665019960048/handle_bounding.json"
+          name: "99665019960048"
+          path: "99665019960048/mobility.urdf"
+        "322":
+          bounding_box: "99665029960001/bounding_box.json"
+          handle_bounding: "99665029960001/handle_bounding.json"
+          name: "99665029960001"
+          path: "99665029960001/mobility.urdf"
+        "323":
+          bounding_box: "99665029960003/bounding_box.json"
+          handle_bounding: "99665029960003/handle_bounding.json"
+          name: "99665029960003"
+          path: "99665029960003/mobility.urdf"
+        "324":
+          bounding_box: "99665029960006/bounding_box.json"
+          handle_bounding: "99665029960006/handle_bounding.json"
+          name: "99665029960006"
+          path: "99665029960006/mobility.urdf"
+        "325":
+          bounding_box: "99665029960010/bounding_box.json"
+          handle_bounding: "99665029960010/handle_bounding.json"
+          name: "99665029960010"
+          path: "99665029960010/mobility.urdf"
+        "326":
+          bounding_box: "99665029960011/bounding_box.json"
+          handle_bounding: "99665029960011/handle_bounding.json"
+          name: "99665029960011"
+          path: "99665029960011/mobility.urdf"
+        "327":
+          bounding_box: "99665029960012/bounding_box.json"
+          handle_bounding: "99665029960012/handle_bounding.json"
+          name: "99665029960012"
+          path: "99665029960012/mobility.urdf"
+        "328":
+          bounding_box: "99665029960014/bounding_box.json"
+          handle_bounding: "99665029960014/handle_bounding.json"
+          name: "99665029960014"
+          path: "99665029960014/mobility.urdf"
+        "329":
+          bounding_box: "99665029960017/bounding_box.json"
+          handle_bounding: "99665029960017/handle_bounding.json"
+          name: "99665029960017"
+          path: "99665029960017/mobility.urdf"
+        "330":
+          bounding_box: "99665029960018/bounding_box.json"
+          handle_bounding: "99665029960018/handle_bounding.json"
+          name: "99665029960018"
+          path: "99665029960018/mobility.urdf"
+        "331":
+          bounding_box: "99665029960019/bounding_box.json"
+          handle_bounding: "99665029960019/handle_bounding.json"
+          name: "99665029960019"
+          path: "99665029960019/mobility.urdf"
+        "332":
+          bounding_box: "99665029960021/bounding_box.json"
+          handle_bounding: "99665029960021/handle_bounding.json"
+          name: "99665029960021"
+          path: "99665029960021/mobility.urdf"
+        "333":
+          bounding_box: "99665029960022/bounding_box.json"
+          handle_bounding: "99665029960022/handle_bounding.json"
+          name: "99665029960022"
+          path: "99665029960022/mobility.urdf"
+        "334":
+          bounding_box: "99665029960024/bounding_box.json"
+          handle_bounding: "99665029960024/handle_bounding.json"
+          name: "99665029960024"
+          path: "99665029960024/mobility.urdf"
+        "335":
+          bounding_box: "99665029960025/bounding_box.json"
+          handle_bounding: "99665029960025/handle_bounding.json"
+          name: "99665029960025"
+          path: "99665029960025/mobility.urdf"
+        "336":
+          bounding_box: "99665029960028/bounding_box.json"
+          handle_bounding: "99665029960028/handle_bounding.json"
+          name: "99665029960028"
+          path: "99665029960028/mobility.urdf"
+        "337":
+          bounding_box: "99665029960030/bounding_box.json"
+          handle_bounding: "99665029960030/handle_bounding.json"
+          name: "99665029960030"
+          path: "99665029960030/mobility.urdf"
+        "338":
+          bounding_box: "99665029960032/bounding_box.json"
+          handle_bounding: "99665029960032/handle_bounding.json"
+          name: "99665029960032"
+          path: "99665029960032/mobility.urdf"
+        "339":
+          bounding_box: "99665029960034/bounding_box.json"
+          handle_bounding: "99665029960034/handle_bounding.json"
+          name: "99665029960034"
+          path: "99665029960034/mobility.urdf"
+        "340":
+          bounding_box: "99665029960035/bounding_box.json"
+          handle_bounding: "99665029960035/handle_bounding.json"
+          name: "99665029960035"
+          path: "99665029960035/mobility.urdf"
+        "341":
+          bounding_box: "99665029960036/bounding_box.json"
+          handle_bounding: "99665029960036/handle_bounding.json"
+          name: "99665029960036"
+          path: "99665029960036/mobility.urdf"
+        "342":
+          bounding_box: "99665029960045/bounding_box.json"
+          handle_bounding: "99665029960045/handle_bounding.json"
+          name: "99665029960045"
+          path: "99665029960045/mobility.urdf"
+        "343":
+          bounding_box: "99665029960046/bounding_box.json"
+          handle_bounding: "99665029960046/handle_bounding.json"
+          name: "99665029960046"
+          path: "99665029960046/mobility.urdf"
+        "344":
+          bounding_box: "99665029960048/bounding_box.json"
+          handle_bounding: "99665029960048/handle_bounding.json"
+          name: "99665029960048"
+          path: "99665029960048/mobility.urdf"
+        "345":
+          bounding_box: "99665039960001/bounding_box.json"
+          handle_bounding: "99665039960001/handle_bounding.json"
+          name: "99665039960001"
+          path: "99665039960001/mobility.urdf"
+        "346":
+          bounding_box: "99665039960003/bounding_box.json"
+          handle_bounding: "99665039960003/handle_bounding.json"
+          name: "99665039960003"
+          path: "99665039960003/mobility.urdf"
+        "347":
+          bounding_box: "99665039960006/bounding_box.json"
+          handle_bounding: "99665039960006/handle_bounding.json"
+          name: "99665039960006"
+          path: "99665039960006/mobility.urdf"
+        "348":
+          bounding_box: "99665039960010/bounding_box.json"
+          handle_bounding: "99665039960010/handle_bounding.json"
+          name: "99665039960010"
+          path: "99665039960010/mobility.urdf"
+        "349":
+          bounding_box: "99665039960011/bounding_box.json"
+          handle_bounding: "99665039960011/handle_bounding.json"
+          name: "99665039960011"
+          path: "99665039960011/mobility.urdf"
+        "350":
+          bounding_box: "99665039960012/bounding_box.json"
+          handle_bounding: "99665039960012/handle_bounding.json"
+          name: "99665039960012"
+          path: "99665039960012/mobility.urdf"
+        "351":
+          bounding_box: "99665039960014/bounding_box.json"
+          handle_bounding: "99665039960014/handle_bounding.json"
+          name: "99665039960014"
+          path: "99665039960014/mobility.urdf"
+        "352":
+          bounding_box: "99665039960017/bounding_box.json"
+          handle_bounding: "99665039960017/handle_bounding.json"
+          name: "99665039960017"
+          path: "99665039960017/mobility.urdf"
+        "353":
+          bounding_box: "99665039960018/bounding_box.json"
+          handle_bounding: "99665039960018/handle_bounding.json"
+          name: "99665039960018"
+          path: "99665039960018/mobility.urdf"
+        "354":
+          bounding_box: "99665039960019/bounding_box.json"
+          handle_bounding: "99665039960019/handle_bounding.json"
+          name: "99665039960019"
+          path: "99665039960019/mobility.urdf"
+        "355":
+          bounding_box: "99665039960021/bounding_box.json"
+          handle_bounding: "99665039960021/handle_bounding.json"
+          name: "99665039960021"
+          path: "99665039960021/mobility.urdf"
+        "356":
+          bounding_box: "99665039960022/bounding_box.json"
+          handle_bounding: "99665039960022/handle_bounding.json"
+          name: "99665039960022"
+          path: "99665039960022/mobility.urdf"
+        "357":
+          bounding_box: "99665039960024/bounding_box.json"
+          handle_bounding: "99665039960024/handle_bounding.json"
+          name: "99665039960024"
+          path: "99665039960024/mobility.urdf"
+        "358":
+          bounding_box: "99665039960025/bounding_box.json"
+          handle_bounding: "99665039960025/handle_bounding.json"
+          name: "99665039960025"
+          path: "99665039960025/mobility.urdf"
+        "359":
+          bounding_box: "99665039960028/bounding_box.json"
+          handle_bounding: "99665039960028/handle_bounding.json"
+          name: "99665039960028"
+          path: "99665039960028/mobility.urdf"
+        "360":
+          bounding_box: "99665039960030/bounding_box.json"
+          handle_bounding: "99665039960030/handle_bounding.json"
+          name: "99665039960030"
+          path: "99665039960030/mobility.urdf"
+        "361":
+          bounding_box: "99665039960032/bounding_box.json"
+          handle_bounding: "99665039960032/handle_bounding.json"
+          name: "99665039960032"
+          path: "99665039960032/mobility.urdf"
+        "362":
+          bounding_box: "99665039960034/bounding_box.json"
+          handle_bounding: "99665039960034/handle_bounding.json"
+          name: "99665039960034"
+          path: "99665039960034/mobility.urdf"
+        "363":
+          bounding_box: "99665039960035/bounding_box.json"
+          handle_bounding: "99665039960035/handle_bounding.json"
+          name: "99665039960035"
+          path: "99665039960035/mobility.urdf"
+        "364":
+          bounding_box: "99665039960036/bounding_box.json"
+          handle_bounding: "99665039960036/handle_bounding.json"
+          name: "99665039960036"
+          path: "99665039960036/mobility.urdf"
+        "365":
+          bounding_box: "99665039960045/bounding_box.json"
+          handle_bounding: "99665039960045/handle_bounding.json"
+          name: "99665039960045"
+          path: "99665039960045/mobility.urdf"
+        "366":
+          bounding_box: "99665039960046/bounding_box.json"
+          handle_bounding: "99665039960046/handle_bounding.json"
+          name: "99665039960046"
+          path: "99665039960046/mobility.urdf"
+        "367":
+          bounding_box: "99665039960048/bounding_box.json"
+          handle_bounding: "99665039960048/handle_bounding.json"
+          name: "99665039960048"
+          path: "99665039960048/mobility.urdf"
+        "368":
+          bounding_box: "99665049960001/bounding_box.json"
+          handle_bounding: "99665049960001/handle_bounding.json"
+          name: "99665049960001"
+          path: "99665049960001/mobility.urdf"
+        "369":
+          bounding_box: "99665049960003/bounding_box.json"
+          handle_bounding: "99665049960003/handle_bounding.json"
+          name: "99665049960003"
+          path: "99665049960003/mobility.urdf"
+        "370":
+          bounding_box: "99665049960006/bounding_box.json"
+          handle_bounding: "99665049960006/handle_bounding.json"
+          name: "99665049960006"
+          path: "99665049960006/mobility.urdf"
+        "371":
+          bounding_box: "99665049960010/bounding_box.json"
+          handle_bounding: "99665049960010/handle_bounding.json"
+          name: "99665049960010"
+          path: "99665049960010/mobility.urdf"
+        "372":
+          bounding_box: "99665049960011/bounding_box.json"
+          handle_bounding: "99665049960011/handle_bounding.json"
+          name: "99665049960011"
+          path: "99665049960011/mobility.urdf"
+        "373":
+          bounding_box: "99665049960012/bounding_box.json"
+          handle_bounding: "99665049960012/handle_bounding.json"
+          name: "99665049960012"
+          path: "99665049960012/mobility.urdf"
+        "374":
+          bounding_box: "99665049960014/bounding_box.json"
+          handle_bounding: "99665049960014/handle_bounding.json"
+          name: "99665049960014"
+          path: "99665049960014/mobility.urdf"
+        "375":
+          bounding_box: "99665049960017/bounding_box.json"
+          handle_bounding: "99665049960017/handle_bounding.json"
+          name: "99665049960017"
+          path: "99665049960017/mobility.urdf"
+        "376":
+          bounding_box: "99665049960018/bounding_box.json"
+          handle_bounding: "99665049960018/handle_bounding.json"
+          name: "99665049960018"
+          path: "99665049960018/mobility.urdf"
+        "377":
+          bounding_box: "99665049960019/bounding_box.json"
+          handle_bounding: "99665049960019/handle_bounding.json"
+          name: "99665049960019"
+          path: "99665049960019/mobility.urdf"
+        "378":
+          bounding_box: "99665049960021/bounding_box.json"
+          handle_bounding: "99665049960021/handle_bounding.json"
+          name: "99665049960021"
+          path: "99665049960021/mobility.urdf"
+        "379":
+          bounding_box: "99665049960022/bounding_box.json"
+          handle_bounding: "99665049960022/handle_bounding.json"
+          name: "99665049960022"
+          path: "99665049960022/mobility.urdf"
+        "380":
+          bounding_box: "99665049960024/bounding_box.json"
+          handle_bounding: "99665049960024/handle_bounding.json"
+          name: "99665049960024"
+          path: "99665049960024/mobility.urdf"
+        "381":
+          bounding_box: "99665049960025/bounding_box.json"
+          handle_bounding: "99665049960025/handle_bounding.json"
+          name: "99665049960025"
+          path: "99665049960025/mobility.urdf"
+        "382":
+          bounding_box: "99665049960028/bounding_box.json"
+          handle_bounding: "99665049960028/handle_bounding.json"
+          name: "99665049960028"
+          path: "99665049960028/mobility.urdf"
+        "383":
+          bounding_box: "99665049960030/bounding_box.json"
+          handle_bounding: "99665049960030/handle_bounding.json"
+          name: "99665049960030"
+          path: "99665049960030/mobility.urdf"
+        "384":
+          bounding_box: "99665049960032/bounding_box.json"
+          handle_bounding: "99665049960032/handle_bounding.json"
+          name: "99665049960032"
+          path: "99665049960032/mobility.urdf"
+        "385":
+          bounding_box: "99665049960034/bounding_box.json"
+          handle_bounding: "99665049960034/handle_bounding.json"
+          name: "99665049960034"
+          path: "99665049960034/mobility.urdf"
+        "386":
+          bounding_box: "99665049960035/bounding_box.json"
+          handle_bounding: "99665049960035/handle_bounding.json"
+          name: "99665049960035"
+          path: "99665049960035/mobility.urdf"
+        "387":
+          bounding_box: "99665049960036/bounding_box.json"
+          handle_bounding: "99665049960036/handle_bounding.json"
+          name: "99665049960036"
+          path: "99665049960036/mobility.urdf"
+        "388":
+          bounding_box: "99665049960045/bounding_box.json"
+          handle_bounding: "99665049960045/handle_bounding.json"
+          name: "99665049960045"
+          path: "99665049960045/mobility.urdf"
+        "389":
+          bounding_box: "99665049960046/bounding_box.json"
+          handle_bounding: "99665049960046/handle_bounding.json"
+          name: "99665049960046"
+          path: "99665049960046/mobility.urdf"
+        "390":
+          bounding_box: "99665049960048/bounding_box.json"
+          handle_bounding: "99665049960048/handle_bounding.json"
+          name: "99665049960048"
+          path: "99665049960048/mobility.urdf"
+        "391":
+          bounding_box: "99688979960001/bounding_box.json"
+          handle_bounding: "99688979960001/handle_bounding.json"
+          name: "99688979960001"
+          path: "99688979960001/mobility.urdf"
+        "392":
+          bounding_box: "99688979960003/bounding_box.json"
+          handle_bounding: "99688979960003/handle_bounding.json"
+          name: "99688979960003"
+          path: "99688979960003/mobility.urdf"
+        "393":
+          bounding_box: "99688979960006/bounding_box.json"
+          handle_bounding: "99688979960006/handle_bounding.json"
+          name: "99688979960006"
+          path: "99688979960006/mobility.urdf"
+        "394":
+          bounding_box: "99688979960010/bounding_box.json"
+          handle_bounding: "99688979960010/handle_bounding.json"
+          name: "99688979960010"
+          path: "99688979960010/mobility.urdf"
+        "395":
+          bounding_box: "99688979960011/bounding_box.json"
+          handle_bounding: "99688979960011/handle_bounding.json"
+          name: "99688979960011"
+          path: "99688979960011/mobility.urdf"
+        "396":
+          bounding_box: "99688979960012/bounding_box.json"
+          handle_bounding: "99688979960012/handle_bounding.json"
+          name: "99688979960012"
+          path: "99688979960012/mobility.urdf"
+        "397":
+          bounding_box: "99688979960014/bounding_box.json"
+          handle_bounding: "99688979960014/handle_bounding.json"
+          name: "99688979960014"
+          path: "99688979960014/mobility.urdf"
+        "398":
+          bounding_box: "99688979960017/bounding_box.json"
+          handle_bounding: "99688979960017/handle_bounding.json"
+          name: "99688979960017"
+          path: "99688979960017/mobility.urdf"
+        "399":
+          bounding_box: "99688979960018/bounding_box.json"
+          handle_bounding: "99688979960018/handle_bounding.json"
+          name: "99688979960018"
+          path: "99688979960018/mobility.urdf"
+        "400":
+          bounding_box: "99688979960019/bounding_box.json"
+          handle_bounding: "99688979960019/handle_bounding.json"
+          name: "99688979960019"
+          path: "99688979960019/mobility.urdf"
+        "401":
+          bounding_box: "99688979960021/bounding_box.json"
+          handle_bounding: "99688979960021/handle_bounding.json"
+          name: "99688979960021"
+          path: "99688979960021/mobility.urdf"
+        "402":
+          bounding_box: "99688979960022/bounding_box.json"
+          handle_bounding: "99688979960022/handle_bounding.json"
+          name: "99688979960022"
+          path: "99688979960022/mobility.urdf"
+        "403":
+          bounding_box: "99688979960024/bounding_box.json"
+          handle_bounding: "99688979960024/handle_bounding.json"
+          name: "99688979960024"
+          path: "99688979960024/mobility.urdf"
+        "404":
+          bounding_box: "99688979960025/bounding_box.json"
+          handle_bounding: "99688979960025/handle_bounding.json"
+          name: "99688979960025"
+          path: "99688979960025/mobility.urdf"
+        "405":
+          bounding_box: "99688979960028/bounding_box.json"
+          handle_bounding: "99688979960028/handle_bounding.json"
+          name: "99688979960028"
+          path: "99688979960028/mobility.urdf"
+        "406":
+          bounding_box: "99688979960030/bounding_box.json"
+          handle_bounding: "99688979960030/handle_bounding.json"
+          name: "99688979960030"
+          path: "99688979960030/mobility.urdf"
+        "407":
+          bounding_box: "99688979960032/bounding_box.json"
+          handle_bounding: "99688979960032/handle_bounding.json"
+          name: "99688979960032"
+          path: "99688979960032/mobility.urdf"
+        "408":
+          bounding_box: "99688979960034/bounding_box.json"
+          handle_bounding: "99688979960034/handle_bounding.json"
+          name: "99688979960034"
+          path: "99688979960034/mobility.urdf"
+        "409":
+          bounding_box: "99688979960035/bounding_box.json"
+          handle_bounding: "99688979960035/handle_bounding.json"
+          name: "99688979960035"
+          path: "99688979960035/mobility.urdf"
+        "410":
+          bounding_box: "99688979960036/bounding_box.json"
+          handle_bounding: "99688979960036/handle_bounding.json"
+          name: "99688979960036"
+          path: "99688979960036/mobility.urdf"
+        "411":
+          bounding_box: "99688979960045/bounding_box.json"
+          handle_bounding: "99688979960045/handle_bounding.json"
+          name: "99688979960045"
+          path: "99688979960045/mobility.urdf"
+        "412":
+          bounding_box: "99688979960046/bounding_box.json"
+          handle_bounding: "99688979960046/handle_bounding.json"
+          name: "99688979960046"
+          path: "99688979960046/mobility.urdf"
+        "413":
+          bounding_box: "99688979960048/bounding_box.json"
+          handle_bounding: "99688979960048/handle_bounding.json"
+          name: "99688979960048"
+          path: "99688979960048/mobility.urdf"
+        "414":
+          bounding_box: "99689039960001/bounding_box.json"
+          handle_bounding: "99689039960001/handle_bounding.json"
+          name: "99689039960001"
+          path: "99689039960001/mobility.urdf"
+        "415":
+          bounding_box: "99689039960003/bounding_box.json"
+          handle_bounding: "99689039960003/handle_bounding.json"
+          name: "99689039960003"
+          path: "99689039960003/mobility.urdf"
+        "416":
+          bounding_box: "99689039960006/bounding_box.json"
+          handle_bounding: "99689039960006/handle_bounding.json"
+          name: "99689039960006"
+          path: "99689039960006/mobility.urdf"
+        "417":
+          bounding_box: "99689039960010/bounding_box.json"
+          handle_bounding: "99689039960010/handle_bounding.json"
+          name: "99689039960010"
+          path: "99689039960010/mobility.urdf"
+        "418":
+          bounding_box: "99689039960011/bounding_box.json"
+          handle_bounding: "99689039960011/handle_bounding.json"
+          name: "99689039960011"
+          path: "99689039960011/mobility.urdf"
+        "419":
+          bounding_box: "99689039960012/bounding_box.json"
+          handle_bounding: "99689039960012/handle_bounding.json"
+          name: "99689039960012"
+          path: "99689039960012/mobility.urdf"
+        "420":
+          bounding_box: "99689039960014/bounding_box.json"
+          handle_bounding: "99689039960014/handle_bounding.json"
+          name: "99689039960014"
+          path: "99689039960014/mobility.urdf"
+        "421":
+          bounding_box: "99689039960017/bounding_box.json"
+          handle_bounding: "99689039960017/handle_bounding.json"
+          name: "99689039960017"
+          path: "99689039960017/mobility.urdf"
+        "422":
+          bounding_box: "99689039960018/bounding_box.json"
+          handle_bounding: "99689039960018/handle_bounding.json"
+          name: "99689039960018"
+          path: "99689039960018/mobility.urdf"
+        "423":
+          bounding_box: "99689039960019/bounding_box.json"
+          handle_bounding: "99689039960019/handle_bounding.json"
+          name: "99689039960019"
+          path: "99689039960019/mobility.urdf"
+        "424":
+          bounding_box: "99689039960021/bounding_box.json"
+          handle_bounding: "99689039960021/handle_bounding.json"
+          name: "99689039960021"
+          path: "99689039960021/mobility.urdf"
+        "425":
+          bounding_box: "99689039960022/bounding_box.json"
+          handle_bounding: "99689039960022/handle_bounding.json"
+          name: "99689039960022"
+          path: "99689039960022/mobility.urdf"
+        "426":
+          bounding_box: "99689039960024/bounding_box.json"
+          handle_bounding: "99689039960024/handle_bounding.json"
+          name: "99689039960024"
+          path: "99689039960024/mobility.urdf"
+        "427":
+          bounding_box: "99689039960025/bounding_box.json"
+          handle_bounding: "99689039960025/handle_bounding.json"
+          name: "99689039960025"
+          path: "99689039960025/mobility.urdf"
+        "428":
+          bounding_box: "99689039960028/bounding_box.json"
+          handle_bounding: "99689039960028/handle_bounding.json"
+          name: "99689039960028"
+          path: "99689039960028/mobility.urdf"
+        "429":
+          bounding_box: "99689039960030/bounding_box.json"
+          handle_bounding: "99689039960030/handle_bounding.json"
+          name: "99689039960030"
+          path: "99689039960030/mobility.urdf"
+        "430":
+          bounding_box: "99689039960032/bounding_box.json"
+          handle_bounding: "99689039960032/handle_bounding.json"
+          name: "99689039960032"
+          path: "99689039960032/mobility.urdf"
+        "431":
+          bounding_box: "99689039960034/bounding_box.json"
+          handle_bounding: "99689039960034/handle_bounding.json"
+          name: "99689039960034"
+          path: "99689039960034/mobility.urdf"
+        "432":
+          bounding_box: "99689039960035/bounding_box.json"
+          handle_bounding: "99689039960035/handle_bounding.json"
+          name: "99689039960035"
+          path: "99689039960035/mobility.urdf"
+        "433":
+          bounding_box: "99689039960036/bounding_box.json"
+          handle_bounding: "99689039960036/handle_bounding.json"
+          name: "99689039960036"
+          path: "99689039960036/mobility.urdf"
+        "434":
+          bounding_box: "99689039960045/bounding_box.json"
+          handle_bounding: "99689039960045/handle_bounding.json"
+          name: "99689039960045"
+          path: "99689039960045/mobility.urdf"
+        "435":
+          bounding_box: "99689039960046/bounding_box.json"
+          handle_bounding: "99689039960046/handle_bounding.json"
+          name: "99689039960046"
+          path: "99689039960046/mobility.urdf"
+        "436":
+          bounding_box: "99689039960048/bounding_box.json"
+          handle_bounding: "99689039960048/handle_bounding.json"
+          name: "99689039960048"
+          path: "99689039960048/mobility.urdf"
+        "437":
+          bounding_box: "99689669960001/bounding_box.json"
+          handle_bounding: "99689669960001/handle_bounding.json"
+          name: "99689669960001"
+          path: "99689669960001/mobility.urdf"
+        "438":
+          bounding_box: "99689669960003/bounding_box.json"
+          handle_bounding: "99689669960003/handle_bounding.json"
+          name: "99689669960003"
+          path: "99689669960003/mobility.urdf"
+        "439":
+          bounding_box: "99689669960006/bounding_box.json"
+          handle_bounding: "99689669960006/handle_bounding.json"
+          name: "99689669960006"
+          path: "99689669960006/mobility.urdf"
+        "440":
+          bounding_box: "99689669960010/bounding_box.json"
+          handle_bounding: "99689669960010/handle_bounding.json"
+          name: "99689669960010"
+          path: "99689669960010/mobility.urdf"
+        "441":
+          bounding_box: "99689669960011/bounding_box.json"
+          handle_bounding: "99689669960011/handle_bounding.json"
+          name: "99689669960011"
+          path: "99689669960011/mobility.urdf"
+        "442":
+          bounding_box: "99689669960012/bounding_box.json"
+          handle_bounding: "99689669960012/handle_bounding.json"
+          name: "99689669960012"
+          path: "99689669960012/mobility.urdf"
+        "443":
+          bounding_box: "99689669960014/bounding_box.json"
+          handle_bounding: "99689669960014/handle_bounding.json"
+          name: "99689669960014"
+          path: "99689669960014/mobility.urdf"
+        "444":
+          bounding_box: "99689669960017/bounding_box.json"
+          handle_bounding: "99689669960017/handle_bounding.json"
+          name: "99689669960017"
+          path: "99689669960017/mobility.urdf"
+        "445":
+          bounding_box: "99689669960018/bounding_box.json"
+          handle_bounding: "99689669960018/handle_bounding.json"
+          name: "99689669960018"
+          path: "99689669960018/mobility.urdf"
+        "446":
+          bounding_box: "99689669960019/bounding_box.json"
+          handle_bounding: "99689669960019/handle_bounding.json"
+          name: "99689669960019"
+          path: "99689669960019/mobility.urdf"
+        "447":
+          bounding_box: "99689669960021/bounding_box.json"
+          handle_bounding: "99689669960021/handle_bounding.json"
+          name: "99689669960021"
+          path: "99689669960021/mobility.urdf"
+        "448":
+          bounding_box: "99689669960022/bounding_box.json"
+          handle_bounding: "99689669960022/handle_bounding.json"
+          name: "99689669960022"
+          path: "99689669960022/mobility.urdf"
+        "449":
+          bounding_box: "99689669960024/bounding_box.json"
+          handle_bounding: "99689669960024/handle_bounding.json"
+          name: "99689669960024"
+          path: "99689669960024/mobility.urdf"
+        "450":
+          bounding_box: "99689669960025/bounding_box.json"
+          handle_bounding: "99689669960025/handle_bounding.json"
+          name: "99689669960025"
+          path: "99689669960025/mobility.urdf"
+        "451":
+          bounding_box: "99689669960028/bounding_box.json"
+          handle_bounding: "99689669960028/handle_bounding.json"
+          name: "99689669960028"
+          path: "99689669960028/mobility.urdf"
+        "452":
+          bounding_box: "99689669960030/bounding_box.json"
+          handle_bounding: "99689669960030/handle_bounding.json"
+          name: "99689669960030"
+          path: "99689669960030/mobility.urdf"
+        "453":
+          bounding_box: "99689669960032/bounding_box.json"
+          handle_bounding: "99689669960032/handle_bounding.json"
+          name: "99689669960032"
+          path: "99689669960032/mobility.urdf"
+        "454":
+          bounding_box: "99689669960034/bounding_box.json"
+          handle_bounding: "99689669960034/handle_bounding.json"
+          name: "99689669960034"
+          path: "99689669960034/mobility.urdf"
+        "455":
+          bounding_box: "99689669960035/bounding_box.json"
+          handle_bounding: "99689669960035/handle_bounding.json"
+          name: "99689669960035"
+          path: "99689669960035/mobility.urdf"
+        "456":
+          bounding_box: "99689669960036/bounding_box.json"
+          handle_bounding: "99689669960036/handle_bounding.json"
+          name: "99689669960036"
+          path: "99689669960036/mobility.urdf"
+        "457":
+          bounding_box: "99689669960045/bounding_box.json"
+          handle_bounding: "99689669960045/handle_bounding.json"
+          name: "99689669960045"
+          path: "99689669960045/mobility.urdf"
+        "458":
+          bounding_box: "99689669960046/bounding_box.json"
+          handle_bounding: "99689669960046/handle_bounding.json"
+          name: "99689669960046"
+          path: "99689669960046/mobility.urdf"
+        "459":
+          bounding_box: "99689669960048/bounding_box.json"
+          handle_bounding: "99689669960048/handle_bounding.json"
+          name: "99689669960048"
+          path: "99689669960048/mobility.urdf"
+        "460":
+          bounding_box: "99689949960001/bounding_box.json"
+          handle_bounding: "99689949960001/handle_bounding.json"
+          name: "99689949960001"
+          path: "99689949960001/mobility.urdf"
+        "461":
+          bounding_box: "99689949960003/bounding_box.json"
+          handle_bounding: "99689949960003/handle_bounding.json"
+          name: "99689949960003"
+          path: "99689949960003/mobility.urdf"
+        "462":
+          bounding_box: "99689949960006/bounding_box.json"
+          handle_bounding: "99689949960006/handle_bounding.json"
+          name: "99689949960006"
+          path: "99689949960006/mobility.urdf"
+        "463":
+          bounding_box: "99689949960010/bounding_box.json"
+          handle_bounding: "99689949960010/handle_bounding.json"
+          name: "99689949960010"
+          path: "99689949960010/mobility.urdf"
+        "464":
+          bounding_box: "99689949960011/bounding_box.json"
+          handle_bounding: "99689949960011/handle_bounding.json"
+          name: "99689949960011"
+          path: "99689949960011/mobility.urdf"
+        "465":
+          bounding_box: "99689949960012/bounding_box.json"
+          handle_bounding: "99689949960012/handle_bounding.json"
+          name: "99689949960012"
+          path: "99689949960012/mobility.urdf"
+        "466":
+          bounding_box: "99689949960014/bounding_box.json"
+          handle_bounding: "99689949960014/handle_bounding.json"
+          name: "99689949960014"
+          path: "99689949960014/mobility.urdf"
+        "467":
+          bounding_box: "99689949960017/bounding_box.json"
+          handle_bounding: "99689949960017/handle_bounding.json"
+          name: "99689949960017"
+          path: "99689949960017/mobility.urdf"
+        "468":
+          bounding_box: "99689949960018/bounding_box.json"
+          handle_bounding: "99689949960018/handle_bounding.json"
+          name: "99689949960018"
+          path: "99689949960018/mobility.urdf"
+        "469":
+          bounding_box: "99689949960019/bounding_box.json"
+          handle_bounding: "99689949960019/handle_bounding.json"
+          name: "99689949960019"
+          path: "99689949960019/mobility.urdf"
+        "470":
+          bounding_box: "99689949960021/bounding_box.json"
+          handle_bounding: "99689949960021/handle_bounding.json"
+          name: "99689949960021"
+          path: "99689949960021/mobility.urdf"
+        "471":
+          bounding_box: "99689949960022/bounding_box.json"
+          handle_bounding: "99689949960022/handle_bounding.json"
+          name: "99689949960022"
+          path: "99689949960022/mobility.urdf"
+        "472":
+          bounding_box: "99689949960024/bounding_box.json"
+          handle_bounding: "99689949960024/handle_bounding.json"
+          name: "99689949960024"
+          path: "99689949960024/mobility.urdf"
+        "473":
+          bounding_box: "99689949960025/bounding_box.json"
+          handle_bounding: "99689949960025/handle_bounding.json"
+          name: "99689949960025"
+          path: "99689949960025/mobility.urdf"
+        "474":
+          bounding_box: "99689949960028/bounding_box.json"
+          handle_bounding: "99689949960028/handle_bounding.json"
+          name: "99689949960028"
+          path: "99689949960028/mobility.urdf"
+        "475":
+          bounding_box: "99689949960030/bounding_box.json"
+          handle_bounding: "99689949960030/handle_bounding.json"
+          name: "99689949960030"
+          path: "99689949960030/mobility.urdf"
+        "476":
+          bounding_box: "99689949960032/bounding_box.json"
+          handle_bounding: "99689949960032/handle_bounding.json"
+          name: "99689949960032"
+          path: "99689949960032/mobility.urdf"
+        "477":
+          bounding_box: "99689949960034/bounding_box.json"
+          handle_bounding: "99689949960034/handle_bounding.json"
+          name: "99689949960034"
+          path: "99689949960034/mobility.urdf"
+        "478":
+          bounding_box: "99689949960035/bounding_box.json"
+          handle_bounding: "99689949960035/handle_bounding.json"
+          name: "99689949960035"
+          path: "99689949960035/mobility.urdf"
+        "479":
+          bounding_box: "99689949960036/bounding_box.json"
+          handle_bounding: "99689949960036/handle_bounding.json"
+          name: "99689949960036"
+          path: "99689949960036/mobility.urdf"
+        "480":
+          bounding_box: "99689949960045/bounding_box.json"
+          handle_bounding: "99689949960045/handle_bounding.json"
+          name: "99689949960045"
+          path: "99689949960045/mobility.urdf"
+        "481":
+          bounding_box: "99689949960046/bounding_box.json"
+          handle_bounding: "99689949960046/handle_bounding.json"
+          name: "99689949960046"
+          path: "99689949960046/mobility.urdf"
+        "482":
+          bounding_box: "99689949960048/bounding_box.json"
+          handle_bounding: "99689949960048/handle_bounding.json"
+          name: "99689949960048"
+          path: "99689949960048/mobility.urdf"
+        "483":
+          bounding_box: "99690039960001/bounding_box.json"
+          handle_bounding: "99690039960001/handle_bounding.json"
+          name: "99690039960001"
+          path: "99690039960001/mobility.urdf"
+        "484":
+          bounding_box: "99690039960003/bounding_box.json"
+          handle_bounding: "99690039960003/handle_bounding.json"
+          name: "99690039960003"
+          path: "99690039960003/mobility.urdf"
+        "485":
+          bounding_box: "99690039960006/bounding_box.json"
+          handle_bounding: "99690039960006/handle_bounding.json"
+          name: "99690039960006"
+          path: "99690039960006/mobility.urdf"
+        "486":
+          bounding_box: "99690039960010/bounding_box.json"
+          handle_bounding: "99690039960010/handle_bounding.json"
+          name: "99690039960010"
+          path: "99690039960010/mobility.urdf"
+        "487":
+          bounding_box: "99690039960011/bounding_box.json"
+          handle_bounding: "99690039960011/handle_bounding.json"
+          name: "99690039960011"
+          path: "99690039960011/mobility.urdf"
+        "488":
+          bounding_box: "99690039960012/bounding_box.json"
+          handle_bounding: "99690039960012/handle_bounding.json"
+          name: "99690039960012"
+          path: "99690039960012/mobility.urdf"
+        "489":
+          bounding_box: "99690039960014/bounding_box.json"
+          handle_bounding: "99690039960014/handle_bounding.json"
+          name: "99690039960014"
+          path: "99690039960014/mobility.urdf"
+        "490":
+          bounding_box: "99690039960017/bounding_box.json"
+          handle_bounding: "99690039960017/handle_bounding.json"
+          name: "99690039960017"
+          path: "99690039960017/mobility.urdf"
+        "491":
+          bounding_box: "99690039960018/bounding_box.json"
+          handle_bounding: "99690039960018/handle_bounding.json"
+          name: "99690039960018"
+          path: "99690039960018/mobility.urdf"
+        "492":
+          bounding_box: "99690039960019/bounding_box.json"
+          handle_bounding: "99690039960019/handle_bounding.json"
+          name: "99690039960019"
+          path: "99690039960019/mobility.urdf"
+        "493":
+          bounding_box: "99690039960021/bounding_box.json"
+          handle_bounding: "99690039960021/handle_bounding.json"
+          name: "99690039960021"
+          path: "99690039960021/mobility.urdf"
+        "494":
+          bounding_box: "99690039960022/bounding_box.json"
+          handle_bounding: "99690039960022/handle_bounding.json"
+          name: "99690039960022"
+          path: "99690039960022/mobility.urdf"
+        "495":
+          bounding_box: "99690039960024/bounding_box.json"
+          handle_bounding: "99690039960024/handle_bounding.json"
+          name: "99690039960024"
+          path: "99690039960024/mobility.urdf"
+        "496":
+          bounding_box: "99690039960025/bounding_box.json"
+          handle_bounding: "99690039960025/handle_bounding.json"
+          name: "99690039960025"
+          path: "99690039960025/mobility.urdf"
+        "497":
+          bounding_box: "99690039960028/bounding_box.json"
+          handle_bounding: "99690039960028/handle_bounding.json"
+          name: "99690039960028"
+          path: "99690039960028/mobility.urdf"
+        "498":
+          bounding_box: "99690039960030/bounding_box.json"
+          handle_bounding: "99690039960030/handle_bounding.json"
+          name: "99690039960030"
+          path: "99690039960030/mobility.urdf"
+        "499":
+          bounding_box: "99690039960032/bounding_box.json"
+          handle_bounding: "99690039960032/handle_bounding.json"
+          name: "99690039960032"
+          path: "99690039960032/mobility.urdf"
+        "500":
+          bounding_box: "99690039960034/bounding_box.json"
+          handle_bounding: "99690039960034/handle_bounding.json"
+          name: "99690039960034"
+          path: "99690039960034/mobility.urdf"
+        "501":
+          bounding_box: "99690039960035/bounding_box.json"
+          handle_bounding: "99690039960035/handle_bounding.json"
+          name: "99690039960035"
+          path: "99690039960035/mobility.urdf"
+        "502":
+          bounding_box: "99690039960036/bounding_box.json"
+          handle_bounding: "99690039960036/handle_bounding.json"
+          name: "99690039960036"
+          path: "99690039960036/mobility.urdf"
+        "503":
+          bounding_box: "99690039960045/bounding_box.json"
+          handle_bounding: "99690039960045/handle_bounding.json"
+          name: "99690039960045"
+          path: "99690039960045/mobility.urdf"
+        "504":
+          bounding_box: "99690039960046/bounding_box.json"
+          handle_bounding: "99690039960046/handle_bounding.json"
+          name: "99690039960046"
+          path: "99690039960046/mobility.urdf"
+        "505":
+          bounding_box: "99690039960048/bounding_box.json"
+          handle_bounding: "99690039960048/handle_bounding.json"
+          name: "99690039960048"
+          path: "99690039960048/mobility.urdf"
+        "506":
+          bounding_box: "99690329960001/bounding_box.json"
+          handle_bounding: "99690329960001/handle_bounding.json"
+          name: "99690329960001"
+          path: "99690329960001/mobility.urdf"
+        "507":
+          bounding_box: "99690329960003/bounding_box.json"
+          handle_bounding: "99690329960003/handle_bounding.json"
+          name: "99690329960003"
+          path: "99690329960003/mobility.urdf"
+        "508":
+          bounding_box: "99690329960006/bounding_box.json"
+          handle_bounding: "99690329960006/handle_bounding.json"
+          name: "99690329960006"
+          path: "99690329960006/mobility.urdf"
+        "509":
+          bounding_box: "99690329960010/bounding_box.json"
+          handle_bounding: "99690329960010/handle_bounding.json"
+          name: "99690329960010"
+          path: "99690329960010/mobility.urdf"
+        "510":
+          bounding_box: "99690329960011/bounding_box.json"
+          handle_bounding: "99690329960011/handle_bounding.json"
+          name: "99690329960011"
+          path: "99690329960011/mobility.urdf"
+        "511":
+          bounding_box: "99690329960012/bounding_box.json"
+          handle_bounding: "99690329960012/handle_bounding.json"
+          name: "99690329960012"
+          path: "99690329960012/mobility.urdf"
+        "512":
+          bounding_box: "99690329960014/bounding_box.json"
+          handle_bounding: "99690329960014/handle_bounding.json"
+          name: "99690329960014"
+          path: "99690329960014/mobility.urdf"
+        "513":
+          bounding_box: "99690329960017/bounding_box.json"
+          handle_bounding: "99690329960017/handle_bounding.json"
+          name: "99690329960017"
+          path: "99690329960017/mobility.urdf"
+        "514":
+          bounding_box: "99690329960018/bounding_box.json"
+          handle_bounding: "99690329960018/handle_bounding.json"
+          name: "99690329960018"
+          path: "99690329960018/mobility.urdf"
+        "515":
+          bounding_box: "99690329960019/bounding_box.json"
+          handle_bounding: "99690329960019/handle_bounding.json"
+          name: "99690329960019"
+          path: "99690329960019/mobility.urdf"
+        "516":
+          bounding_box: "99690329960021/bounding_box.json"
+          handle_bounding: "99690329960021/handle_bounding.json"
+          name: "99690329960021"
+          path: "99690329960021/mobility.urdf"
+        "517":
+          bounding_box: "99690329960022/bounding_box.json"
+          handle_bounding: "99690329960022/handle_bounding.json"
+          name: "99690329960022"
+          path: "99690329960022/mobility.urdf"
+        "518":
+          bounding_box: "99690329960024/bounding_box.json"
+          handle_bounding: "99690329960024/handle_bounding.json"
+          name: "99690329960024"
+          path: "99690329960024/mobility.urdf"
+        "519":
+          bounding_box: "99690329960025/bounding_box.json"
+          handle_bounding: "99690329960025/handle_bounding.json"
+          name: "99690329960025"
+          path: "99690329960025/mobility.urdf"
+        "520":
+          bounding_box: "99690329960028/bounding_box.json"
+          handle_bounding: "99690329960028/handle_bounding.json"
+          name: "99690329960028"
+          path: "99690329960028/mobility.urdf"
+        "521":
+          bounding_box: "99690329960030/bounding_box.json"
+          handle_bounding: "99690329960030/handle_bounding.json"
+          name: "99690329960030"
+          path: "99690329960030/mobility.urdf"
+        "522":
+          bounding_box: "99690329960032/bounding_box.json"
+          handle_bounding: "99690329960032/handle_bounding.json"
+          name: "99690329960032"
+          path: "99690329960032/mobility.urdf"
+        "523":
+          bounding_box: "99690329960034/bounding_box.json"
+          handle_bounding: "99690329960034/handle_bounding.json"
+          name: "99690329960034"
+          path: "99690329960034/mobility.urdf"
+        "524":
+          bounding_box: "99690329960035/bounding_box.json"
+          handle_bounding: "99690329960035/handle_bounding.json"
+          name: "99690329960035"
+          path: "99690329960035/mobility.urdf"
+        "525":
+          bounding_box: "99690329960036/bounding_box.json"
+          handle_bounding: "99690329960036/handle_bounding.json"
+          name: "99690329960036"
+          path: "99690329960036/mobility.urdf"
+        "526":
+          bounding_box: "99690329960045/bounding_box.json"
+          handle_bounding: "99690329960045/handle_bounding.json"
+          name: "99690329960045"
+          path: "99690329960045/mobility.urdf"
+        "527":
+          bounding_box: "99690329960046/bounding_box.json"
+          handle_bounding: "99690329960046/handle_bounding.json"
+          name: "99690329960046"
+          path: "99690329960046/mobility.urdf"
+        "528":
+          bounding_box: "99690329960048/bounding_box.json"
+          handle_bounding: "99690329960048/handle_bounding.json"
+          name: "99690329960048"
+          path: "99690329960048/mobility.urdf"
+        "529":
+          bounding_box: "99690419960001/bounding_box.json"
+          handle_bounding: "99690419960001/handle_bounding.json"
+          name: "99690419960001"
+          path: "99690419960001/mobility.urdf"
+        "530":
+          bounding_box: "99690419960003/bounding_box.json"
+          handle_bounding: "99690419960003/handle_bounding.json"
+          name: "99690419960003"
+          path: "99690419960003/mobility.urdf"
+        "531":
+          bounding_box: "99690419960006/bounding_box.json"
+          handle_bounding: "99690419960006/handle_bounding.json"
+          name: "99690419960006"
+          path: "99690419960006/mobility.urdf"
+        "532":
+          bounding_box: "99690419960010/bounding_box.json"
+          handle_bounding: "99690419960010/handle_bounding.json"
+          name: "99690419960010"
+          path: "99690419960010/mobility.urdf"
+        "533":
+          bounding_box: "99690419960011/bounding_box.json"
+          handle_bounding: "99690419960011/handle_bounding.json"
+          name: "99690419960011"
+          path: "99690419960011/mobility.urdf"
+        "534":
+          bounding_box: "99690419960012/bounding_box.json"
+          handle_bounding: "99690419960012/handle_bounding.json"
+          name: "99690419960012"
+          path: "99690419960012/mobility.urdf"
+        "535":
+          bounding_box: "99690419960014/bounding_box.json"
+          handle_bounding: "99690419960014/handle_bounding.json"
+          name: "99690419960014"
+          path: "99690419960014/mobility.urdf"
+        "536":
+          bounding_box: "99690419960017/bounding_box.json"
+          handle_bounding: "99690419960017/handle_bounding.json"
+          name: "99690419960017"
+          path: "99690419960017/mobility.urdf"
+        "537":
+          bounding_box: "99690419960018/bounding_box.json"
+          handle_bounding: "99690419960018/handle_bounding.json"
+          name: "99690419960018"
+          path: "99690419960018/mobility.urdf"
+        "538":
+          bounding_box: "99690419960019/bounding_box.json"
+          handle_bounding: "99690419960019/handle_bounding.json"
+          name: "99690419960019"
+          path: "99690419960019/mobility.urdf"
+        "539":
+          bounding_box: "99690419960021/bounding_box.json"
+          handle_bounding: "99690419960021/handle_bounding.json"
+          name: "99690419960021"
+          path: "99690419960021/mobility.urdf"
+        "540":
+          bounding_box: "99690419960022/bounding_box.json"
+          handle_bounding: "99690419960022/handle_bounding.json"
+          name: "99690419960022"
+          path: "99690419960022/mobility.urdf"
+        "541":
+          bounding_box: "99690419960024/bounding_box.json"
+          handle_bounding: "99690419960024/handle_bounding.json"
+          name: "99690419960024"
+          path: "99690419960024/mobility.urdf"
+        "542":
+          bounding_box: "99690419960025/bounding_box.json"
+          handle_bounding: "99690419960025/handle_bounding.json"
+          name: "99690419960025"
+          path: "99690419960025/mobility.urdf"
+        "543":
+          bounding_box: "99690419960028/bounding_box.json"
+          handle_bounding: "99690419960028/handle_bounding.json"
+          name: "99690419960028"
+          path: "99690419960028/mobility.urdf"
+        "544":
+          bounding_box: "99690419960030/bounding_box.json"
+          handle_bounding: "99690419960030/handle_bounding.json"
+          name: "99690419960030"
+          path: "99690419960030/mobility.urdf"
+        "545":
+          bounding_box: "99690419960032/bounding_box.json"
+          handle_bounding: "99690419960032/handle_bounding.json"
+          name: "99690419960032"
+          path: "99690419960032/mobility.urdf"
+        "546":
+          bounding_box: "99690419960034/bounding_box.json"
+          handle_bounding: "99690419960034/handle_bounding.json"
+          name: "99690419960034"
+          path: "99690419960034/mobility.urdf"
+        "547":
+          bounding_box: "99690419960035/bounding_box.json"
+          handle_bounding: "99690419960035/handle_bounding.json"
+          name: "99690419960035"
+          path: "99690419960035/mobility.urdf"
+        "548":
+          bounding_box: "99690419960036/bounding_box.json"
+          handle_bounding: "99690419960036/handle_bounding.json"
+          name: "99690419960036"
+          path: "99690419960036/mobility.urdf"
+        "549":
+          bounding_box: "99690419960045/bounding_box.json"
+          handle_bounding: "99690419960045/handle_bounding.json"
+          name: "99690419960045"
+          path: "99690419960045/mobility.urdf"
+        "550":
+          bounding_box: "99690419960046/bounding_box.json"
+          handle_bounding: "99690419960046/handle_bounding.json"
+          name: "99690419960046"
+          path: "99690419960046/mobility.urdf"
+        "551":
+          bounding_box: "99690419960048/bounding_box.json"
+          handle_bounding: "99690419960048/handle_bounding.json"
+          name: "99690419960048"
+          path: "99690419960048/mobility.urdf"
+        "552":
+          bounding_box: "99690659960001/bounding_box.json"
+          handle_bounding: "99690659960001/handle_bounding.json"
+          name: "99690659960001"
+          path: "99690659960001/mobility.urdf"
+        "553":
+          bounding_box: "99690659960003/bounding_box.json"
+          handle_bounding: "99690659960003/handle_bounding.json"
+          name: "99690659960003"
+          path: "99690659960003/mobility.urdf"
+        "554":
+          bounding_box: "99690659960006/bounding_box.json"
+          handle_bounding: "99690659960006/handle_bounding.json"
+          name: "99690659960006"
+          path: "99690659960006/mobility.urdf"
+        "555":
+          bounding_box: "99690659960010/bounding_box.json"
+          handle_bounding: "99690659960010/handle_bounding.json"
+          name: "99690659960010"
+          path: "99690659960010/mobility.urdf"
+        "556":
+          bounding_box: "99690659960011/bounding_box.json"
+          handle_bounding: "99690659960011/handle_bounding.json"
+          name: "99690659960011"
+          path: "99690659960011/mobility.urdf"
+        "557":
+          bounding_box: "99690659960012/bounding_box.json"
+          handle_bounding: "99690659960012/handle_bounding.json"
+          name: "99690659960012"
+          path: "99690659960012/mobility.urdf"
+        "558":
+          bounding_box: "99690659960014/bounding_box.json"
+          handle_bounding: "99690659960014/handle_bounding.json"
+          name: "99690659960014"
+          path: "99690659960014/mobility.urdf"
+        "559":
+          bounding_box: "99690659960017/bounding_box.json"
+          handle_bounding: "99690659960017/handle_bounding.json"
+          name: "99690659960017"
+          path: "99690659960017/mobility.urdf"
+        "560":
+          bounding_box: "99690659960018/bounding_box.json"
+          handle_bounding: "99690659960018/handle_bounding.json"
+          name: "99690659960018"
+          path: "99690659960018/mobility.urdf"
+        "561":
+          bounding_box: "99690659960019/bounding_box.json"
+          handle_bounding: "99690659960019/handle_bounding.json"
+          name: "99690659960019"
+          path: "99690659960019/mobility.urdf"
+        "562":
+          bounding_box: "99690659960021/bounding_box.json"
+          handle_bounding: "99690659960021/handle_bounding.json"
+          name: "99690659960021"
+          path: "99690659960021/mobility.urdf"
+        "563":
+          bounding_box: "99690659960022/bounding_box.json"
+          handle_bounding: "99690659960022/handle_bounding.json"
+          name: "99690659960022"
+          path: "99690659960022/mobility.urdf"
+        "564":
+          bounding_box: "99690659960024/bounding_box.json"
+          handle_bounding: "99690659960024/handle_bounding.json"
+          name: "99690659960024"
+          path: "99690659960024/mobility.urdf"
+        "565":
+          bounding_box: "99690659960025/bounding_box.json"
+          handle_bounding: "99690659960025/handle_bounding.json"
+          name: "99690659960025"
+          path: "99690659960025/mobility.urdf"
+        "566":
+          bounding_box: "99690659960028/bounding_box.json"
+          handle_bounding: "99690659960028/handle_bounding.json"
+          name: "99690659960028"
+          path: "99690659960028/mobility.urdf"
+        "567":
+          bounding_box: "99690659960030/bounding_box.json"
+          handle_bounding: "99690659960030/handle_bounding.json"
+          name: "99690659960030"
+          path: "99690659960030/mobility.urdf"
+        "568":
+          bounding_box: "99690659960032/bounding_box.json"
+          handle_bounding: "99690659960032/handle_bounding.json"
+          name: "99690659960032"
+          path: "99690659960032/mobility.urdf"
+        "569":
+          bounding_box: "99690659960034/bounding_box.json"
+          handle_bounding: "99690659960034/handle_bounding.json"
+          name: "99690659960034"
+          path: "99690659960034/mobility.urdf"
+        "570":
+          bounding_box: "99690659960035/bounding_box.json"
+          handle_bounding: "99690659960035/handle_bounding.json"
+          name: "99690659960035"
+          path: "99690659960035/mobility.urdf"
+        "571":
+          bounding_box: "99690659960036/bounding_box.json"
+          handle_bounding: "99690659960036/handle_bounding.json"
+          name: "99690659960036"
+          path: "99690659960036/mobility.urdf"
+        "572":
+          bounding_box: "99690659960045/bounding_box.json"
+          handle_bounding: "99690659960045/handle_bounding.json"
+          name: "99690659960045"
+          path: "99690659960045/mobility.urdf"
+        "573":
+          bounding_box: "99690659960046/bounding_box.json"
+          handle_bounding: "99690659960046/handle_bounding.json"
+          name: "99690659960046"
+          path: "99690659960046/mobility.urdf"
+        "574":
+          bounding_box: "99690659960048/bounding_box.json"
+          handle_bounding: "99690659960048/handle_bounding.json"
+          name: "99690659960048"
+          path: "99690659960048/mobility.urdf"
+        "575":
+          bounding_box: "99691179960001/bounding_box.json"
+          handle_bounding: "99691179960001/handle_bounding.json"
+          name: "99691179960001"
+          path: "99691179960001/mobility.urdf"
+        "576":
+          bounding_box: "99691179960003/bounding_box.json"
+          handle_bounding: "99691179960003/handle_bounding.json"
+          name: "99691179960003"
+          path: "99691179960003/mobility.urdf"
+        "577":
+          bounding_box: "99691179960006/bounding_box.json"
+          handle_bounding: "99691179960006/handle_bounding.json"
+          name: "99691179960006"
+          path: "99691179960006/mobility.urdf"
+        "578":
+          bounding_box: "99691179960010/bounding_box.json"
+          handle_bounding: "99691179960010/handle_bounding.json"
+          name: "99691179960010"
+          path: "99691179960010/mobility.urdf"
+        "579":
+          bounding_box: "99691179960011/bounding_box.json"
+          handle_bounding: "99691179960011/handle_bounding.json"
+          name: "99691179960011"
+          path: "99691179960011/mobility.urdf"
+        "580":
+          bounding_box: "99691179960012/bounding_box.json"
+          handle_bounding: "99691179960012/handle_bounding.json"
+          name: "99691179960012"
+          path: "99691179960012/mobility.urdf"
+        "581":
+          bounding_box: "99691179960014/bounding_box.json"
+          handle_bounding: "99691179960014/handle_bounding.json"
+          name: "99691179960014"
+          path: "99691179960014/mobility.urdf"
+        "582":
+          bounding_box: "99691179960017/bounding_box.json"
+          handle_bounding: "99691179960017/handle_bounding.json"
+          name: "99691179960017"
+          path: "99691179960017/mobility.urdf"
+        "583":
+          bounding_box: "99691179960018/bounding_box.json"
+          handle_bounding: "99691179960018/handle_bounding.json"
+          name: "99691179960018"
+          path: "99691179960018/mobility.urdf"
+        "584":
+          bounding_box: "99691179960019/bounding_box.json"
+          handle_bounding: "99691179960019/handle_bounding.json"
+          name: "99691179960019"
+          path: "99691179960019/mobility.urdf"
+        "585":
+          bounding_box: "99691179960021/bounding_box.json"
+          handle_bounding: "99691179960021/handle_bounding.json"
+          name: "99691179960021"
+          path: "99691179960021/mobility.urdf"
+        "586":
+          bounding_box: "99691179960022/bounding_box.json"
+          handle_bounding: "99691179960022/handle_bounding.json"
+          name: "99691179960022"
+          path: "99691179960022/mobility.urdf"
+        "587":
+          bounding_box: "99691179960024/bounding_box.json"
+          handle_bounding: "99691179960024/handle_bounding.json"
+          name: "99691179960024"
+          path: "99691179960024/mobility.urdf"
+        "588":
+          bounding_box: "99691179960025/bounding_box.json"
+          handle_bounding: "99691179960025/handle_bounding.json"
+          name: "99691179960025"
+          path: "99691179960025/mobility.urdf"
+        "589":
+          bounding_box: "99691179960028/bounding_box.json"
+          handle_bounding: "99691179960028/handle_bounding.json"
+          name: "99691179960028"
+          path: "99691179960028/mobility.urdf"
+        "590":
+          bounding_box: "99691179960030/bounding_box.json"
+          handle_bounding: "99691179960030/handle_bounding.json"
+          name: "99691179960030"
+          path: "99691179960030/mobility.urdf"
+        "591":
+          bounding_box: "99691179960032/bounding_box.json"
+          handle_bounding: "99691179960032/handle_bounding.json"
+          name: "99691179960032"
+          path: "99691179960032/mobility.urdf"
+        "592":
+          bounding_box: "99691179960034/bounding_box.json"
+          handle_bounding: "99691179960034/handle_bounding.json"
+          name: "99691179960034"
+          path: "99691179960034/mobility.urdf"
+        "593":
+          bounding_box: "99691179960035/bounding_box.json"
+          handle_bounding: "99691179960035/handle_bounding.json"
+          name: "99691179960035"
+          path: "99691179960035/mobility.urdf"
+        "594":
+          bounding_box: "99691179960036/bounding_box.json"
+          handle_bounding: "99691179960036/handle_bounding.json"
+          name: "99691179960036"
+          path: "99691179960036/mobility.urdf"
+        "595":
+          bounding_box: "99691179960045/bounding_box.json"
+          handle_bounding: "99691179960045/handle_bounding.json"
+          name: "99691179960045"
+          path: "99691179960045/mobility.urdf"
+        "596":
+          bounding_box: "99691179960046/bounding_box.json"
+          handle_bounding: "99691179960046/handle_bounding.json"
+          name: "99691179960046"
+          path: "99691179960046/mobility.urdf"
+        "597":
+          bounding_box: "99691179960048/bounding_box.json"
+          handle_bounding: "99691179960048/handle_bounding.json"
+          name: "99691179960048"
+          path: "99691179960048/mobility.urdf"
+        "598":
+          bounding_box: "99691649960001/bounding_box.json"
+          handle_bounding: "99691649960001/handle_bounding.json"
+          name: "99691649960001"
+          path: "99691649960001/mobility.urdf"
+        "599":
+          bounding_box: "99691649960003/bounding_box.json"
+          handle_bounding: "99691649960003/handle_bounding.json"
+          name: "99691649960003"
+          path: "99691649960003/mobility.urdf"
+        "600":
+          bounding_box: "99691649960006/bounding_box.json"
+          handle_bounding: "99691649960006/handle_bounding.json"
+          name: "99691649960006"
+          path: "99691649960006/mobility.urdf"
+        "601":
+          bounding_box: "99691649960010/bounding_box.json"
+          handle_bounding: "99691649960010/handle_bounding.json"
+          name: "99691649960010"
+          path: "99691649960010/mobility.urdf"
+        "602":
+          bounding_box: "99691649960011/bounding_box.json"
+          handle_bounding: "99691649960011/handle_bounding.json"
+          name: "99691649960011"
+          path: "99691649960011/mobility.urdf"
+        "603":
+          bounding_box: "99691649960012/bounding_box.json"
+          handle_bounding: "99691649960012/handle_bounding.json"
+          name: "99691649960012"
+          path: "99691649960012/mobility.urdf"
+        "604":
+          bounding_box: "99691649960014/bounding_box.json"
+          handle_bounding: "99691649960014/handle_bounding.json"
+          name: "99691649960014"
+          path: "99691649960014/mobility.urdf"
+        "605":
+          bounding_box: "99691649960017/bounding_box.json"
+          handle_bounding: "99691649960017/handle_bounding.json"
+          name: "99691649960017"
+          path: "99691649960017/mobility.urdf"
+        "606":
+          bounding_box: "99691649960018/bounding_box.json"
+          handle_bounding: "99691649960018/handle_bounding.json"
+          name: "99691649960018"
+          path: "99691649960018/mobility.urdf"
+        "607":
+          bounding_box: "99691649960019/bounding_box.json"
+          handle_bounding: "99691649960019/handle_bounding.json"
+          name: "99691649960019"
+          path: "99691649960019/mobility.urdf"
+        "608":
+          bounding_box: "99691649960021/bounding_box.json"
+          handle_bounding: "99691649960021/handle_bounding.json"
+          name: "99691649960021"
+          path: "99691649960021/mobility.urdf"
+        "609":
+          bounding_box: "99691649960022/bounding_box.json"
+          handle_bounding: "99691649960022/handle_bounding.json"
+          name: "99691649960022"
+          path: "99691649960022/mobility.urdf"
+        "610":
+          bounding_box: "99691649960024/bounding_box.json"
+          handle_bounding: "99691649960024/handle_bounding.json"
+          name: "99691649960024"
+          path: "99691649960024/mobility.urdf"
+        "611":
+          bounding_box: "99691649960025/bounding_box.json"
+          handle_bounding: "99691649960025/handle_bounding.json"
+          name: "99691649960025"
+          path: "99691649960025/mobility.urdf"
+        "612":
+          bounding_box: "99691649960028/bounding_box.json"
+          handle_bounding: "99691649960028/handle_bounding.json"
+          name: "99691649960028"
+          path: "99691649960028/mobility.urdf"
+        "613":
+          bounding_box: "99691649960030/bounding_box.json"
+          handle_bounding: "99691649960030/handle_bounding.json"
+          name: "99691649960030"
+          path: "99691649960030/mobility.urdf"
+        "614":
+          bounding_box: "99691649960032/bounding_box.json"
+          handle_bounding: "99691649960032/handle_bounding.json"
+          name: "99691649960032"
+          path: "99691649960032/mobility.urdf"
+        "615":
+          bounding_box: "99691649960034/bounding_box.json"
+          handle_bounding: "99691649960034/handle_bounding.json"
+          name: "99691649960034"
+          path: "99691649960034/mobility.urdf"
+        "616":
+          bounding_box: "99691649960035/bounding_box.json"
+          handle_bounding: "99691649960035/handle_bounding.json"
+          name: "99691649960035"
+          path: "99691649960035/mobility.urdf"
+        "617":
+          bounding_box: "99691649960036/bounding_box.json"
+          handle_bounding: "99691649960036/handle_bounding.json"
+          name: "99691649960036"
+          path: "99691649960036/mobility.urdf"
+        "618":
+          bounding_box: "99691649960045/bounding_box.json"
+          handle_bounding: "99691649960045/handle_bounding.json"
+          name: "99691649960045"
+          path: "99691649960045/mobility.urdf"
+        "619":
+          bounding_box: "99691649960046/bounding_box.json"
+          handle_bounding: "99691649960046/handle_bounding.json"
+          name: "99691649960046"
+          path: "99691649960046/mobility.urdf"
+        "620":
+          bounding_box: "99691649960048/bounding_box.json"
+          handle_bounding: "99691649960048/handle_bounding.json"
+          name: "99691649960048"
+          path: "99691649960048/mobility.urdf"
+        "621":
+          bounding_box: "99692779960001/bounding_box.json"
+          handle_bounding: "99692779960001/handle_bounding.json"
+          name: "99692779960001"
+          path: "99692779960001/mobility.urdf"
+        "622":
+          bounding_box: "99692779960003/bounding_box.json"
+          handle_bounding: "99692779960003/handle_bounding.json"
+          name: "99692779960003"
+          path: "99692779960003/mobility.urdf"
+        "623":
+          bounding_box: "99692779960006/bounding_box.json"
+          handle_bounding: "99692779960006/handle_bounding.json"
+          name: "99692779960006"
+          path: "99692779960006/mobility.urdf"
+        "624":
+          bounding_box: "99692779960010/bounding_box.json"
+          handle_bounding: "99692779960010/handle_bounding.json"
+          name: "99692779960010"
+          path: "99692779960010/mobility.urdf"
+        "625":
+          bounding_box: "99692779960011/bounding_box.json"
+          handle_bounding: "99692779960011/handle_bounding.json"
+          name: "99692779960011"
+          path: "99692779960011/mobility.urdf"
+        "626":
+          bounding_box: "99692779960012/bounding_box.json"
+          handle_bounding: "99692779960012/handle_bounding.json"
+          name: "99692779960012"
+          path: "99692779960012/mobility.urdf"
+        "627":
+          bounding_box: "99692779960014/bounding_box.json"
+          handle_bounding: "99692779960014/handle_bounding.json"
+          name: "99692779960014"
+          path: "99692779960014/mobility.urdf"
+        "628":
+          bounding_box: "99692779960017/bounding_box.json"
+          handle_bounding: "99692779960017/handle_bounding.json"
+          name: "99692779960017"
+          path: "99692779960017/mobility.urdf"
+        "629":
+          bounding_box: "99692779960018/bounding_box.json"
+          handle_bounding: "99692779960018/handle_bounding.json"
+          name: "99692779960018"
+          path: "99692779960018/mobility.urdf"
+        "630":
+          bounding_box: "99692779960019/bounding_box.json"
+          handle_bounding: "99692779960019/handle_bounding.json"
+          name: "99692779960019"
+          path: "99692779960019/mobility.urdf"
+        "631":
+          bounding_box: "99692779960021/bounding_box.json"
+          handle_bounding: "99692779960021/handle_bounding.json"
+          name: "99692779960021"
+          path: "99692779960021/mobility.urdf"
+        "632":
+          bounding_box: "99692779960022/bounding_box.json"
+          handle_bounding: "99692779960022/handle_bounding.json"
+          name: "99692779960022"
+          path: "99692779960022/mobility.urdf"
+        "633":
+          bounding_box: "99692779960024/bounding_box.json"
+          handle_bounding: "99692779960024/handle_bounding.json"
+          name: "99692779960024"
+          path: "99692779960024/mobility.urdf"
+        "634":
+          bounding_box: "99692779960025/bounding_box.json"
+          handle_bounding: "99692779960025/handle_bounding.json"
+          name: "99692779960025"
+          path: "99692779960025/mobility.urdf"
+        "635":
+          bounding_box: "99692779960028/bounding_box.json"
+          handle_bounding: "99692779960028/handle_bounding.json"
+          name: "99692779960028"
+          path: "99692779960028/mobility.urdf"
+        "636":
+          bounding_box: "99692779960030/bounding_box.json"
+          handle_bounding: "99692779960030/handle_bounding.json"
+          name: "99692779960030"
+          path: "99692779960030/mobility.urdf"
+        "637":
+          bounding_box: "99692779960032/bounding_box.json"
+          handle_bounding: "99692779960032/handle_bounding.json"
+          name: "99692779960032"
+          path: "99692779960032/mobility.urdf"
+        "638":
+          bounding_box: "99692779960034/bounding_box.json"
+          handle_bounding: "99692779960034/handle_bounding.json"
+          name: "99692779960034"
+          path: "99692779960034/mobility.urdf"
+        "639":
+          bounding_box: "99692779960035/bounding_box.json"
+          handle_bounding: "99692779960035/handle_bounding.json"
+          name: "99692779960035"
+          path: "99692779960035/mobility.urdf"
+        "640":
+          bounding_box: "99692779960036/bounding_box.json"
+          handle_bounding: "99692779960036/handle_bounding.json"
+          name: "99692779960036"
+          path: "99692779960036/mobility.urdf"
+        "641":
+          bounding_box: "99692779960045/bounding_box.json"
+          handle_bounding: "99692779960045/handle_bounding.json"
+          name: "99692779960045"
+          path: "99692779960045/mobility.urdf"
+        "642":
+          bounding_box: "99692779960046/bounding_box.json"
+          handle_bounding: "99692779960046/handle_bounding.json"
+          name: "99692779960046"
+          path: "99692779960046/mobility.urdf"
+        "643":
+          bounding_box: "99692779960048/bounding_box.json"
+          handle_bounding: "99692779960048/handle_bounding.json"
+          name: "99692779960048"
+          path: "99692779960048/mobility.urdf"
+        "644":
+          bounding_box: "99692809960001/bounding_box.json"
+          handle_bounding: "99692809960001/handle_bounding.json"
+          name: "99692809960001"
+          path: "99692809960001/mobility.urdf"
+        "645":
+          bounding_box: "99692809960003/bounding_box.json"
+          handle_bounding: "99692809960003/handle_bounding.json"
+          name: "99692809960003"
+          path: "99692809960003/mobility.urdf"
+        "646":
+          bounding_box: "99692809960006/bounding_box.json"
+          handle_bounding: "99692809960006/handle_bounding.json"
+          name: "99692809960006"
+          path: "99692809960006/mobility.urdf"
+        "647":
+          bounding_box: "99692809960010/bounding_box.json"
+          handle_bounding: "99692809960010/handle_bounding.json"
+          name: "99692809960010"
+          path: "99692809960010/mobility.urdf"
+        "648":
+          bounding_box: "99692809960011/bounding_box.json"
+          handle_bounding: "99692809960011/handle_bounding.json"
+          name: "99692809960011"
+          path: "99692809960011/mobility.urdf"
+        "649":
+          bounding_box: "99692809960012/bounding_box.json"
+          handle_bounding: "99692809960012/handle_bounding.json"
+          name: "99692809960012"
+          path: "99692809960012/mobility.urdf"
+        "650":
+          bounding_box: "99692809960014/bounding_box.json"
+          handle_bounding: "99692809960014/handle_bounding.json"
+          name: "99692809960014"
+          path: "99692809960014/mobility.urdf"
+        "651":
+          bounding_box: "99692809960017/bounding_box.json"
+          handle_bounding: "99692809960017/handle_bounding.json"
+          name: "99692809960017"
+          path: "99692809960017/mobility.urdf"
+        "652":
+          bounding_box: "99692809960018/bounding_box.json"
+          handle_bounding: "99692809960018/handle_bounding.json"
+          name: "99692809960018"
+          path: "99692809960018/mobility.urdf"
+        "653":
+          bounding_box: "99692809960019/bounding_box.json"
+          handle_bounding: "99692809960019/handle_bounding.json"
+          name: "99692809960019"
+          path: "99692809960019/mobility.urdf"
+        "654":
+          bounding_box: "99692809960021/bounding_box.json"
+          handle_bounding: "99692809960021/handle_bounding.json"
+          name: "99692809960021"
+          path: "99692809960021/mobility.urdf"
+        "655":
+          bounding_box: "99692809960022/bounding_box.json"
+          handle_bounding: "99692809960022/handle_bounding.json"
+          name: "99692809960022"
+          path: "99692809960022/mobility.urdf"
+        "656":
+          bounding_box: "99692809960024/bounding_box.json"
+          handle_bounding: "99692809960024/handle_bounding.json"
+          name: "99692809960024"
+          path: "99692809960024/mobility.urdf"
+        "657":
+          bounding_box: "99692809960025/bounding_box.json"
+          handle_bounding: "99692809960025/handle_bounding.json"
+          name: "99692809960025"
+          path: "99692809960025/mobility.urdf"
+        "658":
+          bounding_box: "99692809960028/bounding_box.json"
+          handle_bounding: "99692809960028/handle_bounding.json"
+          name: "99692809960028"
+          path: "99692809960028/mobility.urdf"
+        "659":
+          bounding_box: "99692809960030/bounding_box.json"
+          handle_bounding: "99692809960030/handle_bounding.json"
+          name: "99692809960030"
+          path: "99692809960030/mobility.urdf"
+        "660":
+          bounding_box: "99692809960032/bounding_box.json"
+          handle_bounding: "99692809960032/handle_bounding.json"
+          name: "99692809960032"
+          path: "99692809960032/mobility.urdf"
+        "661":
+          bounding_box: "99692809960034/bounding_box.json"
+          handle_bounding: "99692809960034/handle_bounding.json"
+          name: "99692809960034"
+          path: "99692809960034/mobility.urdf"
+        "662":
+          bounding_box: "99692809960035/bounding_box.json"
+          handle_bounding: "99692809960035/handle_bounding.json"
+          name: "99692809960035"
+          path: "99692809960035/mobility.urdf"
+        "663":
+          bounding_box: "99692809960036/bounding_box.json"
+          handle_bounding: "99692809960036/handle_bounding.json"
+          name: "99692809960036"
+          path: "99692809960036/mobility.urdf"
+        "664":
+          bounding_box: "99692809960045/bounding_box.json"
+          handle_bounding: "99692809960045/handle_bounding.json"
+          name: "99692809960045"
+          path: "99692809960045/mobility.urdf"
+        "665":
+          bounding_box: "99692809960046/bounding_box.json"
+          handle_bounding: "99692809960046/handle_bounding.json"
+          name: "99692809960046"
+          path: "99692809960046/mobility.urdf"
+        "666":
+          bounding_box: "99692809960048/bounding_box.json"
+          handle_bounding: "99692809960048/handle_bounding.json"
+          name: "99692809960048"
+          path: "99692809960048/mobility.urdf"
 
     control:
       stiffness: {"joint": 80, "z1": 5}

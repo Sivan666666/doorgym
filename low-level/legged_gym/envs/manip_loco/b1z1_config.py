@@ -140,12 +140,12 @@ class B1Z1RoughCfg( LeggedRobotCfg ):
             'RR_calf_joint': -1.5,    # [rad]
 
             'z1_waist': 0.0,
-            'z1_shoulder': 1.92,
-            'z1_elbow': -1.0,
-            'z1_wrist_angle': -0.86,
+            'z1_shoulder': 1.48,
+            'z1_elbow': -0.63,
+            'z1_wrist_angle': -0.84,
             'z1_forearm_roll': 0.0,
-            'z1_wrist_rotate': 0.0,
-            'z1_jointGripper': 0.0,
+            'z1_wrist_rotate': 1.57,
+            'z1_jointGripper': -0.785,
         }
         rand_yaw_range = np.pi/2
         origin_perturb_range = 0.5

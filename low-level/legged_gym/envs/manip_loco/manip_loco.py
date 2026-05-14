@@ -257,7 +257,7 @@ class ManipLoco(LeggedRobot):
                                     self.commands[:, :3] * self.commands_scale,  # dim 3
                                     # self.curr_ee_goal_sphere,  # dim 3 position
                                     ee_goal_local_cart,  # dim 3 position
-                                    self.ee_goal_orn_delta_rpy  # dim 3 orientation command
+                                    torch.zeros_like(self.ee_goal_orn_delta_rpy)  # dim 3 orientation command disabled for old ckpt compatibility
                                     ),dim=-1)
         if self.cfg.env.observe_gait_commands:
             obs_buf = torch.cat((obs_buf,
@@ -914,7 +914,8 @@ class ManipLoco(LeggedRobot):
         old_dof_vel = self.dof_vel.clone()
         self.dof_pos[:] = self.default_dof_pos
         self.dof_vel[:] = 0.0
-        self.gym.set_dof_state_tensor(self.sim, gymtorch.unwrap_tensor(self.dof_state))
+        dof_state_tensor = self._full_dof_state if hasattr(self, "_full_dof_state") else self.dof_state
+        self.gym.set_dof_state_tensor(self.sim, gymtorch.unwrap_tensor(dof_state_tensor))
         self.gym.refresh_rigid_body_state_tensor(self.sim)
 
         default_ee_orn_world = self.rigid_body_state[:, self.gripper_idx, 3:7]
@@ -926,7 +927,7 @@ class ManipLoco(LeggedRobot):
 
         self.dof_pos[:] = old_dof_pos
         self.dof_vel[:] = old_dof_vel
-        self.gym.set_dof_state_tensor(self.sim, gymtorch.unwrap_tensor(self.dof_state))
+        self.gym.set_dof_state_tensor(self.sim, gymtorch.unwrap_tensor(dof_state_tensor))
         self.gym.refresh_rigid_body_state_tensor(self.sim)
         return default_ee_orn_local.clone()
 

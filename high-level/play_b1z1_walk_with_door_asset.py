@@ -1507,9 +1507,13 @@ def main():
         red_axis_quat = quat_from_euler_xyz(red_axis_rot, zeros, zeros)
         return quat_mul(base_quat, red_axis_quat)
 
-    def ee_goal_delta_rpy_from_quat(target_pos, target_quat):
+    def ee_goal_delta_rpy_from_quat(target_pos, target_quat, env_ids=None):
         goal_roll, goal_pitch, goal_yaw = euler_from_quat(target_quat)
         center = env._get_ee_goal_spherical_center()
+        if env_ids is not None:
+            center = center[env_ids]
+        elif center.shape[0] != target_pos.shape[0]:
+            center = center[: target_pos.shape[0]]
         target_cart = target_pos - center
         target_xy_len = torch.norm(target_cart[:, :2], dim=-1)
         target_sphere_pitch = torch.atan2(target_cart[:, 2], target_xy_len)
