@@ -254,10 +254,11 @@ class FloatIKDoorWorld:
         robot_opts.vhacd_enabled = True
         robot_opts.vhacd_params = gymapi.VhacdParams()
         robot_opts.vhacd_params.resolution = self.args.robot_vhacd_resolution
-        robot_root = HIGH_LEVEL_ROOT / "data" / "asset" / "b1z1-float"
-        self.robot_asset = self.gym.load_asset(self.sim, str(robot_root), "urdf/b1z1.urdf", robot_opts)
+        robot_root = HIGH_LEVEL_ROOT / "data" / "asset" / "b1z1-base-arm-from-lowlevel"
+        robot_file = "urdf/b1z1_base_arm.urdf"
+        self.robot_asset = self.gym.load_asset(self.sim, str(robot_root), robot_file, robot_opts)
         if self.robot_asset is None:
-            raise RuntimeError("Failed to load b1z1-float URDF")
+            raise RuntimeError(f"Failed to load {robot_root / robot_file}")
         self.robot_dof_names = self.gym.get_asset_dof_names(self.robot_asset)
         self.robot_body_names = self.gym.get_asset_rigid_body_names(self.robot_asset)
         self.robot_body_dict = self.gym.get_asset_rigid_body_dict(self.robot_asset)
@@ -265,7 +266,7 @@ class FloatIKDoorWorld:
         self.num_robot_dofs = self.gym.get_asset_dof_count(self.robot_asset)
         self.num_robot_bodies = self.gym.get_asset_rigid_body_count(self.robot_asset)
         print("------------------------------------------------------")
-        print("float_robot_asset:", robot_root / "urdf" / "b1z1.urdf")
+        print("float_robot_asset:", robot_root / robot_file)
         print("float_robot_dofs:", self.robot_dof_names)
         print("float_robot_bodies:", self.robot_body_names)
         print("------------------------------------------------------")

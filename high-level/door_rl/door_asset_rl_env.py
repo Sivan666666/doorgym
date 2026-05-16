@@ -702,6 +702,13 @@ class DoorAssetRLVecEnv:
         gripper_error = torch.abs(self.low_env.external_gripper_target.mean(dim=-1) - target) / denom
         return torch.clamp(1.0 - gripper_error, 0.0, 1.0)
 
+    def _actual_gripper_closed(self):
+        gripper_pos = self.low_env.dof_pos[:, -self.low_env.cfg.env.num_gripper_joints :].mean(dim=-1)
+        denom = self.args.gripper_closed - self.args.gripper_open
+        if abs(denom) < 1e-6:
+            return torch.zeros_like(gripper_pos)
+        return torch.clamp((gripper_pos - self.args.gripper_open) / denom, 0.0, 1.0)
+
     def _body_pos(self, name, fallback=None):
         body_map = getattr(self.low_env, "body_names_to_idx", {})
         idx = body_map.get(name)
@@ -781,7 +788,12 @@ class DoorAssetRLVecEnv:
         base_reachable_margin = torch.clamp(arm_base_to_handle - self.args.ee_max_radius * 0.8, min=0.0)
         base_reach_dense = torch.exp(-3.0 * base_reachable_margin)
         base_reach_progress = torch.clamp(self.prev_arm_base_to_handle - arm_base_to_handle, min=-0.02, max=0.05)
-        self.base_stop_latch[:] = self.base_stop_latch | (arm_base_to_handle <= self.args.base_stop_dist)
+        base_stop_release = arm_base_to_handle > (self.args.base_stop_dist + 0.20)
+        self.base_stop_latch[:] = torch.where(
+            base_stop_release,
+            torch.zeros_like(self.base_stop_latch),
+            self.base_stop_latch | (arm_base_to_handle <= self.args.base_stop_dist),
+        )
         base_approach_active = ~self.base_stop_latch
         base_approach_active_f = base_approach_active.to(torch.float32)
         base_reach_active_f = 1.0 - base_approach_active_f
@@ -807,6 +819,8 @@ class DoorAssetRLVecEnv:
         policy_base_yaw_stop = torch.exp(-10.0 * torch.abs(policy_yaw_cmd))
         base_vx_stop = torch.exp(-8.0 * torch.abs(vx_cmd))
         base_yaw_stop = torch.exp(-10.0 * torch.abs(yaw_cmd))
+        base_reach_hold = torch.exp(-4.0 * torch.clamp(arm_base_to_handle - self.args.base_stop_dist, min=0.0))
+        distance_over_base_stop = torch.clamp(arm_base_to_handle - self.args.base_stop_dist, min=0.0)
         base_under_70cm = (arm_base_to_handle < 0.70).to(torch.float32)
         base_under_60cm = (arm_base_to_handle < 0.60).to(torch.float32)
         base_under_50cm = (arm_base_to_handle < self.args.base_approach_dist).to(torch.float32)
@@ -856,6 +870,8 @@ class DoorAssetRLVecEnv:
         tilt = torch.abs(self.low_env.projected_gravity[:, 0]) + torch.abs(self.low_env.projected_gravity[:, 1])
         gripper_open = self._gripper_reward(self.args.gripper_open)
         gripper_closed = self._gripper_reward(self.args.gripper_closed)
+        actual_gripper_closed = self._actual_gripper_closed()
+        actual_gripper_open = 1.0 - actual_gripper_closed
 
         handle_state = self.low_env._rigid_body_state[:, self.low_env.handle_body_idx, :]
         handle_rot = handle_state[:, 3:7]
@@ -898,7 +914,9 @@ class DoorAssetRLVecEnv:
         approach_gripper_handle = torch.exp(-8.0 * finger_mid_to_handle)
         finger_close_bonus = (finger_mid_to_handle <= 0.10).to(torch.float32)
         gripper_close_action = torch.clamp((actions[:, 6] + 1.0) * 0.5, min=0.0, max=1.0)
-        grasp_handle_reward = (ee_to_handle <= self.args.grasp_success_dist).to(torch.float32) * gripper_closed
+        gripper_open_action = 1.0 - gripper_close_action
+        grasp_close_score = 0.5 * gripper_closed + 0.5 * actual_gripper_closed
+        grasp_handle_reward = (ee_to_handle <= self.args.grasp_success_dist).to(torch.float32) * grasp_close_score
         hold_close = torch.exp(-8.0 * ee_to_handle)
 
         self._update_stagewise_phase(ee_to_handle, handle_progress, open_reward)
@@ -938,6 +956,7 @@ class DoorAssetRLVecEnv:
         grasped_stage = (
             (ee_to_handle <= max(self.args.grasp_success_dist, 0.12))
             & (gripper_closed > 0.75)
+            & (actual_gripper_closed > 0.35)
         ).to(torch.float32)
         grasp_stage = grasp_ready * (1.0 - grasped_stage)
         open_stage = grasp_ready * grasped_stage
@@ -954,11 +973,13 @@ class DoorAssetRLVecEnv:
             + 30.0 * policy_base_yaw_stop
             + 30.0 * ee_pose_action_stop
             + 4.0 * base_reach_dense
-            + 1.0 * gripper_open
+            + 4.0 * gripper_open
+            + 16.0 * gripper_open_action
+            + 6.0 * actual_gripper_open
             - 8.0 * torch.abs(yaw_cmd)
             - 1.5 * action_ee_pose_l2
             - self.args.rew_action_penalty * action_penalty
-                - self.args.rew_tilt_penalty * tilt
+            - self.args.rew_tilt_penalty * tilt
         )
         stage_reach_reward = (
             12.0 * reach_dense
@@ -968,11 +989,15 @@ class DoorAssetRLVecEnv:
             + 25.0 * reach_close_bonus
             + 8.0 * reach_goal_dense
             + 80.0 * reach_goal_progress
+            + 10.0 * base_reach_hold
             + 8.0 * base_still_reward
             + 6.0 * policy_base_still_reward
-            + 2.0 * gripper_open
+            + 8.0 * gripper_open
+            + 12.0 * gripper_open_action
+            + 6.0 * actual_gripper_open
             - 12.0 * ee_goal_clamp_penalty
             - 4.0 * distance_over_grasp
+            - 8.0 * distance_over_base_stop
             - self.args.rew_action_penalty * action_penalty
             - 0.01 * action_rate_l2
             - self.args.rew_tilt_penalty * tilt
@@ -984,9 +1009,10 @@ class DoorAssetRLVecEnv:
             + 18.0 * approach_gripper_handle
             + 10.0 * finger_close_bonus
             + 4.0 * grasp_around
-            + 18.0 * gripper_close_action
-            + 26.0 * gripper_closed
-            + 35.0 * grasp_handle_reward
+            + 24.0 * gripper_close_action
+            + 16.0 * gripper_closed
+            + 24.0 * actual_gripper_closed
+            + 45.0 * grasp_handle_reward
             + 8.0 * base_still_reward
             + 14.0 * policy_base_still_reward
             - 12.0 * ee_goal_clamp_penalty
@@ -1003,6 +1029,7 @@ class DoorAssetRLVecEnv:
             + 6.0 * grasp_around
             + 8.0 * gripper_close_action
             + 8.0 * gripper_closed
+            + 8.0 * actual_gripper_closed
             + 80.0 * handle_delta
             + 6.0 * handle_progress
             + 120.0 * open_delta
@@ -1041,14 +1068,18 @@ class DoorAssetRLVecEnv:
                 + 20.0 * ee_pos_action_alignment
                 + 20.0 * reach_close_bonus
                 + 50.0 * reach_success
-                + 2.0 * gripper_open
+                + 8.0 * gripper_open
+                + 12.0 * gripper_open_action
+                + 6.0 * actual_gripper_open
                 + 3.0 * reach_goal_dense
                 + 50.0 * reach_goal_progress
                 + 3.0 * base_reach_dense
                 + 40.0 * base_reach_progress
+                + 12.0 * base_reach_hold
                 + 5.0 * base_vx_stop
                 + 2.0 * base_yaw_stop
                 - 5.0 * ee_goal_clamp_penalty
+                - 10.0 * distance_over_base_stop
                 - 0.02 * action_pos_l2
                 - self.args.rew_action_penalty * action_penalty
                 - self.args.rew_tilt_penalty * tilt
@@ -1057,7 +1088,11 @@ class DoorAssetRLVecEnv:
             self.phase_success_buf[:] = reach_success > 0.5
             self.success_buf[:] = self.phase_success_buf
         elif self.args.reward_curriculum == "grasp":
-            grasp_now = (ee_to_handle < self.args.grasp_success_dist) & (gripper_closed > 0.65)
+            grasp_now = (
+                (ee_to_handle < self.args.grasp_success_dist)
+                & (gripper_closed > 0.65)
+                & (actual_gripper_closed > 0.35)
+            )
             grasp_hold = torch.where(grasp_now, self.grasp_hold_buf + 1, torch.zeros_like(self.grasp_hold_buf))
             grasp_success = (grasp_hold >= self.args.grasp_hold_steps).to(torch.float32)
             self.grasp_hold_buf[:] = grasp_hold
@@ -1123,6 +1158,8 @@ class DoorAssetRLVecEnv:
             "policy_base_yaw_stop": policy_base_yaw_stop.detach(),
             "base_vx_stop": base_vx_stop.detach(),
             "base_yaw_stop": base_yaw_stop.detach(),
+            "base_reach_hold": base_reach_hold.detach(),
+            "distance_over_base_stop": distance_over_base_stop.detach(),
             "base_under_70cm": base_under_70cm.detach(),
             "base_under_60cm": base_under_60cm.detach(),
             "base_under_50cm": base_under_50cm.detach(),
@@ -1137,6 +1174,8 @@ class DoorAssetRLVecEnv:
             "grasp_success": self.grasp_success_buf.detach().to(torch.float32),
             "gripper_open": gripper_open.detach(),
             "gripper_closed": gripper_closed.detach(),
+            "actual_gripper_open": actual_gripper_open.detach(),
+            "actual_gripper_closed": actual_gripper_closed.detach(),
             "ee_handle_alignment": ee_handle_alignment.detach(),
             "approach_ee_handle": approach_ee_handle.detach(),
             "align_ee_handle": align_ee_handle.detach(),
@@ -1146,6 +1185,7 @@ class DoorAssetRLVecEnv:
             "grasp_around_handle": grasp_around.detach(),
             "grasp_handle": grasp_handle_reward.detach(),
             "gripper_close_action": gripper_close_action.detach(),
+            "gripper_open_action": gripper_open_action.detach(),
             "handle": handle_progress.detach(),
             "handle_delta": handle_delta.detach(),
             "open": open_reward.detach(),
@@ -1246,6 +1286,8 @@ class DoorAssetRLVecEnv:
             "policy_base_yaw_stop": mean_value("policy_base_yaw_stop"),
             "base_vx_stop": mean_value("base_vx_stop"),
             "base_yaw_stop": mean_value("base_yaw_stop"),
+            "base_reach_hold": mean_value("base_reach_hold"),
+            "distance_over_base_stop": mean_value("distance_over_base_stop"),
             "base_under_70cm_rate": mean_value("base_under_70cm"),
             "base_under_60cm_rate": mean_value("base_under_60cm"),
             "base_under_50cm_rate": mean_value("base_under_50cm"),
@@ -1258,6 +1300,8 @@ class DoorAssetRLVecEnv:
             "reach_under_08cm_rate": mean_value("reach_under_08cm"),
             "gripper_open": mean_value("gripper_open"),
             "gripper_closed": mean_value("gripper_closed"),
+            "actual_gripper_open": mean_value("actual_gripper_open"),
+            "actual_gripper_closed": mean_value("actual_gripper_closed"),
             "approach_ee_handle": mean_value("approach_ee_handle"),
             "align_ee_handle": mean_value("align_ee_handle"),
             "approach_gripper_handle": mean_value("approach_gripper_handle"),
@@ -1266,6 +1310,7 @@ class DoorAssetRLVecEnv:
             "grasp_around_handle_rate": mean_value("grasp_around_handle"),
             "grasp_handle": mean_value("grasp_handle"),
             "gripper_close_action": mean_value("gripper_close_action"),
+            "gripper_open_action": mean_value("gripper_open_action"),
             "handle_open_ratio": mean_value("handle"),
             "handle_delta": mean_value("handle_delta"),
             "signed_open_ratio": mean_value("signed_open_ratio"),

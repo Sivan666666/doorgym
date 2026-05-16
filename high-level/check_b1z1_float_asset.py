@@ -49,6 +49,7 @@ def parse_args():
     parser.add_argument("--robot_y", type=float, default=0.0)
     parser.add_argument("--robot_z", type=float, default=0.8)
     parser.add_argument("--robot_yaw", type=float, default=0.0)
+    parser.add_argument("--print_body_states", action="store_true")
     return parser.parse_args()
 
 
@@ -165,6 +166,13 @@ def main():
     gym.refresh_actor_root_state_tensor(sim)
     print("spawn_pose_xyz:", [float(args.robot_x), float(args.robot_y), float(args.robot_z)])
     print("actual_root_xyz:", root_states[0, :3].detach().cpu().tolist())
+    rigid_body_states = gymtorch.wrap_tensor(gym.acquire_rigid_body_state_tensor(sim))
+    gym.refresh_rigid_body_state_tensor(sim)
+    if args.print_body_states:
+        body_names = gym.get_actor_rigid_body_names(env, actor)
+        print("body_world_positions:")
+        for i, name in enumerate(body_names):
+            print(f"  {i:02d} {name}: {rigid_body_states[i, :3].detach().cpu().tolist()}")
 
     viewer = None
     if not args.headless:

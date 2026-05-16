@@ -445,3 +445,64 @@ conda run --no-capture-output -n b1z1 python -u high-level/door_rl/train_door_rl
 - `actual_command.base_vx_cmd`：真实底层 command。
 - `metrics.base_stop_latched`：为 `1.0` 后代表已进入 stop-hold。
 - `scaled_policy_command.base_vx_cmd` 只是 raw policy 缩放值，不代表真实执行命令。
+
+## 2026-05-14 Pure Policy Reach/Grasp Reward Debug
+
+目标：不使用 `--stagewise_action_assist`，重新调试 approach -> reach -> grasp。所有 base vx/yaw、EE、gripper command 都由 high-level policy 输出。
+
+关于 critic 真值信息：
+
+- teacher 的 actor/value 都使用 `_teacher_obs()`。
+- `_teacher_obs()` 已包含 `handle_base`、`door_base`、door dof、signed door angle/open ratio、handle_open_ratio、gripper_pos 等真值信息。
+- 当前实现不是 critic-only privileged state，而是 teacher actor 和 critic 都能看到这些真值；这对 teacher debug 是足够的。
+
+本轮代码修改：
+
+- `high-level/door_rl/door_asset_rl_env.py`
+  - 新增 `actual_gripper_closed` / `actual_gripper_open`，用真实 gripper joint position 计算，而不是只看 high-level gripper target。
+  - `grasp_success` 改为同时要求：
+    - `ee_to_handle < grasp_success_dist`
+    - policy gripper target 接近 closed
+    - 真实 gripper 也有一定闭合
+  - reward/log 新增：
+    - `actual_gripper_closed`
+    - `actual_gripper_open`
+    - `gripper_open_action`
+    - `base_reach_hold`
+    - `distance_over_base_stop`
+  - `base_stop_latch` 改成可释放：如果 latch 后又漂到 `base_stop_dist + 0.20m` 外，重新回到 base approach 阶段。
+  - reach/base approach 阶段加强：
+    - 鼓励 base 保持在 arm 可达区。
+    - 鼓励 gripper open。
+    - 惩罚 latch 后 base 离 stop 区太远。
+
+验证：
+
+```bash
+python -m py_compile high-level/door_rl/door_asset_rl_env.py high-level/door_rl/train_door_rl.py high-level/door_rl/models.py
+conda run --no-capture-output -n b1z1 python -u high-level/door_rl/train_door_rl.py --stage teacher --reward_curriculum grasp --mode pull --num_envs 4 --timesteps 100 --rl_device cuda:0 --sim_device cuda:0 --headless --run_name door_asset_pure_grasp_smoke_v1 --write_interval 24 --save_interval 100 --no_print_high_level_commands
+```
+
+训练调试记录：
+
+| Run | Curriculum | Init | 关键结果 |
+| --- | --- | --- | --- |
+| `door_asset_pure_reach_reward_v2` | reach | scratch | last10: `ee_to_handle_m≈0.729m`, `best_ee_to_handle_m≈0.569m`, `base_under_stop_dist≈0.528`, `reach_success=0`。最好窗口: `best_ee_to_handle_m≈0.483m`。 |
+| `door_asset_pure_reach_reward_v3` | reach | v2 ckpt | policy vx 明显变大，last10: `policy_base_vx_cmd≈0.198m/s`，但 `base_under_stop_dist≈0.355`，`reach_success=0`。最好窗口: `best_ee_to_handle_m≈0.424m`。 |
+| `door_asset_pure_reach_reward_v4_latch_release` | reach | v3 ckpt | 加入 latch release 后最好窗口改善到 `best_ee_to_handle_m≈0.396m`，`reach_under_12cm≈0.0094`，但 `reach_success=0`。 |
+| `door_asset_pure_reach_reward_v5_open_hold` | reach | v4 ckpt | 第一次出现非零 reach success：last10 `reach_success≈0.0016`，`reach_under_15cm≈0.0125`，`reach_under_20cm≈0.0266`。仍不稳定，真实 gripper 仍偏 closed。 |
+| `door_asset_pure_grasp_reward_v1_from_reach_v5` | grasp | v5 ckpt | debug 阈值 `grasp_entry=0.25m`、`grasp_success=0.15m`、`hold=3`。最好窗口出现 `grasp_success≈0.0031`，`grasp_handle≈0.0084`；last10 退化到 `grasp_success=0`，说明还没有稳定抓住。 |
+
+当前结论：
+
+- 有改善：纯 policy 已经从完全没有 success，提升到偶发 reach success 和偶发 grasp success。
+- 但还不能认为学会了抓把手：成功率只有千分级，且后段不稳定。
+- 当前 bottleneck 主要是 reach 还不稳定，base 经常仍在 `0.7m+`，导致 EE 大部分时间离把手太远；另外 gripper 在 reach 阶段仍偏闭合，需要继续调 reward 或初始化。
+
+当前最好 checkpoint：
+
+```text
+high-level/logs/door-rl/door_asset_pure_reach_reward_v5_open_hold/teacher/checkpoints/agent_2000.pt
+```
+
+这个 checkpoint 偶尔能 reach 成功；grasp checkpoint 虽出现过非零 grasp_success，但整体 reach/base 指标更差，暂不建议作为 play 首选。
