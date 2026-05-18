@@ -816,6 +816,8 @@ class ManipLocoDoorAsset(ManipLoco):
         if not getattr(self, "wrist_camera_tensors", None) and not getattr(self, "front_camera_tensors", None):
             return {}
 
+        if self.device != "cpu":
+            self.gym.fetch_results(self.sim, True)
         self.gym.step_graphics(self.sim)
         self.gym.render_all_camera_sensors(self.sim)
         self.gym.start_access_image_tensors(self.sim)
@@ -828,6 +830,21 @@ class ManipLocoDoorAsset(ManipLoco):
                 images[f"front_{name}"] = torch.stack([tensor.clone() for tensor in tensors], dim=0)
         finally:
             self.gym.end_access_image_tensors(self.sim)
+        if self.headless and not getattr(self, "_headless_camera_render_checked", False):
+            raw_depth_keys = [key for key in ("depth", "front_depth") if key in images]
+            if raw_depth_keys:
+                valid_depth_count = 0
+                for key in raw_depth_keys:
+                    raw_depth = images[key].clone().to(torch.float32)
+                    raw_depth = torch.nan_to_num(raw_depth, nan=0.0, posinf=0.0, neginf=0.0).abs()
+                    valid_depth_count += int(torch.count_nonzero(raw_depth > 1e-6).detach().cpu().item())
+                if valid_depth_count == 0:
+                    print(
+                        "⚠️📷 Headless camera render is blank: raw depth has no nonzero pixels. "
+                        "Check graphics_device_id/GPU rendering if this persists.",
+                        flush=True,
+                    )
+                self._headless_camera_render_checked = True
         for prefix in ("wrist", "front"):
             seg_key = "seg" if prefix == "wrist" and "seg" in images else f"{prefix}_seg"
             depth_key = "depth" if prefix == "wrist" and "depth" in images else f"{prefix}_depth"
