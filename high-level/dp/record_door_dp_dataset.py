@@ -119,7 +119,11 @@ def main():
         raise ValueError("--num_rollouts must be positive")
     modes = ["pull", "push"] if args.mode == "both" else [args.mode]
     if args.headless:
-        print("Warning: Isaac Gym wrist camera tensors may be unavailable in headless mode.", flush=True)
+        print(
+            "⚠️📷 Headless raw recording requested. If Isaac Gym cannot render camera tensors, "
+            "the play script will print a camera-unavailable warning and discard empty episodes.",
+            flush=True,
+        )
     if args.record_all_envs:
         print(
             f"Raw recording uses all {args.num_envs} envs in parallel for {args.num_rollouts} rollout(s) per mode; "

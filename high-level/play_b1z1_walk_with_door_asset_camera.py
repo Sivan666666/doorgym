@@ -757,6 +757,11 @@ class ManipLocoDoorAsset(ManipLoco):
         local_transform.p = gymapi.Vec3(*local_pos)
         local_transform.r = gymapi.Quat.from_euler_zyx(*local_rot)
         camera_handle = self.gym.create_camera_sensor(env_handle, camera_props)
+        if camera_handle < 0:
+            if not getattr(self, "_wrist_camera_create_warned", False):
+                print("⚠️📷 Wrist camera sensor creation failed; camera tensors will be disabled for this run.", flush=True)
+                self._wrist_camera_create_warned = True
+            return camera_handle
         self.gym.attach_camera_to_body(
             camera_handle,
             env_handle,
@@ -804,6 +809,11 @@ class ManipLocoDoorAsset(ManipLoco):
         local_transform.p = gymapi.Vec3(*local_pos)
         local_transform.r = gymapi.Quat.from_euler_zyx(*local_rot)
         camera_handle = self.gym.create_camera_sensor(env_handle, camera_props)
+        if camera_handle < 0:
+            if not getattr(self, "_front_camera_create_warned", False):
+                print("⚠️📷 Front camera sensor creation failed; front camera tensors will be disabled for this run.", flush=True)
+                self._front_camera_create_warned = True
+            return camera_handle
         self.gym.attach_camera_to_body(
             camera_handle,
             env_handle,
@@ -821,6 +831,16 @@ class ManipLocoDoorAsset(ManipLoco):
     def _init_wrist_camera_tensors(self):
         self.wrist_camera_tensors = {}
         self.front_camera_tensors = {}
+        if DOOR_RUNTIME["enable_wrist_camera"] and any(camera_handle < 0 for camera_handle in self.wrist_camera_handles):
+            if not getattr(self, "_wrist_camera_tensor_warned", False):
+                print("⚠️📷 Wrist camera handles are invalid; skipping wrist camera tensor access.", flush=True)
+                self._wrist_camera_tensor_warned = True
+            self.wrist_camera_handles = []
+        if DOOR_RUNTIME["enable_front_camera"] and any(camera_handle < 0 for camera_handle in self.front_camera_handles):
+            if not getattr(self, "_front_camera_tensor_warned", False):
+                print("⚠️📷 Front camera handles are invalid; skipping front camera tensor access.", flush=True)
+                self._front_camera_tensor_warned = True
+            self.front_camera_handles = []
         image_types = {
             "rgb": gymapi.IMAGE_COLOR,
             "depth": gymapi.IMAGE_DEPTH,
@@ -1588,7 +1608,12 @@ def main():
     DOOR_RUNTIME["camera_rgb"] = args.camera_rgb
     DOOR_RUNTIME["camera_depth"] = args.camera_depth
     DOOR_RUNTIME["camera_seg"] = args.camera_seg
-    DOOR_RUNTIME["show_seg"] = args.show_seg
+    DOOR_RUNTIME["show_seg"] = bool(args.show_seg and not args.headless)
+    if args.headless and args.show_seg:
+        print(
+            "⚠️📷 Headless mode disables OpenCV camera preview windows; DP recording still captures camera tensors.",
+            flush=True,
+        )
     DOOR_RUNTIME["handle_seg_id"] = args.handle_seg_id
     DOOR_RUNTIME["camera_depth_clip_lower"] = args.camera_depth_clip_lower
     DOOR_RUNTIME["camera_depth_clip_far"] = args.camera_depth_clip_far
@@ -1611,6 +1636,9 @@ def main():
 
     env_cfg.env.num_envs = args.num_envs
     env_cfg.env.episode_length_s = args.episode_length_s
+    env_cfg.env.enable_headless_camera = bool(
+        args.headless and (args.enable_wrist_camera or args.enable_front_camera or args.record_dp_dataset or args.dp_policy_checkpoint)
+    )
     terrain_side = max(2, int(math.ceil(math.sqrt(args.num_envs))))
     env_cfg.terrain.num_rows = terrain_side
     env_cfg.terrain.num_cols = terrain_side
@@ -1660,7 +1688,7 @@ def main():
             "rgb": args.camera_rgb,
             "depth": args.camera_depth,
             "seg": args.camera_seg,
-            "show_seg": args.show_seg,
+            "show_seg": DOOR_RUNTIME["show_seg"],
             "display_env": args.camera_env_id,
             "handle_seg_id": args.handle_seg_id,
             "down_tilt": args.wrist_camera_down_tilt,
@@ -1858,7 +1886,11 @@ def main():
                 "DP raw recording requires door_dp_common.py. It should not require LeRobot in the b1z1 environment."
             )
         if args.headless:
-            print("Warning: wrist camera tensor recording can fail in headless Isaac Gym runs.")
+            print(
+                "⚠️📷 Headless DP recording needs camera tensors; if the graphics device cannot render cameras, "
+                "raw episodes will be discarded with a camera-unavailable message.",
+                flush=True,
+            )
         if args.dp_record_env_id < 0 or args.dp_record_env_id >= args.num_envs:
             raise ValueError(f"--dp_record_env_id must be in [0, {args.num_envs - 1}]")
         state_names = make_state_feature_names(env.num_dofs, env.num_actions, phase_name)
@@ -2276,17 +2308,31 @@ def main():
         recorder = dp_recorders[env_id]
         if bool(dp_record_closed[env_id].item()):
             return
-        if bool(dp_record_success[env_id].item()):
+        if bool(dp_record_success[env_id].item()) and recorder.frame_count > 0:
             recorder.save_episode()
             print(
                 f"Saved successful raw Door DP episode env={env_id} "
-                f"frames={recorder.frame_count} reason={reason}"
+                f"frames={recorder.frame_count} reason={reason}",
+                flush=True,
+            )
+        elif recorder.frame_count == 0 and str(reason).startswith("camera_unavailable"):
+            print(
+                f"⚠️📷 Discarded raw Door DP episode env={env_id} "
+                f"frames=0 reason={reason}: camera images were unavailable, so no DP frames could be saved.",
+                flush=True,
+            )
+        elif bool(dp_record_success[env_id].item()):
+            print(
+                f"Discarded successful raw Door DP episode env={env_id} "
+                f"frames=0 reason={reason}: no DP frames were recorded.",
+                flush=True,
             )
         else:
             print(
                 f"Discarded failed raw Door DP episode env={env_id} "
                 f"frames={recorder.frame_count} reason={reason}: "
-                f"door did not reach {args.pass_open_angle_deg} deg"
+                f"door did not reach {args.pass_open_angle_deg} deg",
+                flush=True,
             )
         recorder.finalize()
         dp_record_closed[env_id] = True
@@ -2401,10 +2447,20 @@ def main():
                 if bool(dp_record_closed[env_id].item()):
                     continue
                 mask_rgb, masked_depth_rgb, front_mask_rgb, front_masked_depth_rgb = dp_image_inputs_from_camera_tensors(camera_images, env_id)
+                should_close = bool(pass_done[env_id].item()) or step == args.steps - 1
                 if mask_rgb is None or masked_depth_rgb is None:
                     if not dp_record_warned_no_camera:
-                        print("Warning: skipped DP frame because wrist camera images are unavailable.")
+                        print(
+                            "⚠️📷 Camera unavailable: skipped DP frame because wrist camera mask/depth images are missing. "
+                            "No raw DP frame can be saved until camera tensors are available.",
+                            flush=True,
+                        )
                         dp_record_warned_no_camera = True
+                    if should_close:
+                        close_dp_recording(
+                            env_id,
+                            "camera_unavailable_" + ("pass_done" if bool(pass_done[env_id].item()) else "max_steps"),
+                        )
                     continue
                 recorder.add_frame(
                     get_door_dp_state(env, phase_id, phase_name, env_id),
@@ -2420,7 +2476,6 @@ def main():
                         else None
                     ),
                 )
-                should_close = bool(pass_done[env_id].item()) or step == args.steps - 1
                 if should_close:
                     close_dp_recording(env_id, "pass_done" if bool(pass_done[env_id].item()) else "max_steps")
         env.draw_wrist_camera_axes(args.camera_axis_scale, args.camera_axis_thickness)
