@@ -102,6 +102,30 @@ def get_door_dp_action(env, env_id=0):
     return action[env_id].detach().cpu().to(torch.float32).numpy()
 
 
+def make_door_dp_replay_snapshot(env, env_id=0):
+    env_id = int(env_id)
+    snapshot = {
+        "replay_root_state": _to_numpy(env.root_states[env_id]).astype(np.float32),
+        "replay_dof_pos": _to_numpy(env.dof_pos[env_id]).astype(np.float32),
+        "replay_dof_vel": _to_numpy(env.dof_vel[env_id]).astype(np.float32),
+        "replay_ee_pos": _to_numpy(env.ee_pos[env_id]).astype(np.float32),
+        "replay_ee_quat": _to_numpy(env.ee_orn[env_id]).astype(np.float32),
+    }
+    if hasattr(env, "door_root_state"):
+        snapshot["replay_door_root_state"] = _to_numpy(env.door_root_state[env_id]).astype(np.float32)
+    if hasattr(env, "box_root_state"):
+        snapshot["replay_box_root_state"] = _to_numpy(env.box_root_state[env_id]).astype(np.float32)
+    if hasattr(env, "_door_dof_pos"):
+        snapshot["replay_door_dof_pos"] = _to_numpy(env._door_dof_pos[env_id]).astype(np.float32)
+    elif hasattr(env, "door_dof_pos"):
+        snapshot["replay_door_dof_pos"] = _to_numpy(env.door_dof_pos[env_id]).astype(np.float32)
+    if hasattr(env, "_door_dof_vel"):
+        snapshot["replay_door_dof_vel"] = _to_numpy(env._door_dof_vel[env_id]).astype(np.float32)
+    elif hasattr(env, "door_dof_vel"):
+        snapshot["replay_door_dof_vel"] = _to_numpy(env.door_dof_vel[env_id]).astype(np.float32)
+    return snapshot
+
+
 def make_door_dp_log_record(env, step, dp_action, env_id=0, phase_id=None, phase_names=None, extra=None):
     env_id = int(env_id)
     quat = env.ee_goal_orn_quat / torch.clamp(torch.norm(env.ee_goal_orn_quat, dim=-1, keepdim=True), min=1e-6)
@@ -350,12 +374,13 @@ class DoorDPLeRobotRecorder:
 
 
 class RawDoorDPRecorder:
-    def __init__(self, raw_root, fps, state_feature_names, task):
+    def __init__(self, raw_root, fps, state_feature_names, task, metadata=None):
         self.raw_root = Path(raw_root)
         self.fps = int(fps)
         self.task = str(task)
         self.state_feature_names = list(state_feature_names)
         self.action_names = list(ACTION_NAMES)
+        self.metadata = dict(metadata or {})
         self.raw_root.mkdir(parents=True, exist_ok=True)
         self.frames = {
             "state": [],
@@ -391,6 +416,7 @@ class RawDoorDPRecorder:
         subtask_index,
         front_mask_rgb=None,
         front_masked_depth_rgb=None,
+        replay_snapshot=None,
     ):
         front_mask_rgb = _zero_image_like(mask_rgb) if front_mask_rgb is None else front_mask_rgb
         front_masked_depth_rgb = _zero_image_like(masked_depth_rgb) if front_masked_depth_rgb is None else front_masked_depth_rgb
@@ -401,6 +427,9 @@ class RawDoorDPRecorder:
         self.frames["front_handle_mask"].append(np.asarray(front_mask_rgb, dtype=np.uint8))
         self.frames["front_masked_depth"].append(np.asarray(front_masked_depth_rgb, dtype=np.uint8))
         self.frames["subtask_index"].append(np.asarray([subtask_index], dtype=np.int64))
+        if replay_snapshot:
+            for key, value in replay_snapshot.items():
+                self.frames.setdefault(key, []).append(np.asarray(value, dtype=np.float32))
         self.frame_count += 1
 
     def _next_episode_path(self):
@@ -433,6 +462,13 @@ class RawDoorDPRecorder:
             "state_feature_names": np.asarray(self.state_feature_names, dtype=object),
             "action_names": np.asarray(self.action_names, dtype=object),
         }
+        for key, value in self.metadata.items():
+            if key not in payload:
+                payload[key] = np.asarray(value)
+        for key, values in self.frames.items():
+            if key in payload or not values or len(values) != self.frame_count:
+                continue
+            payload[key] = np.stack(values, axis=0).astype(np.float32)
         np.savez_compressed(out, **payload)
         self.episode_count += 1
         print(f"Saved raw Door DP episode: {out}")

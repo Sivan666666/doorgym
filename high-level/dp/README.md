@@ -10,6 +10,9 @@ This folder contains the reorganized Door Diffusion Policy pipeline.
 - `convert_door_raw_to_lerobot.py`  
   Convert raw `.npz` episodes into a local LeRobotDataset for visualization and training.
 
+- `replay_door_dp_raw_in_isaacgym.py`  
+  Replay a raw `.npz` episode in Isaac Gym, either by directly restoring recorded state or by re-running recorded high-level actions.
+
 - `train_door_dp.py`  
   Train the door diffusion policy from the converted LeRobotDataset.
 

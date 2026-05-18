@@ -44,6 +44,7 @@ try:
         get_door_dp_state,
         images_from_camera_tensors,
         make_door_dp_log_record,
+        make_door_dp_replay_snapshot,
         make_state_feature_names,
         print_door_dp_log_record,
     )
@@ -57,6 +58,7 @@ except Exception:
     get_door_dp_state = None
     images_from_camera_tensors = None
     make_door_dp_log_record = None
+    make_door_dp_replay_snapshot = None
     make_state_feature_names = None
     print_door_dp_log_record = None
 
@@ -1810,11 +1812,19 @@ def main():
         state_names = make_state_feature_names(env.num_dofs, env.num_actions, phase_name)
         record_env_ids = list(range(args.num_envs)) if args.dp_record_all_envs else [args.dp_record_env_id]
         for record_env_id in record_env_ids:
+            door_asset_index = int(env.door_asset_indices[record_env_id].detach().cpu().item())
+            door_asset_spec = env.door_asset_specs[door_asset_index]
             dp_recorders[record_env_id] = RawDoorDPRecorder(
                 raw_root=args.dp_raw_root,
                 fps=args.dp_fps,
                 state_feature_names=state_names,
                 task=args.dp_task,
+                metadata={
+                    "door_asset_index": door_asset_index,
+                    "door_asset_name": env.door_asset_names[door_asset_index],
+                    "door_asset_path": door_asset_spec.get("path", ""),
+                    "door_cfg": str(args.door_cfg),
+                },
             )
         print(
             f"Recording raw Door DP dataset to {args.dp_raw_root} task={args.dp_task!r} "
@@ -2351,6 +2361,11 @@ def main():
                     int(phase_id[env_id].detach().cpu().item()),
                     front_mask_rgb=front_mask_rgb,
                     front_masked_depth_rgb=front_masked_depth_rgb,
+                    replay_snapshot=(
+                        make_door_dp_replay_snapshot(env, env_id)
+                        if make_door_dp_replay_snapshot is not None
+                        else None
+                    ),
                 )
                 should_close = bool(pass_done[env_id].item()) or step == args.steps - 1
                 if should_close:

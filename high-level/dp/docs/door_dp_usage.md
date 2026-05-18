@@ -123,17 +123,63 @@ wrist_masked_depth     [T, 54, 96, 3]
 front_handle_mask      [T, 54, 96, 3]
 front_masked_depth     [T, 54, 96, 3]
 subtask_index          [T, 1]
+door_asset_index       scalar
+door_asset_name        scalar
+door_asset_path        scalar
+door_cfg               scalar
 task
 fps
 state_feature_names
 action_names
 ```
 
+`door_asset_index/name/path` identify the exact door asset used by the recorded env. Door assets
+are assigned by env index as `env_i % loaded_door_asset_count`; they are not randomly sampled.
+The index is the loaded asset index after the play script applies YAML/default filtering. Replay
+prefers `door_asset_name` to load the same mesh.
+
 `subtask_index` is saved only for visualization/debugging. It is not included in
 `observation.state`, so the DP policy does not receive scripted phase labels at
 inference time.
 
-## 3. Convert Raw Data To LeRobotDataset
+## 3. Replay Raw Data In Isaac Gym
+
+Use state replay to check whether the recorded data itself looks correct. This mode does not run
+the low-level policy; it restores recorded robot state each frame. New recordings include full
+replay snapshots for robot root, robot joints, and door joints. Older raw files only contain
+`observation.state`, so replay can restore `dof_pos/dof_vel` but not exact root xy/yaw or door state.
+For new raw episodes, replay reads `door_asset_name` from the `.npz` and loads only that matching
+door from `--door_cfg`.
+
+```bash
+conda run -n b1z1 python high-level/dp/replay_door_dp_raw_in_isaacgym.py \
+  --raw_episode data/door_dp_raw/local_door_dp/episode_000000.npz \
+  --replay_mode state \
+  --mode auto \
+  --num_envs 1 \
+  --rl_device cuda:0 \
+  --sim_device cuda:0
+```
+
+For old raw episodes without door metadata, provide the door manually:
+
+```bash
+--door_asset_name 99650089960001
+```
+
+Use action replay to re-run the recorded 10D high-level actions through the low-level policy:
+
+```bash
+conda run -n b1z1 python high-level/dp/replay_door_dp_raw_in_isaacgym.py \
+  --raw_episode data/door_dp_raw/local_door_dp/episode_000000.npz \
+  --replay_mode action \
+  --mode auto \
+  --num_envs 1 \
+  --rl_device cuda:0 \
+  --sim_device cuda:0
+```
+
+## 4. Convert Raw Data To LeRobotDataset
 
 Convert raw `.npz` episodes to a local LeRobotDataset:
 
@@ -151,7 +197,7 @@ Converted dataset path:
 data/lerobot/local/door_dp/
 ```
 
-## 4. View With Rerun
+## 5. View With Rerun
 
 Directly open the local LeRobotDataset in Rerun:
 
@@ -182,7 +228,7 @@ conda run -n b1z1_lerobot rerun \
   /home/sivan/whole_body/visual_whole_body/data/lerobot_viz/local_door_dp_episode_0.rrd
 ```
 
-## 5. Train Door DP
+## 6. Train Door DP
 
 Short smoke training, only checks the training pipeline:
 
@@ -222,7 +268,7 @@ Checkpoints are saved to:
 high-level/logs/door-dp/<run_name>/checkpoints/model_latest.pt
 ```
 
-## 6. Play A Trained DP Policy
+## 7. Play A Trained DP Policy
 
 Install DP inference dependencies in `b1z1` once:
 
@@ -270,7 +316,7 @@ conda run -n b1z1 python high-level/dp/play_door_dp_policy.py \
   --camera_display_scale 1
 ```
 
-## 7. Action And Observation Format
+## 8. Action And Observation Format
 
 Action is 10D:
 
