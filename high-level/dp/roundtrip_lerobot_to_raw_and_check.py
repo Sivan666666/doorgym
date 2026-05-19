@@ -7,9 +7,23 @@ import numpy as np
 import torch
 
 try:
-    from .door_dp_common import ACTION_NAMES, IMAGE_HEIGHT, IMAGE_WIDTH, import_lerobot_or_raise
+    from .door_dp_common import (
+        ACTION_NAMES,
+        IMAGE_HEIGHT,
+        IMAGE_WIDTH,
+        import_lerobot_or_raise,
+        normalize_vision_mode,
+        raw_image_keys_for_vision_mode,
+    )
 except ImportError:
-    from door_dp_common import ACTION_NAMES, IMAGE_HEIGHT, IMAGE_WIDTH, import_lerobot_or_raise
+    from door_dp_common import (
+        ACTION_NAMES,
+        IMAGE_HEIGHT,
+        IMAGE_WIDTH,
+        import_lerobot_or_raise,
+        normalize_vision_mode,
+        raw_image_keys_for_vision_mode,
+    )
 
 
 DP_ROOT = Path(__file__).resolve().parent
@@ -20,27 +34,17 @@ RAW_DP_KEYS = {
     "action",
     "wrist_handle_mask",
     "wrist_masked_depth",
+    "wrist_rgb",
     "front_handle_mask",
     "front_masked_depth",
+    "front_rgb",
     "subtask_index",
     "task",
     "fps",
+    "vision_mode",
     "state_feature_names",
     "action_names",
 }
-IMAGE_KEYS = [
-    "wrist_handle_mask",
-    "wrist_masked_depth",
-    "front_handle_mask",
-    "front_masked_depth",
-]
-LEROBOT_IMAGE_KEYS = {
-    "wrist_handle_mask": "observation.images.wrist_handle_mask",
-    "wrist_masked_depth": "observation.images.wrist_masked_depth",
-    "front_handle_mask": "observation.images.front_handle_mask",
-    "front_masked_depth": "observation.images.front_masked_depth",
-}
-
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -59,6 +63,7 @@ def parse_args():
         help="Output directory for reconstructed raw .npz episodes.",
     )
     parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--rgb", action="store_true", help="Roundtrip/check RGB+mask Door DP data.")
     parser.add_argument("--state_atol", type=float, default=1e-5)
     parser.add_argument("--action_atol", type=float, default=1e-5)
     parser.add_argument(
@@ -143,6 +148,27 @@ def scalar_str(value):
     if arr.shape == ():
         return str(arr.item())
     return str(arr.reshape(-1)[0])
+
+
+def lerobot_image_key(raw_key):
+    return f"observation.images.{raw_key}"
+
+
+def detect_raw_vision_mode(raw_data, raw_sidecar):
+    if raw_sidecar and raw_sidecar.get("vision_mode") is not None:
+        return normalize_vision_mode(raw_sidecar["vision_mode"])
+    if "vision_mode" in raw_data.files:
+        return normalize_vision_mode(scalar_str(raw_data["vision_mode"]))
+    if "wrist_rgb" in raw_data.files or "front_rgb" in raw_data.files:
+        return "rgb"
+    return "depth"
+
+
+def detect_lerobot_vision_mode(dataset_root):
+    sidecar = load_json(Path(dataset_root) / "door_dp_feature_names.json")
+    if sidecar and sidecar.get("vision_mode") is not None:
+        return normalize_vision_mode(sidecar["vision_mode"])
+    return "depth"
 
 
 def as_state(value):
@@ -255,17 +281,17 @@ def group_lerobot_indices(dataset, raw_files):
     return groups
 
 
-def decode_episode_from_lerobot(dataset, indices):
+def decode_episode_from_lerobot(dataset, indices, image_keys):
     states = []
     actions = []
-    images = {key: [] for key in IMAGE_KEYS}
+    images = {key: [] for key in image_keys}
     subtasks = []
     for idx in indices:
         frame = dataset[idx]
         states.append(as_state(field(frame, "observation.state")))
         actions.append(as_action(field(frame, "action")))
-        for raw_key, lerobot_key in LEROBOT_IMAGE_KEYS.items():
-            images[raw_key].append(as_hwc_u8(field(frame, lerobot_key)))
+        for raw_key in image_keys:
+            images[raw_key].append(as_hwc_u8(field(frame, lerobot_image_key(raw_key))))
         try:
             subtasks.append(as_subtask(field(frame, "subtask_index")))
         except Exception:
@@ -287,14 +313,16 @@ def copy_replay_and_metadata(raw_data, payload):
         payload[key] = np.asarray(raw_data[key])
 
 
-def write_sidecar(out_root, fps, state_names):
+def write_sidecar(out_root, fps, state_names, vision_mode, image_keys):
     sidecar = {
         "fps": int(fps),
         "state": list(state_names),
         "action": list(ACTION_NAMES),
-        "image_features": IMAGE_KEYS,
+        "image_features": list(image_keys),
         "format": "door_dp_raw_npz_v1_lerobot_roundtrip",
     }
+    if vision_mode == "rgb":
+        sidecar["vision_mode"] = vision_mode
     with (Path(out_root) / "door_dp_feature_names.json").open("w", encoding="utf-8") as f:
         json.dump(sidecar, f, indent=2)
 
@@ -387,24 +415,42 @@ def main():
 
     raw_sidecar = load_json(raw_root / "door_dp_feature_names.json")
     first_raw = np.load(raw_files[0], allow_pickle=True)
+    requested_vision_mode = "rgb" if args.rgb else "depth"
+    raw_vision_mode = detect_raw_vision_mode(first_raw, raw_sidecar)
+    lerobot_vision_mode = detect_lerobot_vision_mode(dataset_root)
+    if raw_vision_mode != requested_vision_mode:
+        raise ValueError(
+            f"Raw data vision_mode={raw_vision_mode!r}, but roundtrip was run with "
+            f"{'--rgb' if args.rgb else 'depth mode'}."
+        )
+    if lerobot_vision_mode != requested_vision_mode:
+        raise ValueError(
+            f"LeRobot data vision_mode={lerobot_vision_mode!r}, but roundtrip was run with "
+            f"{'--rgb' if args.rgb else 'depth mode'}."
+        )
+    image_keys = raw_image_keys_for_vision_mode(requested_vision_mode)
     raw_names = raw_state_names(first_raw, raw_sidecar)
     converted_names = lerobot_state_names(dataset_root, raw_names)
     fps = int(first_raw["fps"]) if "fps" in first_raw.files else int((raw_sidecar or {}).get("fps", 50))
     first_raw.close()
-    write_sidecar(out_root, fps, converted_names)
+    write_sidecar(out_root, fps, converted_names, requested_vision_mode, image_keys)
 
     report = {
         "raw_root": str(raw_root),
         "lerobot_root": str(dataset_root),
         "repo_id": args.repo_id,
         "out_raw_root": str(out_root),
+        "vision_mode": requested_vision_mode,
         "episodes": [],
     }
     all_ok = True
 
     for ep_idx, (raw_path, frame_indices) in enumerate(zip(raw_files, groups)):
-        converted = decode_episode_from_lerobot(dataset, frame_indices)
+        converted = decode_episode_from_lerobot(dataset, frame_indices, image_keys)
         with np.load(raw_path, allow_pickle=True) as raw_data:
+            episode_vision_mode = detect_raw_vision_mode(raw_data, raw_sidecar)
+            if episode_vision_mode != requested_vision_mode:
+                raise ValueError(f"{raw_path} has vision_mode={episode_vision_mode!r}, expected {requested_vision_mode!r}")
             raw_state_ref = state_reference(raw_data["state"].astype(np.float32), raw_names, converted_names)
             payload = {
                 **converted,
@@ -413,6 +459,8 @@ def main():
                 "state_feature_names": np.asarray(converted_names, dtype=str),
                 "action_names": np.asarray(ACTION_NAMES, dtype=str),
             }
+            if requested_vision_mode == "rgb":
+                payload["vision_mode"] = np.asarray(requested_vision_mode)
             copy_replay_and_metadata(raw_data, payload)
             out_path = out_root / raw_path.name
             np.savez_compressed(out_path, **payload)
@@ -422,7 +470,7 @@ def main():
                 compare_numeric("action", converted["action"], raw_data["action"].astype(np.float32), args.action_atol),
                 compare_exact("subtask_index", converted["subtask_index"], raw_data["subtask_index"].astype(np.int64)),
             ]
-            for key in IMAGE_KEYS:
+            for key in image_keys:
                 checks.append(compare_images(key, converted[key], raw_data[key].astype(np.uint8), args.image_atol))
             replay_keys = sorted(key for key in raw_data.files if key.startswith("replay_"))
             copied_keys = sorted(key for key in raw_data.files if key not in RAW_DP_KEYS)

@@ -9,10 +9,24 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 
 try:
-    from .door_dp_common import ACTION_NAMES, IMAGE_HEIGHT, IMAGE_WIDTH, import_lerobot_or_raise
+    from .door_dp_common import (
+        ACTION_NAMES,
+        IMAGE_HEIGHT,
+        IMAGE_WIDTH,
+        import_lerobot_or_raise,
+        lerobot_image_keys_for_vision_mode,
+        normalize_vision_mode,
+    )
     from .models.door_diffusion_policy import DoorDiffusionPolicy
 except ImportError:
-    from door_dp_common import ACTION_NAMES, IMAGE_HEIGHT, IMAGE_WIDTH, import_lerobot_or_raise
+    from door_dp_common import (
+        ACTION_NAMES,
+        IMAGE_HEIGHT,
+        IMAGE_WIDTH,
+        import_lerobot_or_raise,
+        lerobot_image_keys_for_vision_mode,
+        normalize_vision_mode,
+    )
     from models.door_diffusion_policy import DoorDiffusionPolicy
 
 
@@ -35,6 +49,7 @@ def parse_args():
     parser.add_argument("--action_horizon", type=int, default=16)
     parser.add_argument("--num_diffusion_iters", type=int, default=100)
     parser.add_argument("--save_interval", type=int, default=5000)
+    parser.add_argument("--rgb", action="store_true", help="Train on RGB+mask image fields instead of masked depth+mask.")
     parser.add_argument("--wandb", action="store_true", help="Log training metrics to Weights & Biases.")
     parser.add_argument("--wandb_project", type=str, default="door-dp")
     parser.add_argument("--wandb_entity", type=str, default=None)
@@ -110,6 +125,10 @@ def _image_or_zeros(frame, key):
         return torch.zeros(3, IMAGE_HEIGHT, IMAGE_WIDTH, dtype=torch.uint8)
 
 
+def _image_required(frame, key):
+    return _as_chw_u8(_field(frame, key))
+
+
 def _scalar_int(x, default=0):
     if x is None:
         return int(default)
@@ -118,8 +137,10 @@ def _scalar_int(x, default=0):
 
 
 class DoorDPSequenceDataset(Dataset):
-    def __init__(self, root, repo_id, obs_horizon, pred_horizon):
+    def __init__(self, root, repo_id, obs_horizon, pred_horizon, vision_mode="depth"):
         self.dataset = _load_lerobot_dataset(root, repo_id)
+        self.vision_mode = normalize_vision_mode(vision_mode)
+        self.image_keys = lerobot_image_keys_for_vision_mode(self.vision_mode)
         self.obs_horizon = int(obs_horizon)
         self.pred_horizon = int(pred_horizon)
         self.length = len(self.dataset)
@@ -161,14 +182,15 @@ class DoorDPSequenceDataset(Dataset):
         center = self.indices[item]
         obs_ids = range(center - self.obs_horizon + 1, center + 1)
         action_ids = range(center, center + self.pred_horizon)
-        states, masks, depths, front_masks, front_depths = [], [], [], [], []
+        states, masks, second_images, front_masks, front_second_images = [], [], [], [], []
+        image_reader = _image_required if self.vision_mode == "rgb" else _image_or_zeros
         for idx in obs_ids:
             frame = self._frame(idx)
             states.append(torch.as_tensor(_as_numpy(_field(frame, "observation.state")), dtype=torch.float32))
-            masks.append(_image_or_zeros(frame, "observation.images.wrist_handle_mask"))
-            depths.append(_image_or_zeros(frame, "observation.images.wrist_masked_depth"))
-            front_masks.append(_image_or_zeros(frame, "observation.images.front_handle_mask"))
-            front_depths.append(_image_or_zeros(frame, "observation.images.front_masked_depth"))
+            masks.append(image_reader(frame, self.image_keys[0]))
+            second_images.append(image_reader(frame, self.image_keys[1]))
+            front_masks.append(image_reader(frame, self.image_keys[2]))
+            front_second_images.append(image_reader(frame, self.image_keys[3]))
         actions = []
         for idx in action_ids:
             frame = self._frame(idx)
@@ -176,9 +198,9 @@ class DoorDPSequenceDataset(Dataset):
         return {
             "state": torch.stack(states, dim=0),
             "mask": torch.stack(masks, dim=0),
-            "masked_depth": torch.stack(depths, dim=0),
+            "masked_depth": torch.stack(second_images, dim=0),
             "front_mask": torch.stack(front_masks, dim=0),
-            "front_masked_depth": torch.stack(front_depths, dim=0),
+            "front_masked_depth": torch.stack(front_second_images, dim=0),
             "action": torch.stack(actions, dim=0),
         }
 
@@ -236,13 +258,25 @@ def main():
 
     device = torch.device(args.device if torch.cuda.is_available() or not args.device.startswith("cuda") else "cpu")
     dataset_root = _resolve_lerobot_root(args.root, args.repo_id)
+    vision_mode = "rgb" if args.rgb else "depth"
     print(f"Using LeRobot dataset root: {dataset_root}", flush=True)
-    dataset = DoorDPSequenceDataset(dataset_root, args.repo_id, args.obs_horizon, args.pred_horizon)
-    stats = compute_stats(dataset)
     sidecar = dataset_root / "door_dp_feature_names.json"
+    sidecar_data = {}
     if sidecar.exists():
         with open(sidecar, "r", encoding="utf-8") as f:
-            feature_names = json.load(f).get("state", [])
+            sidecar_data = json.load(f)
+    if args.rgb and not sidecar_data:
+        raise FileNotFoundError(f"RGB training requires {sidecar} with vision_mode='rgb'.")
+    dataset_vision_mode = normalize_vision_mode(sidecar_data.get("vision_mode", "depth"))
+    if dataset_vision_mode != vision_mode:
+        raise ValueError(
+            f"LeRobot dataset vision_mode={dataset_vision_mode!r}, but train was run with "
+            f"{'--rgb' if args.rgb else 'depth mode'}."
+        )
+    dataset = DoorDPSequenceDataset(dataset_root, args.repo_id, args.obs_horizon, args.pred_horizon, vision_mode=vision_mode)
+    stats = compute_stats(dataset)
+    if sidecar_data:
+        feature_names = sidecar_data.get("state", [])
     else:
         feature_names = [f"state_{i}" for i in range(stats["state_mean"].numel())]
 
@@ -276,6 +310,8 @@ def main():
             "action_dim": len(ACTION_NAMES),
             "image_height": IMAGE_HEIGHT,
             "image_width": IMAGE_WIDTH,
+            "vision_mode": vision_mode,
+            "image_features": lerobot_image_keys_for_vision_mode(vision_mode),
         }
     )
     wandb_run = None

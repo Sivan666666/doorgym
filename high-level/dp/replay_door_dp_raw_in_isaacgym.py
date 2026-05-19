@@ -15,6 +15,13 @@ REPO_ROOT = HIGH_LEVEL_ROOT.parent
 LOW_LEVEL_ROOT = REPO_ROOT / "low-level"
 
 
+def normalize_vision_mode(vision_mode):
+    mode = str(vision_mode or "depth").lower()
+    if mode not in ("depth", "rgb"):
+        raise ValueError(f"Unsupported Door DP vision mode: {vision_mode!r}")
+    return mode
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description=(
@@ -84,6 +91,7 @@ def parse_args():
     parser.add_argument("--no_enable_wrist_camera", dest="enable_wrist_camera", action="store_false")
     parser.add_argument("--enable_front_camera", dest="enable_front_camera", action="store_true", default=True)
     parser.add_argument("--no_enable_front_camera", dest="enable_front_camera", action="store_false")
+    parser.add_argument("--rgb", action="store_true", help="Replay RGB+mask raw episodes instead of masked depth+mask episodes.")
     parser.add_argument("--camera_rgb", action="store_true")
     parser.add_argument("--camera_depth", dest="camera_depth", action="store_true", default=True)
     parser.add_argument("--no_camera_depth", dest="camera_depth", action="store_false")
@@ -316,8 +324,9 @@ def configure_door_runtime(base, args, mode, door_asset_selection=None):
     base.DOOR_RUNTIME["door_vhacd_resolution"] = args.door_vhacd_resolution
     base.DOOR_RUNTIME["enable_wrist_camera"] = args.enable_wrist_camera
     base.DOOR_RUNTIME["enable_front_camera"] = args.enable_front_camera
-    base.DOOR_RUNTIME["camera_rgb"] = args.camera_rgb
-    base.DOOR_RUNTIME["camera_depth"] = args.camera_depth
+    base.DOOR_RUNTIME["dp_vision_mode"] = "rgb" if args.rgb else "depth"
+    base.DOOR_RUNTIME["camera_rgb"] = bool(args.camera_rgb or args.rgb)
+    base.DOOR_RUNTIME["camera_depth"] = bool(args.camera_depth and not args.rgb)
     base.DOOR_RUNTIME["camera_seg"] = args.camera_seg
     base.DOOR_RUNTIME["show_seg"] = args.show_seg
     base.DOOR_RUNTIME["handle_seg_id"] = args.handle_seg_id
@@ -434,6 +443,14 @@ def feature_names_from_data(data):
     if "state_feature_names" not in data.files:
         return []
     return [scalar_to_str(item) for item in np.asarray(data["state_feature_names"]).tolist()]
+
+
+def vision_mode_from_data(data):
+    if "vision_mode" in data.files:
+        return normalize_vision_mode(scalar_to_str(data["vision_mode"]))
+    if "wrist_rgb" in data.files or "front_rgb" in data.files:
+        return "rgb"
+    return "depth"
 
 
 def prefixed_feature_indices(names, prefix):
@@ -583,22 +600,46 @@ def _raw_frame_image_tensor(base, data, key, frame_idx, num_envs):
     return tensor
 
 
-def raw_camera_images_from_episode(base, data, frame_idx, num_envs):
+def _raw_frame_rgb_tensor(base, data, key, frame_idx, num_envs):
+    if key not in data.files:
+        raise KeyError(f"RGB replay requires raw episode field {key!r}")
+    image = np.asarray(data[key][frame_idx])
+    if image.ndim == 2:
+        image = np.repeat(image[..., None], 3, axis=-1)
+    if image.ndim != 3 or image.shape[-1] < 3:
+        raise ValueError(f"RGB replay field {key!r} must have shape [H, W, 3], got {image.shape}")
+    image = image[..., :3].astype(np.uint8)
+    tensor = base.torch.as_tensor(image, dtype=base.torch.uint8)
+    tensor = tensor.unsqueeze(0)
+    if num_envs > 1:
+        tensor = tensor.repeat(num_envs, 1, 1, 1)
+    return tensor
+
+
+def raw_camera_images_from_episode(base, data, frame_idx, num_envs, vision_mode="depth"):
+    vision_mode = normalize_vision_mode(vision_mode)
     images = {}
     wrist_mask = _raw_frame_image_tensor(base, data, "wrist_handle_mask", frame_idx, num_envs)
-    wrist_depth = _raw_frame_image_tensor(base, data, "wrist_masked_depth", frame_idx, num_envs)
     front_mask = _raw_frame_image_tensor(base, data, "front_handle_mask", frame_idx, num_envs)
-    front_depth = _raw_frame_image_tensor(base, data, "front_masked_depth", frame_idx, num_envs)
+    if vision_mode == "rgb" and (wrist_mask is None or front_mask is None):
+        raise KeyError("RGB replay requires raw episode fields 'wrist_handle_mask' and 'front_handle_mask'")
     if wrist_mask is not None:
         images["wrist_handle_mask"] = wrist_mask
         images["handle_mask"] = wrist_mask
-    if wrist_depth is not None:
-        images["wrist_handle_masked_depth"] = wrist_depth
-        images["handle_masked_depth"] = wrist_depth
     if front_mask is not None:
         images["front_handle_mask"] = front_mask
-    if front_depth is not None:
-        images["front_handle_masked_depth"] = front_depth
+    if vision_mode == "rgb":
+        images["wrist_rgb"] = _raw_frame_rgb_tensor(base, data, "wrist_rgb", frame_idx, num_envs)
+        images["rgb"] = images["wrist_rgb"]
+        images["front_rgb"] = _raw_frame_rgb_tensor(base, data, "front_rgb", frame_idx, num_envs)
+    else:
+        wrist_depth = _raw_frame_image_tensor(base, data, "wrist_masked_depth", frame_idx, num_envs)
+        front_depth = _raw_frame_image_tensor(base, data, "front_masked_depth", frame_idx, num_envs)
+        if wrist_depth is not None:
+            images["wrist_handle_masked_depth"] = wrist_depth
+            images["handle_masked_depth"] = wrist_depth
+        if front_depth is not None:
+            images["front_handle_masked_depth"] = front_depth
     return images or None
 
 
@@ -657,6 +698,13 @@ def main():
     os.chdir(REPO_ROOT)
     episode_path = resolve_episode(args)
     data = np.load(episode_path, allow_pickle=True)
+    requested_vision_mode = "rgb" if args.rgb else "depth"
+    episode_vision_mode = vision_mode_from_data(data)
+    if episode_vision_mode != requested_vision_mode:
+        raise ValueError(
+            f"Raw episode vision_mode={episode_vision_mode!r}, but replay was run with "
+            f"{'--rgb' if args.rgb else 'depth mode'}."
+        )
     mode = infer_mode(data, args.mode)
     base = load_play_module(mode)
     from dp.door_dp_common import (
@@ -695,6 +743,7 @@ def main():
             "task": scalar_to_str(data["task"]) if "task" in data.files else None,
             "mode": mode,
             "replay_mode": args.replay_mode,
+            "vision_mode": requested_vision_mode,
             "frames": total_frames,
             "selected_frames": len(indices),
             "door_cfg": str(cfg_path),
@@ -728,7 +777,13 @@ def main():
                 has_snapshot = False
                 if args.replay_mode == "state":
                     has_snapshot = apply_state_frame(base, env, data, names, frame_idx, env_ids)
-                    raw_camera_images = raw_camera_images_from_episode(base, data, frame_idx, args.num_envs)
+                    raw_camera_images = raw_camera_images_from_episode(
+                        base,
+                        data,
+                        frame_idx,
+                        args.num_envs,
+                        vision_mode=requested_vision_mode,
+                    )
                     keep_running = render_state_frame(base, env, args, env_ids, camera_images=raw_camera_images)
                     if not keep_running:
                         return

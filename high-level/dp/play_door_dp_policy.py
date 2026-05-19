@@ -19,6 +19,7 @@ def parse_args():
     parser.add_argument("--sim_device", type=str, default="cuda:0")
     parser.add_argument("--graphics_device_id", type=int, default=None)
     parser.add_argument("--headless", action="store_true")
+    parser.add_argument("--rgb", action="store_true", help="Run a RGB+mask Door DP checkpoint. Push mode only.")
     parser.add_argument("--show_seg", dest="show_seg", action="store_true", default=True)
     parser.add_argument("--no_show_seg", dest="show_seg", action="store_false")
     parser.add_argument("--camera_display_scale", type=int, default=5)
@@ -38,6 +39,8 @@ def parse_args():
 
 def main():
     args = parse_args()
+    if args.rgb and args.mode != "push":
+        raise ValueError("--rgb Door DP policy play is only wired for push mode.")
     script = (
         HIGH_LEVEL_ROOT / "play_b1z1_walk_with_door_asset_camera.py"
         if args.mode == "pull"
@@ -61,7 +64,6 @@ def main():
         str(args.steps),
         "--enable_wrist_camera",
         "--camera_seg",
-        "--camera_depth",
         "--camera_display_scale",
         str(args.camera_display_scale),
         "--dp_policy_checkpoint",
@@ -76,6 +78,10 @@ def main():
         str(args.dp_log_interval),
         "--no_preview_trajectory_at_spawn",
     ]
+    if args.rgb:
+        cmd += ["--rgb", "--camera_rgb", "--no_camera_depth"]
+    else:
+        cmd.append("--camera_depth")
     if not args.dp_print:
         cmd.append("--no_dp_print")
     if args.dp_action_horizon is not None:

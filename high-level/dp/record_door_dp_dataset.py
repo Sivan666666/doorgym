@@ -44,6 +44,7 @@ def parse_args():
     parser.add_argument("--sim_device", type=str, default="cuda:0")
     parser.add_argument("--graphics_device_id", type=int, default=None)
     parser.add_argument("--headless", action="store_true")
+    parser.add_argument("--rgb", action="store_true", help="Record RGB+mask vision for push data instead of masked depth+mask.")
     parser.add_argument("--record_env_id", type=int, default=0)
     parser.add_argument("--record_all_envs", dest="record_all_envs", action="store_true", default=True)
     parser.add_argument("--no_record_all_envs", dest="record_all_envs", action="store_false")
@@ -79,7 +80,6 @@ def run_one(mode, rollout_idx, args):
         str(args.steps),
         "--enable_wrist_camera",
         "--camera_seg",
-        "--camera_depth",
         "--record_dp_dataset",
         "--dp_raw_root",
         args.raw_root,
@@ -90,6 +90,10 @@ def run_one(mode, rollout_idx, args):
         "--dp_fps",
         str(args.fps),
     ]
+    if args.rgb:
+        cmd += ["--rgb", "--camera_rgb", "--no_camera_depth"]
+    else:
+        cmd.append("--camera_depth")
     if args.graphics_device_id is not None:
         cmd += ["--graphics_device_id", str(args.graphics_device_id)]
     if args.headless:
@@ -118,6 +122,8 @@ def main():
     if args.num_rollouts <= 0:
         raise ValueError("--num_rollouts must be positive")
     modes = ["pull", "push"] if args.mode == "both" else [args.mode]
+    if args.rgb and any(mode != "push" for mode in modes):
+        raise ValueError("--rgb recording is only wired for push mode; pass --mode push.")
     if args.headless:
         print(
             "⚠️📷 Headless raw recording requested. If Isaac Gym cannot render camera tensors, "
@@ -138,7 +144,8 @@ def main():
     print(
         "\nDone. Only successful env rollouts were saved as raw episodes. "
         "Convert raw episodes in a Python>=3.10 environment with:\n"
-        f"  python high-level/dp/convert_door_raw_to_lerobot.py --raw_root {args.raw_root} --root data/lerobot --repo_id local/door_dp",
+        f"  python high-level/dp/convert_door_raw_to_lerobot.py --raw_root {args.raw_root} "
+        f"--root data/lerobot --repo_id local/door_dp{' --rgb' if args.rgb else ''}",
         flush=True,
     )
 

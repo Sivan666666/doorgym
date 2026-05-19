@@ -30,6 +30,7 @@ def parse_args():
     parser.add_argument("--graphics_device_id", type=int, default=None)
     parser.add_argument("--headless", dest="headless", action="store_true", default=True, help="Forward --headless. On by default.")
     parser.add_argument("--no_headless", "--no-headless", dest="headless", action="store_false", help="Open the Isaac Gym viewer.")
+    parser.add_argument("--rgb", action="store_true", help="Record RGB+mask Door DP data.")
     parser.add_argument("--preview_cameras", action="store_true", help="Show OpenCV camera preview windows.")
     parser.add_argument("--dry_run", action="store_true", help="Print commands without launching Isaac Gym.")
     parser.add_argument(
@@ -109,6 +110,8 @@ def build_command(args, play_args, num_envs):
         cmd += ["--graphics_device_id", str(args.graphics_device_id)]
     if args.headless:
         cmd.append("--headless")
+    if args.rgb:
+        cmd.append("--rgb")
 
     extra = args.extra_play_args[1:] if args.extra_play_args[:1] == ["--"] else args.extra_play_args
     cmd += [

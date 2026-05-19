@@ -885,6 +885,27 @@ class ManipLocoDoorAsset(ManipLoco):
             return
         env_id = int(np.clip(env_id, 0, images[mask_key].shape[0] - 1))
         display_scale = max(1, int(DOOR_RUNTIME["camera_display_scale"]))
+        rgb_mode = DOOR_RUNTIME.get("dp_vision_mode", "depth") == "rgb"
+
+        def _rgb_vis(image_tensor):
+            arr = image_tensor[env_id].detach().cpu().numpy()
+            if arr.ndim == 2:
+                arr = np.repeat(arr[..., None], 3, axis=-1)
+            elif arr.ndim == 3 and arr.shape[0] in (3, 4) and arr.shape[-1] not in (3, 4):
+                arr = np.transpose(arr, (1, 2, 0))
+            if arr.shape[-1] > 3:
+                arr = arr[..., :3]
+            if arr.shape[-1] == 1:
+                arr = np.repeat(arr, 3, axis=-1)
+            if np.issubdtype(arr.dtype, np.floating):
+                finite = arr[np.isfinite(arr)]
+                if finite.size and float(finite.max()) <= 1.5:
+                    arr = arr * 255.0
+            arr = np.clip(arr, 0, 255).astype(np.uint8)
+            if display_scale > 1:
+                arr = cv2.resize(arr, None, fx=display_scale, fy=display_scale, interpolation=cv2.INTER_NEAREST)
+            return cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
+
         for prefix, title in (("wrist", "Wrist"), ("front", "Front")):
             local_mask_key = f"{prefix}_handle_mask" if f"{prefix}_handle_mask" in images else ("handle_mask" if prefix == "wrist" else None)
             local_depth_key = (
@@ -894,11 +915,18 @@ class ManipLocoDoorAsset(ManipLoco):
             )
             if local_mask_key is None or local_mask_key not in images:
                 continue
+            local_rgb_key = f"{prefix}_rgb" if f"{prefix}_rgb" in images else ("rgb" if prefix == "wrist" and "rgb" in images else None)
+            if rgb_mode:
+                if local_rgb_key is None or local_rgb_key not in images:
+                    continue
+                cv2.imshow(f"{title} RGB", _rgb_vis(images[local_rgb_key]))
             mask_image = np.squeeze(images[local_mask_key][env_id].detach().cpu().numpy()).astype(np.float32)
             mask_vis = (255.0 * mask_image).astype(np.uint8)
             if display_scale > 1:
                 mask_vis = cv2.resize(mask_vis, None, fx=display_scale, fy=display_scale, interpolation=cv2.INTER_NEAREST)
             cv2.imshow(f"{title} Handle Mask", mask_vis)
+            if rgb_mode:
+                continue
             if local_depth_key is None or local_depth_key not in images:
                 continue
             masked_depth = np.squeeze(images[local_depth_key][env_id].detach().cpu().numpy()).astype(np.float32)
@@ -1427,6 +1455,7 @@ def parse_args():
     parser.add_argument("--no_enable_wrist_camera", dest="enable_wrist_camera", action="store_false")
     parser.add_argument("--enable_front_camera", dest="enable_front_camera", action="store_true", default=True)
     parser.add_argument("--no_enable_front_camera", dest="enable_front_camera", action="store_false")
+    parser.add_argument("--rgb", action="store_true", help="Use RGB+mask Door DP vision instead of masked depth+mask.")
     parser.add_argument("--camera_rgb", action="store_true")
     parser.add_argument("--camera_depth", dest="camera_depth", action="store_true", default=True)
     parser.add_argument("--no_camera_depth", dest="camera_depth", action="store_false")
@@ -1560,8 +1589,9 @@ def main():
     DOOR_RUNTIME["door_vhacd_resolution"] = args.door_vhacd_resolution
     DOOR_RUNTIME["enable_wrist_camera"] = args.enable_wrist_camera
     DOOR_RUNTIME["enable_front_camera"] = args.enable_front_camera
-    DOOR_RUNTIME["camera_rgb"] = args.camera_rgb
-    DOOR_RUNTIME["camera_depth"] = args.camera_depth
+    DOOR_RUNTIME["dp_vision_mode"] = "rgb" if args.rgb else "depth"
+    DOOR_RUNTIME["camera_rgb"] = bool(args.camera_rgb or args.rgb)
+    DOOR_RUNTIME["camera_depth"] = bool(args.camera_depth and not args.rgb)
     DOOR_RUNTIME["camera_seg"] = args.camera_seg
     DOOR_RUNTIME["show_seg"] = bool(args.show_seg and not args.headless)
     if args.headless and args.show_seg:
@@ -1640,8 +1670,9 @@ def main():
         {
             "enabled": args.enable_wrist_camera,
             "front_enabled": args.enable_front_camera,
-            "rgb": args.camera_rgb,
-            "depth": args.camera_depth,
+            "dp_vision_mode": DOOR_RUNTIME["dp_vision_mode"],
+            "rgb": DOOR_RUNTIME["camera_rgb"],
+            "depth": DOOR_RUNTIME["camera_depth"],
             "seg": args.camera_seg,
             "show_seg": DOOR_RUNTIME["show_seg"],
             "display_env": args.camera_env_id,
@@ -1848,6 +1879,7 @@ def main():
                 fps=args.dp_fps,
                 state_feature_names=state_names,
                 task=args.dp_task,
+                vision_mode=DOOR_RUNTIME["dp_vision_mode"],
                 metadata={
                     "door_asset_index": door_asset_index,
                     "door_asset_name": env.door_asset_names[door_asset_index],
@@ -1872,6 +1904,11 @@ def main():
             num_inference_steps=args.dp_inference_steps,
             action_horizon=args.dp_action_horizon,
         )
+        if getattr(dp_controller, "vision_mode", "depth") != DOOR_RUNTIME["dp_vision_mode"]:
+            raise ValueError(
+                f"DP checkpoint vision_mode={getattr(dp_controller, 'vision_mode', 'depth')!r}, "
+                f"but play was run with {DOOR_RUNTIME['dp_vision_mode']!r}."
+            )
         print(f"Loaded Door DP policy from {args.dp_policy_checkpoint}")
         print(
             f"Door DP controls only env {args.dp_control_env_id}; other envs keep the scripted target trajectory.",
@@ -2348,14 +2385,20 @@ def main():
         if dp_controller is not None:
             dp_env_id = args.dp_control_env_id
             dp_camera_images = env.capture_wrist_camera_images()
-            mask_rgb, masked_depth_rgb, front_mask_rgb, front_masked_depth_rgb = dp_image_inputs_from_camera_tensors(dp_camera_images, dp_env_id)
-            if mask_rgb is not None and masked_depth_rgb is not None:
+            mask_rgb, second_rgb, front_mask_rgb, front_second_rgb = dp_image_inputs_from_camera_tensors(
+                dp_camera_images,
+                dp_env_id,
+                vision_mode=DOOR_RUNTIME["dp_vision_mode"],
+            )
+            if args.rgb and (front_mask_rgb is None or front_second_rgb is None):
+                raise RuntimeError("RGB DP policy inference requires wrist/front RGB and mask camera tensors.")
+            if mask_rgb is not None and second_rgb is not None:
                 dp_action = dp_controller.act(
                     get_door_dp_state(env, phase_id, phase_name, dp_env_id),
                     mask_rgb,
-                    masked_depth_rgb,
+                    second_rgb,
                     front_mask_rgb,
-                    front_masked_depth_rgb,
+                    front_second_rgb,
                 )
                 apply_door_dp_action(env, dp_action, dp_env_id, ee_goal_delta_rpy_from_quat)
                 if make_door_dp_log_record is not None:
@@ -2390,12 +2433,20 @@ def main():
             for env_id, recorder in dp_recorders.items():
                 if bool(dp_record_closed[env_id].item()):
                     continue
-                mask_rgb, masked_depth_rgb, front_mask_rgb, front_masked_depth_rgb = dp_image_inputs_from_camera_tensors(camera_images, env_id)
+                mask_rgb, second_rgb, front_mask_rgb, front_second_rgb = dp_image_inputs_from_camera_tensors(
+                    camera_images,
+                    env_id,
+                    vision_mode=DOOR_RUNTIME["dp_vision_mode"],
+                )
                 should_close = bool(pass_done[env_id].item()) or step == args.steps - 1
-                if mask_rgb is None or masked_depth_rgb is None:
+                missing_required_camera = mask_rgb is None or second_rgb is None or (
+                    args.rgb and (front_mask_rgb is None or front_second_rgb is None)
+                )
+                if missing_required_camera:
                     if not dp_record_warned_no_camera:
+                        missing_desc = "wrist/front camera RGB or mask images" if args.rgb else "wrist camera mask/depth images"
                         print(
-                            "⚠️📷 Camera unavailable: skipped DP frame because wrist camera mask/depth images are missing. "
+                            f"⚠️📷 Camera unavailable: skipped DP frame because {missing_desc} are missing. "
                             "No raw DP frame can be saved until camera tensors are available.",
                             flush=True,
                         )
@@ -2409,11 +2460,11 @@ def main():
                 recorder.add_frame(
                     get_door_dp_state(env, phase_id, phase_name, env_id),
                     mask_rgb,
-                    masked_depth_rgb,
+                    second_rgb,
                     get_door_dp_action(env, env_id),
                     int(phase_id[env_id].detach().cpu().item()),
                     front_mask_rgb=front_mask_rgb,
-                    front_masked_depth_rgb=front_masked_depth_rgb,
+                    front_second_rgb=front_second_rgb,
                     replay_snapshot=(
                         make_door_dp_replay_snapshot(env, env_id)
                         if make_door_dp_replay_snapshot is not None

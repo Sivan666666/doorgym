@@ -6,9 +6,21 @@ from pathlib import Path
 import numpy as np
 
 try:
-    from .door_dp_common import ACTION_NAMES, DoorDPLeRobotRecorder
+    from .door_dp_common import (
+        ACTION_NAMES,
+        DoorDPLeRobotRecorder,
+        lerobot_image_keys_for_vision_mode,
+        normalize_vision_mode,
+        raw_image_keys_for_vision_mode,
+    )
 except ImportError:
-    from door_dp_common import ACTION_NAMES, DoorDPLeRobotRecorder
+    from door_dp_common import (
+        ACTION_NAMES,
+        DoorDPLeRobotRecorder,
+        lerobot_image_keys_for_vision_mode,
+        normalize_vision_mode,
+        raw_image_keys_for_vision_mode,
+    )
 
 
 DP_ROOT = Path(__file__).resolve().parent
@@ -22,6 +34,7 @@ def parse_args():
     parser.add_argument("--repo_id", type=str, default="local/door_dp")
     parser.add_argument("--fps", type=int, default=None)
     parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--rgb", action="store_true", help="Convert raw RGB+mask Door DP data. Required for RGB raw data.")
     parser.add_argument(
         "--keep_phase_state",
         action="store_true",
@@ -52,6 +65,22 @@ def scalar_str(value):
     return str(arr.reshape(-1)[0])
 
 
+def detect_raw_vision_mode(data, sidecar):
+    if sidecar and sidecar.get("vision_mode") is not None:
+        return normalize_vision_mode(sidecar["vision_mode"])
+    if "vision_mode" in data.files:
+        return normalize_vision_mode(scalar_str(data["vision_mode"]))
+    if "wrist_rgb" in data.files or "front_rgb" in data.files:
+        return "rgb"
+    return "depth"
+
+
+def require_fields(data, keys, path):
+    missing = [key for key in keys if key not in data.files]
+    if missing:
+        raise KeyError(f"{path} is missing required fields for this vision mode: {missing}")
+
+
 def main():
     args = parse_args()
     raw_root = Path(args.raw_root)
@@ -77,7 +106,23 @@ def main():
             )
     raw_fps = int(first["fps"]) if "fps" in first else 50
     fps = int(args.fps or (sidecar.get("fps") if sidecar else raw_fps))
+    vision_mode = "rgb" if args.rgb else "depth"
+    raw_vision_mode = detect_raw_vision_mode(first, sidecar)
+    if raw_vision_mode != vision_mode:
+        raise ValueError(
+            f"Raw data vision_mode={raw_vision_mode!r}, but converter was run with "
+            f"{'--rgb' if args.rgb else 'depth mode'}. Use --rgb only for RGB raw data."
+        )
+    image_keys = raw_image_keys_for_vision_mode(vision_mode)
     out_dir = Path(args.root) / args.repo_id
+    existing_sidecar = load_sidecar(out_dir) if out_dir.exists() else None
+    if existing_sidecar and not args.overwrite:
+        existing_vision_mode = normalize_vision_mode(existing_sidecar.get("vision_mode", "depth"))
+        if existing_vision_mode != vision_mode:
+            raise ValueError(
+                f"Existing LeRobot dataset at {out_dir} has vision_mode={existing_vision_mode!r}; "
+                "use a different --repo_id or pass --overwrite."
+            )
     if args.overwrite and out_dir.exists():
         shutil.rmtree(out_dir)
 
@@ -89,6 +134,7 @@ def main():
         state_feature_names=state_names,
         task=initial_task,
         resume=not args.overwrite,
+        vision_mode=vision_mode,
     )
     for ep_idx, path in enumerate(files):
         data = np.load(path, allow_pickle=True)
@@ -99,18 +145,24 @@ def main():
             raise ValueError(f"Episode {path} has state_dim={states.shape[-1]}, cannot apply selected state columns.")
         states = states[:, keep_state_indices]
         actions = data["action"].astype(np.float32)
-        masks = data["wrist_handle_mask"].astype(np.uint8)
-        depths = data["wrist_masked_depth"].astype(np.uint8)
-        front_masks = data["front_handle_mask"].astype(np.uint8) if "front_handle_mask" in data else np.zeros_like(masks)
-        front_depths = data["front_masked_depth"].astype(np.uint8) if "front_masked_depth" in data else np.zeros_like(depths)
+        require_fields(data, image_keys[:2], path)
+        wrist_first = data[image_keys[0]].astype(np.uint8)
+        wrist_second = data[image_keys[1]].astype(np.uint8)
+        if vision_mode == "rgb":
+            require_fields(data, image_keys[2:], path)
+            front_first = data[image_keys[2]].astype(np.uint8)
+            front_second = data[image_keys[3]].astype(np.uint8)
+        else:
+            front_first = data[image_keys[2]].astype(np.uint8) if image_keys[2] in data else np.zeros_like(wrist_first)
+            front_second = data[image_keys[3]].astype(np.uint8) if image_keys[3] in data else np.zeros_like(wrist_second)
         subtasks = data["subtask_index"].astype(np.int64).reshape(-1)
         n = states.shape[0]
         if not (
             actions.shape[0]
-            == masks.shape[0]
-            == depths.shape[0]
-            == front_masks.shape[0]
-            == front_depths.shape[0]
+            == wrist_first.shape[0]
+            == wrist_second.shape[0]
+            == front_first.shape[0]
+            == front_second.shape[0]
             == subtasks.shape[0]
             == n
         ):
@@ -118,35 +170,29 @@ def main():
         for i in range(n):
             recorder.add_frame(
                 states[i],
-                masks[i],
-                depths[i],
+                wrist_first[i],
+                wrist_second[i],
                 actions[i],
                 int(subtasks[i]),
-                front_mask_rgb=front_masks[i],
-                front_masked_depth_rgb=front_depths[i],
+                front_mask_rgb=front_first[i],
+                front_second_rgb=front_second[i],
             )
         recorder.save_episode()
         print(f"Converted {path.name}: {n} frames task={task!r} ({ep_idx + 1}/{len(files)})", flush=True)
     recorder.finalize()
     feature_sidecar = Path(args.root) / args.repo_id / "door_dp_feature_names.json"
     feature_sidecar.parent.mkdir(parents=True, exist_ok=True)
+    sidecar_payload = {
+        "fps": fps,
+        "state": state_names,
+        "action": ACTION_NAMES,
+        "image_features": lerobot_image_keys_for_vision_mode(vision_mode),
+        "source_raw_root": str(raw_root),
+    }
+    if vision_mode == "rgb":
+        sidecar_payload["vision_mode"] = vision_mode
     with open(feature_sidecar, "w", encoding="utf-8") as f:
-        json.dump(
-            {
-                "fps": fps,
-                "state": state_names,
-                "action": ACTION_NAMES,
-                "image_features": [
-                    "observation.images.wrist_handle_mask",
-                    "observation.images.wrist_masked_depth",
-                    "observation.images.front_handle_mask",
-                    "observation.images.front_masked_depth",
-                ],
-                "source_raw_root": str(raw_root),
-            },
-            f,
-            indent=2,
-        )
+        json.dump(sidecar_payload, f, indent=2)
     print(f"Done. LeRobotDataset written to {Path(args.root) / args.repo_id}")
 
 
