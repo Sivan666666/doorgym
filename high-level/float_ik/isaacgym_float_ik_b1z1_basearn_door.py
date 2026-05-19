@@ -63,7 +63,6 @@ class DoorRuntime:
     dof_lower: np.ndarray
     dof_upper: np.ndarray
     handle_body_index: int
-    door_body_index: int
     handle_goal_offset: np.ndarray
     handle_unlock_threshold: float
     open_stage: bool = False
@@ -85,7 +84,7 @@ def parse_args():
         custom_parameters=[
             {"name": "--asset_root", "type": str, "default": str(base_ik.DEFAULT_ASSET_ROOT)},
             {"name": "--asset_file", "type": str, "default": base_ik.DEFAULT_ASSET_FILE},
-            {"name": "--steps", "type": int, "default": 2200},
+            {"name": "--steps", "type": int, "default": 3600},
             {"name": "--door_cfg", "type": str, "default": str(DEFAULT_DOOR_CFG)},
             {"name": "--door_name", "type": str, "default": ""},
             {"name": "--door_index", "type": int, "default": -1},
@@ -98,9 +97,12 @@ def parse_args():
             {"name": "--robot_z", "type": float, "default": 0.60},
             {"name": "--robot_yaw", "type": float, "default": math.pi},
             {"name": "--robot_front_offset", "type": float, "default": 0.55},
+            {"name": "--robot_rear_offset", "type": float, "default": 0.65},
             {"name": "--stop_distance", "type": float, "default": 0.25},
             {"name": "--pull_base_distance", "type": float, "default": -0.35},
+            {"name": "--base_pull_time_scale", "type": float, "default": 0.40},
             {"name": "--pull_base_yaw_delta", "type": float, "default": 0.18},
+            {"name": "--door_pass_clearance", "type": float, "default": 0.55},
             {"name": "--walk_steps", "type": int, "default": 260},
             {"name": "--initial_hold_steps", "type": int, "default": 150},
             {"name": "--grasp_steps", "type": int, "default": 150},
@@ -108,6 +110,7 @@ def parse_args():
             {"name": "--gripper_close_steps", "type": int, "default": 120},
             {"name": "--handle_rotate_steps", "type": int, "default": 300},
             {"name": "--door_pull_steps", "type": int, "default": 960},
+            {"name": "--pass_through_steps", "type": int, "default": 620},
             {"name": "--hold_steps", "type": int, "default": 300},
             {"name": "--pregrasp_offset", "type": float, "default": 0.15},
             {"name": "--grasp_offset", "type": float, "default": 0.0},
@@ -118,6 +121,10 @@ def parse_args():
             {"name": "--handle_rotate_angle", "type": float, "default": 1.05},
             {"name": "--door_pull_distance", "type": float, "default": 1.10},
             {"name": "--lever_step_size", "type": float, "default": 0.06},
+            {"name": "--pass_open_angle_deg", "type": float, "default": 80.0},
+            {"name": "--pass_home_wait_min_steps", "type": int, "default": 120},
+            {"name": "--pass_home_wait_max_steps", "type": int, "default": 420},
+            {"name": "--pass_home_ready_tolerance", "type": float, "default": 0.05},
             {
                 "name": "--unidoor_style_pull",
                 "action": "store_true",
@@ -234,6 +241,16 @@ def forward_ee_quat(args, base_yaw):
     return base_ik.quat_multiply(base_quat, red_axis_quat)
 
 
+def approach_ee_quat(args, approach_dir, fallback_yaw):
+    approach_xy = np.asarray(approach_dir[:2], dtype=np.float32)
+    norm = float(np.linalg.norm(approach_xy))
+    if norm < 1.0e-5:
+        return forward_ee_quat(args, fallback_yaw)
+    # approach_dir points from handle to robot; the gripper should face back toward the handle.
+    face_dir = -approach_xy / norm
+    return forward_ee_quat(args, math.atan2(float(face_dir[1]), float(face_dir[0])))
+
+
 def load_door_spec(args):
     cfg_path = Path(args.door_cfg).expanduser()
     if not cfg_path.is_absolute():
@@ -325,7 +342,6 @@ def load_door_asset(gym, sim, args):
         dof_lower=lower,
         dof_upper=upper,
         handle_body_index=len(body_names) - 1,
-        door_body_index=max(0, len(body_names) - 2),
         handle_goal_offset=handle_goal_offset,
         handle_unlock_threshold=handle_unlock_threshold,
     )
@@ -395,6 +411,29 @@ def set_robot_base_pose(gym, env, actor_handles, xy, z, yaw):
         gym.set_rigid_transform(env, root_handle, transform)
 
 
+def world_to_base_local(point, xy, z, yaw):
+    origin = np.array([float(xy[0]), float(xy[1]), float(z)], dtype=np.float32)
+    rel = np.asarray(point, dtype=np.float32) - origin
+    return quat_apply(base_ik.quat_conjugate(base_ik.yaw_quat(float(yaw))), rel)
+
+
+def base_local_to_world(local_point, xy, z, yaw):
+    origin = np.array([float(xy[0]), float(xy[1]), float(z)], dtype=np.float32)
+    return origin + quat_apply(base_ik.yaw_quat(float(yaw)), np.asarray(local_point, dtype=np.float32))
+
+
+def default_ee_world_target(args, traj, base_xy, yaw, fallback):
+    home_local = traj.get("home_ee_local")
+    if home_local is None:
+        return np.asarray(fallback, dtype=np.float32).copy()
+    return base_local_to_world(home_local, base_xy, args.robot_z, yaw)
+
+
+def compute_base_pass_target(args, heading):
+    door_xy = np.asarray([args.door_x, args.door_y], dtype=np.float32)
+    return door_xy + heading * (float(args.robot_rear_offset) + float(args.door_pass_clearance))
+
+
 def get_body_pose(gym, env, actor, body_index):
     states = gym.get_actor_rigid_body_states(env, actor, gymapi.STATE_POS)
     pos_raw = states["pose"]["p"][body_index]
@@ -407,6 +446,22 @@ def get_body_pose(gym, env, actor, body_index):
 def get_actor_dof_state(gym, env, actor):
     states = gym.get_actor_dof_states(env, actor, gymapi.STATE_ALL)
     return np.asarray(states["pos"], dtype=np.float32), np.asarray(states["vel"], dtype=np.float32)
+
+
+def door_open_angle_from_closed(door, door_angle):
+    closed_angle = float(door.dof_lower[0]) if len(door.dof_lower) > 0 else 0.0
+    return abs(float(door_angle) - closed_angle)
+
+
+def live_handle_pull_direction(handle_quat, approach_dir):
+    pull_dir = quat_axis(handle_quat, axis=2)
+    pull_dir[2] = 0.0
+    pull_dir = normalize(pull_dir)
+    if np.linalg.norm(pull_dir) < 1.0e-5:
+        pull_dir = approach_dir.copy()
+    if float(np.dot(pull_dir, approach_dir)) < 0.0:
+        pull_dir = -pull_dir
+    return pull_dir
 
 
 def compute_door_efforts(door, dof_pos, dof_vel, args):
@@ -520,6 +575,7 @@ def trajectory_targets(
     base_start,
     base_stop,
     base_pull,
+    base_pass,
     yaw_start,
     yaw_pull,
     traj,
@@ -539,20 +595,13 @@ def trajectory_targets(
     pregrasp[2] += args.grasp_z_offset
     grasp[0] += args.grasp_x_offset
     grasp[2] += args.grasp_z_offset
-    goal_quat = forward_ee_quat(args, yaw_start)
+    goal_quat = approach_ee_quat(args, approach_dir, yaw_start)
 
     rotate_offset = np.zeros(3, dtype=np.float32)
     rotate_offset[1] = args.handle_rotate_right_distance
     rotate_offset[2] = -args.handle_rotate_down_distance
     rotate_pos = grasp + rotate_offset
-    pull_dir = quat_axis(handle_quat, axis=2)
-    pull_dir[2] = 0.0
-    fallback_pull_dir = approach_dir.copy()
-    pull_dir = normalize(pull_dir)
-    if np.linalg.norm(pull_dir) < 1.0e-5:
-        pull_dir = fallback_pull_dir
-    if float(np.dot(pull_dir, approach_dir)) < 0.0:
-        pull_dir = -pull_dir
+    pull_dir = live_handle_pull_direction(handle_quat, approach_dir)
     pull_pos = rotate_pos + pull_dir * args.door_pull_distance
 
     walk_end = args.walk_steps
@@ -584,6 +633,7 @@ def trajectory_targets(
             traj["pull"] = pull_pos.copy()
             traj["goal_quat"] = goal_quat.copy()
             traj["pull_dir"] = pull_dir.copy()
+            traj["approach_dir"] = approach_dir.copy()
 
         base_xy = base_stop.copy()
         target_pos = traj["pregrasp"].copy()
@@ -615,34 +665,123 @@ def trajectory_targets(
             phase = "rotate_handle"
         elif step < pull_end:
             t = smoothstep((step - rotate_end + 1) / max(1, args.door_pull_steps))
+            base_t = smoothstep(
+                (step - rotate_end + 1) / max(1.0, args.door_pull_steps * args.base_pull_time_scale)
+            )
+            live_goal_quat = approach_ee_quat(args, approach_dir, yaw_start)
             turned_quat = base_ik.quat_multiply(
-                traj["goal_quat"],
+                live_goal_quat,
                 quat_from_angle_axis(-args.handle_rotate_angle, np.array([1.0, 0.0, 0.0], dtype=np.float32)),
             )
-            if args.unidoor_style_pull and ik_state.current_pos_np is not None:
+            door_pos, _ = get_actor_dof_state(gym, env, door_actor)
+            door_open_enough = (
+                len(door_pos) > 0
+                and door_open_angle_from_closed(door, float(door_pos[0])) >= math.radians(args.pass_open_angle_deg)
+            )
+            if door_open_enough and "pass_home_start_step" not in traj and "pass_start_step" not in traj:
+                traj["pass_home_start_step"] = step
+                traj["pass_home_base_xy"] = traj.get("base_xy", base_pull).copy()
+                traj["pass_home_yaw"] = float(traj.get("yaw", yaw_pull))
+
+            if "pass_start_step" in traj:
+                pass_t = smoothstep((step - traj["pass_start_step"] + 1) / max(1, args.pass_through_steps))
+                base_xy = lerp(traj["pass_start_base_xy"], base_pass, pass_t)
+                yaw = float(lerp(np.array([traj["pass_start_yaw"]], dtype=np.float32), np.array([yaw_start], dtype=np.float32), pass_t)[0])
+                fallback = ik_state.current_pos_np if ik_state.current_pos_np is not None else traj["grasp"]
+                target_pos = default_ee_world_target(args, traj, base_xy, yaw, fallback)
+                target_quat = None
+                gripper = gripper_closed
+                phase = "pass_through" if pass_t < 1.0 else "hold_pass"
+            elif "pass_home_start_step" in traj:
+                base_xy = traj["pass_home_base_xy"].copy()
+                yaw = float(traj["pass_home_yaw"])
+                fallback = ik_state.current_pos_np if ik_state.current_pos_np is not None else traj["grasp"]
+                target_pos = default_ee_world_target(args, traj, base_xy, yaw, fallback)
+                target_quat = None
+                gripper = gripper_closed
+                wait_steps = step - traj["pass_home_start_step"] + 1
+                ready_by_time = wait_steps >= max(1, args.pass_home_wait_min_steps)
+                ready_by_error = ik_state.last_pos_error <= float(args.pass_home_ready_tolerance)
+                timed_out = wait_steps >= max(1, args.pass_home_wait_max_steps)
+                if (ready_by_time and ready_by_error) or timed_out:
+                    traj["pass_start_step"] = step + 1
+                    traj["pass_start_base_xy"] = base_xy.copy()
+                    traj["pass_start_yaw"] = float(yaw)
+                phase = "return_home"
+            elif door.open_stage and ik_state.current_pos_np is not None:
+                live_pull_dir = live_handle_pull_direction(handle_quat, traj["approach_dir"])
+                target_pos = ik_state.current_pos_np + live_pull_dir * args.lever_step_size
+                target_quat = None if args.ik_position_only else turned_quat
+                base_xy = lerp(base_stop, base_pull, base_t)
+                yaw = float(lerp(np.array([yaw_start], dtype=np.float32), np.array([yaw_pull], dtype=np.float32), base_t)[0])
+                gripper = gripper_closed
+                phase = "pull_door"
+            elif args.unidoor_style_pull and ik_state.current_pos_np is not None:
                 pull_step_pos = ik_state.current_pos_np + traj["pull_dir"] * args.lever_step_size
                 pull_max_pos = traj["rotate"] + traj["pull_dir"] * args.door_pull_distance
                 progress = float(np.dot(pull_step_pos - traj["rotate"], traj["pull_dir"]))
                 target_pos = pull_max_pos if progress > args.door_pull_distance else pull_step_pos
+                target_quat = None if args.ik_position_only else turned_quat
+                base_xy = lerp(base_stop, base_pull, base_t)
+                yaw = float(lerp(np.array([yaw_start], dtype=np.float32), np.array([yaw_pull], dtype=np.float32), base_t)[0])
+                gripper = gripper_closed
+                phase = "pull_door"
             else:
                 target_pos = lerp(traj["rotate"], traj["pull"], t)
-            target_quat = None if args.ik_position_only else turned_quat
-            base_xy = lerp(base_stop, base_pull, t)
-            yaw = float(lerp(np.array([yaw_start], dtype=np.float32), np.array([yaw_pull], dtype=np.float32), t)[0])
-            gripper = gripper_closed
-            phase = "pull_door"
+                target_quat = None if args.ik_position_only else turned_quat
+                base_xy = lerp(base_stop, base_pull, base_t)
+                yaw = float(lerp(np.array([yaw_start], dtype=np.float32), np.array([yaw_pull], dtype=np.float32), base_t)[0])
+                gripper = gripper_closed
+                phase = "pull_door"
         else:
-            target_pos = ik_state.current_pos_np.copy() if ik_state.current_pos_np is not None else traj["pull"].copy()
-            target_quat = None if args.ik_position_only else base_ik.quat_multiply(
-                traj["goal_quat"],
-                quat_from_angle_axis(-args.handle_rotate_angle, np.array([1.0, 0.0, 0.0], dtype=np.float32)),
+            door_pos, _ = get_actor_dof_state(gym, env, door_actor)
+            door_open_enough = (
+                len(door_pos) > 0
+                and door_open_angle_from_closed(door, float(door_pos[0])) >= math.radians(args.pass_open_angle_deg)
             )
-            base_xy = base_pull.copy()
-            yaw = yaw_pull
-            gripper = gripper_closed
-            phase = "hold"
+            if door_open_enough and "pass_home_start_step" not in traj and "pass_start_step" not in traj:
+                traj["pass_home_start_step"] = step
+                traj["pass_home_base_xy"] = traj.get("base_xy", base_pull).copy()
+                traj["pass_home_yaw"] = float(traj.get("yaw", yaw_pull))
+
+            if "pass_start_step" in traj:
+                pass_t = smoothstep((step - traj["pass_start_step"] + 1) / max(1, args.pass_through_steps))
+                base_xy = lerp(traj["pass_start_base_xy"], base_pass, pass_t)
+                yaw = float(lerp(np.array([traj["pass_start_yaw"]], dtype=np.float32), np.array([yaw_start], dtype=np.float32), pass_t)[0])
+                fallback = ik_state.current_pos_np if ik_state.current_pos_np is not None else traj["pull"]
+                target_pos = default_ee_world_target(args, traj, base_xy, yaw, fallback)
+                target_quat = None
+                gripper = gripper_closed
+                phase = "pass_through" if pass_t < 1.0 else "hold_pass"
+            elif "pass_home_start_step" in traj:
+                base_xy = traj["pass_home_base_xy"].copy()
+                yaw = float(traj["pass_home_yaw"])
+                fallback = ik_state.current_pos_np if ik_state.current_pos_np is not None else traj["pull"]
+                target_pos = default_ee_world_target(args, traj, base_xy, yaw, fallback)
+                target_quat = None
+                gripper = gripper_closed
+                wait_steps = step - traj["pass_home_start_step"] + 1
+                ready_by_time = wait_steps >= max(1, args.pass_home_wait_min_steps)
+                ready_by_error = ik_state.last_pos_error <= float(args.pass_home_ready_tolerance)
+                timed_out = wait_steps >= max(1, args.pass_home_wait_max_steps)
+                if (ready_by_time and ready_by_error) or timed_out:
+                    traj["pass_start_step"] = step + 1
+                    traj["pass_start_base_xy"] = base_xy.copy()
+                    traj["pass_start_yaw"] = float(yaw)
+                phase = "return_home"
+            else:
+                target_pos = ik_state.current_pos_np.copy() if ik_state.current_pos_np is not None else traj["pull"].copy()
+                target_quat = None if args.ik_position_only else base_ik.quat_multiply(
+                    traj["goal_quat"],
+                    quat_from_angle_axis(-args.handle_rotate_angle, np.array([1.0, 0.0, 0.0], dtype=np.float32)),
+                )
+                base_xy = base_pull.copy()
+                yaw = yaw_pull
+                gripper = gripper_closed
+                phase = "hold"
 
     traj["base_xy"] = base_xy.copy()
+    traj["yaw"] = float(yaw)
     return phase, base_xy, yaw, target_pos, target_quat, gripper, handle_goal
 
 
@@ -674,14 +813,46 @@ def run_demo(gym, sim, env, arm_actor, actor_handles, door, door_actor, viewer, 
     walk_dist = max(0.0, front_to_door - args.stop_distance)
     base_stop = base_start + heading * walk_dist
     base_pull = base_stop + heading * args.pull_base_distance
+    base_pass = compute_base_pass_target(args, heading)
     yaw_pull = yaw_start + args.pull_base_yaw_delta
-    traj = {"base_xy": base_start.copy()}
+    initial_ee = ik_state.current_pos_np.copy() if ik_state.current_pos_np is not None else np.array(
+        [base_start[0], base_start[1], args.robot_z],
+        dtype=np.float32,
+    )
+    home_ee_local = world_to_base_local(initial_ee, base_start, args.robot_z, yaw_start)
+    traj = {"base_xy": base_start.copy(), "home_ee_local": home_ee_local.copy()}
 
-    print("base_start:", base_start.tolist(), "base_stop:", base_stop.tolist(), "base_pull:", base_pull.tolist())
+    print(
+        "base_start:",
+        base_start.tolist(),
+        "base_stop:",
+        base_stop.tolist(),
+        "base_pull:",
+        base_pull.tolist(),
+        "base_pass:",
+        base_pass.tolist(),
+    )
+    print(
+        "pass_open_angle_deg:",
+        float(args.pass_open_angle_deg),
+        "base_pull_time_scale:",
+        float(args.base_pull_time_scale),
+        "door_pass_clearance:",
+        float(args.door_pass_clearance),
+    )
+    print(
+        "pass_home_wait:",
+        int(args.pass_home_wait_min_steps),
+        "to",
+        int(args.pass_home_wait_max_steps),
+        "steps, tolerance:",
+        float(args.pass_home_ready_tolerance),
+    )
+    print("home_ee_local_from_default_joints:", home_ee_local.tolist())
     print("Close viewer to exit.")
     start = time.time()
     step = 0
-    max_steps = args.steps if args.steps > 0 else 2200
+    max_steps = args.steps if args.steps > 0 else 3600
     while step < max_steps:
         if viewer is not None and gym.query_viewer_has_closed(viewer):
             break
@@ -697,6 +868,7 @@ def run_demo(gym, sim, env, arm_actor, actor_handles, door, door_actor, viewer, 
             base_start,
             base_stop,
             base_pull,
+            base_pass,
             yaw_start,
             yaw_pull,
             traj,
