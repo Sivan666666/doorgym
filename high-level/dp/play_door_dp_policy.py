@@ -19,7 +19,7 @@ def parse_args():
     parser.add_argument("--sim_device", type=str, default="cuda:0")
     parser.add_argument("--graphics_device_id", type=int, default=None)
     parser.add_argument("--headless", action="store_true")
-    parser.add_argument("--rgb", action="store_true", help="Run a RGB+mask Door DP checkpoint. Push mode only.")
+    parser.add_argument("--rgb", action="store_true", help="Run a RGB+mask Door DP checkpoint. Push/ikpush modes only.")
     parser.add_argument("--show_seg", dest="show_seg", action="store_true", default=True)
     parser.add_argument("--no_show_seg", dest="show_seg", action="store_false")
     parser.add_argument("--camera_display_scale", type=int, default=5)
@@ -39,19 +39,17 @@ def parse_args():
 
 def main():
     args = parse_args()
+    checkpoint_path = Path(args.checkpoint).expanduser()
+    if not checkpoint_path.is_absolute():
+        checkpoint_path = (Path.cwd() / checkpoint_path).resolve()
+    if args.rgb and args.mode not in ("push", "ikpush"):
+        raise ValueError("--rgb Door DP policy play is only wired for push/ikpush mode.")
     if args.mode == "ikpush":
-        raise ValueError(
-            "--mode ikpush is the float_ik recorder/replay environment. "
-            "DP policy execution is not wired in that script yet; use replay for ikpush raw data, "
-            "or pass --mode push/--mode pull for the old DP play environments."
-        )
-    if args.rgb and args.mode != "push":
-        raise ValueError("--rgb Door DP policy play is only wired for push mode.")
-    script = (
-        HIGH_LEVEL_ROOT / "play_b1z1_walk_with_door_asset_camera.py"
-        if args.mode == "pull"
-        else HIGH_LEVEL_ROOT / "play_b1z1_push_with_door_asset_camera.py"
-    )
+        script = HIGH_LEVEL_ROOT / "float_ik" / "isaacgym_float_ik_b1z1_basearn_push_door_parallel.py"
+    elif args.mode == "pull":
+        script = HIGH_LEVEL_ROOT / "play_b1z1_walk_with_door_asset_camera.py"
+    else:
+        script = HIGH_LEVEL_ROOT / "play_b1z1_push_with_door_asset_camera.py"
     dp_log_path = args.dp_log_path
     if dp_log_path is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -73,7 +71,7 @@ def main():
         "--camera_display_scale",
         str(args.camera_display_scale),
         "--dp_policy_checkpoint",
-        args.checkpoint,
+        str(checkpoint_path),
         "--dp_inference_steps",
         str(args.dp_inference_steps),
         "--dp_control_env_id",
@@ -84,6 +82,8 @@ def main():
         str(args.dp_log_interval),
         "--no_preview_trajectory_at_spawn",
     ]
+    if args.mode == "ikpush":
+        cmd.append("--enable_front_camera")
     if args.rgb:
         cmd += ["--rgb", "--camera_rgb", "--no_camera_depth"]
     else:

@@ -72,9 +72,18 @@ if str(DP_ROOT) not in sys.path:
     sys.path.insert(0, str(DP_ROOT))
 
 try:
-    from door_dp_common import ACTION_NAMES, RawDoorDPRecorder, make_state_feature_names, normalize_vision_mode
+    from door_dp_common import (
+        ACTION_NAMES,
+        DoorDPJsonlLogger,
+        DoorDPPolicyController,
+        RawDoorDPRecorder,
+        make_state_feature_names,
+        normalize_vision_mode,
+    )
 except ImportError:
     ACTION_NAMES = None
+    DoorDPJsonlLogger = None
+    DoorDPPolicyController = None
     RawDoorDPRecorder = None
     make_state_feature_names = None
     normalize_vision_mode = None
@@ -366,6 +375,13 @@ def parse_args():
             {"name": "--dp_record_all_envs", "action": "store_true"},
             {"name": "--no_dp_record_all_envs", "action": "store_true"},
             {"name": "--dp_fps", "type": int, "default": 50},
+            {"name": "--dp_policy_checkpoint", "type": str, "default": ""},
+            {"name": "--dp_control_env_id", "type": int, "default": 0},
+            {"name": "--dp_inference_steps", "type": int, "default": 100},
+            {"name": "--dp_action_horizon", "type": int, "default": -1},
+            {"name": "--dp_log_path", "type": str, "default": ""},
+            {"name": "--dp_log_interval", "type": int, "default": 25},
+            {"name": "--no_dp_print", "dest": "dp_print", "action": "store_false", "default": True},
             {"name": "--pass_open_angle_deg", "type": float, "default": 80.0},
             {"name": "--no_preview_trajectory_at_spawn", "action": "store_true"},
         ],
@@ -397,10 +413,16 @@ def parse_args():
     args.camera_depth = bool((args.camera_depth or not args.no_camera_depth) and not args.rgb)
     args.camera_seg = bool(args.camera_seg or not args.no_camera_seg)
     args.dp_record_all_envs = not bool(args.no_dp_record_all_envs)
+    args.dp_print = "--no_dp_print" not in argv
+    args.dp_action_horizon = None if int(args.dp_action_horizon) < 0 else int(args.dp_action_horizon)
     if args.num_envs <= 0:
         raise ValueError("--num_envs must be positive.")
     if not args.dp_record_all_envs and (args.dp_record_env_id < 0 or args.dp_record_env_id >= args.num_envs):
         raise ValueError("--dp_record_env_id must be in [0, num_envs - 1].")
+    if args.dp_policy_checkpoint and (args.dp_control_env_id < 0 or args.dp_control_env_id >= args.num_envs):
+        raise ValueError("--dp_control_env_id must be in [0, num_envs - 1].")
+    if args.record_dp_dataset and args.dp_policy_checkpoint:
+        raise ValueError("--record_dp_dataset and --dp_policy_checkpoint are separate modes; run recording or policy play, not both.")
     args._explicit_cli_flags = set(sys.argv[1:])
 
     if args.headless and args.show_camera_images:
@@ -1468,6 +1490,65 @@ def make_float_dp_action(vx, yaw_rate, target_pos, target_quat, gripper):
     ).astype(np.float32)
 
 
+def apply_float_dp_action(action, base_xy, yaw, dt):
+    action = np.asarray(action, dtype=np.float32).reshape(-1)
+    if action.shape[0] < 10:
+        raise ValueError(f"Door DP action must have at least 10 values, got shape {action.shape}")
+    vx = float(action[0])
+    yaw_rate = float(action[1])
+    yaw_next = float(yaw) + yaw_rate * float(dt)
+    heading = np.asarray([math.cos(float(yaw)), math.sin(float(yaw))], dtype=np.float32)
+    base_xy_next = np.asarray(base_xy, dtype=np.float32) + heading * (vx * float(dt))
+    target_pos = np.asarray(action[2:5], dtype=np.float32).copy()
+    target_quat = base_ik.normalize_quat(np.asarray(action[5:9], dtype=np.float32))
+    gripper = float(action[9])
+    return base_xy_next.astype(np.float32), yaw_next, target_pos, target_quat, gripper
+
+
+def _round_list(value, precision=5):
+    return np.round(np.asarray(value, dtype=np.float64), precision).tolist()
+
+
+def make_float_dp_policy_log_record(step, st, dp_action, dp_state, ee_pos, ee_quat, door_pos, phase):
+    return {
+        "step": int(step),
+        "controlled_env_id": int(st.index),
+        "num_envs": int(st.args.num_envs),
+        "phase_name": str(phase),
+        "dp_action_names": list(ACTION_NAMES or []),
+        "dp_action_raw": _round_list(dp_action),
+        "state": _round_list(dp_state),
+        "base": {
+            "xy": _round_list(st.traj.get("base_xy", st.base_start)),
+            "yaw": float(st.traj.get("yaw", st.yaw_start)),
+        },
+        "ee": {
+            "target_pos_world": _round_list(st.last_target_pos),
+            "target_quat": None if st.last_target_quat is None else _round_list(st.last_target_quat),
+            "actual_pos_world": _round_list(ee_pos),
+            "actual_quat": _round_list(ee_quat),
+        },
+        "gripper": {"target": float(st.last_gripper)},
+        "door": {"dof": _round_list(door_pos) if door_pos is not None else []},
+    }
+
+
+def print_float_dp_policy_log_record(record):
+    action = record["dp_action_raw"]
+    ee = record["ee"]
+    print(
+        "[DoorDP-FloatIK]"
+        f" step={record['step']}"
+        f" env={record['controlled_env_id']}/{record['num_envs']}"
+        f" phase={record['phase_name']}"
+        f" action(vx,yaw,ee,grip)=({action[0]:.3f}, {action[1]:.3f}, "
+        f"[{action[2]:.3f}, {action[3]:.3f}, {action[4]:.3f}], {action[9]:.3f})"
+        f" ee_target={ee['target_pos_world']}"
+        f" ee_actual={ee['actual_pos_world']}",
+        flush=True,
+    )
+
+
 def make_float_replay_snapshot(args, door, dof_names, dof_pos, dof_vel, door_pos, door_vel, ee_pos, ee_quat, base_xy, yaw, vx, yaw_rate):
     dp_dof_pos, dp_dof_vel = map_float_dofs_to_dp(dof_names, dof_pos, dof_vel)
     root_state = np.zeros(13, dtype=np.float32)
@@ -2348,32 +2429,149 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
         float(args.door_pass_clearance),
     )
     print("Close viewer to exit.")
+    dp_controller = None
+    dp_logger = None
+    dp_control_state = None
+    if args.dp_policy_checkpoint:
+        if DoorDPPolicyController is None:
+            raise RuntimeError("DP policy execution requires high-level/dp/door_dp_common.py and diffusers.")
+        dp_controller = DoorDPPolicyController(
+            args.dp_policy_checkpoint,
+            device=args.rl_device,
+            num_inference_steps=args.dp_inference_steps,
+            action_horizon=args.dp_action_horizon,
+        )
+        expected_vision_mode = "rgb" if args.rgb else "depth"
+        if getattr(dp_controller, "vision_mode", "depth") != expected_vision_mode:
+            raise ValueError(
+                f"DP checkpoint vision_mode={getattr(dp_controller, 'vision_mode', 'depth')!r}, "
+                f"but ikpush play was run with {expected_vision_mode!r}."
+            )
+        dp_control_state = env_states[int(args.dp_control_env_id)]
+        if not dp_control_state.camera_handles:
+            raise RuntimeError("ikpush DP policy execution requires camera sensors; do not disable wrist/front cameras.")
+        print(f"Loaded Door DP policy from {args.dp_policy_checkpoint}", flush=True)
+        print(
+            f"Door DP controls only env {args.dp_control_env_id}; other envs keep the scripted target trajectory.",
+            flush=True,
+        )
+        if args.dp_log_path:
+            if DoorDPJsonlLogger is None:
+                raise RuntimeError("DP policy logging requires high-level/dp/door_dp_common.py")
+            dp_logger = DoorDPJsonlLogger(args.dp_log_path)
+            print(f"Door DP log: {args.dp_log_path}", flush=True)
 
     while step < max_steps:
         if viewer is not None and gym.query_viewer_has_closed(viewer):
             break
 
+        if dp_controller is not None:
+            gym.step_graphics(sim)
+            gym.render_all_camera_sensors(sim)
+            gym.refresh_rigid_body_state_tensor(sim)
+            gym.refresh_dof_state_tensor(sim)
+            gym.refresh_jacobian_tensors(sim)
+
         for st in env_states:
-            phase, base_xy, yaw, target_pos, target_quat, gripper, handle_goal = trajectory_targets(
-                step,
-                st.args,
-                st.door,
-                gym,
-                st.env,
-                st.door_actor,
-                st.ik_state,
-                st.base_start,
-                st.base_stop,
-                st.base_push,
-                st.yaw_start,
-                st.yaw_push,
-                st.traj,
-            )
+            if dp_controller is not None and st.index == int(args.dp_control_env_id):
+                phase = "dp_policy"
+                base_xy_current = np.asarray(st.traj.get("base_xy", st.base_start), dtype=np.float32)
+                yaw_current = float(st.traj.get("yaw", st.yaw_start))
+                handle_pos, handle_quat = get_body_pose(gym, st.env, st.door_actor, st.door.handle_body_index)
+                handle_goal = quat_apply(handle_quat, st.door.handle_goal_offset) + handle_pos
+                ee_pos, ee_quat = current_ee_pose_from_refreshed_tensors(st.ik_state)
+                dof_pos_actual, dof_vel_actual = get_actor_dof_state(gym, st.env, st.arm_actor)
+                gripper_actual = (
+                    float(dof_pos_actual[gripper_idx])
+                    if gripper_idx is not None and gripper_idx < len(dof_pos_actual)
+                    else float(st.args.gripper_open)
+                )
+                vx_state, yaw_rate_state = base_command_from_targets(
+                    base_xy_current,
+                    yaw_current,
+                    st.prev_base_xy,
+                    st.prev_yaw,
+                    dt,
+                )
+                dp_state = make_float_dp_state(
+                    dof_names,
+                    dof_pos_actual,
+                    dof_vel_actual,
+                    ee_pos,
+                    ee_quat,
+                    base_xy_current,
+                    st.args.robot_z,
+                    yaw_current,
+                    yaw_rate_state,
+                    gripper_actual,
+                )
+                camera_images = capture_dp_camera_images_from_rendered(gym, sim, st.env, st.camera_handles, st.args)
+                wrist_mask_rgb, wrist_second_rgb, front_mask_rgb, front_second_rgb = dp_image_inputs_from_cpu_cameras(
+                    camera_images, st.args
+                )
+                missing_required_camera = wrist_mask_rgb is None or wrist_second_rgb is None or (
+                    st.args.rgb and (front_mask_rgb is None or front_second_rgb is None)
+                )
+                if missing_required_camera:
+                    missing_desc = "wrist/front camera RGB or mask images" if st.args.rgb else "wrist camera mask/depth images"
+                    raise RuntimeError(f"ikpush DP policy execution cannot run because {missing_desc} are missing.")
+                dp_action = dp_controller.act(
+                    dp_state,
+                    wrist_mask_rgb,
+                    wrist_second_rgb,
+                    front_mask_rgb,
+                    front_second_rgb,
+                )
+                base_xy, yaw, target_pos, target_quat, gripper = apply_float_dp_action(
+                    dp_action,
+                    base_xy_current,
+                    yaw_current,
+                    dt,
+                )
+                st.traj["base_xy"] = np.asarray(base_xy, dtype=np.float32).copy()
+                st.traj["yaw"] = float(yaw)
+                door_pos_for_log, _door_vel_for_log = get_actor_dof_state(gym, st.env, st.door_actor)
+            else:
+                phase, base_xy, yaw, target_pos, target_quat, gripper, handle_goal = trajectory_targets(
+                    step,
+                    st.args,
+                    st.door,
+                    gym,
+                    st.env,
+                    st.door_actor,
+                    st.ik_state,
+                    st.base_start,
+                    st.base_stop,
+                    st.base_push,
+                    st.yaw_start,
+                    st.yaw_push,
+                    st.traj,
+                )
+                dp_action = None
+                dp_state = None
+                ee_pos = None
+                ee_quat = None
+                door_pos_for_log = None
             st.last_phase = phase
             st.last_handle_goal = handle_goal
             st.last_target_pos = np.asarray(target_pos, dtype=np.float32).copy()
             st.last_target_quat = None if target_quat is None else np.asarray(target_quat, dtype=np.float32).copy()
             st.last_gripper = float(gripper)
+            if dp_action is not None:
+                dp_record = make_float_dp_policy_log_record(
+                    step,
+                    st,
+                    dp_action,
+                    dp_state,
+                    ee_pos,
+                    ee_quat,
+                    door_pos_for_log,
+                    phase,
+                )
+                if dp_logger is not None:
+                    dp_logger.write(dp_record)
+                if args.dp_print and step % max(1, int(args.dp_log_interval)) == 0:
+                    print_float_dp_policy_log_record(dp_record)
             set_robot_base_pose(gym, st.env, st.actor_handles, base_xy, st.args.robot_z, yaw)
             if phase == "return_home":
                 if "return_home_start_dofs" not in st.traj:
@@ -2582,6 +2780,8 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
         st.dp_recorder.finalize()
     if total_recorders:
         print(f"Finished parallel raw Door DP recording: saved_successful={saved}/{total_recorders}", flush=True)
+    if dp_logger is not None:
+        dp_logger.close()
 
 
 def main():

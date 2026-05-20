@@ -80,6 +80,11 @@ def _resolve_lerobot_root(root, repo_id):
     return root
 
 
+def _read_json(path):
+    with Path(path).open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
 def _field(frame, key):
     if key in frame:
         return frame[key]
@@ -136,9 +141,228 @@ def _scalar_int(x, default=0):
     return int(arr.reshape(-1)[0])
 
 
+def _to_1d_int_array(value):
+    if isinstance(value, torch.Tensor):
+        return value.detach().cpu().numpy().astype(np.int64).reshape(-1)
+    return np.asarray(value, dtype=np.int64).reshape(-1)
+
+
+def _episode_ranges_from_index(index, total_length):
+    if not isinstance(index, dict):
+        return None
+    start = index.get("from", index.get("start", index.get("starts")))
+    end = index.get("to", index.get("end", index.get("ends")))
+    if start is None or end is None:
+        return None
+    starts = _to_1d_int_array(start)
+    ends = _to_1d_int_array(end)
+    if len(starts) != len(ends) or len(starts) == 0:
+        return None
+    ranges = [(int(s), int(e)) for s, e in zip(starts, ends) if 0 <= int(s) < int(e) <= total_length]
+    return ranges or None
+
+
+def _episode_ranges_from_dataset_attrs(dataset, total_length):
+    candidates = [getattr(dataset, "episode_data_index", None)]
+    meta = getattr(dataset, "meta", None)
+    if meta is not None:
+        candidates.append(getattr(meta, "episode_data_index", None))
+    for candidate in candidates:
+        ranges = _episode_ranges_from_index(candidate, total_length)
+        if ranges:
+            return ranges
+    return None
+
+
+def _read_arrow_column(table, name):
+    if name not in table.column_names:
+        return None
+    return table[name].to_pylist()
+
+
+def _episode_ranges_from_metadata(dataset_root, total_length):
+    episode_files = sorted((Path(dataset_root) / "meta" / "episodes").glob("**/*.parquet"))
+    if not episode_files:
+        return None
+    try:
+        import pyarrow.parquet as pq
+    except Exception:
+        return None
+
+    rows = []
+    for path in episode_files:
+        table = pq.read_table(path)
+        names = set(table.column_names)
+        episode_index = _read_arrow_column(table, "episode_index") or list(range(table.num_rows))
+        lengths = None
+        for key in ("length", "episode_length", "num_frames", "frame_count"):
+            values = _read_arrow_column(table, key)
+            if values is not None:
+                lengths = [int(v) for v in values]
+                break
+        starts = ends = None
+        for start_key, end_key in (
+            ("from", "to"),
+            ("start", "end"),
+            ("frame_index_from", "frame_index_to"),
+            ("start_frame", "end_frame"),
+        ):
+            if start_key in names and end_key in names:
+                starts = [int(v) for v in _read_arrow_column(table, start_key)]
+                ends = [int(v) for v in _read_arrow_column(table, end_key)]
+                break
+        for row_idx, ep in enumerate(episode_index):
+            row = {"episode_index": int(ep)}
+            if lengths is not None:
+                row["length"] = lengths[row_idx]
+            if starts is not None and ends is not None:
+                row["start"] = starts[row_idx]
+                row["end"] = ends[row_idx]
+            rows.append(row)
+    if not rows:
+        return None
+    rows.sort(key=lambda item: item["episode_index"])
+    if all("start" in row and "end" in row for row in rows):
+        ranges = [(row["start"], row["end"]) for row in rows]
+    elif all("length" in row for row in rows):
+        ranges = []
+        start = 0
+        for row in rows:
+            end = start + int(row["length"])
+            ranges.append((start, end))
+            start = end
+    else:
+        return None
+    if ranges and ranges[-1][1] == total_length and all(0 <= s < e <= total_length for s, e in ranges):
+        return [(int(s), int(e)) for s, e in ranges]
+    return None
+
+
+def _episode_ranges_by_frame_scan(dataset, total_length):
+    episodes = []
+    for i in range(total_length):
+        frame = dataset[i]
+        try:
+            ep = _scalar_int(_field(frame, "episode_index"))
+        except Exception:
+            ep = 0
+        episodes.append(ep)
+    ranges = []
+    start = 0
+    while start < total_length:
+        ep = episodes[start]
+        end = start + 1
+        while end < total_length and episodes[end] == ep:
+            end += 1
+        ranges.append((start, end))
+        start = end
+    return ranges
+
+
+def _load_episode_ranges(dataset_root, dataset, total_length):
+    for loader_name, loader in (
+        ("metadata", lambda: _episode_ranges_from_metadata(dataset_root, total_length)),
+        ("dataset index", lambda: _episode_ranges_from_dataset_attrs(dataset, total_length)),
+    ):
+        try:
+            ranges = loader()
+        except Exception as exc:
+            print(f"Warning: failed to build episode ranges from {loader_name}: {exc}", flush=True)
+            ranges = None
+        if ranges:
+            print(f"Loaded {len(ranges)} episode ranges from {loader_name}; skipped full image frame scan.", flush=True)
+            return ranges
+    print("Warning: falling back to full dataset frame scan to build episode ranges.", flush=True)
+    return _episode_ranges_by_frame_scan(dataset, total_length)
+
+
+def _lerobot_data_files(dataset_root):
+    return sorted((Path(dataset_root) / "data").glob("**/*.parquet"))
+
+
+def _arrow_column_to_2d_numpy(table, name):
+    if name not in table.column_names:
+        raise KeyError(f"Parquet table is missing column {name!r}")
+    values = table[name].to_pylist()
+    arr = np.asarray(values, dtype=np.float64)
+    if arr.ndim == 1:
+        arr = arr.reshape(-1, 1)
+    return arr
+
+
+def _compute_stats_from_parquet_columns(dataset_root):
+    files = _lerobot_data_files(dataset_root)
+    if not files:
+        return None
+    try:
+        import pyarrow.parquet as pq
+    except Exception:
+        return None
+
+    count = 0
+    state_sum = action_sum = state_sumsq = action_sumsq = None
+    for path in files:
+        table = pq.read_table(path, columns=["observation.state", "action"])
+        states = _arrow_column_to_2d_numpy(table, "observation.state")
+        actions = _arrow_column_to_2d_numpy(table, "action")
+        if states.shape[0] != actions.shape[0]:
+            raise ValueError(f"{path} has mismatched state/action rows.")
+        if state_sum is None:
+            state_sum = np.zeros(states.shape[1], dtype=np.float64)
+            action_sum = np.zeros(actions.shape[1], dtype=np.float64)
+            state_sumsq = np.zeros(states.shape[1], dtype=np.float64)
+            action_sumsq = np.zeros(actions.shape[1], dtype=np.float64)
+        count += int(states.shape[0])
+        state_sum += states.sum(axis=0)
+        action_sum += actions.sum(axis=0)
+        state_sumsq += np.square(states).sum(axis=0)
+        action_sumsq += np.square(actions).sum(axis=0)
+    if count <= 0:
+        return None
+
+    def finish(total, total_sq):
+        mean = total / float(count)
+        if count > 1:
+            var = (total_sq - np.square(total) / float(count)) / float(count - 1)
+        else:
+            var = np.zeros_like(mean)
+        std = np.sqrt(np.maximum(var, 0.0))
+        return torch.as_tensor(mean, dtype=torch.float32), torch.as_tensor(std, dtype=torch.float32).clamp_min(1e-6)
+
+    state_mean, state_std = finish(state_sum, state_sumsq)
+    action_mean, action_std = finish(action_sum, action_sumsq)
+    print(f"Computed state/action stats from parquet columns only: frames={count}", flush=True)
+    return {
+        "state_mean": state_mean,
+        "state_std": state_std,
+        "action_mean": action_mean,
+        "action_std": action_std,
+    }
+
+
+def _compute_stats_from_stats_json(dataset_root):
+    path = Path(dataset_root) / "meta" / "stats.json"
+    if not path.is_file():
+        return None
+    data = _read_json(path)
+    try:
+        state = data["observation.state"]
+        action = data["action"]
+        print("Loaded state/action stats from meta/stats.json; skipped full image frame scan.", flush=True)
+        return {
+            "state_mean": torch.as_tensor(state["mean"], dtype=torch.float32),
+            "state_std": torch.as_tensor(state["std"], dtype=torch.float32).clamp_min(1e-6),
+            "action_mean": torch.as_tensor(action["mean"], dtype=torch.float32),
+            "action_std": torch.as_tensor(action["std"], dtype=torch.float32).clamp_min(1e-6),
+        }
+    except Exception:
+        return None
+
+
 class DoorDPSequenceDataset(Dataset):
     def __init__(self, root, repo_id, obs_horizon, pred_horizon, vision_mode="depth"):
-        self.dataset = _load_lerobot_dataset(root, repo_id)
+        self.dataset_root = _resolve_lerobot_root(root, repo_id)
+        self.dataset = _load_lerobot_dataset(self.dataset_root, repo_id)
         self.vision_mode = normalize_vision_mode(vision_mode)
         self.image_keys = lerobot_image_keys_for_vision_mode(self.vision_mode)
         self.obs_horizon = int(obs_horizon)
@@ -146,28 +370,15 @@ class DoorDPSequenceDataset(Dataset):
         self.length = len(self.dataset)
         if self.length < self.obs_horizon + self.pred_horizon:
             raise ValueError("Dataset is too short for the requested horizons.")
-        self.episodes = []
-        for i in range(self.length):
-            frame = self.dataset[i]
-            try:
-                ep = _scalar_int(_field(frame, "episode_index"))
-            except Exception:
-                ep = 0
-            self.episodes.append(ep)
+        self.episode_ranges = _load_episode_ranges(self.dataset_root, self.dataset, self.length)
         self.indices = self._build_indices()
 
     def _build_indices(self):
         indices = []
-        start = 0
-        while start < self.length:
-            ep = self.episodes[start]
-            end = start + 1
-            while end < self.length and self.episodes[end] == ep:
-                end += 1
+        for start, end in self.episode_ranges:
             first = start + self.obs_horizon - 1
             last = end - self.pred_horizon
             indices.extend(range(first, max(last + 1, first)))
-            start = end
         if not indices:
             raise ValueError("No valid train sequences found. Record longer episodes or reduce horizons.")
         return indices
@@ -206,6 +417,19 @@ class DoorDPSequenceDataset(Dataset):
 
 
 def compute_stats(seq_dataset):
+    for loader in (
+        lambda: _compute_stats_from_parquet_columns(seq_dataset.dataset_root),
+        lambda: _compute_stats_from_stats_json(seq_dataset.dataset_root),
+    ):
+        try:
+            stats = loader()
+        except Exception as exc:
+            print(f"Warning: optimized stats loading failed: {exc}", flush=True)
+            stats = None
+        if stats is not None:
+            return stats
+
+    print("Warning: falling back to full dataset frame scan to compute stats.", flush=True)
     base = seq_dataset.dataset
     states, actions = [], []
     for i in range(len(base)):
