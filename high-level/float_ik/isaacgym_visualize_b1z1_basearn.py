@@ -92,6 +92,34 @@ def import_isaacgym():
 gymapi, gymutil = import_isaacgym()
 
 
+class ThickAxesGeometry(gymutil.LineGeometry):
+    def __init__(self, scale=1.0, thickness=0.004, pose=None):
+        offsets = {
+            0: [(0, 0, 0), (0, thickness, 0), (0, -thickness, 0), (0, 0, thickness), (0, 0, -thickness)],
+            1: [(0, 0, 0), (thickness, 0, 0), (-thickness, 0, 0), (0, 0, thickness), (0, 0, -thickness)],
+            2: [(0, 0, 0), (thickness, 0, 0), (-thickness, 0, 0), (0, thickness, 0), (0, -thickness, 0)],
+        }
+        axis_end = [(scale, 0, 0), (0, scale, 0), (0, 0, scale)]
+        axis_color = [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)]
+        verts = np.empty((15, 2), gymapi.Vec3.dtype)
+        colors = np.empty(15, gymapi.Vec3.dtype)
+        idx = 0
+        for axis in range(3):
+            for offset in offsets[axis]:
+                verts[idx][0] = offset
+                verts[idx][1] = tuple(axis_end[axis][j] + offset[j] for j in range(3))
+                colors[idx] = axis_color[axis]
+                idx += 1
+        self.verts = pose.transform_points(verts) if pose is not None else verts
+        self._colors = colors
+
+    def vertices(self):
+        return self.verts
+
+    def colors(self):
+        return self._colors
+
+
 def clamp(value: float, lower: float, upper: float) -> float:
     return max(lower, min(upper, value))
 
@@ -1118,7 +1146,7 @@ def draw_ik_target(gym, viewer, env, ik_state):
     gymutil.draw_lines(target_sphere, gym, viewer, env, target_pose)
 
     if ik_state.target_quat_np is not None:
-        gymutil.draw_lines(gymutil.AxesGeometry(scale=0.12), gym, viewer, env, target_pose)
+        gymutil.draw_lines(ThickAxesGeometry(scale=0.12, thickness=0.004), gym, viewer, env, target_pose)
 
     if ik_state.current_pos_np is not None:
         current_pose = transform_from_arrays(
@@ -1134,7 +1162,7 @@ def draw_ik_target(gym, viewer, env, ik_state):
         )
         gymutil.draw_lines(current_sphere, gym, viewer, env, current_pose)
         if getattr(ik_state, "current_quat_np", None) is not None:
-            gymutil.draw_lines(gymutil.AxesGeometry(scale=0.12), gym, viewer, env, current_pose)
+            gymutil.draw_lines(ThickAxesGeometry(scale=0.12, thickness=0.004), gym, viewer, env, current_pose)
 
         p1 = gymapi.Vec3(
             float(ik_state.current_pos_np[0]),

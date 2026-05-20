@@ -48,6 +48,7 @@ def parse_args():
     parser.add_argument("--pred_horizon", type=int, default=32)
     parser.add_argument("--action_horizon", type=int, default=16)
     parser.add_argument("--num_diffusion_iters", type=int, default=100)
+    parser.add_argument("--clip_sample_range", type=float, default=7.0)
     parser.add_argument("--save_interval", type=int, default=5000)
     parser.add_argument("--rgb", action="store_true", help="Train on RGB+mask image fields instead of masked depth+mask.")
     parser.add_argument("--wandb", action="store_true", help="Log training metrics to Weights & Biases.")
@@ -522,6 +523,7 @@ def main():
         num_train_timesteps=args.num_diffusion_iters,
         beta_schedule="squaredcos_cap_v2",
         clip_sample=True,
+        clip_sample_range=float(args.clip_sample_range),
         prediction_type="epsilon",
     )
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-6)

@@ -574,6 +574,7 @@ class DoorDPPolicyController:
             num_train_timesteps=int(self.config.get("num_diffusion_iters", 100)),
             beta_schedule="squaredcos_cap_v2",
             clip_sample=True,
+            clip_sample_range=float(self.config.get("clip_sample_range", 7.0)),
             prediction_type="epsilon",
         )
         self.noise_scheduler.set_timesteps(int(num_inference_steps or self.noise_scheduler.config.num_train_timesteps))
