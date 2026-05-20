@@ -562,6 +562,7 @@ def update_arm_ik_targets(gym, sim, dof_positions, ik_state, args, num_arm_dofs)
     ik_state.last_pos_error = float(torch.linalg.norm(pos_err).detach().cpu())
     ik_state.last_rot_error = rot_err_norm
     ik_state.current_pos_np = eef_pos.detach().cpu().numpy().copy()
+    ik_state.current_quat_np = eef_quat.detach().cpu().numpy().copy()
 
 
 def trajectory_targets(

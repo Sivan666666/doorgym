@@ -2315,15 +2315,50 @@ def main():
         env.ee_goal_orn_delta_rpy[active] = ee_goal_delta_rpy_from_quat(manip_target_pos, manip_target_quat)[active]
         manip_step[active] += 1
 
-    red_target_geom = gymutil.WireframeSphereGeometry(0.035, 8, 8, None, color=(1, 0, 0))
+    target_sphere_geom = gymutil.WireframeSphereGeometry(
+        radius=0.035,
+        num_lats=8,
+        num_lons=8,
+        color=(1.0, 0.82, 0.1),
+        color2=(1.0, 0.45, 0.1),
+    )
+    current_sphere_geom = gymutil.WireframeSphereGeometry(
+        radius=0.035,
+        num_lats=8,
+        num_lons=8,
+        color=(1.0, 0.0, 0.0),
+        color2=(1.0, 0.0, 0.0),
+    )
+    ee_axes_geom = ThickAxesGeometry(scale=0.12, thickness=0.004)
 
     def draw_ee_target():
         if getattr(env, "viewer", None) is None:
             return
         for env_i in range(min(args.num_envs, 16)):
             target = env.curr_ee_goal_cart_world[env_i].detach().cpu().tolist()
-            pose = gymapi.Transform(gymapi.Vec3(target[0], target[1], target[2]), r=None)
-            gymutil.draw_lines(red_target_geom, env.gym, env.viewer, env.envs[env_i], pose)
+            target_quat = env.ee_goal_orn_quat[env_i].detach().cpu().tolist()
+            ee_pos = env.ee_pos[env_i].detach().cpu().tolist()
+            ee_quat = env.ee_orn[env_i].detach().cpu().tolist()
+            target_pose = gymapi.Transform(
+                gymapi.Vec3(target[0], target[1], target[2]),
+                gymapi.Quat(target_quat[0], target_quat[1], target_quat[2], target_quat[3]),
+            )
+            ee_pose = gymapi.Transform(
+                gymapi.Vec3(ee_pos[0], ee_pos[1], ee_pos[2]),
+                gymapi.Quat(ee_quat[0], ee_quat[1], ee_quat[2], ee_quat[3]),
+            )
+            gymutil.draw_lines(target_sphere_geom, env.gym, env.viewer, env.envs[env_i], target_pose)
+            gymutil.draw_lines(current_sphere_geom, env.gym, env.viewer, env.envs[env_i], ee_pose)
+            gymutil.draw_lines(ee_axes_geom, env.gym, env.viewer, env.envs[env_i], target_pose)
+            gymutil.draw_lines(ee_axes_geom, env.gym, env.viewer, env.envs[env_i], ee_pose)
+            gymutil.draw_line(
+                gymapi.Vec3(ee_pos[0], ee_pos[1], ee_pos[2]),
+                gymapi.Vec3(target[0], target[1], target[2]),
+                gymapi.Vec3(1.0, 0.75, 0.0),
+                env.gym,
+                env.viewer,
+                env.envs[env_i],
+            )
 
     def close_dp_recording(env_id, reason):
         recorder = dp_recorders[env_id]

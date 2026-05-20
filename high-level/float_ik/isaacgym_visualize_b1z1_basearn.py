@@ -922,6 +922,7 @@ class IKState:
     last_pos_error: float = math.inf
     last_rot_error: float | None = None
     current_pos_np: np.ndarray | None = None
+    current_quat_np: np.ndarray | None = None
 
 
 def ik_requested(args):
@@ -1039,6 +1040,7 @@ def setup_ik_controller(gym, sim, env, actor, asset, dof_names, lower, upper, ar
         eef_link=args.ik_ee_link,
         control_dof_names=control_dof_names,
         current_pos_np=current_pos_np.copy(),
+        current_quat_np=current_quat_np.copy(),
     )
 
 
@@ -1091,6 +1093,7 @@ def update_ik_targets(gym, sim, dof_positions, ik_state, args):
     ik_state.last_pos_error = pos_err_norm
     ik_state.last_rot_error = rot_err_norm
     ik_state.current_pos_np = eef_pos.detach().cpu().numpy().copy()
+    ik_state.current_quat_np = eef_quat.detach().cpu().numpy().copy()
 
     if not ik_state.reached_reported:
         reached_pos = pos_err_norm <= args.ik_pos_tolerance
@@ -1118,7 +1121,10 @@ def draw_ik_target(gym, viewer, env, ik_state):
         gymutil.draw_lines(gymutil.AxesGeometry(scale=0.12), gym, viewer, env, target_pose)
 
     if ik_state.current_pos_np is not None:
-        current_pose = transform_from_arrays(ik_state.current_pos_np)
+        current_pose = transform_from_arrays(
+            ik_state.current_pos_np,
+            getattr(ik_state, "current_quat_np", None),
+        )
         current_sphere = gymutil.WireframeSphereGeometry(
             radius=0.03,
             num_lats=8,
@@ -1127,6 +1133,8 @@ def draw_ik_target(gym, viewer, env, ik_state):
             color2=(1.0, 0.0, 0.0),
         )
         gymutil.draw_lines(current_sphere, gym, viewer, env, current_pose)
+        if getattr(ik_state, "current_quat_np", None) is not None:
+            gymutil.draw_lines(gymutil.AxesGeometry(scale=0.12), gym, viewer, env, current_pose)
 
         p1 = gymapi.Vec3(
             float(ik_state.current_pos_np[0]),

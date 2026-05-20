@@ -1269,12 +1269,14 @@ def update_arm_ik_targets(gym, sim, dof_positions, ik_state, args, num_arm_dofs)
     ik_state.last_pos_error = float(torch.linalg.norm(pos_err).detach().cpu())
     ik_state.last_rot_error = rot_err_norm
     ik_state.current_pos_np = eef_pos.detach().cpu().numpy().copy()
+    ik_state.current_quat_np = eef_quat.detach().cpu().numpy().copy()
 
 
 def refresh_current_ee_pose(gym, sim, ik_state):
     gym.refresh_rigid_body_state_tensor(sim)
     eef_state = ik_state.rb_states[ik_state.eef_body_sim_index]
     ik_state.current_pos_np = eef_state[:3].detach().cpu().numpy().copy()
+    ik_state.current_quat_np = eef_state[3:7].detach().cpu().numpy().copy()
 
 
 def trajectory_targets(

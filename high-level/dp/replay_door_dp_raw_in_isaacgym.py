@@ -671,7 +671,20 @@ def apply_state_frame(base, env, data, names, frame_idx, env_ids):
 def draw_replay_markers(base, env, env_ids):
     if getattr(env, "viewer", None) is None:
         return
-    target_geom = base.gymutil.WireframeSphereGeometry(0.035, 8, 8, None, color=(1, 0, 0))
+    target_geom = base.gymutil.WireframeSphereGeometry(
+        radius=0.035,
+        num_lats=8,
+        num_lons=8,
+        color=(1.0, 0.82, 0.1),
+        color2=(1.0, 0.45, 0.1),
+    )
+    current_geom = base.gymutil.WireframeSphereGeometry(
+        radius=0.035,
+        num_lats=8,
+        num_lons=8,
+        color=(1.0, 0.0, 0.0),
+        color2=(1.0, 0.0, 0.0),
+    )
     axes_geom = base.ThickAxesGeometry(scale=0.12, thickness=0.004)
     for env_id in env_ids[:16]:
         target = env.curr_ee_goal_cart_world[env_id].detach().cpu().tolist()
@@ -687,8 +700,17 @@ def draw_replay_markers(base, env, env_ids):
             base.gymapi.Quat(ee_quat[0], ee_quat[1], ee_quat[2], ee_quat[3]),
         )
         base.gymutil.draw_lines(target_geom, env.gym, env.viewer, env.envs[env_id], target_pose)
+        base.gymutil.draw_lines(current_geom, env.gym, env.viewer, env.envs[env_id], ee_pose)
         base.gymutil.draw_lines(axes_geom, env.gym, env.viewer, env.envs[env_id], target_pose)
         base.gymutil.draw_lines(axes_geom, env.gym, env.viewer, env.envs[env_id], ee_pose)
+        base.gymutil.draw_line(
+            base.gymapi.Vec3(ee_pos[0], ee_pos[1], ee_pos[2]),
+            base.gymapi.Vec3(target[0], target[1], target[2]),
+            base.gymapi.Vec3(1.0, 0.75, 0.0),
+            env.gym,
+            env.viewer,
+            env.envs[env_id],
+        )
 
 
 def _raw_frame_image_tensor(base, data, key, frame_idx, num_envs):
@@ -1000,6 +1022,7 @@ def display_float_ik_raw_camera_images(float_mod, data, frame_idx, args, vision_
 def draw_float_ik_replay_markers(float_mod, gym, viewer, env, data, frame_idx, action=None):
     if viewer is None:
         return
+    ee_pos = None
     if "replay_ee_pos" in data.files and "replay_ee_quat" in data.files:
         ee_pos = np.asarray(data["replay_ee_pos"][frame_idx], dtype=np.float32)
         ee_quat = np.asarray(data["replay_ee_quat"][frame_idx], dtype=np.float32)
@@ -1007,6 +1030,14 @@ def draw_float_ik_replay_markers(float_mod, gym, viewer, env, data, frame_idx, a
             float_mod.gymapi.Vec3(float(ee_pos[0]), float(ee_pos[1]), float(ee_pos[2])),
             float_mod.gymapi.Quat(float(ee_quat[0]), float(ee_quat[1]), float(ee_quat[2]), float(ee_quat[3])),
         )
+        current_geom = float_mod.gymutil.WireframeSphereGeometry(
+            radius=0.035,
+            num_lats=8,
+            num_lons=8,
+            color=(1.0, 0.0, 0.0),
+            color2=(1.0, 0.0, 0.0),
+        )
+        float_mod.gymutil.draw_lines(current_geom, gym, viewer, env, ee_pose)
         float_mod.gymutil.draw_lines(float_mod.ThickAxesGeometry(scale=0.12, thickness=0.004), gym, viewer, env, ee_pose)
     if action is None:
         return
@@ -1016,9 +1047,24 @@ def draw_float_ik_replay_markers(float_mod, gym, viewer, env, data, frame_idx, a
         float_mod.gymapi.Vec3(float(target[0]), float(target[1]), float(target[2])),
         float_mod.gymapi.Quat(float(target_quat[0]), float(target_quat[1]), float(target_quat[2]), float(target_quat[3])),
     )
-    target_geom = float_mod.gymutil.WireframeSphereGeometry(0.035, 8, 8, None, color=(1.0, 0.0, 0.0))
+    target_geom = float_mod.gymutil.WireframeSphereGeometry(
+        radius=0.035,
+        num_lats=8,
+        num_lons=8,
+        color=(1.0, 0.82, 0.1),
+        color2=(1.0, 0.45, 0.1),
+    )
     float_mod.gymutil.draw_lines(target_geom, gym, viewer, env, target_pose)
     float_mod.gymutil.draw_lines(float_mod.ThickAxesGeometry(scale=0.12, thickness=0.004), gym, viewer, env, target_pose)
+    if ee_pos is not None:
+        float_mod.gymutil.draw_line(
+            float_mod.gymapi.Vec3(float(ee_pos[0]), float(ee_pos[1]), float(ee_pos[2])),
+            float_mod.gymapi.Vec3(float(target[0]), float(target[1]), float(target[2])),
+            float_mod.gymapi.Vec3(1.0, 0.75, 0.0),
+            gym,
+            viewer,
+            env,
+        )
 
 
 def render_float_ik_state_frame(float_mod, gym, sim, env, arm_actor, actor_handles, viewer, args, data, frame_idx, action, vision_mode):
