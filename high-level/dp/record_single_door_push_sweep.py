@@ -22,7 +22,7 @@ def parse_args():
     parser.add_argument("--target_episodes", type=int, default=128, help="Stop once raw_root contains this many .npz episodes.")
     parser.add_argument("--max_runs", type=int, default=30, help="Maximum simulator launches before stopping.")
     parser.add_argument("--num_envs", type=int, default=16, help="Parallel float_ik envs per sweep run.")
-    parser.add_argument("--steps", type=int, default=2520)
+    parser.add_argument("--steps", type=int, default=2160)
     parser.add_argument("--raw_root", type=Path, default=DEFAULT_RAW_ROOT)
     parser.add_argument("--door_cfg", type=Path, default=DEFAULT_DOOR_CFG)
     parser.add_argument("--rl_device", type=str, default="cuda:0")

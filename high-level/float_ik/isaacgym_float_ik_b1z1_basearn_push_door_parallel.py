@@ -264,6 +264,10 @@ def parse_args():
             {"name": "--ikpush_door_push_distance_rand", "type": float, "default": 0.06},
             {"name": "--ikpush_door_joint_friction_rand", "type": float, "default": 0.08},
             {"name": "--ikpush_door_joint_damping_rand", "type": float, "default": 0.04},
+            {"name": "--ikpush_handle_joint_friction_rand", "type": float, "default": 0.005},
+            {"name": "--ikpush_handle_joint_damping_rand", "type": float, "default": 0.005},
+            {"name": "--ikpush_handle_spring_stiffness_rand", "type": float, "default": 0.05},
+            {"name": "--ikpush_handle_spring_damping_rand", "type": float, "default": 0.01},
             {"name": "--lever_step_size", "type": float, "default": 0.06},
             {"name": "--push_contact_bias", "type": float, "default": 0.025},
             {"name": "--handle_follow_push_ratio", "type": float, "default": 0.45},
@@ -785,8 +789,12 @@ IKPUSH_DEFAULT_ENV_RANGES = {
     "grasp_z_offset": (-0.055, -0.005),
     "door_push_distance": (0.95, 1.20),
     "handle_rotate_angle": (0.95, 1.15),
-    "door_joint_friction": (0.35, 0.75),
-    "door_joint_damping": (0.12, 0.30),
+    "door_joint_friction": (0.05, 0.30),
+    "door_joint_damping": (0.05, 0.30),
+    "handle_joint_friction": (0.045, 0.055),
+    "handle_joint_damping": (0.045, 0.055),
+    "handle_spring_stiffness": (0.45, 0.55),
+    "handle_spring_damping": (0.09, 0.11),
 }
 
 
@@ -800,6 +808,10 @@ IKPUSH_ARG_FLAGS = {
     "handle_rotate_angle": "--handle_rotate_angle",
     "door_joint_friction": "--door_joint_friction",
     "door_joint_damping": "--door_joint_damping",
+    "handle_joint_friction": "--handle_joint_friction",
+    "handle_joint_damping": "--handle_joint_damping",
+    "handle_spring_stiffness": "--handle_spring_stiffness",
+    "handle_spring_damping": "--handle_spring_damping",
 }
 
 
@@ -869,6 +881,10 @@ def make_env_args(args, env_index):
     set_sampled("door_push_distance", "ikpush_door_push_distance_rand", lower=0.70, upper=1.40)
     set_sampled("door_joint_friction", "ikpush_door_joint_friction_rand", lower=0.0)
     set_sampled("door_joint_damping", "ikpush_door_joint_damping_rand", lower=0.0)
+    set_sampled("handle_joint_friction", "ikpush_handle_joint_friction_rand", lower=0.0)
+    set_sampled("handle_joint_damping", "ikpush_handle_joint_damping_rand", lower=0.0)
+    set_sampled("handle_spring_stiffness", "ikpush_handle_spring_stiffness_rand", lower=0.0)
+    set_sampled("handle_spring_damping", "ikpush_handle_spring_damping_rand", lower=0.0)
 
     env_args.ikpush_randomization_json = json.dumps(sampled, sort_keys=True)
     return env_args
@@ -2147,6 +2163,10 @@ def make_parallel_dp_recorder(args, door, env_index, vision_mode):
             "door_push_distance": float(args.door_push_distance),
             "door_joint_friction": float(args.door_joint_friction),
             "door_joint_damping": float(args.door_joint_damping),
+            "handle_joint_friction": float(args.handle_joint_friction),
+            "handle_joint_damping": float(args.handle_joint_damping),
+            "handle_spring_stiffness": float(args.handle_spring_stiffness),
+            "handle_spring_damping": float(args.handle_spring_damping),
             "ikpush_randomization": str(getattr(args, "ikpush_randomization_json", "")),
         },
     )
