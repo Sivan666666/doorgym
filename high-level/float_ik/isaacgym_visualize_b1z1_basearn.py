@@ -15,7 +15,8 @@ import numpy as np
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_ASSET_ROOT = Path("/home/sivan/whole_body/visual_whole_body/low-level/resources/robots/b1z1")
+DOORGYM_ROOT = REPO_ROOT.parent
+DEFAULT_ASSET_ROOT = DOORGYM_ROOT / "low-level" / "resources" / "robots" / "b1z1"
 DEFAULT_ASSET_FILE = "urdf/b1z1_basearn.urdf"
 ARM_ACTOR_NAME = "z1_arm_articulated"
 EE_GRIPPER_LINK = "ee_gripper_link"

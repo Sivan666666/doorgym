@@ -5,13 +5,13 @@ This folder contains the reorganized Door Diffusion Policy pipeline.
 ## Main Scripts
 
 - `record_door_dp_dataset.py`  
-  Run scripted pull/push experts in Isaac Gym and save successful raw `.npz` episodes.
+  Run scripted `pull`/`push` experts or the float-IK `ikpush` expert in Isaac Gym and save successful raw `.npz` episodes.
 
 - `convert_door_raw_to_lerobot.py`  
   Convert raw `.npz` episodes into a local LeRobotDataset for visualization and training.
 
 - `replay_door_dp_raw_in_isaacgym.py`  
-  Replay a raw `.npz` episode in Isaac Gym, either by directly restoring recorded state or by re-running recorded high-level actions.
+  Replay a raw `.npz` episode in Isaac Gym. `ikpush` recordings are replayed in the float-IK scene; `pull`/`push` use the old play scenes.
 
 - `train_door_dp.py`  
   Train the door diffusion policy from the converted LeRobotDataset.

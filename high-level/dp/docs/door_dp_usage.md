@@ -31,6 +31,16 @@ conda run -n b1z1 python high-level/play_b1z1_push_with_door_asset_camera.py \
   --steps 2500
 ```
 
+Float-IK push scripted play:
+
+```bash
+conda run -n b1z1 python high-level/float_ik/isaacgym_float_ik_b1z1_basearn_push_door.py \
+  --rl_device cuda:0 \
+  --sim_device cuda:0 \
+  --num_envs 1 \
+  --steps 2850
+```
+
 Hide OpenCV camera windows during scripted play:
 
 ```bash
@@ -48,10 +58,14 @@ Raw recording now saves only successful episodes. A rollout is successful only a
 `--pass_open_angle_deg` (default `80`) and the scripted pass stage starts. Failed envs are discarded
 and do not become `.npz` files.
 
-By default, recording uses one simulator launch per mode and records all envs in parallel.
+Door mode names are explicit: `pull` and `push` are the old play environments; `ikpush`
+is the float-IK push environment and is the default for this wrapper.
+
+By default, `pull`/`push` recording uses one simulator launch per mode and records all envs in parallel.
 For example, if you want about 80 pull samples, use `--num_envs 80 --num_rollouts 1`.
 It will attempt 80 envs at once and save only the successful ones. `--num_episodes` is kept as
 a convenient alias: if `--num_envs` is not given, the script uses `--num_envs = --num_episodes`.
+`ikpush` uses sequential single-env attempts because the float-IK recorder is single-env.
 
 Record both pull and push:
 
@@ -77,12 +91,24 @@ conda run -n b1z1 python high-level/dp/record_door_dp_dataset.py \
   --sim_device cuda:0
 ```
 
-Record push only:
+Record old push only:
 
 ```bash
 conda run -n b1z1 python high-level/dp/record_door_dp_dataset.py \
   --mode push \
   --num_envs 80 \
+  --num_rollouts 1 \
+  --raw_root /home/sivan/whole_body/visual_whole_body/data/door_dp_raw/local_door_dp \
+  --rl_device cuda:0 \
+  --sim_device cuda:0
+```
+
+Record float-IK push only:
+
+```bash
+conda run -n b1z1 python high-level/dp/record_door_dp_dataset.py \
+  --mode ikpush \
+  --num_envs 16 \
   --num_rollouts 1 \
   --raw_root /home/sivan/whole_body/visual_whole_body/data/door_dp_raw/local_door_dp \
   --rl_device cuda:0 \
@@ -151,15 +177,21 @@ replay snapshots for robot root, robot joints, and door joints. Older raw files 
 For new raw episodes, replay reads `door_asset_name` from the `.npz` and loads only that matching
 door from `--door_cfg`.
 
+Replay float-IK push data in the float-IK scene:
+
 ```bash
 conda run -n b1z1 python high-level/dp/replay_door_dp_raw_in_isaacgym.py \
   --raw_episode data/door_dp_raw/local_door_dp/episode_000000.npz \
   --replay_mode state \
-  --mode auto \
+  --mode ikpush \
   --num_envs 1 \
   --rl_device cuda:0 \
   --sim_device cuda:0
 ```
+
+Use `--mode auto` to infer `ikpush` from new float-IK episodes that contain
+`source_script=isaacgym_float_ik_b1z1_basearn_push_door.py`; use `--mode pull`
+or `--mode push` for the old play environments.
 
 For old raw episodes without door metadata, provide the door manually:
 
@@ -167,13 +199,14 @@ For old raw episodes without door metadata, provide the door manually:
 --door_asset_name 99650089960001
 ```
 
-Use action replay to re-run the recorded 10D high-level actions through the low-level policy:
+Use action replay to re-run the recorded 10D high-level actions through the low-level policy.
+This is only for the old `pull`/`push` play environments, not `ikpush`:
 
 ```bash
 conda run -n b1z1 python high-level/dp/replay_door_dp_raw_in_isaacgym.py \
   --raw_episode data/door_dp_raw/local_door_dp/episode_000000.npz \
   --replay_mode action \
-  --mode auto \
+  --mode push \
   --num_envs 1 \
   --rl_device cuda:0 \
   --sim_device cuda:0
@@ -269,6 +302,9 @@ high-level/logs/door-dp/<run_name>/checkpoints/model_latest.pt
 ```
 
 ## 7. Play A Trained DP Policy
+
+DP policy play is currently wired only for the old `pull` and `push` play environments.
+The float-IK `ikpush` path supports raw recording and state replay, but not policy execution yet.
 
 Install DP inference dependencies in `b1z1` once:
 

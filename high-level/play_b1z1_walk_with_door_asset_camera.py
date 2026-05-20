@@ -2486,7 +2486,7 @@ def main():
                     get_door_dp_action(env, env_id),
                     int(phase_id[env_id].detach().cpu().item()),
                     front_mask_rgb=front_mask_rgb,
-                    front_masked_depth_rgb=front_masked_depth_rgb,
+                    front_second_rgb=front_masked_depth_rgb,
                     replay_snapshot=(
                         make_door_dp_replay_snapshot(env, env_id)
                         if make_door_dp_replay_snapshot is not None

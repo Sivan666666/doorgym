@@ -478,16 +478,16 @@ class RawDoorDPRecorder:
             front_second_rgb = _zero_image_like(wrist_second_rgb) if front_second_rgb is None else front_second_rgb
         elif front_mask_rgb is None or front_second_rgb is None:
             raise ValueError("RGB Door DP raw frames require wrist/front RGB and mask images.")
-        self.frames["state"].append(np.asarray(state, dtype=np.float32))
-        self.frames["action"].append(np.asarray(action, dtype=np.float32))
-        self.frames[self.image_keys[0]].append(np.asarray(wrist_mask_rgb, dtype=np.uint8))
-        self.frames[self.image_keys[1]].append(np.asarray(wrist_second_rgb, dtype=np.uint8))
-        self.frames[self.image_keys[2]].append(np.asarray(front_mask_rgb, dtype=np.uint8))
-        self.frames[self.image_keys[3]].append(np.asarray(front_second_rgb, dtype=np.uint8))
-        self.frames["subtask_index"].append(np.asarray([subtask_index], dtype=np.int64))
+        self.frames["state"].append(np.asarray(state, dtype=np.float32).copy())
+        self.frames["action"].append(np.asarray(action, dtype=np.float32).copy())
+        self.frames[self.image_keys[0]].append(np.asarray(wrist_mask_rgb, dtype=np.uint8).copy())
+        self.frames[self.image_keys[1]].append(np.asarray(wrist_second_rgb, dtype=np.uint8).copy())
+        self.frames[self.image_keys[2]].append(np.asarray(front_mask_rgb, dtype=np.uint8).copy())
+        self.frames[self.image_keys[3]].append(np.asarray(front_second_rgb, dtype=np.uint8).copy())
+        self.frames["subtask_index"].append(np.asarray([subtask_index], dtype=np.int64).copy())
         if replay_snapshot:
             for key, value in replay_snapshot.items():
-                self.frames.setdefault(key, []).append(np.asarray(value, dtype=np.float32))
+                self.frames.setdefault(key, []).append(np.asarray(value, dtype=np.float32).copy())
         self.frame_count += 1
 
     def _next_episode_path(self):

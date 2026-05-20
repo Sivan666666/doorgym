@@ -12,7 +12,7 @@ HIGH_LEVEL_ROOT = DP_ROOT.parent
 def parse_args():
     parser = argparse.ArgumentParser(description="Play a trained Door Diffusion Policy in the door asset scene.")
     parser.add_argument("--checkpoint", type=str, required=True)
-    parser.add_argument("--mode", choices=["pull", "push"], default="pull")
+    parser.add_argument("--mode", choices=["ikpush", "pull", "push"], default="ikpush")
     parser.add_argument("--num_envs", type=int, default=1)
     parser.add_argument("--steps", type=int, default=2500)
     parser.add_argument("--rl_device", type=str, default="cuda:0")
@@ -39,6 +39,12 @@ def parse_args():
 
 def main():
     args = parse_args()
+    if args.mode == "ikpush":
+        raise ValueError(
+            "--mode ikpush is the float_ik recorder/replay environment. "
+            "DP policy execution is not wired in that script yet; use replay for ikpush raw data, "
+            "or pass --mode push/--mode pull for the old DP play environments."
+        )
     if args.rgb and args.mode != "push":
         raise ValueError("--rgb Door DP policy play is only wired for push mode.")
     script = (

@@ -15,14 +15,14 @@ DEFAULT_RAW_ROOT = REPO_ROOT / "high-level" / "data" / "door_dp_raw" / "single_9
 def parse_args():
     parser = argparse.ArgumentParser(
         description=(
-            "Record push Door DP raw episodes on one door asset by repeatedly launching "
-            "the scripted recorder with randomized but conservative play parameters."
+            "Record ikpush Door DP raw episodes on one door asset by repeatedly launching "
+            "the float_ik recorder with randomized but conservative play parameters."
         )
     )
     parser.add_argument("--target_episodes", type=int, default=128, help="Stop once raw_root contains this many .npz episodes.")
     parser.add_argument("--max_runs", type=int, default=30, help="Maximum simulator launches before stopping.")
-    parser.add_argument("--num_envs", type=int, default=16, help="Parallel envs per launch.")
-    parser.add_argument("--steps", type=int, default=1080)
+    parser.add_argument("--num_envs", type=int, default=16, help="Sequential single-env attempts per sweep run.")
+    parser.add_argument("--steps", type=int, default=2600)
     parser.add_argument("--raw_root", type=Path, default=DEFAULT_RAW_ROOT)
     parser.add_argument("--door_cfg", type=Path, default=DEFAULT_DOOR_CFG)
     parser.add_argument("--rl_device", type=str, default="cuda:0")
@@ -50,18 +50,8 @@ def uniform(rng, lo, hi, digits=4):
 
 
 def sample_play_args(rng):
-    speed_min = rng.uniform(0.60, 0.70)
-    speed_max = rng.uniform(max(speed_min + 0.08, 0.72), 0.86)
     robot_yaw = rng.uniform(3.10, 3.18)
     return [
-        "--speed_min",
-        f"{speed_min:.4f}",
-        "--speed_max",
-        f"{speed_max:.4f}",
-        "--yaw_min",
-        uniform(rng, -0.08, -0.02),
-        "--yaw_max",
-        uniform(rng, 0.02, 0.08),
         "--robot_y",
         uniform(rng, -0.07, 0.07),
         "--robot_yaw",
@@ -72,8 +62,6 @@ def sample_play_args(rng):
         uniform(rng, -0.055, -0.010),
         "--grasp_z_offset",
         uniform(rng, -0.055, -0.005),
-        "--push_base_vx",
-        uniform(rng, 0.20, 0.32),
         "--door_push_distance",
         uniform(rng, 0.95, 1.20),
         "--handle_rotate_angle",
@@ -92,7 +80,7 @@ def build_command(args, play_args, num_envs):
         sys.executable,
         str(RECORD_SCRIPT),
         "--mode",
-        "push",
+        "ikpush",
         "--num_envs",
         str(num_envs),
         "--num_rollouts",
@@ -140,20 +128,28 @@ def main():
         current = count_episodes(args.raw_root.expanduser().resolve())
         if current >= args.target_episodes:
             break
-        play_args = sample_play_args(rng)
-        launch_envs = args.num_envs
-        cmd = build_command(args, play_args, launch_envs)
+        run_start = current
         print(
             f"\n=== sweep run {run_idx + 1}/{args.max_runs} "
-            f"current={current}/{args.target_episodes} launch_envs={launch_envs} ===",
+            f"current={current}/{args.target_episodes} attempts={args.num_envs} ===",
             flush=True,
         )
-        print(" ".join(shlex.quote(part) for part in cmd), flush=True)
-        if args.dry_run:
-            continue
-        subprocess.run(cmd, cwd=str(REPO_ROOT), check=True)
+        for attempt_idx in range(args.num_envs):
+            current = count_episodes(args.raw_root.expanduser().resolve())
+            if current >= args.target_episodes:
+                break
+            play_args = sample_play_args(rng)
+            cmd = build_command(args, play_args, 1)
+            print(
+                f"\n--- sweep attempt {attempt_idx + 1}/{args.num_envs} current={current}/{args.target_episodes} ---",
+                flush=True,
+            )
+            print(" ".join(shlex.quote(part) for part in cmd), flush=True)
+            if args.dry_run:
+                continue
+            subprocess.run(cmd, cwd=str(REPO_ROOT), check=True)
         after = count_episodes(args.raw_root.expanduser().resolve())
-        print(f"Saved this run: {after - current}; total: {after}", flush=True)
+        print(f"Saved this run: {after - run_start}; total: {after}", flush=True)
 
     final_total = count_episodes(args.raw_root.expanduser().resolve())
     print(f"\nDone. Episodes in {args.raw_root}: {final_total}", flush=True)
