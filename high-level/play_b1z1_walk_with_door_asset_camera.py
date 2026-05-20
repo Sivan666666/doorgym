@@ -1504,6 +1504,10 @@ def parse_args():
     parser.add_argument("--front_camera_roll_deg", type=float, default=0.0)
     parser.add_argument("--camera_axis_scale", type=float, default=0.10)
     parser.add_argument("--camera_axis_thickness", type=float, default=0.004)
+    parser.add_argument("--draw_camera_axes", dest="draw_camera_axes", action="store_true", default=True)
+    parser.add_argument("--no_draw_camera_axes", dest="draw_camera_axes", action="store_false")
+    parser.add_argument("--draw_ee_target", dest="draw_ee_target", action="store_true", default=True)
+    parser.add_argument("--no_draw_ee_target", dest="draw_ee_target", action="store_false")
     parser.add_argument("--record_dp_dataset", action="store_true")
     parser.add_argument("--dp_raw_root", type=str, default=str(HIGH_LEVEL_ROOT / "data" / "door_dp_raw" / "local_door_dp"))
     parser.add_argument("--dp_dataset_root", type=str, default=None)
@@ -2495,8 +2499,10 @@ def main():
                 )
                 if should_close:
                     close_dp_recording(env_id, "pass_done" if bool(pass_done[env_id].item()) else "max_steps")
-        env.draw_wrist_camera_axes(args.camera_axis_scale, args.camera_axis_thickness)
-        draw_ee_target()
+        if args.draw_camera_axes:
+            env.draw_wrist_camera_axes(args.camera_axis_scale, args.camera_axis_thickness)
+        if args.draw_ee_target:
+            draw_ee_target()
         if torch.any(dones):
             if dp_recorders:
                 for env_id in dp_recorders:

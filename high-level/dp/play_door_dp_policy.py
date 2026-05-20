@@ -23,6 +23,11 @@ def parse_args():
     parser.add_argument("--show_seg", dest="show_seg", action="store_true", default=True)
     parser.add_argument("--no_show_seg", dest="show_seg", action="store_false")
     parser.add_argument("--camera_display_scale", type=int, default=5)
+    parser.add_argument(
+        "--debug_visuals",
+        action="store_true",
+        help="Keep viewer-only debug markers such as EE target spheres and camera axes.",
+    )
     parser.add_argument("--dp_inference_steps", type=int, default=100)
     parser.add_argument("--dp_action_horizon", type=int, default=None)
     parser.add_argument("--dp_control_env_id", type=int, default=0)
@@ -84,6 +89,10 @@ def main():
     ]
     if args.mode == "ikpush":
         cmd.append("--enable_front_camera")
+        if not args.debug_visuals:
+            cmd += ["--no_draw_ik_target", "--no_draw_camera_axes"]
+    elif not args.debug_visuals:
+        cmd += ["--no_draw_ee_target", "--no_draw_camera_axes"]
     if args.rgb:
         cmd += ["--rgb", "--camera_rgb", "--no_camera_depth"]
     else:
