@@ -16,13 +16,13 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description=(
             "Record ikpush Door DP raw episodes on one door asset by repeatedly launching "
-            "the float_ik recorder with randomized but conservative play parameters."
+            "the float_ik recorder with a new seed for each run."
         )
     )
     parser.add_argument("--target_episodes", type=int, default=128, help="Stop once raw_root contains this many .npz episodes.")
     parser.add_argument("--max_runs", type=int, default=30, help="Maximum simulator launches before stopping.")
-    parser.add_argument("--num_envs", type=int, default=16, help="Sequential single-env attempts per sweep run.")
-    parser.add_argument("--steps", type=int, default=2600)
+    parser.add_argument("--num_envs", type=int, default=16, help="Parallel float_ik envs per sweep run.")
+    parser.add_argument("--steps", type=int, default=2520)
     parser.add_argument("--raw_root", type=Path, default=DEFAULT_RAW_ROOT)
     parser.add_argument("--door_cfg", type=Path, default=DEFAULT_DOOR_CFG)
     parser.add_argument("--rl_device", type=str, default="cuda:0")
@@ -45,35 +45,7 @@ def count_episodes(raw_root):
     return len(list(Path(raw_root).glob("episode_*.npz")))
 
 
-def uniform(rng, lo, hi, digits=4):
-    return f"{rng.uniform(lo, hi):.{digits}f}"
-
-
-def sample_play_args(rng):
-    robot_yaw = rng.uniform(3.10, 3.18)
-    return [
-        "--robot_y",
-        uniform(rng, -0.07, 0.07),
-        "--robot_yaw",
-        f"{robot_yaw:.4f}",
-        "--pregrasp_offset",
-        uniform(rng, 0.12, 0.20),
-        "--grasp_x_offset",
-        uniform(rng, -0.055, -0.010),
-        "--grasp_z_offset",
-        uniform(rng, -0.055, -0.005),
-        "--door_push_distance",
-        uniform(rng, 0.95, 1.20),
-        "--handle_rotate_angle",
-        uniform(rng, 0.95, 1.15),
-        "--door_joint_friction",
-        uniform(rng, 0.35, 0.75),
-        "--door_joint_damping",
-        uniform(rng, 0.12, 0.30),
-    ]
-
-
-def build_command(args, play_args, num_envs):
+def build_command(args, play_args, num_envs, seed):
     raw_root = args.raw_root.expanduser().resolve()
     door_cfg = args.door_cfg.expanduser().resolve()
     cmd = [
@@ -87,6 +59,8 @@ def build_command(args, play_args, num_envs):
         "1",
         "--steps",
         str(args.steps),
+        "--seed",
+        str(int(seed)),
         "--raw_root",
         str(raw_root),
         "--rl_device",
@@ -129,25 +103,17 @@ def main():
         if current >= args.target_episodes:
             break
         run_start = current
+        run_seed = rng.randrange(0, 2**31 - 1)
+        cmd = build_command(args, [], args.num_envs, run_seed)
         print(
             f"\n=== sweep run {run_idx + 1}/{args.max_runs} "
-            f"current={current}/{args.target_episodes} attempts={args.num_envs} ===",
+            f"current={current}/{args.target_episodes} parallel_envs={args.num_envs} seed={run_seed} ===",
             flush=True,
         )
-        for attempt_idx in range(args.num_envs):
-            current = count_episodes(args.raw_root.expanduser().resolve())
-            if current >= args.target_episodes:
-                break
-            play_args = sample_play_args(rng)
-            cmd = build_command(args, play_args, 1)
-            print(
-                f"\n--- sweep attempt {attempt_idx + 1}/{args.num_envs} current={current}/{args.target_episodes} ---",
-                flush=True,
-            )
-            print(" ".join(shlex.quote(part) for part in cmd), flush=True)
-            if args.dry_run:
-                continue
-            subprocess.run(cmd, cwd=str(REPO_ROOT), check=True)
+        print(" ".join(shlex.quote(part) for part in cmd), flush=True)
+        if args.dry_run:
+            continue
+        subprocess.run(cmd, cwd=str(REPO_ROOT), check=True)
         after = count_episodes(args.raw_root.expanduser().resolve())
         print(f"Saved this run: {after - run_start}; total: {after}", flush=True)
 

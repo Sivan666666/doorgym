@@ -15,7 +15,10 @@ DP_ROOT = Path(__file__).resolve().parent
 HIGH_LEVEL_ROOT = DP_ROOT.parent
 REPO_ROOT = HIGH_LEVEL_ROOT.parent
 LOW_LEVEL_ROOT = REPO_ROOT / "low-level"
-FLOAT_IK_SOURCE_SCRIPT = "isaacgym_float_ik_b1z1_basearn_push_door.py"
+FLOAT_IK_SOURCE_SCRIPTS = (
+    "isaacgym_float_ik_b1z1_basearn_push_door.py",
+    "isaacgym_float_ik_b1z1_basearn_push_door_parallel.py",
+)
 REPLAY_STATE_KEYS = (
     "state",
     "action",
@@ -277,7 +280,8 @@ def source_script_from_episode(data):
 
 
 def is_float_ik_episode(data):
-    return source_script_from_episode(data).endswith(FLOAT_IK_SOURCE_SCRIPT)
+    source_script = source_script_from_episode(data)
+    return any(source_script.endswith(name) for name in FLOAT_IK_SOURCE_SCRIPTS)
 
 
 def door_asset_selection_from_episode(data, args):
@@ -320,7 +324,7 @@ def load_play_module(mode):
 
 
 def load_float_ik_module():
-    module_path = HIGH_LEVEL_ROOT / "float_ik" / FLOAT_IK_SOURCE_SCRIPT
+    module_path = HIGH_LEVEL_ROOT / "float_ik" / "isaacgym_float_ik_b1z1_basearn_push_door.py"
     for path in (str(module_path.parent), str(HIGH_LEVEL_ROOT), str(DP_ROOT), str(REPO_ROOT), str(LOW_LEVEL_ROOT)):
         if path not in sys.path:
             sys.path.insert(0, path)
