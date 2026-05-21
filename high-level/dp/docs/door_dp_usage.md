@@ -390,12 +390,12 @@ Current state is 73D when `num_dofs=19` and `num_actions=18`:
 72     gripper_pos
 ```
 
-`wrist_masked_depth` and `front_masked_depth` are stored as 3-channel images for
-LeRobot/video tooling and for the shared 3-channel CNN image encoder. They are
-still grayscale masked depth visualizations internally; the three channels contain
-the same value. In depth mode, valid handle pixels are encoded with a fixed metric
-scale, `depth_meters / camera_depth_clip_far`, rather than per-frame min-max
-normalization.
+`wrist_masked_depth` and `front_masked_depth` are legacy field names. In current
+depth mode they store full-scene grayscale depth images, while
+`wrist_handle_mask` and `front_handle_mask` store the handle masks. Depth pixels
+use a fixed metric scale over `[camera_depth_clip_lower, camera_depth_clip_far]`,
+with the current defaults `[0.02m, 2.0m]`; the three channels contain the same
+value.
 
 State/action feature names are stored in:
 

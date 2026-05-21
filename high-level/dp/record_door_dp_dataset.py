@@ -55,7 +55,7 @@ def parse_args():
     parser.add_argument("--sim_device", type=str, default="cuda:0")
     parser.add_argument("--graphics_device_id", type=int, default=None)
     parser.add_argument("--headless", action="store_true")
-    parser.add_argument("--rgb", action="store_true", help="Record RGB+mask vision for push/ikpush data instead of masked depth+mask.")
+    parser.add_argument("--rgb", action="store_true", help="Record RGB+mask vision for push/ikpush data instead of full depth+mask.")
     parser.add_argument("--record_env_id", type=int, default=0)
     parser.add_argument("--record_all_envs", dest="record_all_envs", action="store_true", default=True)
     parser.add_argument("--no_record_all_envs", dest="record_all_envs", action="store_false")

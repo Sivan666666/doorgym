@@ -918,14 +918,19 @@ class ManipLocoDoorAsset(ManipLoco):
                 images["handle_mask"] = images[f"{prefix}_handle_mask"]
             if depth_key in images:
                 depth_image = images[depth_key].clone().to(torch.float32)
-                depth_image = torch.nan_to_num(depth_image, nan=0.0, posinf=0.0, neginf=0.0)
                 depth_image = torch.abs(depth_image)
+                depth_image = torch.nan_to_num(
+                    depth_image,
+                    nan=0.0,
+                    posinf=float(DOOR_RUNTIME["camera_depth_clip_far"]),
+                    neginf=float(DOOR_RUNTIME["camera_depth_clip_far"]),
+                )
                 depth_image[depth_image < DOOR_RUNTIME["camera_depth_clip_lower"]] = 0
                 depth_image = torch.clamp(depth_image, 0.0, DOOR_RUNTIME["camera_depth_clip_far"])
                 normalized_depth = depth_image / DOOR_RUNTIME["camera_depth_clip_far"]
                 images[f"{prefix}_depth_meters"] = depth_image
                 images[f"{prefix}_normalized_depth"] = normalized_depth
-                images[f"{prefix}_handle_masked_depth"] = depth_image * images[f"{prefix}_handle_mask"]
+                images[f"{prefix}_handle_masked_depth"] = depth_image
                 if prefix == "wrist":
                     images["depth_meters"] = depth_image
                     images["normalized_depth"] = normalized_depth
@@ -963,16 +968,19 @@ class ManipLocoDoorAsset(ManipLoco):
             cv2.imshow(f"{title} Handle Mask", mask_vis)
             if local_depth_key is None or local_depth_key not in images:
                 continue
-            masked_depth = np.squeeze(images[local_depth_key][env_id].detach().cpu().numpy()).astype(np.float32)
-            masked_depth_vis = np.zeros_like(masked_depth, dtype=np.uint8)
-            valid_depth = masked_depth[mask_image > 0.5]
+            depth_image = np.squeeze(images[local_depth_key][env_id].detach().cpu().numpy()).astype(np.float32)
+            depth_vis = np.zeros_like(depth_image, dtype=np.uint8)
+            valid_depth = depth_image[np.isfinite(depth_image) & (depth_image > 0.0)]
             valid_depth = valid_depth[np.isfinite(valid_depth) & (valid_depth > 0.0)]
             if valid_depth.size > 0:
-                depth_scaled = masked_depth / max(float(DOOR_RUNTIME["camera_depth_clip_far"]), 1e-4)
-                masked_depth_vis = (255.0 * np.clip(depth_scaled, 0.0, 1.0) * mask_image).astype(np.uint8)
+                depth_scaled = (depth_image - float(DOOR_RUNTIME["camera_depth_clip_lower"])) / max(
+                    float(DOOR_RUNTIME["camera_depth_clip_far"]) - float(DOOR_RUNTIME["camera_depth_clip_lower"]),
+                    1e-4,
+                )
+                depth_vis = (255.0 * np.clip(depth_scaled, 0.0, 1.0)).astype(np.uint8)
             if display_scale > 1:
-                masked_depth_vis = cv2.resize(masked_depth_vis, None, fx=display_scale, fy=display_scale, interpolation=cv2.INTER_NEAREST)
-            cv2.imshow(f"{title} Handle Masked Depth", masked_depth_vis)
+                depth_vis = cv2.resize(depth_vis, None, fx=display_scale, fy=display_scale, interpolation=cv2.INTER_NEAREST)
+            cv2.imshow(f"{title} Full Depth", depth_vis)
         cv2.waitKey(1)
 
     def draw_wrist_camera_axes(self, scale=0.10, thickness=0.004):
@@ -2456,6 +2464,7 @@ def main():
             mask_rgb, masked_depth_rgb, front_mask_rgb, front_masked_depth_rgb = dp_image_inputs_from_camera_tensors(
                 dp_camera_images,
                 dp_env_id,
+                depth_lower=DOOR_RUNTIME["camera_depth_clip_lower"],
                 depth_far=DOOR_RUNTIME["camera_depth_clip_far"],
             )
             if mask_rgb is not None and masked_depth_rgb is not None:
@@ -2504,6 +2513,7 @@ def main():
                 mask_rgb, masked_depth_rgb, front_mask_rgb, front_masked_depth_rgb = dp_image_inputs_from_camera_tensors(
                     camera_images,
                     env_id,
+                    depth_lower=DOOR_RUNTIME["camera_depth_clip_lower"],
                     depth_far=DOOR_RUNTIME["camera_depth_clip_far"],
                 )
                 should_close = bool(pass_done[env_id].item()) or step == args.steps - 1

@@ -170,7 +170,7 @@ def parse_args():
     parser.add_argument("--no_enable_wrist_camera", dest="enable_wrist_camera", action="store_false")
     parser.add_argument("--enable_front_camera", dest="enable_front_camera", action="store_true", default=True)
     parser.add_argument("--no_enable_front_camera", dest="enable_front_camera", action="store_false")
-    parser.add_argument("--rgb", action="store_true", help="Replay RGB+mask raw episodes instead of masked depth+mask episodes.")
+    parser.add_argument("--rgb", action="store_true", help="Replay RGB+mask raw episodes instead of full depth+mask episodes.")
     parser.add_argument("--camera_rgb", action="store_true")
     parser.add_argument("--camera_depth", dest="camera_depth", action="store_true", default=True)
     parser.add_argument("--no_camera_depth", dest="camera_depth", action="store_false")
@@ -998,9 +998,9 @@ def display_float_ik_raw_camera_images(float_mod, data, frame_idx, args, vision_
     else:
         windows = [
             ("Wrist Handle Mask", "wrist_handle_mask"),
-            ("Wrist Handle Masked Depth", "wrist_masked_depth"),
+            ("Wrist Full Depth", "wrist_masked_depth"),
             ("Front Handle Mask", "front_handle_mask"),
-            ("Front Handle Masked Depth", "front_masked_depth"),
+            ("Front Full Depth", "front_masked_depth"),
         ]
     scale = max(1, int(args.camera_display_scale))
     for title, key in windows:

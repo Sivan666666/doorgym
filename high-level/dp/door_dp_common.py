@@ -9,6 +9,7 @@ import torch
 
 IMAGE_HEIGHT = 54
 IMAGE_WIDTH = 96
+DEFAULT_DEPTH_LOWER_METERS = 0.02
 DEFAULT_DEPTH_FAR_METERS = 2.0
 DEPTH_IMAGE_KEYS = ["wrist_handle_mask", "wrist_masked_depth", "front_handle_mask", "front_masked_depth"]
 RGB_IMAGE_KEYS = ["wrist_handle_mask", "wrist_rgb", "front_handle_mask", "front_rgb"]
@@ -234,21 +235,28 @@ def print_door_dp_log_record(record):
     )
 
 
-def _image_pair_from_camera_tensors(camera_images, mask_key, depth_key, env_id=0, depth_far=DEFAULT_DEPTH_FAR_METERS):
+def _image_pair_from_camera_tensors(
+    camera_images,
+    mask_key,
+    depth_key,
+    env_id=0,
+    depth_lower=DEFAULT_DEPTH_LOWER_METERS,
+    depth_far=DEFAULT_DEPTH_FAR_METERS,
+):
     env_id = int(env_id)
     if mask_key not in camera_images or depth_key not in camera_images:
         return None, None
     mask = np.squeeze(_to_numpy(camera_images[mask_key][env_id])).astype(np.float32)
-    masked_depth = np.squeeze(_to_numpy(camera_images[depth_key][env_id])).astype(np.float32)
+    depth_image = np.squeeze(_to_numpy(camera_images[depth_key][env_id])).astype(np.float32)
     mask_u8 = (255.0 * np.clip(mask, 0.0, 1.0)).astype(np.uint8)
-    valid = masked_depth[mask > 0.5]
+    valid = depth_image[np.isfinite(depth_image) & (depth_image > 0.0)]
     valid = valid[np.isfinite(valid) & (valid > 0.0)]
     depth_u8 = np.zeros_like(mask_u8)
     if valid.size > 0:
-        scaled = masked_depth / max(float(depth_far), 1e-4)
-        depth_u8 = (255.0 * np.clip(scaled, 0.0, 1.0) * mask).astype(np.uint8)
+        scaled = (depth_image - float(depth_lower)) / max(float(depth_far) - float(depth_lower), 1e-4)
+        depth_u8 = (255.0 * np.clip(scaled, 0.0, 1.0)).astype(np.uint8)
     # Store as RGB-compatible images for LeRobot/video tools and the shared 3-channel CNN encoder.
-    # The masked depth is still a single grayscale depth visualization; all three channels are identical.
+    # Depth is a single grayscale full-depth visualization; all three channels are identical.
     return np.repeat(mask_u8[..., None], 3, axis=-1), np.repeat(depth_u8[..., None], 3, axis=-1)
 
 
@@ -285,26 +293,45 @@ def _rgb_from_camera_tensors(camera_images, rgb_key, env_id=0):
     return np.clip(rgb, 0, 255).astype(np.uint8)
 
 
-def images_from_camera_tensors(camera_images, env_id=0, depth_far=DEFAULT_DEPTH_FAR_METERS):
+def images_from_camera_tensors(
+    camera_images,
+    env_id=0,
+    depth_lower=DEFAULT_DEPTH_LOWER_METERS,
+    depth_far=DEFAULT_DEPTH_FAR_METERS,
+):
     mask_key = "wrist_handle_mask" if "wrist_handle_mask" in camera_images else "handle_mask"
     depth_key = "wrist_handle_masked_depth" if "wrist_handle_masked_depth" in camera_images else "handle_masked_depth"
-    return _image_pair_from_camera_tensors(camera_images, mask_key, depth_key, env_id, depth_far=depth_far)
+    return _image_pair_from_camera_tensors(
+        camera_images,
+        mask_key,
+        depth_key,
+        env_id,
+        depth_lower=depth_lower,
+        depth_far=depth_far,
+    )
 
 
 def dp_image_inputs_from_camera_tensors(
     camera_images,
     env_id=0,
     vision_mode="depth",
+    depth_lower=DEFAULT_DEPTH_LOWER_METERS,
     depth_far=DEFAULT_DEPTH_FAR_METERS,
 ):
     vision_mode = normalize_vision_mode(vision_mode)
     if vision_mode == "depth":
-        wrist_mask, wrist_depth = images_from_camera_tensors(camera_images, env_id, depth_far=depth_far)
+        wrist_mask, wrist_depth = images_from_camera_tensors(
+            camera_images,
+            env_id,
+            depth_lower=depth_lower,
+            depth_far=depth_far,
+        )
         front_mask, front_depth = _image_pair_from_camera_tensors(
             camera_images,
             "front_handle_mask",
             "front_handle_masked_depth",
             env_id,
+            depth_lower=depth_lower,
             depth_far=depth_far,
         )
         return wrist_mask, wrist_depth, front_mask, front_depth

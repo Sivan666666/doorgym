@@ -50,7 +50,7 @@ def parse_args():
     parser.add_argument("--num_diffusion_iters", type=int, default=100)
     parser.add_argument("--clip_sample_range", type=float, default=7.0)
     parser.add_argument("--save_interval", type=int, default=5000)
-    parser.add_argument("--rgb", action="store_true", help="Train on RGB+mask image fields instead of masked depth+mask.")
+    parser.add_argument("--rgb", action="store_true", help="Train on RGB+mask image fields instead of full depth+mask.")
     parser.add_argument("--wandb", action="store_true", help="Log training metrics to Weights & Biases.")
     parser.add_argument("--wandb_project", type=str, default="door-dp")
     parser.add_argument("--wandb_entity", type=str, default=None)

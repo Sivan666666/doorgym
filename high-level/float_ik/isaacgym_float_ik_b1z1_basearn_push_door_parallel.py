@@ -351,7 +351,7 @@ def parse_args():
             {"name": "--no_show_camera_images", "dest": "show_camera_images", "action": "store_false"},
             {"name": "--show_seg", "action": "store_true"},
             {"name": "--no_show_seg", "action": "store_true"},
-            {"name": "--rgb", "action": "store_true", "help": "Show RGB+mask camera previews instead of masked depth+mask."},
+            {"name": "--rgb", "action": "store_true", "help": "Show RGB+mask camera previews instead of full depth+mask."},
             {"name": "--camera_rgb", "action": "store_true"},
             {"name": "--camera_depth", "action": "store_true"},
             {"name": "--no_camera_depth", "action": "store_true"},
@@ -1095,7 +1095,7 @@ def create_low_level_cameras(gym, env, arm_actor, actor_handles, args):
             pair_names = (
                 ", ".join(f"{name}_rgb/{name}_mask" for name in cameras.keys())
                 if args.rgb
-                else ", ".join(f"{name}_mask/{name}_masked_depth" for name in cameras.keys())
+                else ", ".join(f"{name}_mask/{name}_full_depth" for name in cameras.keys())
             )
             print(
                 "Camera image windows enabled:",
@@ -1195,17 +1195,25 @@ def show_camera_handle_images(gym, sim, env, camera_handles, args):
         if depth_raw is None:
             continue
         depth_image = camera_image_to_array(depth_raw, height, width).astype(np.float32)
-        depth_image = np.nan_to_num(np.abs(depth_image), nan=0.0, posinf=0.0, neginf=0.0)
+        depth_image = np.abs(depth_image)
+        depth_image = np.nan_to_num(
+            depth_image,
+            nan=0.0,
+            posinf=float(args.camera_depth_clip_far),
+            neginf=float(args.camera_depth_clip_far),
+        )
         depth_image[depth_image < float(args.camera_depth_clip_lower)] = 0.0
         depth_image = np.clip(depth_image, 0.0, float(args.camera_depth_clip_far))
 
-        masked_depth = depth_image * handle_mask
-        masked_depth_vis = np.zeros_like(masked_depth, dtype=np.uint8)
-        valid_depth = masked_depth[handle_mask > 0.5]
+        depth_vis = np.zeros_like(depth_image, dtype=np.uint8)
+        valid_depth = depth_image[np.isfinite(depth_image) & (depth_image > 0.0)]
         valid_depth = valid_depth[np.isfinite(valid_depth) & (valid_depth > 0.0)]
         if valid_depth.size > 0:
-            depth_scaled = masked_depth / max(float(args.camera_depth_clip_far), 1.0e-4)
-            masked_depth_vis = (255.0 * np.clip(depth_scaled, 0.0, 1.0) * handle_mask).astype(np.uint8)
+            depth_scaled = (depth_image - float(args.camera_depth_clip_lower)) / max(
+                float(args.camera_depth_clip_far) - float(args.camera_depth_clip_lower),
+                1.0e-4,
+            )
+            depth_vis = (255.0 * np.clip(depth_scaled, 0.0, 1.0)).astype(np.uint8)
 
         printed = getattr(args, "_camera_image_stats_printed", set())
         if prefix not in printed:
@@ -1233,7 +1241,7 @@ def show_camera_handle_images(gym, sim, env, camera_handles, args):
             blank_printed = getattr(args, "_camera_blank_warned", set())
             if prefix not in blank_printed:
                 print(
-                    "⚠️📷 Camera render has no valid masked depth pixels. "
+                    "⚠️📷 Camera render has no valid depth pixels. "
                     "Check handle visibility, segmentation id, and graphics rendering if this persists.",
                     flush=True,
                 )
@@ -1242,11 +1250,11 @@ def show_camera_handle_images(gym, sim, env, camera_handles, args):
 
         if display_scale > 1:
             mask_vis = cv2.resize(mask_vis, None, fx=display_scale, fy=display_scale, interpolation=cv2.INTER_NEAREST)
-            masked_depth_vis = cv2.resize(
-                masked_depth_vis, None, fx=display_scale, fy=display_scale, interpolation=cv2.INTER_NEAREST
+            depth_vis = cv2.resize(
+                depth_vis, None, fx=display_scale, fy=display_scale, interpolation=cv2.INTER_NEAREST
             )
         cv2.imshow(f"{prefix.capitalize()} Handle Mask", mask_vis)
-        cv2.imshow(f"{prefix.capitalize()} Handle Masked Depth", masked_depth_vis)
+        cv2.imshow(f"{prefix.capitalize()} Full Depth", depth_vis)
     cv2.waitKey(1)
 
 
@@ -1255,14 +1263,13 @@ def mask_to_rgb(mask):
     return np.repeat(mask_u8[..., None], 3, axis=-1)
 
 
-def masked_depth_to_rgb(depth_image, handle_mask, depth_far):
-    masked_depth = depth_image * handle_mask
-    depth_u8 = np.zeros_like(masked_depth, dtype=np.uint8)
-    valid = masked_depth[handle_mask > 0.5]
+def depth_to_rgb(depth_image, depth_lower, depth_far):
+    depth_u8 = np.zeros_like(depth_image, dtype=np.uint8)
+    valid = depth_image[np.isfinite(depth_image) & (depth_image > 0.0)]
     valid = valid[np.isfinite(valid) & (valid > 0.0)]
     if valid.size > 0:
-        scaled = masked_depth / max(float(depth_far), 1.0e-4)
-        depth_u8 = (255.0 * np.clip(scaled, 0.0, 1.0) * handle_mask).astype(np.uint8)
+        scaled = (depth_image - float(depth_lower)) / max(float(depth_far) - float(depth_lower), 1.0e-4)
+        depth_u8 = (255.0 * np.clip(scaled, 0.0, 1.0)).astype(np.uint8)
     return np.repeat(depth_u8[..., None], 3, axis=-1), int(valid.size)
 
 
@@ -1308,19 +1315,25 @@ def capture_dp_camera_images_from_rendered(gym, sim, env, camera_handles, args):
         if depth_raw is None:
             continue
         depth_image = camera_image_to_array(depth_raw, height, width).astype(np.float32)
-        depth_image = np.nan_to_num(np.abs(depth_image), nan=0.0, posinf=0.0, neginf=0.0)
+        depth_image = np.abs(depth_image)
+        depth_image = np.nan_to_num(
+            depth_image,
+            nan=0.0,
+            posinf=float(args.camera_depth_clip_far),
+            neginf=float(args.camera_depth_clip_far),
+        )
         depth_image[depth_image < float(args.camera_depth_clip_lower)] = 0.0
         depth_image = np.clip(depth_image, 0.0, float(args.camera_depth_clip_far))
-        masked_depth_rgb, valid_depth_count = masked_depth_to_rgb(
+        depth_rgb, valid_depth_count = depth_to_rgb(
             depth_image,
-            handle_mask,
+            args.camera_depth_clip_lower,
             args.camera_depth_clip_far,
         )
-        images[f"{prefix}_masked_depth"] = masked_depth_rgb
+        images[f"{prefix}_masked_depth"] = depth_rgb
         if args.headless and not getattr(args, f"_{prefix}_headless_depth_checked", False):
             if valid_depth_count == 0:
                 print(
-                    "⚠️📷 Headless camera render has no valid masked depth pixels. "
+                    "⚠️📷 Headless camera render has no valid depth pixels. "
                     "Check graphics_device_id/GPU rendering if this persists.",
                     flush=True,
                 )
