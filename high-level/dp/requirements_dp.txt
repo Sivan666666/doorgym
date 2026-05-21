@@ -1,10 +1,59 @@
-# Install in a Python>=3.10 training/conversion environment, not in the b1z1 Isaac Gym environment.
-lerobot
-diffusers
-rerun-sdk
-opencv-python
-einops
-zarr
-pyarrow
-av
-wandb
+# Door DP / LeRobot environment.
+#
+# This file is pinned from the working conda env `door_dp`:
+#   Python 3.10.20
+#   torch 2.6.0+cu124, torchvision 0.21.0+cu124, torchcodec 0.2.1+cu124
+#
+# Recommended setup:
+#   conda create -n door_dp python=3.10
+#   conda activate door_dp
+#   python -m pip install --upgrade pip
+#   python -m pip install -r high-level/dp/requirements_dp.txt
+#
+# Keep the +cu124 suffixes below. Dropping them may install CPU wheels and break
+# LeRobot/TorchCodec CUDA compatibility for Door DP training and inference.
+--extra-index-url https://download.pytorch.org/whl/cu124
+
+# PyTorch CUDA 12.4 stack.
+torch==2.6.0+cu124
+torchvision==0.21.0+cu124
+torchcodec==0.2.1+cu124
+
+# LeRobot policy training/inference.
+lerobot==0.4.4
+diffusers==0.35.2
+accelerate==1.13.0
+safetensors==0.7.0
+datasets==4.8.5
+huggingface-hub==0.35.3
+gymnasium==1.3.0
+draccus==0.10.0
+
+# Door dataset conversion, visualization, and logging.
+rerun-sdk==0.26.2
+av==15.1.0
+opencv-python==4.13.0.92
+opencv-python-headless==4.12.0.88
+einops==0.8.2
+zarr==2.18.3
+pyarrow==24.0.0
+numpy==2.2.6
+pillow==12.2.0
+imageio==2.37.3
+imageio-ffmpeg==0.6.0
+pandas==2.3.3
+tqdm==4.67.3
+wandb==0.24.2
+
+# Important LeRobot transitive dependencies pinned for reproducible installs.
+cmake==4.1.3
+deepdiff==8.6.2
+jsonlines==4.0.0
+packaging==25.0
+protobuf==6.33.6
+pynput==1.8.2
+pyserial==3.5
+pyyaml==6.0.3
+pyyaml-include==1.4.1
+requests==2.34.2
+termcolor==3.3.0
