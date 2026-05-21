@@ -25,6 +25,7 @@ RGB_LEROBOT_IMAGE_KEYS = [
     "observation.images.front_handle_mask",
     "observation.images.front_rgb",
 ]
+DATASET_METADATA_KEYS = ("action_frame", "action_pose_frame", "target_pose_frame", "ikpush_state_version")
 ACTION_NAMES = [
     "vx",
     "yaw",
@@ -410,7 +411,7 @@ class DoorDPLeRobotRecorder:
         }
         if self.vision_mode == "rgb":
             sidecar["vision_mode"] = self.vision_mode
-        for key in ("action_frame", "action_pose_frame", "target_pose_frame"):
+        for key in DATASET_METADATA_KEYS:
             if hasattr(self, "metadata") and key in self.metadata:
                 sidecar[key] = self.metadata[key]
         out = self.dataset_root / "door_dp_feature_names.json"
@@ -496,7 +497,7 @@ class RawDoorDPRecorder:
         }
         if self.vision_mode == "rgb":
             sidecar["vision_mode"] = self.vision_mode
-        for key in ("action_frame", "action_pose_frame", "target_pose_frame"):
+        for key in DATASET_METADATA_KEYS:
             if key in self.metadata:
                 sidecar[key] = self.metadata[key]
         out = self.raw_root / "door_dp_feature_names.json"

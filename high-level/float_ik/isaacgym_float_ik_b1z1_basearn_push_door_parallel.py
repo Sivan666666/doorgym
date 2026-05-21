@@ -105,6 +105,7 @@ DP_PHASE_NAMES = [
     "hold_home",
 ]
 DP_PHASE_ID = {name: idx for idx, name in enumerate(DP_PHASE_NAMES)}
+IKPUSH_STATE_VERSION = "zero_leg_dof_pos_prev_action_v1"
 B1Z1_DEFAULT_DOF_POS = np.asarray(
     [
         -0.2,
@@ -790,6 +791,7 @@ class ParallelEnvState:
     dp_record_warned_no_camera: bool = False
     prev_base_xy: object = None
     prev_yaw: object = None
+    last_dp_action: object = None
     last_phase: str = "init"
     last_handle_goal: object = None
     last_door_pos: object = None
@@ -1449,7 +1451,7 @@ def update_arm_ik_targets_for_env(gym, env, arm_actor, env_index, dof_positions,
 
 
 def map_float_dofs_to_dp(dof_names, dof_pos, dof_vel):
-    dp_pos = B1Z1_DEFAULT_DOF_POS.copy()
+    dp_pos = np.zeros(DP_NUM_DOFS, dtype=np.float32)
     dp_vel = np.zeros(DP_NUM_DOFS, dtype=np.float32)
     for src_idx, name in enumerate(dof_names):
         dst_idx = FLOAT_ARM_TO_DP_DOF.get(name)
@@ -1480,11 +1482,33 @@ def target_quat_for_dp(target_quat, ik_state, ee_quat):
     return base_ik.normalize_quat(ee_quat)
 
 
-def make_float_dp_state(dof_names, dof_pos, dof_vel, ee_pos, ee_quat, base_xy, base_z, yaw, yaw_rate, gripper):
+def make_last_low_action_from_dp(last_dp_action):
+    last_low_action = np.zeros(DP_NUM_ACTIONS, dtype=np.float32)
+    if last_dp_action is None:
+        return last_low_action
+    values = np.asarray(last_dp_action, dtype=np.float32).reshape(-1)
+    n = min(10, DP_NUM_ACTIONS, values.shape[0])
+    last_low_action[:n] = values[:n]
+    return last_low_action
+
+
+def make_float_dp_state(
+    dof_names,
+    dof_pos,
+    dof_vel,
+    ee_pos,
+    ee_quat,
+    base_xy,
+    base_z,
+    yaw,
+    yaw_rate,
+    gripper,
+    last_dp_action=None,
+):
     dp_dof_pos, dp_dof_vel = map_float_dofs_to_dp(dof_names, dof_pos, dof_vel)
     base_roll_pitch = np.asarray([0.0, 0.0], dtype=np.float32)
     base_ang_vel = np.asarray([0.0, 0.0, yaw_rate], dtype=np.float32)
-    last_low_action = np.zeros(DP_NUM_ACTIONS, dtype=np.float32)
+    last_low_action = make_last_low_action_from_dp(last_dp_action)
     foot_contacts = np.zeros(4, dtype=np.float32)
     base_pos = np.asarray([base_xy[0], base_xy[1], base_z], dtype=np.float32)
     rel = np.asarray(ee_pos, dtype=np.float32) - base_pos
@@ -1680,6 +1704,12 @@ def raw_action_frame_from_data(data):
     return "world"
 
 
+def raw_ikpush_state_version_from_data(data):
+    if "ikpush_state_version" in data.files:
+        return scalar_to_str(data["ikpush_state_version"])
+    return "legacy"
+
+
 def normalize_config_path_for_match(path_value):
     value = scalar_to_str(path_value)
     candidates = [Path(value).expanduser(), HIGH_LEVEL_ROOT / value, REPO_ROOT / value]
@@ -1726,6 +1756,13 @@ def validate_warmstart_raw(data, args, controller, st):
     ckpt_frame = str(getattr(controller, "action_frame", "world")).lower()
     if raw_frame != ckpt_frame:
         raise ValueError(f"Warm-start raw action_frame={raw_frame!r}, checkpoint action_frame={ckpt_frame!r}.")
+    raw_state_version = raw_ikpush_state_version_from_data(data)
+    ckpt_state_version = str(controller.config.get("ikpush_state_version", "legacy"))
+    if raw_state_version != ckpt_state_version:
+        raise ValueError(
+            f"Warm-start raw ikpush_state_version={raw_state_version!r}, "
+            f"checkpoint ikpush_state_version={ckpt_state_version!r}."
+        )
     if "door_cfg" in data.files:
         raw_cfg = normalize_config_path_for_match(data["door_cfg"])
         play_cfg = normalize_config_path_for_match(args.door_cfg)
@@ -1825,6 +1862,11 @@ def apply_warmstart_state(gym, sim, st, data, step, dof_names):
     else:
         st.prev_base_xy = np.asarray(root_state[:2], dtype=np.float32).copy()
         st.prev_yaw = float(yaw)
+    if "action" in data.files:
+        action_index = max(0, int(step) - 1)
+        st.last_dp_action = np.asarray(data["action"][action_index], dtype=np.float32).copy()
+    else:
+        st.last_dp_action = np.zeros(10, dtype=np.float32)
     if "replay_ee_pos" in data.files:
         st.last_target_pos = np.asarray(data["replay_ee_pos"][int(step)], dtype=np.float32).copy()
     if "replay_ee_quat" in data.files:
@@ -2333,6 +2375,7 @@ def run_demo(
                 "action_frame": "base",
                 "action_pose_frame": "base",
                 "target_pose_frame": "base",
+                "ikpush_state_version": IKPUSH_STATE_VERSION,
             },
         )
         print(
@@ -2342,6 +2385,7 @@ def run_demo(
         )
     prev_base_xy = None
     prev_yaw = None
+    prev_dp_action = np.zeros(10, dtype=np.float32)
     while step < max_steps:
         if viewer is not None and gym.query_viewer_has_closed(viewer):
             break
@@ -2426,6 +2470,7 @@ def run_demo(
                     yaw,
                     yaw_rate_cmd,
                     gripper_actual,
+                    prev_dp_action,
                 )
                 dp_action = make_float_dp_action(
                     vx_cmd,
@@ -2461,6 +2506,7 @@ def run_demo(
                         yaw_rate_cmd,
                     ),
                 )
+                prev_dp_action = dp_action.copy()
             if len(door_pos_record) > 0:
                 signed_open_deg = math.degrees(args.door_motion_sign * float(door_pos_record[0]))
                 dp_record_success = dp_record_success or signed_open_deg >= float(args.pass_open_angle_deg)
@@ -2545,6 +2591,7 @@ def make_parallel_dp_recorder(args, door, env_index, vision_mode):
             "action_frame": "base",
             "action_pose_frame": "base",
             "target_pose_frame": "base",
+            "ikpush_state_version": IKPUSH_STATE_VERSION,
             "parallel_env_id": int(env_index),
             "parallel_num_envs": int(args.num_envs),
             "seed": int(getattr(args, "seed", -1)),
@@ -2767,6 +2814,13 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                 f"DP checkpoint action_frame={getattr(dp_controller, 'action_frame', None)!r}; "
                 "expected 'world' or 'base'."
             )
+        checkpoint_state_version = str(dp_controller.config.get("ikpush_state_version", "legacy"))
+        if checkpoint_state_version != IKPUSH_STATE_VERSION:
+            raise ValueError(
+                f"DP checkpoint ikpush_state_version={checkpoint_state_version!r}, "
+                f"but this ikpush play script emits {IKPUSH_STATE_VERSION!r}. "
+                "Reconvert/retrain with the current ikpush state format."
+            )
         dp_control_state = env_states[int(args.dp_control_env_id)]
         dp_control_state.dp_action_frame = getattr(dp_controller, "action_frame", "world")
         if not dp_control_state.camera_handles:
@@ -2830,6 +2884,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                     yaw_current,
                     yaw_rate_state,
                     gripper_actual,
+                    st.last_dp_action,
                 )
                 camera_images = capture_dp_camera_images_from_rendered(gym, sim, st.env, st.camera_handles, st.args)
                 wrist_mask_rgb, wrist_second_rgb, front_mask_rgb, front_second_rgb = dp_image_inputs_from_cpu_cameras(
@@ -2848,6 +2903,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                     front_mask_rgb,
                     front_second_rgb,
                 )
+                st.last_dp_action = np.asarray(dp_action, dtype=np.float32).copy()
                 base_xy, yaw, target_pos, target_quat, gripper = apply_float_dp_action(
                     dp_action,
                     base_xy_current,
@@ -3004,6 +3060,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                         yaw,
                         yaw_rate_cmd,
                         gripper_actual,
+                        st.last_dp_action,
                     )
                     dp_action = make_float_dp_action(
                         vx_cmd,
@@ -3039,6 +3096,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                             yaw_rate_cmd,
                         ),
                     )
+                    st.last_dp_action = dp_action.copy()
                 if len(door_pos_record) > 0:
                     signed_open_deg = math.degrees(st.args.door_motion_sign * float(door_pos_record[0]))
                     st.dp_record_success = st.dp_record_success or signed_open_deg >= float(args.pass_open_angle_deg)

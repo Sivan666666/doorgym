@@ -395,6 +395,12 @@ Current state is 73D when `num_dofs=19` and `num_actions=18`:
 72     gripper_pos
 ```
 
+For current `ikpush` data, the first 12 leg `dof_pos_*` entries are zeroed
+because float-IK does not run the low-level leg controller. Arm/gripper DOFs
+remain in entries 12-18. `last_low_action_0 ... last_low_action_9` stores the
+previous frame's 10D Door DP action; `last_low_action_10 ... 17` stays zero.
+The first recorded frame uses zeros for the previous action.
+
 `wrist_masked_depth` and `front_masked_depth` are legacy field names. In current
 depth mode they store full-scene grayscale depth images, while
 `wrist_handle_mask` and `front_handle_mask` store the handle masks. Depth pixels

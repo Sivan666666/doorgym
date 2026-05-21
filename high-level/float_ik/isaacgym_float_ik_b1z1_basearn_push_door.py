@@ -93,6 +93,7 @@ DP_PHASE_NAMES = [
     "hold_home",
 ]
 DP_PHASE_ID = {name: idx for idx, name in enumerate(DP_PHASE_NAMES)}
+IKPUSH_STATE_VERSION = "zero_leg_dof_pos_prev_action_v1"
 B1Z1_DEFAULT_DOF_POS = np.asarray(
     [
         -0.2,
@@ -1065,7 +1066,7 @@ def current_ee_pose(gym, sim, ik_state):
 
 
 def map_float_dofs_to_dp(dof_names, dof_pos, dof_vel):
-    dp_pos = B1Z1_DEFAULT_DOF_POS.copy()
+    dp_pos = np.zeros(DP_NUM_DOFS, dtype=np.float32)
     dp_vel = np.zeros(DP_NUM_DOFS, dtype=np.float32)
     for src_idx, name in enumerate(dof_names):
         dst_idx = FLOAT_ARM_TO_DP_DOF.get(name)
@@ -1096,11 +1097,33 @@ def target_quat_for_dp(target_quat, ik_state, ee_quat):
     return base_ik.normalize_quat(ee_quat)
 
 
-def make_float_dp_state(dof_names, dof_pos, dof_vel, ee_pos, ee_quat, base_xy, base_z, yaw, yaw_rate, gripper):
+def make_last_low_action_from_dp(last_dp_action):
+    last_low_action = np.zeros(DP_NUM_ACTIONS, dtype=np.float32)
+    if last_dp_action is None:
+        return last_low_action
+    values = np.asarray(last_dp_action, dtype=np.float32).reshape(-1)
+    n = min(10, DP_NUM_ACTIONS, values.shape[0])
+    last_low_action[:n] = values[:n]
+    return last_low_action
+
+
+def make_float_dp_state(
+    dof_names,
+    dof_pos,
+    dof_vel,
+    ee_pos,
+    ee_quat,
+    base_xy,
+    base_z,
+    yaw,
+    yaw_rate,
+    gripper,
+    last_dp_action=None,
+):
     dp_dof_pos, dp_dof_vel = map_float_dofs_to_dp(dof_names, dof_pos, dof_vel)
     base_roll_pitch = np.asarray([0.0, 0.0], dtype=np.float32)
     base_ang_vel = np.asarray([0.0, 0.0, yaw_rate], dtype=np.float32)
-    last_low_action = np.zeros(DP_NUM_ACTIONS, dtype=np.float32)
+    last_low_action = make_last_low_action_from_dp(last_dp_action)
     foot_contacts = np.zeros(4, dtype=np.float32)
     base_pos = np.asarray([base_xy[0], base_xy[1], base_z], dtype=np.float32)
     rel = np.asarray(ee_pos, dtype=np.float32) - base_pos
@@ -1646,6 +1669,7 @@ def run_demo(
                 "action_frame": "base",
                 "action_pose_frame": "base",
                 "target_pose_frame": "base",
+                "ikpush_state_version": IKPUSH_STATE_VERSION,
             },
         )
         print(
@@ -1655,6 +1679,7 @@ def run_demo(
         )
     prev_base_xy = None
     prev_yaw = None
+    prev_dp_action = np.zeros(10, dtype=np.float32)
     while step < max_steps:
         if viewer is not None and gym.query_viewer_has_closed(viewer):
             break
@@ -1739,6 +1764,7 @@ def run_demo(
                     yaw,
                     yaw_rate_cmd,
                     gripper_actual,
+                    prev_dp_action,
                 )
                 dp_action = make_float_dp_action(
                     vx_cmd,
@@ -1774,6 +1800,7 @@ def run_demo(
                         yaw_rate_cmd,
                     ),
                 )
+                prev_dp_action = dp_action.copy()
             if len(door_pos_record) > 0:
                 signed_open_deg = math.degrees(args.door_motion_sign * float(door_pos_record[0]))
                 dp_record_success = dp_record_success or signed_open_deg >= float(args.pass_open_angle_deg)

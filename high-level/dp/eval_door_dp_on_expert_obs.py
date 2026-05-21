@@ -146,6 +146,12 @@ def action_frame(data) -> str:
     return "world"
 
 
+def ikpush_state_version(data) -> str:
+    if "ikpush_state_version" in data.files:
+        return scalar_str(data["ikpush_state_version"])
+    return "legacy"
+
+
 def quat_angle_deg(q1, q2) -> float:
     q1 = np.asarray(q1, dtype=np.float64)
     q2 = np.asarray(q2, dtype=np.float64)
@@ -176,7 +182,7 @@ def build_eval_steps(args: argparse.Namespace, total_frames: int, obs_horizon: i
     return steps
 
 
-def validate_inputs(data, controller: DoorDPPolicyController, expected_vision_mode: str) -> tuple[str, list[str]]:
+def validate_inputs(data, controller: DoorDPPolicyController, expected_vision_mode: str) -> tuple[str, str, list[str]]:
     data_vision = raw_vision_mode(data)
     if data_vision != expected_vision_mode:
         raise ValueError(f"Raw episode vision_mode={data_vision!r}, but script expected {expected_vision_mode!r}.")
@@ -188,11 +194,18 @@ def validate_inputs(data, controller: DoorDPPolicyController, expected_vision_mo
     ckpt_frame = str(getattr(controller, "action_frame", "world")).lower()
     if ckpt_frame != raw_frame:
         raise ValueError(f"Checkpoint action_frame={ckpt_frame!r}, raw episode action_frame={raw_frame!r}.")
+    raw_state_version = ikpush_state_version(data)
+    ckpt_state_version = str(controller.config.get("ikpush_state_version", "legacy"))
+    if ckpt_state_version != raw_state_version:
+        raise ValueError(
+            f"Checkpoint ikpush_state_version={ckpt_state_version!r}, "
+            f"raw episode ikpush_state_version={raw_state_version!r}."
+        )
     image_keys = raw_image_keys_for_vision_mode(expected_vision_mode)
     missing = [key for key in image_keys if key not in data.files]
     if missing:
         raise KeyError(f"Raw episode is missing image fields: {missing}")
-    return raw_frame, image_keys
+    return raw_frame, raw_state_version, image_keys
 
 
 def preload_episode_arrays(data, image_keys: list[str]) -> dict[str, np.ndarray]:
@@ -327,7 +340,7 @@ def main() -> None:
         num_inference_steps=args.num_inference_steps,
         action_horizon=args.action_horizon,
     )
-    raw_frame, image_keys = validate_inputs(data, controller, expected_vision_mode)
+    raw_frame, raw_state_version, image_keys = validate_inputs(data, controller, expected_vision_mode)
     t0 = time.perf_counter()
     episode = preload_episode_arrays(data, image_keys)
     data.close()
@@ -344,7 +357,7 @@ def main() -> None:
     print(
         f"raw_episode={raw_path}\n"
         f"checkpoint={ckpt_path}\n"
-        f"vision_mode={expected_vision_mode} action_frame={raw_frame} "
+        f"vision_mode={expected_vision_mode} action_frame={raw_frame} ikpush_state_version={raw_state_version} "
         f"obs_horizon={controller.obs_horizon} pred_horizon={controller.pred_horizon} "
         f"action_horizon={controller.action_horizon} compare_horizon={compare_horizon}\n"
         f"eval_steps={len(steps)} stride={args.stride if not args.steps else 'explicit'} "

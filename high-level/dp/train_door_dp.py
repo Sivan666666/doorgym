@@ -501,6 +501,7 @@ def main():
     action_frame = str(sidecar_data.get("action_frame", sidecar_data.get("action_pose_frame", "world"))).lower()
     if action_frame not in ("world", "base"):
         raise ValueError(f"LeRobot dataset action_frame={action_frame!r}; expected 'world' or 'base'.")
+    ikpush_state_version = str(sidecar_data.get("ikpush_state_version", "legacy"))
     dataset = DoorDPSequenceDataset(dataset_root, args.repo_id, args.obs_horizon, args.pred_horizon, vision_mode=vision_mode)
     stats = compute_stats(dataset)
     if sidecar_data:
@@ -544,6 +545,7 @@ def main():
             "action_frame": action_frame,
             "action_pose_frame": action_frame,
             "target_pose_frame": action_frame,
+            "ikpush_state_version": ikpush_state_version,
         }
     )
     wandb_run = None

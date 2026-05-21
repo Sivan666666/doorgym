@@ -76,6 +76,16 @@ def detect_action_frame(data, sidecar):
     return "world"
 
 
+def detect_ikpush_state_version(data, sidecar):
+    for source in (data, sidecar or {}):
+        if isinstance(source, dict):
+            if "ikpush_state_version" in source:
+                return str(source["ikpush_state_version"])
+        elif "ikpush_state_version" in source.files:
+            return scalar_str(source["ikpush_state_version"])
+    return "legacy"
+
+
 def detect_raw_vision_mode(data, sidecar):
     if sidecar and sidecar.get("vision_mode") is not None:
         return normalize_vision_mode(sidecar["vision_mode"])
@@ -120,6 +130,7 @@ def main():
     vision_mode = "rgb" if args.rgb else "depth"
     raw_vision_mode = detect_raw_vision_mode(first, sidecar)
     action_frame = detect_action_frame(first, sidecar)
+    ikpush_state_version = detect_ikpush_state_version(first, sidecar)
     if action_frame not in ("world", "base"):
         raise ValueError(f"Unsupported raw action_frame={action_frame!r}; expected 'world' or 'base'.")
     if raw_vision_mode != vision_mode:
@@ -145,6 +156,12 @@ def main():
                 f"Existing LeRobot dataset at {out_dir} has action_frame={existing_action_frame!r}, "
                 f"but raw data has action_frame={action_frame!r}; use a different --repo_id or pass --overwrite."
             )
+        existing_state_version = str(existing_sidecar.get("ikpush_state_version", "legacy"))
+        if existing_state_version != ikpush_state_version:
+            raise ValueError(
+                f"Existing LeRobot dataset at {out_dir} has ikpush_state_version={existing_state_version!r}, "
+                f"but raw data has {ikpush_state_version!r}; use a different --repo_id or pass --overwrite."
+            )
     if args.overwrite and out_dir.exists():
         shutil.rmtree(out_dir)
 
@@ -161,6 +178,7 @@ def main():
             "action_frame": action_frame,
             "action_pose_frame": action_frame,
             "target_pose_frame": action_frame,
+            "ikpush_state_version": ikpush_state_version,
         },
     )
     for ep_idx, path in enumerate(files):
@@ -170,6 +188,12 @@ def main():
             raise ValueError(
                 f"Episode {path} action_frame={episode_action_frame!r}, expected {action_frame!r}; "
                 "do not mix world-frame and base-frame action datasets."
+            )
+        episode_state_version = detect_ikpush_state_version(data, sidecar)
+        if episode_state_version != ikpush_state_version:
+            raise ValueError(
+                f"Episode {path} ikpush_state_version={episode_state_version!r}, expected {ikpush_state_version!r}; "
+                "do not mix old and new ikpush state semantics."
             )
         task = scalar_str(data["task"]) if "task" in data else initial_task
         recorder.task = task
@@ -224,6 +248,7 @@ def main():
         "action_frame": action_frame,
         "action_pose_frame": action_frame,
         "target_pose_frame": action_frame,
+        "ikpush_state_version": ikpush_state_version,
     }
     if vision_mode == "rgb":
         sidecar_payload["vision_mode"] = vision_mode

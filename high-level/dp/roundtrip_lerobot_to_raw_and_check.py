@@ -175,6 +175,16 @@ def detect_action_frame(data, sidecar):
     return "world"
 
 
+def detect_ikpush_state_version(data, sidecar):
+    for source in (data, sidecar or {}):
+        if isinstance(source, dict):
+            if "ikpush_state_version" in source:
+                return str(source["ikpush_state_version"])
+        elif "ikpush_state_version" in source.files:
+            return scalar_str(source["ikpush_state_version"])
+    return "legacy"
+
+
 def detect_lerobot_vision_mode(dataset_root):
     sidecar = load_json(Path(dataset_root) / "door_dp_feature_names.json")
     if sidecar and sidecar.get("vision_mode") is not None:
@@ -187,6 +197,13 @@ def detect_lerobot_action_frame(dataset_root):
     if not sidecar:
         return "world"
     return str(sidecar.get("action_frame", sidecar.get("action_pose_frame", "world"))).lower()
+
+
+def detect_lerobot_ikpush_state_version(dataset_root):
+    sidecar = load_json(Path(dataset_root) / "door_dp_feature_names.json")
+    if not sidecar:
+        return "legacy"
+    return str(sidecar.get("ikpush_state_version", "legacy"))
 
 
 def as_state(value):
@@ -331,7 +348,7 @@ def copy_replay_and_metadata(raw_data, payload):
         payload[key] = np.asarray(raw_data[key])
 
 
-def write_sidecar(out_root, fps, state_names, vision_mode, image_keys, action_frame):
+def write_sidecar(out_root, fps, state_names, vision_mode, image_keys, action_frame, ikpush_state_version):
     sidecar = {
         "fps": int(fps),
         "state": list(state_names),
@@ -341,6 +358,7 @@ def write_sidecar(out_root, fps, state_names, vision_mode, image_keys, action_fr
         "action_frame": action_frame,
         "action_pose_frame": action_frame,
         "target_pose_frame": action_frame,
+        "ikpush_state_version": ikpush_state_version,
     }
     if vision_mode == "rgb":
         sidecar["vision_mode"] = vision_mode
@@ -440,6 +458,7 @@ def main():
     raw_vision_mode = detect_raw_vision_mode(first_raw, raw_sidecar)
     lerobot_vision_mode = detect_lerobot_vision_mode(dataset_root)
     lerobot_action_frame = detect_lerobot_action_frame(dataset_root)
+    lerobot_state_version = detect_lerobot_ikpush_state_version(dataset_root)
     if raw_vision_mode != requested_vision_mode:
         raise ValueError(
             f"Raw data vision_mode={raw_vision_mode!r}, but roundtrip was run with "
@@ -455,14 +474,20 @@ def main():
     converted_names = lerobot_state_names(dataset_root, raw_names)
     fps = int(first_raw["fps"]) if "fps" in first_raw.files else int((raw_sidecar or {}).get("fps", 50))
     action_frame = detect_action_frame(first_raw, raw_sidecar)
+    ikpush_state_version = detect_ikpush_state_version(first_raw, raw_sidecar)
     if action_frame not in ("world", "base"):
         raise ValueError(f"Unsupported action_frame={action_frame!r}; expected 'world' or 'base'.")
     if lerobot_action_frame != action_frame:
         raise ValueError(
             f"LeRobot data action_frame={lerobot_action_frame!r}, but raw data action_frame={action_frame!r}."
         )
+    if lerobot_state_version != ikpush_state_version:
+        raise ValueError(
+            f"LeRobot data ikpush_state_version={lerobot_state_version!r}, "
+            f"but raw data ikpush_state_version={ikpush_state_version!r}."
+        )
     first_raw.close()
-    write_sidecar(out_root, fps, converted_names, requested_vision_mode, image_keys, action_frame)
+    write_sidecar(out_root, fps, converted_names, requested_vision_mode, image_keys, action_frame, ikpush_state_version)
 
     report = {
         "raw_root": str(raw_root),
@@ -486,6 +511,12 @@ def main():
                     f"{raw_path} has action_frame={episode_action_frame!r}, expected {action_frame!r}; "
                     "do not mix world-frame and base-frame action datasets."
                 )
+            episode_state_version = detect_ikpush_state_version(raw_data, raw_sidecar)
+            if episode_state_version != ikpush_state_version:
+                raise ValueError(
+                    f"{raw_path} has ikpush_state_version={episode_state_version!r}, expected {ikpush_state_version!r}; "
+                    "do not mix old and new ikpush state semantics."
+                )
             raw_state_ref = state_reference(raw_data["state"].astype(np.float32), raw_names, converted_names)
             payload = {
                 **converted,
@@ -496,6 +527,7 @@ def main():
                 "action_frame": np.asarray(action_frame),
                 "action_pose_frame": np.asarray(action_frame),
                 "target_pose_frame": np.asarray(action_frame),
+                "ikpush_state_version": np.asarray(ikpush_state_version),
             }
             if requested_vision_mode == "rgb":
                 payload["vision_mode"] = np.asarray(requested_vision_mode)
