@@ -79,6 +79,7 @@ try:
         RawDoorDPRecorder,
         make_state_feature_names,
         normalize_vision_mode,
+        raw_image_keys_for_vision_mode,
     )
 except ImportError:
     ACTION_NAMES = None
@@ -87,6 +88,7 @@ except ImportError:
     RawDoorDPRecorder = None
     make_state_feature_names = None
     normalize_vision_mode = None
+    raw_image_keys_for_vision_mode = None
 
 
 DP_NUM_DOFS = 19
@@ -382,6 +384,11 @@ def parse_args():
             {"name": "--dp_log_path", "type": str, "default": ""},
             {"name": "--dp_log_interval", "type": int, "default": 25},
             {"name": "--no_dp_print", "dest": "dp_print", "action": "store_false", "default": True},
+            {"name": "--dp_warmstart", "action": "store_true"},
+            {"name": "--dp_warmstart_raw_episode", "type": str, "default": ""},
+            {"name": "--dp_warmstart_step", "type": int, "default": -1},
+            {"name": "--dp_warmstart_expert_obs", "dest": "dp_warmstart_expert_obs", "action": "store_true", "default": True},
+            {"name": "--no_dp_warmstart_expert_obs", "dest": "dp_warmstart_expert_obs", "action": "store_false"},
             {"name": "--pass_open_angle_deg", "type": float, "default": 80.0},
             {"name": "--no_preview_trajectory_at_spawn", "action": "store_true"},
         ],
@@ -423,6 +430,20 @@ def parse_args():
         raise ValueError("--dp_control_env_id must be in [0, num_envs - 1].")
     if args.record_dp_dataset and args.dp_policy_checkpoint:
         raise ValueError("--record_dp_dataset and --dp_policy_checkpoint are separate modes; run recording or policy play, not both.")
+    warmstart_params = [
+        bool(args.dp_warmstart_raw_episode),
+        int(args.dp_warmstart_step) >= 0,
+        "--dp_warmstart_expert_obs" in argv or "--no_dp_warmstart_expert_obs" in argv,
+    ]
+    if not args.dp_warmstart and any(warmstart_params):
+        raise ValueError("Warm-start options require --dp_warmstart.")
+    if args.dp_warmstart:
+        if not args.dp_policy_checkpoint:
+            raise ValueError("--dp_warmstart requires --dp_policy_checkpoint.")
+        if not args.dp_warmstart_raw_episode:
+            raise ValueError("--dp_warmstart requires --dp_warmstart_raw_episode.")
+        if int(args.dp_warmstart_step) < 0:
+            raise ValueError("--dp_warmstart requires non-negative --dp_warmstart_step.")
     args._explicit_cli_flags = set(sys.argv[1:])
 
     if args.headless and args.show_camera_images:
@@ -1627,6 +1648,235 @@ def make_float_replay_snapshot(args, door, dof_names, dof_pos, dof_vel, door_pos
     }
 
 
+def scalar_to_str(value):
+    arr = np.asarray(value)
+    if arr.shape == ():
+        return str(arr.item())
+    return str(arr.reshape(-1)[0])
+
+
+def scalar_to_int(value):
+    arr = np.asarray(value)
+    if arr.shape == ():
+        return int(arr.item())
+    return int(arr.reshape(-1)[0])
+
+
+def raw_vision_mode_from_data(data):
+    if "vision_mode" in data.files:
+        mode = scalar_to_str(data["vision_mode"]).lower()
+        if normalize_vision_mode is not None:
+            return normalize_vision_mode(mode)
+        return mode
+    if "wrist_rgb" in data.files or "front_rgb" in data.files:
+        return "rgb"
+    return "depth"
+
+
+def raw_action_frame_from_data(data):
+    for key in ("action_frame", "action_pose_frame", "target_pose_frame"):
+        if key in data.files:
+            return scalar_to_str(data[key]).lower()
+    return "world"
+
+
+def normalize_config_path_for_match(path_value):
+    value = scalar_to_str(path_value)
+    candidates = [Path(value).expanduser(), HIGH_LEVEL_ROOT / value, REPO_ROOT / value]
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate.resolve())
+    return value
+
+
+def yaw_from_quat_xyzw(quat):
+    q = base_ik.normalize_quat(np.asarray(quat, dtype=np.float32))
+    x, y, z, w = [float(v) for v in q]
+    return math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+
+
+def set_actor_root_from_state(gym, env, actor, root_state):
+    state = np.asarray(root_state, dtype=np.float32).reshape(-1)
+    if state.shape[0] < 7:
+        raise ValueError(f"Root state must have at least 7 values, got shape {state.shape}")
+    root_handle = gym.get_actor_root_rigid_body_handle(env, actor)
+    transform = gymapi.Transform()
+    transform.p = gymapi.Vec3(float(state[0]), float(state[1]), float(state[2]))
+    transform.r = gymapi.Quat(float(state[3]), float(state[4]), float(state[5]), float(state[6]))
+    gym.set_rigid_transform(env, root_handle, transform)
+
+
+def require_warmstart_field(data, key, step):
+    if key not in data.files:
+        raise KeyError(f"Warm-start raw episode is missing required field {key!r}.")
+    arr = np.asarray(data[key])
+    if arr.ndim <= 0 or arr.shape[0] <= int(step):
+        raise ValueError(f"Warm-start field {key!r} has shape {arr.shape}, cannot read step {step}.")
+    return arr
+
+
+def validate_warmstart_raw(data, args, controller, st):
+    expected_vision_mode = "rgb" if args.rgb else "depth"
+    raw_vision = raw_vision_mode_from_data(data)
+    if raw_vision != expected_vision_mode:
+        raise ValueError(
+            f"Warm-start raw episode vision_mode={raw_vision!r}, but ikpush play is running {expected_vision_mode!r}."
+        )
+    raw_frame = raw_action_frame_from_data(data)
+    ckpt_frame = str(getattr(controller, "action_frame", "world")).lower()
+    if raw_frame != ckpt_frame:
+        raise ValueError(f"Warm-start raw action_frame={raw_frame!r}, checkpoint action_frame={ckpt_frame!r}.")
+    if "door_cfg" in data.files:
+        raw_cfg = normalize_config_path_for_match(data["door_cfg"])
+        play_cfg = normalize_config_path_for_match(args.door_cfg)
+        if raw_cfg != play_cfg:
+            raise ValueError(f"Warm-start raw door_cfg={raw_cfg!r}, play door_cfg={play_cfg!r}.")
+    if "door_asset_name" in data.files:
+        raw_name = scalar_to_str(data["door_asset_name"])
+        play_name = str(st.door.spec.get("name", ""))
+        if raw_name and play_name and raw_name != play_name:
+            raise ValueError(f"Warm-start raw door_asset_name={raw_name!r}, play door_asset_name={play_name!r}.")
+    elif "door_asset_index" in data.files:
+        raw_index = scalar_to_int(data["door_asset_index"])
+        play_index = int(getattr(st.door, "asset_index", -1))
+        if play_index >= 0 and raw_index != play_index:
+            raise ValueError(f"Warm-start raw door_asset_index={raw_index}, play door_asset_index={play_index}.")
+
+    step = int(args.dp_warmstart_step)
+    for key in (
+        "replay_root_state",
+        "replay_dof_pos",
+        "replay_dof_vel",
+        "replay_door_root_state",
+        "replay_door_dof_pos",
+        "replay_door_dof_vel",
+    ):
+        require_warmstart_field(data, key, step)
+    if args.dp_warmstart_expert_obs:
+        if raw_image_keys_for_vision_mode is None:
+            raise RuntimeError("Warm-start expert observation prefill requires door_dp_common.raw_image_keys_for_vision_mode.")
+        missing = [key for key in raw_image_keys_for_vision_mode(expected_vision_mode) if key not in data.files]
+        if missing:
+            raise KeyError(f"Warm-start expert observation prefill is missing raw image fields: {missing}")
+
+
+def raw_dp_dofs_to_actor_dofs(raw_pos, raw_vel, dof_names, fallback_pos):
+    pos_out = np.asarray(fallback_pos, dtype=np.float32).copy()
+    vel_out = np.zeros_like(pos_out, dtype=np.float32)
+    raw_pos = np.asarray(raw_pos, dtype=np.float32).reshape(-1)
+    raw_vel = np.asarray(raw_vel, dtype=np.float32).reshape(-1)
+    if raw_pos.shape[0] == len(dof_names):
+        pos_out[:] = raw_pos[: len(pos_out)]
+        vel_out[:] = raw_vel[: len(vel_out)]
+        return pos_out, vel_out
+    if raw_pos.shape[0] != DP_NUM_DOFS:
+        raise ValueError(f"Expected replay_dof_pos length {DP_NUM_DOFS} or {len(dof_names)}, got {raw_pos.shape[0]}.")
+    for src_idx, name in enumerate(dof_names):
+        dp_idx = FLOAT_ARM_TO_DP_DOF.get(name)
+        if dp_idx is None:
+            continue
+        pos_out[src_idx] = float(raw_pos[dp_idx])
+        if dp_idx < raw_vel.shape[0]:
+            vel_out[src_idx] = float(raw_vel[dp_idx])
+    return pos_out, vel_out
+
+
+def apply_warmstart_state(gym, sim, st, data, step, dof_names):
+    root_state = require_warmstart_field(data, "replay_root_state", step)[step].astype(np.float32)
+    for actor in st.actor_handles:
+        set_actor_root_from_state(gym, st.env, actor, root_state)
+
+    raw_dof_pos = require_warmstart_field(data, "replay_dof_pos", step)[step]
+    raw_dof_vel = require_warmstart_field(data, "replay_dof_vel", step)[step]
+    actor_dof_pos, actor_dof_vel = raw_dp_dofs_to_actor_dofs(raw_dof_pos, raw_dof_vel, dof_names, st.dof_positions)
+    arm_states = gym.get_actor_dof_states(st.env, st.arm_actor, gymapi.STATE_ALL)
+    if len(arm_states) != len(actor_dof_pos):
+        raise ValueError(f"Arm DOF count mismatch: actor={len(arm_states)} warmstart={len(actor_dof_pos)}")
+    arm_states["pos"][:] = actor_dof_pos
+    arm_states["vel"][:] = actor_dof_vel
+    gym.set_actor_dof_states(st.env, st.arm_actor, arm_states, gymapi.STATE_ALL)
+    gym.set_actor_dof_position_targets(st.env, st.arm_actor, actor_dof_pos)
+    st.dof_positions[:] = actor_dof_pos
+
+    door_root_state = require_warmstart_field(data, "replay_door_root_state", step)[step].astype(np.float32)
+    set_actor_root_from_state(gym, st.env, st.door_actor, door_root_state)
+
+    door_pos = require_warmstart_field(data, "replay_door_dof_pos", step)[step].astype(np.float32)
+    door_vel = require_warmstart_field(data, "replay_door_dof_vel", step)[step].astype(np.float32)
+    door_states = gym.get_actor_dof_states(st.env, st.door_actor, gymapi.STATE_ALL)
+    n = min(len(door_states), len(door_pos))
+    door_states["pos"][:n] = door_pos[:n]
+    door_states["vel"][:n] = door_vel[:n]
+    gym.set_actor_dof_states(st.env, st.door_actor, door_states, gymapi.STATE_ALL)
+    if n >= 1 and abs(float(door_pos[0]) - float(st.door.dof_upper[0])) > 1.0e-4:
+        st.door.open_stage = True
+    if n >= 2 and float(door_pos[1] - st.door.dof_lower[1]) >= float(st.door.handle_unlock_threshold):
+        st.door.open_stage = True
+
+    yaw = yaw_from_quat_xyzw(root_state[3:7])
+    st.traj["base_xy"] = np.asarray(root_state[:2], dtype=np.float32).copy()
+    st.traj["yaw"] = float(yaw)
+    st.base_start = np.asarray(root_state[:2], dtype=np.float32).copy()
+    st.yaw_start = float(yaw)
+    if int(step) > 0 and "replay_root_state" in data.files:
+        prev_root = np.asarray(data["replay_root_state"][int(step) - 1], dtype=np.float32)
+        st.prev_base_xy = prev_root[:2].copy()
+        st.prev_yaw = yaw_from_quat_xyzw(prev_root[3:7])
+    else:
+        st.prev_base_xy = np.asarray(root_state[:2], dtype=np.float32).copy()
+        st.prev_yaw = float(yaw)
+    if "replay_ee_pos" in data.files:
+        st.last_target_pos = np.asarray(data["replay_ee_pos"][int(step)], dtype=np.float32).copy()
+    if "replay_ee_quat" in data.files:
+        st.last_target_quat = base_ik.normalize_quat(np.asarray(data["replay_ee_quat"][int(step)], dtype=np.float32))
+
+    gym.refresh_rigid_body_state_tensor(sim)
+    gym.refresh_dof_state_tensor(sim)
+    gym.refresh_jacobian_tensors(sim)
+
+
+def prefill_dp_controller_from_expert_obs(controller, data, step, vision_mode):
+    if raw_image_keys_for_vision_mode is None:
+        raise RuntimeError("Expert observation warm-start requires door_dp_common.raw_image_keys_for_vision_mode.")
+    image_keys = raw_image_keys_for_vision_mode(vision_mode)
+    controller.obs_buffer.clear()
+    controller.action_queue.clear()
+    start = max(0, int(step) - int(controller.obs_horizon) + 1)
+    for idx in range(start, int(step) + 1):
+        controller.append_observation(
+            np.asarray(data["state"][idx], dtype=np.float32),
+            np.asarray(data[image_keys[0]][idx], dtype=np.uint8),
+            np.asarray(data[image_keys[1]][idx], dtype=np.uint8),
+            np.asarray(data[image_keys[2]][idx], dtype=np.uint8),
+            np.asarray(data[image_keys[3]][idx], dtype=np.uint8),
+        )
+
+
+def apply_dp_warmstart_if_requested(gym, sim, args, controller, st, dof_names):
+    if not args.dp_warmstart:
+        return None
+    raw_path = Path(args.dp_warmstart_raw_episode).expanduser()
+    if not raw_path.is_absolute():
+        raw_path = (Path.cwd() / raw_path).resolve()
+    if not raw_path.exists():
+        raise FileNotFoundError(f"Warm-start raw episode not found: {raw_path}")
+    data = np.load(raw_path, allow_pickle=True)
+    step = int(args.dp_warmstart_step)
+    validate_warmstart_raw(data, args, controller, st)
+    apply_warmstart_state(gym, sim, st, data, step, dof_names)
+    vision_mode = "rgb" if args.rgb else "depth"
+    if args.dp_warmstart_expert_obs:
+        prefill_dp_controller_from_expert_obs(controller, data, step, vision_mode)
+    print(
+        f"DP warm-start loaded raw={raw_path} step={step} "
+        f"expert_obs_prefill={bool(args.dp_warmstart_expert_obs)} "
+        f"base_xy={np.round(st.traj['base_xy'], 4).tolist()} yaw={float(st.traj['yaw']):.4f} "
+        f"door_open_stage={bool(st.door.open_stage)}",
+        flush=True,
+    )
+    return data
+
+
 def door_hinge_open_ratio(door, door_angle, args):
     if len(door.dof_lower) == 0 or len(door.dof_upper) == 0:
         return 0.0
@@ -2535,6 +2785,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                 raise RuntimeError("DP policy logging requires high-level/dp/door_dp_common.py")
             dp_logger = DoorDPJsonlLogger(args.dp_log_path)
             print(f"Door DP log: {args.dp_log_path}", flush=True)
+        apply_dp_warmstart_if_requested(gym, sim, args, dp_controller, dp_control_state, dof_names)
 
     while step < max_steps:
         if viewer is not None and gym.query_viewer_has_closed(viewer):

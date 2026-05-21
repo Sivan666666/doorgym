@@ -34,6 +34,22 @@ def parse_args():
     parser.add_argument("--dp_log_path", type=str, default=None)
     parser.add_argument("--dp_log_interval", type=int, default=25)
     parser.add_argument("--no_dp_print", dest="dp_print", action="store_false", default=True)
+    parser.add_argument("--dp_warmstart", action="store_true", help="Initialize ikpush DP play from a raw expert frame.")
+    parser.add_argument("--dp_warmstart_raw_episode", type=str, default=None)
+    parser.add_argument("--dp_warmstart_step", type=int, default=None)
+    parser.add_argument(
+        "--dp_warmstart_expert_obs",
+        dest="dp_warmstart_expert_obs",
+        action="store_true",
+        default=True,
+        help="Prefill the DP observation buffer from raw expert observations before closed-loop play.",
+    )
+    parser.add_argument(
+        "--no_dp_warmstart_expert_obs",
+        dest="dp_warmstart_expert_obs",
+        action="store_false",
+        help="Warm-start simulator state only; do not prefill the DP observation buffer.",
+    )
     parser.add_argument(
         "play_args",
         nargs=argparse.REMAINDER,
@@ -49,6 +65,27 @@ def main():
         checkpoint_path = (Path.cwd() / checkpoint_path).resolve()
     if args.rgb and args.mode not in ("push", "ikpush"):
         raise ValueError("--rgb Door DP policy play is only wired for push/ikpush mode.")
+    warmstart_params = [
+        args.dp_warmstart_raw_episode is not None,
+        args.dp_warmstart_step is not None,
+        "--dp_warmstart_expert_obs" in sys.argv or "--no_dp_warmstart_expert_obs" in sys.argv,
+    ]
+    if not args.dp_warmstart and any(warmstart_params):
+        raise ValueError("Warm-start options require --dp_warmstart.")
+    if args.dp_warmstart:
+        if args.mode != "ikpush":
+            raise ValueError("--dp_warmstart is only wired for --mode ikpush.")
+        if args.dp_warmstart_raw_episode is None:
+            raise ValueError("--dp_warmstart requires --dp_warmstart_raw_episode.")
+        if args.dp_warmstart_step is None:
+            raise ValueError("--dp_warmstart requires --dp_warmstart_step.")
+        if args.dp_warmstart_step < 0:
+            raise ValueError("--dp_warmstart_step must be non-negative.")
+        warmstart_raw_path = Path(args.dp_warmstart_raw_episode).expanduser()
+        if not warmstart_raw_path.is_absolute():
+            warmstart_raw_path = (Path.cwd() / warmstart_raw_path).resolve()
+    else:
+        warmstart_raw_path = None
     if args.mode == "ikpush":
         script = HIGH_LEVEL_ROOT / "float_ik" / "isaacgym_float_ik_b1z1_basearn_push_door_parallel.py"
     elif args.mode == "pull":
@@ -101,6 +138,18 @@ def main():
         cmd.append("--no_dp_print")
     if args.dp_action_horizon is not None:
         cmd += ["--dp_action_horizon", str(args.dp_action_horizon)]
+    if args.dp_warmstart:
+        cmd += [
+            "--dp_warmstart",
+            "--dp_warmstart_raw_episode",
+            str(warmstart_raw_path),
+            "--dp_warmstart_step",
+            str(args.dp_warmstart_step),
+        ]
+        if args.dp_warmstart_expert_obs:
+            cmd.append("--dp_warmstart_expert_obs")
+        else:
+            cmd.append("--no_dp_warmstart_expert_obs")
     if args.graphics_device_id is not None:
         cmd += ["--graphics_device_id", str(args.graphics_device_id)]
     if args.headless:
