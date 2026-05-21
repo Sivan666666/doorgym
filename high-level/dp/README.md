@@ -14,7 +14,7 @@ This folder contains the reorganized Door Diffusion Policy pipeline.
   Replay a raw `.npz` episode in Isaac Gym. `ikpush` recordings are replayed in the float-IK scene; `pull`/`push` use the old play scenes.
 
 - `train_door_dp.py`  
-  Train the door diffusion policy from the converted LeRobotDataset.
+  Train the door policy from the converted LeRobotDataset using LeRobot's built-in `DiffusionPolicy`.
 
 - `play_door_dp_policy.py`  
   Load a trained Door DP checkpoint and run inference inside the scripted door environments.
@@ -24,8 +24,11 @@ This folder contains the reorganized Door Diffusion Policy pipeline.
 - `door_dp_common.py`  
   Shared helpers for state/action formatting, raw recording, LeRobot recording, camera-image conversion, and DP inference utilities.
 
+- `door_policy_backend.py` / `door_policy_worker.py`
+  Modular policy backend and Python>=3.10 subprocess worker for LeRobot inference from Isaac Gym runtimes.
+
 - `models/door_diffusion_policy.py`  
-  The Door Diffusion Policy model definition.
+  Legacy custom model definition, kept for reference but no longer used by train/play/eval.
 
 ## Docs
 

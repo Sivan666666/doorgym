@@ -589,90 +589,47 @@ def import_lerobot_or_raise():
 
 class DoorDPPolicyController:
     def __init__(self, checkpoint, device=None, num_inference_steps=None, action_horizon=None):
-        from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
         try:
-            from .models.door_diffusion_policy import DoorDiffusionPolicy
+            from .door_policy_backend import DoorPolicyController, DoorPolicySubprocessController
         except ImportError:
-            from models.door_diffusion_policy import DoorDiffusionPolicy
+            from door_policy_backend import DoorPolicyController, DoorPolicySubprocessController
+        try:
+            self._impl = DoorPolicyController(
+                checkpoint,
+                device=device,
+                num_inference_steps=num_inference_steps,
+                action_horizon=action_horizon,
+            )
+        except RuntimeError as exc:
+            self._impl = DoorPolicySubprocessController(
+                checkpoint,
+                device=device,
+                num_inference_steps=num_inference_steps,
+                action_horizon=action_horizon,
+                startup_error=exc,
+            )
 
-        self.device = torch.device(device or ("cuda:0" if torch.cuda.is_available() else "cpu"))
-        ckpt = torch.load(checkpoint, map_location=self.device)
-        self.config = ckpt["config"]
-        self.vision_mode = normalize_vision_mode(self.config.get("vision_mode", "depth"))
-        self.action_frame = str(
-            self.config.get("action_frame", self.config.get("action_pose_frame", "world"))
-        ).lower()
-        self.stats = {k: v.to(self.device) for k, v in ckpt["stats"].items()}
-        self.obs_horizon = int(self.config.get("obs_horizon", 16))
-        self.pred_horizon = int(self.config.get("pred_horizon", 32))
-        self.action_horizon = int(action_horizon or self.config.get("action_horizon", 16))
-        self.action_dim = int(self.config.get("action_dim", len(ACTION_NAMES)))
-        self.model = DoorDiffusionPolicy(
-            state_dim=int(self.config["state_dim"]),
-            action_dim=self.action_dim,
-            obs_horizon=self.obs_horizon,
-            pred_horizon=self.pred_horizon,
-        ).to(self.device)
-        self.model.load_state_dict(ckpt["model"])
-        self.model.eval()
-        self.noise_scheduler = DDPMScheduler(
-            num_train_timesteps=int(self.config.get("num_diffusion_iters", 100)),
-            beta_schedule="squaredcos_cap_v2",
-            clip_sample=True,
-            clip_sample_range=float(self.config.get("clip_sample_range", 7.0)),
-            prediction_type="epsilon",
-        )
-        self.noise_scheduler.set_timesteps(int(num_inference_steps or self.noise_scheduler.config.num_train_timesteps))
-        self.obs_buffer = deque(maxlen=self.obs_horizon)
-        self.action_queue = deque()
+    def __getattr__(self, name):
+        return getattr(self._impl, name)
+
+    def reset(self):
+        return self._impl.reset()
 
     def _normalize_state(self, state):
-        state = torch.as_tensor(state, dtype=torch.float32, device=self.device)
-        return (state - self.stats["state_mean"]) / self.stats["state_std"]
-
-    def _normalize_action(self, action):
-        return (action - self.stats["action_mean"]) / self.stats["action_std"]
-
-    def _denormalize_action(self, action):
-        return action * self.stats["action_std"] + self.stats["action_mean"]
+        return self._impl._normalize_state(state)
 
     def append_observation(self, state, mask_rgb, masked_depth_rgb, front_mask_rgb=None, front_masked_depth_rgb=None):
-        state = self._normalize_state(state)
-        mask = torch.as_tensor(mask_rgb, dtype=torch.uint8, device=self.device).permute(2, 0, 1)
-        depth = torch.as_tensor(masked_depth_rgb, dtype=torch.uint8, device=self.device).permute(2, 0, 1)
-        front_mask_rgb = _zero_image_like(mask_rgb) if front_mask_rgb is None else front_mask_rgb
-        front_masked_depth_rgb = _zero_image_like(masked_depth_rgb) if front_masked_depth_rgb is None else front_masked_depth_rgb
-        front_mask = torch.as_tensor(front_mask_rgb, dtype=torch.uint8, device=self.device).permute(2, 0, 1)
-        front_depth = torch.as_tensor(front_masked_depth_rgb, dtype=torch.uint8, device=self.device).permute(2, 0, 1)
-        item = (state, mask, depth, front_mask, front_depth)
-        if len(self.obs_buffer) == 0:
-            for _ in range(self.obs_horizon):
-                self.obs_buffer.append(item)
-        else:
-            self.obs_buffer.append(item)
+        return self._impl.append_observation(state, mask_rgb, masked_depth_rgb, front_mask_rgb, front_masked_depth_rgb)
+
+    def _denormalize_action(self, action):
+        return self._impl._denormalize_action(action)
 
     @torch.no_grad()
-    def sample_action_chunk(self):
-        state = torch.stack([x[0] for x in self.obs_buffer], dim=0).unsqueeze(0)
-        mask = torch.stack([x[1] for x in self.obs_buffer], dim=0).unsqueeze(0)
-        depth = torch.stack([x[2] for x in self.obs_buffer], dim=0).unsqueeze(0)
-        front_mask = torch.stack([x[3] for x in self.obs_buffer], dim=0).unsqueeze(0)
-        front_depth = torch.stack([x[4] for x in self.obs_buffer], dim=0).unsqueeze(0)
-        action = torch.randn(1, self.pred_horizon, self.action_dim, device=self.device)
-        for timestep in self.noise_scheduler.timesteps:
-            ts = torch.full((1,), int(timestep), device=self.device, dtype=torch.long)
-            noise_pred = self.model(action, ts, state, mask, depth, front_mask, front_depth)
-            action = self.noise_scheduler.step(noise_pred, timestep, action).prev_sample
-        action = self._denormalize_action(action[0]).detach().cpu().numpy()
-        self.action_queue.clear()
-        for row in action[: self.action_horizon]:
-            self.action_queue.append(row.astype(np.float32))
+    def sample_action_chunk(self, noise=None):
+        return self._impl.sample_action_chunk(noise=noise)
 
     def act(self, state, mask_rgb, masked_depth_rgb, front_mask_rgb=None, front_masked_depth_rgb=None):
-        self.append_observation(state, mask_rgb, masked_depth_rgb, front_mask_rgb, front_masked_depth_rgb)
-        if not self.action_queue:
-            self.sample_action_chunk()
-        return self.action_queue.popleft()
+        return self._impl.act(state, mask_rgb, masked_depth_rgb, front_mask_rgb, front_masked_depth_rgb)
 
 
 def apply_door_dp_action(env, action, env_id=0, delta_rpy_fn=None):

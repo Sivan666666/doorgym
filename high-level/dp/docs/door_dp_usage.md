@@ -264,6 +264,10 @@ conda run -n b1z1_lerobot rerun \
 
 ## 6. Train Door DP
 
+`train_door_dp.py` now trains the Door policy through LeRobot's built-in
+`DiffusionPolicy`. The external contract is unchanged: 73D
+`observation.state` plus four images in, 10D `action` out.
+
 Short smoke training, only checks the training pipeline:
 
 ```bash
@@ -299,20 +303,23 @@ If CUDA memory is not enough, reduce:
 Checkpoints are saved to:
 
 ```text
-high-level/logs/door-dp/<run_name>/checkpoints/model_latest.pt
+high-level/logs/door-dp/<run_name>/checkpoints/model_latest.pt     # manifest accepted by play/eval
+high-level/logs/door-dp/<run_name>/checkpoints/model_latest/        # LeRobot policy + Door metadata
 ```
 
 ## 7. Play A Trained DP Policy
 
-DP policy play is currently wired only for the old `pull` and `push` play environments.
-The float-IK `ikpush` path supports raw recording and state replay, but not policy execution yet.
+DP policy play is wired through the shared `DoorDPPolicyController`, so `pull`,
+`push`, and `ikpush` all load the same LeRobot-backed checkpoint format.
 
-Install DP inference dependencies in `b1z1` once:
+Install the LeRobot DP dependencies in the environment that runs policy inference.
+LeRobot 0.4.x requires Python>=3.10, so the Isaac Gym runtime environment must also
+be able to import LeRobot, or `DoorDPPolicyController` will start a Python>=3.10
+worker subprocess. By default it tries conda env `door_dp`; override with
+`DOOR_DP_LEROBOT_CONDA_ENV` or `DOOR_DP_LEROBOT_PYTHON`.
 
 ```bash
-conda run -n b1z1 python -m pip install \
-  "diffusers==0.24.0" \
-  "huggingface-hub==0.20.3"
+conda run -n b1z1_lerobot python -m pip install -r high-level/dp/requirements_dp.txt
 ```
 
 Pull-door DP play:

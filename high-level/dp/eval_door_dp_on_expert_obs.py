@@ -221,12 +221,15 @@ def build_obs_cache(controller: DoorDPPolicyController, episode: dict[str, np.nd
     cache = []
     total = int(episode["state"].shape[0])
     for idx in range(total):
-        state = controller._normalize_state(episode["state"][idx].astype(np.float32))
-        mask = torch.as_tensor(episode[image_keys[0]][idx], dtype=torch.uint8, device=controller.device).permute(2, 0, 1)
-        second = torch.as_tensor(episode[image_keys[1]][idx], dtype=torch.uint8, device=controller.device).permute(2, 0, 1)
-        front_mask = torch.as_tensor(episode[image_keys[2]][idx], dtype=torch.uint8, device=controller.device).permute(2, 0, 1)
-        front_second = torch.as_tensor(episode[image_keys[3]][idx], dtype=torch.uint8, device=controller.device).permute(2, 0, 1)
-        cache.append((state, mask, second, front_mask, front_second))
+        cache.append(
+            controller._make_item(
+                episode["state"][idx].astype(np.float32),
+                episode[image_keys[0]][idx].astype(np.uint8),
+                episode[image_keys[1]][idx].astype(np.uint8),
+                episode[image_keys[2]][idx].astype(np.uint8),
+                episode[image_keys[3]][idx].astype(np.uint8),
+            )
+        )
     return cache
 
 
@@ -238,15 +241,6 @@ def obs_window_from_cache(obs_cache, step: int, obs_horizon: int):
     if len(items) < obs_horizon:
         items = [obs_cache[0]] * (obs_horizon - len(items)) + items
     return items[-obs_horizon:]
-
-
-def stack_obs_batch(obs_cache, steps: list[int], obs_horizon: int):
-    components = [[] for _ in range(5)]
-    for step in steps:
-        window = obs_window_from_cache(obs_cache, step, obs_horizon)
-        for comp_idx in range(5):
-            components[comp_idx].append(torch.stack([item[comp_idx] for item in window], dim=0))
-    return [torch.stack(component, dim=0) for component in components]
 
 
 def initial_noise_for_steps(controller: DoorDPPolicyController, steps: list[int], seed: int) -> torch.Tensor:
@@ -273,13 +267,10 @@ def predict_action_chunks_batched(
     seed: int,
     compare_horizon: int,
 ) -> np.ndarray:
-    state, mask, second, front_mask, front_second = stack_obs_batch(obs_cache, steps, controller.obs_horizon)
-    action = initial_noise_for_steps(controller, steps, seed)
-    for timestep in controller.noise_scheduler.timesteps:
-        ts = torch.full((len(steps),), int(timestep), device=controller.device, dtype=torch.long)
-        noise_pred = controller.model(action, ts, state, mask, second, front_mask, front_second)
-        action = controller.noise_scheduler.step(noise_pred, timestep, action).prev_sample
-    action = controller._denormalize_action(action).detach().cpu().numpy().astype(np.float32)
+    windows = [obs_window_from_cache(obs_cache, step, controller.obs_horizon) for step in steps]
+    noise = initial_noise_for_steps(controller, steps, seed)
+    action = controller.predict_action_chunks_from_windows(windows, noise=noise)
+    action = action.detach().cpu().numpy().astype(np.float32)
     return action[:, :compare_horizon]
 
 
@@ -305,11 +296,8 @@ def predict_action_chunk(
     seed: int,
 ) -> np.ndarray:
     reset_controller_on_expert_window(controller, data, image_keys, step)
-    np.random.seed(int(seed) + int(step))
-    torch.manual_seed(int(seed) + int(step))
-    if controller.device.type == "cuda":
-        torch.cuda.manual_seed_all(int(seed) + int(step))
-    controller.sample_action_chunk()
+    noise = initial_noise_for_steps(controller, [step], seed)
+    controller.sample_action_chunk(noise=noise)
     chunk = np.asarray(list(controller.action_queue), dtype=np.float32)
     controller.action_queue.clear()
     return chunk
