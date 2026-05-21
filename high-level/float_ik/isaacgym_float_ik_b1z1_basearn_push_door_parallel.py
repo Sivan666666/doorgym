@@ -222,7 +222,7 @@ def parse_args():
             {"name": "--asset_file", "type": str, "default": base_ik.DEFAULT_ASSET_FILE},
             {"name": "--rl_device", "type": str, "default": "cuda:0"},
             {"name": "--num_envs", "type": int, "default": 1},
-            {"name": "--steps", "type": int, "default": 2850},
+            {"name": "--steps", "type": int, "default": 2900},
             {"name": "--seed", "type": int, "default": -1},
             {"name": "--door_cfg", "type": str, "default": str(DEFAULT_DOOR_CFG)},
             {"name": "--door_name", "type": str, "default": ""},
@@ -249,7 +249,7 @@ def parse_args():
             },
             {"name": "--push_base_yaw_delta", "type": float, "default": 0.0},
             {"name": "--walk_steps", "type": int, "default": 260},
-            {"name": "--initial_hold_steps", "type": int, "default": 150},
+            {"name": "--initial_hold_steps", "type": int, "default": 200},
             {"name": "--grasp_steps", "type": int, "default": 150},
             {"name": "--grasp_hold_steps", "type": int, "default": 100},
             {"name": "--gripper_close_steps", "type": int, "default": 120},
@@ -477,6 +477,14 @@ def smoothstep(value):
 
 def lerp(a, b, t):
     return a + (b - a) * float(t)
+
+
+def quat_nlerp(a, b, t):
+    qa = base_ik.normalize_quat(np.asarray(a, dtype=np.float32))
+    qb = base_ik.normalize_quat(np.asarray(b, dtype=np.float32))
+    if float(np.dot(qa, qb)) < 0.0:
+        qb = -qb
+    return base_ik.normalize_quat(lerp(qa, qb, t)).astype(np.float32)
 
 
 def normalize(vec, eps=1.0e-6):
@@ -2121,6 +2129,14 @@ def trajectory_targets(
             traj["goal_quat"] = goal_quat.copy()
             traj["push_dir"] = push_dir.copy()
             traj["approach_dir"] = approach_dir.copy()
+            traj["initial_hold_start_pos"] = (
+                ik_state.current_pos_np.copy() if ik_state.current_pos_np is not None else pregrasp.copy()
+            )
+            if not args.ik_position_only:
+                start_quat = ik_state.target_quat_np
+                if start_quat is None:
+                    start_quat = ik_state.current_quat_np if ik_state.current_quat_np is not None else goal_quat
+                traj["initial_hold_start_quat"] = base_ik.normalize_quat(start_quat).astype(np.float32)
 
         base_xy = base_stop.copy()
         target_pos = traj["pregrasp"].copy()
@@ -2128,7 +2144,13 @@ def trajectory_targets(
         phase = "initial_hold"
 
         if step < initial_end:
-            pass
+            initial_step = step - walk_end
+            move_steps = max(1, int(round(max(1, args.initial_hold_steps) * 0.5)))
+            if initial_step < move_steps:
+                t = smoothstep((initial_step + 1) / move_steps)
+                target_pos = lerp(traj["initial_hold_start_pos"], traj["pregrasp"], t)
+                if not args.ik_position_only:
+                    target_quat = quat_nlerp(traj["initial_hold_start_quat"], traj["goal_quat"], t)
         elif step < grasp_end:
             t = smoothstep((step - initial_end + 1) / max(1, args.grasp_steps))
             target_pos = lerp(traj["pregrasp"], traj["grasp"], t)
@@ -2339,7 +2361,7 @@ def run_demo(
     if gripper_idx is not None:
         home_positions[gripper_idx] = np.clip(args.gripper_open, ik_state.lower[gripper_idx].item(), ik_state.upper[gripper_idx].item())
 
-    max_steps = args.steps if args.steps > 0 else 2850
+    max_steps = args.steps if args.steps > 0 else 2900
     dp_recorder = None
     dp_record_success = False
     dp_record_warned_no_camera = False
@@ -2772,7 +2794,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
     num_arm_dofs = len(env_states[0].dof_positions)
     dof_dict = {name: i for i, name in enumerate(dof_names)}
     gripper_idx = dof_dict.get("jointGripper")
-    max_steps = args.steps if args.steps > 0 else 2850
+    max_steps = args.steps if args.steps > 0 else 2900
     start = time.time()
     step = 0
     print(

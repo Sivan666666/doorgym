@@ -38,7 +38,7 @@ conda run -n b1z1 python high-level/float_ik/isaacgym_float_ik_b1z1_basearn_push
   --rl_device cuda:0 \
   --sim_device cuda:0 \
   --num_envs 1 \
-  --steps 2850
+  --steps 2900
 ```
 
 Hide OpenCV camera windows during scripted play:

@@ -43,7 +43,7 @@ def parse_args():
         "--steps",
         type=int,
         default=None,
-        help="Simulator steps. Defaults to 2160 for ikpush and 2500 for pull/push.",
+        help="Simulator steps. Defaults to 2210 for ikpush and 2500 for pull/push.",
     )
     parser.add_argument(
         "--seed",
@@ -189,7 +189,7 @@ def main():
         raise ValueError("--num_rollouts must be positive")
     modes = ["pull", "push"] if args.mode == "both" else [args.mode]
     if args.steps is None:
-        args.steps = 2160 if modes == ["ikpush"] else 2500
+        args.steps = 2210 if modes == ["ikpush"] else 2500
     if args.rgb and any(mode not in ("push", "ikpush") for mode in modes):
         raise ValueError("--rgb recording is only wired for push/ikpush mode; pass --mode push or --mode ikpush.")
     if args.headless:
