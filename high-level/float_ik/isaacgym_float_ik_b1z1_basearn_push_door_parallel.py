@@ -1486,19 +1486,44 @@ def make_float_dp_state(dof_names, dof_pos, dof_vel, ee_pos, ee_quat, base_xy, b
     ).astype(np.float32)
 
 
-def make_float_dp_action(vx, yaw_rate, target_pos, target_quat, gripper):
+def base_position(base_xy, base_z):
+    return np.asarray([base_xy[0], base_xy[1], base_z], dtype=np.float32)
+
+
+def world_pos_to_base(pos_world, base_xy, base_z, yaw):
+    rel = np.asarray(pos_world, dtype=np.float32) - base_position(base_xy, base_z)
+    return quat_apply(base_ik.quat_conjugate(base_ik.yaw_quat(float(yaw))), rel).astype(np.float32)
+
+
+def base_pos_to_world(pos_base, base_xy, base_z, yaw):
+    return (base_position(base_xy, base_z) + quat_apply(base_ik.yaw_quat(float(yaw)), pos_base)).astype(np.float32)
+
+
+def world_quat_to_base(quat_world, yaw):
+    return base_ik.normalize_quat(
+        base_ik.quat_multiply(base_ik.quat_conjugate(base_ik.yaw_quat(float(yaw))), quat_world)
+    ).astype(np.float32)
+
+
+def base_quat_to_world(quat_base, yaw):
+    return base_ik.normalize_quat(base_ik.quat_multiply(base_ik.yaw_quat(float(yaw)), quat_base)).astype(np.float32)
+
+
+def make_float_dp_action(vx, yaw_rate, target_pos, target_quat, gripper, base_xy, base_z, yaw):
+    target_pos_base = world_pos_to_base(target_pos, base_xy, base_z, yaw)
+    target_quat_base = world_quat_to_base(base_ik.normalize_quat(target_quat), yaw)
     return np.concatenate(
         [
             np.asarray([vx, yaw_rate], dtype=np.float32),
-            np.asarray(target_pos, dtype=np.float32).reshape(3),
-            base_ik.normalize_quat(target_quat).astype(np.float32).reshape(4),
+            target_pos_base.reshape(3),
+            target_quat_base.reshape(4),
             np.asarray([gripper], dtype=np.float32),
         ],
         axis=0,
     ).astype(np.float32)
 
 
-def apply_float_dp_action(action, base_xy, yaw, dt):
+def apply_float_dp_action(action, base_xy, base_z, yaw, dt, action_frame="base"):
     action = np.asarray(action, dtype=np.float32).reshape(-1)
     if action.shape[0] < 10:
         raise ValueError(f"Door DP action must have at least 10 values, got shape {action.shape}")
@@ -1507,8 +1532,17 @@ def apply_float_dp_action(action, base_xy, yaw, dt):
     yaw_next = float(yaw) + yaw_rate * float(dt)
     heading = np.asarray([math.cos(float(yaw)), math.sin(float(yaw))], dtype=np.float32)
     base_xy_next = np.asarray(base_xy, dtype=np.float32) + heading * (vx * float(dt))
-    target_pos = np.asarray(action[2:5], dtype=np.float32).copy()
-    target_quat = base_ik.normalize_quat(np.asarray(action[5:9], dtype=np.float32))
+    target_pos_action = np.asarray(action[2:5], dtype=np.float32).copy()
+    target_quat_action = base_ik.normalize_quat(np.asarray(action[5:9], dtype=np.float32))
+    action_frame = str(action_frame or "base").lower()
+    if action_frame == "base":
+        target_pos = base_pos_to_world(target_pos_action, base_xy, base_z, yaw)
+        target_quat = base_quat_to_world(target_quat_action, yaw)
+    elif action_frame == "world":
+        target_pos = target_pos_action
+        target_quat = target_quat_action
+    else:
+        raise ValueError(f"Unsupported ikpush action_frame={action_frame!r}; expected 'base' or 'world'.")
     gripper = float(action[9])
     return base_xy_next.astype(np.float32), yaw_next, target_pos, target_quat, gripper
 
@@ -1518,12 +1552,14 @@ def _round_list(value, precision=5):
 
 
 def make_float_dp_policy_log_record(step, st, dp_action, dp_state, ee_pos, ee_quat, door_pos, phase):
+    action_frame = str(getattr(st, "dp_action_frame", "base"))
     return {
         "step": int(step),
         "controlled_env_id": int(st.index),
         "num_envs": int(st.args.num_envs),
         "phase_name": str(phase),
         "dp_action_names": list(ACTION_NAMES or []),
+        "action_frame": action_frame,
         "dp_action_raw": _round_list(dp_action),
         "state": _round_list(dp_state),
         "base": {
@@ -1532,7 +1568,9 @@ def make_float_dp_policy_log_record(step, st, dp_action, dp_state, ee_pos, ee_qu
         },
         "ee": {
             "target_pos_world": _round_list(st.last_target_pos),
+            "target_pos_action": _round_list(dp_action[2:5]),
             "target_quat": None if st.last_target_quat is None else _round_list(st.last_target_quat),
+            "target_quat_action": _round_list(dp_action[5:9]),
             "actual_pos_world": _round_list(ee_pos),
             "actual_quat": _round_list(ee_quat),
         },
@@ -1549,9 +1587,11 @@ def print_float_dp_policy_log_record(record):
         f" step={record['step']}"
         f" env={record['controlled_env_id']}/{record['num_envs']}"
         f" phase={record['phase_name']}"
+        f" action_frame={record.get('action_frame')}"
         f" action(vx,yaw,ee,grip)=({action[0]:.3f}, {action[1]:.3f}, "
         f"[{action[2]:.3f}, {action[3]:.3f}, {action[4]:.3f}], {action[9]:.3f})"
-        f" ee_target={ee['target_pos_world']}"
+        f" ee_target_action={ee['target_pos_action']}"
+        f" ee_target_world={ee['target_pos_world']}"
         f" ee_actual={ee['actual_pos_world']}",
         flush=True,
     )
@@ -2040,6 +2080,9 @@ def run_demo(
                 "door_asset_path": door.spec.get("path", ""),
                 "door_cfg": str(args.door_cfg),
                 "source_script": Path(__file__).name,
+                "action_frame": "base",
+                "action_pose_frame": "base",
+                "target_pose_frame": "base",
             },
         )
         print(
@@ -2134,7 +2177,16 @@ def run_demo(
                     yaw_rate_cmd,
                     gripper_actual,
                 )
-                dp_action = make_float_dp_action(vx_cmd, yaw_rate_cmd, target_pos, dp_target_quat, gripper)
+                dp_action = make_float_dp_action(
+                    vx_cmd,
+                    yaw_rate_cmd,
+                    target_pos,
+                    dp_target_quat,
+                    gripper,
+                    base_xy,
+                    args.robot_z,
+                    yaw,
+                )
                 dp_recorder.add_frame(
                     dp_state,
                     wrist_mask_rgb,
@@ -2240,6 +2292,9 @@ def make_parallel_dp_recorder(args, door, env_index, vision_mode):
             "door_asset_path": door.spec.get("path", ""),
             "door_cfg": str(args.door_cfg),
             "source_script": Path(__file__).name,
+            "action_frame": "base",
+            "action_pose_frame": "base",
+            "target_pose_frame": "base",
             "parallel_env_id": int(env_index),
             "parallel_num_envs": int(args.num_envs),
             "seed": int(getattr(args, "seed", -1)),
@@ -2457,10 +2512,20 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                 f"DP checkpoint vision_mode={getattr(dp_controller, 'vision_mode', 'depth')!r}, "
                 f"but ikpush play was run with {expected_vision_mode!r}."
             )
+        if getattr(dp_controller, "action_frame", "world") not in ("world", "base"):
+            raise ValueError(
+                f"DP checkpoint action_frame={getattr(dp_controller, 'action_frame', None)!r}; "
+                "expected 'world' or 'base'."
+            )
         dp_control_state = env_states[int(args.dp_control_env_id)]
+        dp_control_state.dp_action_frame = getattr(dp_controller, "action_frame", "world")
         if not dp_control_state.camera_handles:
             raise RuntimeError("ikpush DP policy execution requires camera sensors; do not disable wrist/front cameras.")
-        print(f"Loaded Door DP policy from {args.dp_policy_checkpoint}", flush=True)
+        print(
+            f"Loaded Door DP policy from {args.dp_policy_checkpoint} "
+            f"action_frame={getattr(dp_controller, 'action_frame', 'world')}",
+            flush=True,
+        )
         print(
             f"Door DP controls only env {args.dp_control_env_id}; other envs keep the scripted target trajectory.",
             flush=True,
@@ -2535,8 +2600,10 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                 base_xy, yaw, target_pos, target_quat, gripper = apply_float_dp_action(
                     dp_action,
                     base_xy_current,
+                    st.args.robot_z,
                     yaw_current,
                     dt,
+                    action_frame=getattr(dp_controller, "action_frame", "world"),
                 )
                 st.traj["base_xy"] = np.asarray(base_xy, dtype=np.float32).copy()
                 st.traj["yaw"] = float(yaw)
@@ -2693,6 +2760,9 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                         st.last_target_pos,
                         target_quat,
                         st.last_gripper,
+                        base_xy,
+                        st.args.robot_z,
+                        yaw,
                     )
                     st.dp_recorder.add_frame(
                         dp_state,

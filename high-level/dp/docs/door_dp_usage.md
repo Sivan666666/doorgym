@@ -153,6 +153,7 @@ door_asset_index       scalar
 door_asset_name        scalar
 door_asset_path        scalar
 door_cfg               scalar
+action_frame           scalar, "base" for current ikpush data
 task
 fps
 state_feature_names
@@ -359,6 +360,10 @@ Action is 10D:
 ```text
 vx, yaw, ee_x, ee_y, ee_z, ee_qx, ee_qy, ee_qz, ee_qw, gripper
 ```
+
+For current `ikpush` data, `ee_*` is the target pose in the robot base frame and
+raw/LeRobot/checkpoint metadata stores `action_frame="base"`. Legacy `push` and
+`pull` data use world-frame EE targets unless metadata says otherwise.
 
 Visual observations:
 

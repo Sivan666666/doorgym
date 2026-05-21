@@ -266,6 +266,15 @@ def scalar_to_str(value):
     return str(value)
 
 
+def action_frame_from_data(data):
+    for key in ("action_frame", "action_pose_frame", "target_pose_frame"):
+        if key in data.files:
+            value = scalar_to_str(data[key]).lower()
+            if value:
+                return value
+    return "world"
+
+
 def scalar_to_int(value):
     arr = np.asarray(value)
     if arr.shape == ():
@@ -1019,6 +1028,24 @@ def display_float_ik_raw_camera_images(float_mod, data, frame_idx, args, vision_
     float_mod.cv2.waitKey(1)
 
 
+def float_ik_action_target_world(float_mod, data, frame_idx, action):
+    action_frame = action_frame_from_data(data)
+    target_pos = np.asarray(action[2:5], dtype=np.float32)
+    target_quat = np.asarray(action[5:9], dtype=np.float32)
+    if action_frame == "world":
+        return target_pos, target_quat
+    if action_frame != "base":
+        raise ValueError(f"Unsupported ikpush action_frame={action_frame!r}; expected 'world' or 'base'.")
+    if "replay_root_state" not in data.files:
+        raise ValueError("ikpush base-frame action visualization requires replay_root_state.")
+    root_state = np.asarray(data["replay_root_state"][frame_idx], dtype=np.float32)
+    yaw = yaw_from_quat_xyzw(root_state[3:7])
+    return (
+        float_mod.base_pos_to_world(target_pos, root_state[:2], root_state[2], yaw),
+        float_mod.base_quat_to_world(target_quat, yaw),
+    )
+
+
 def draw_float_ik_replay_markers(float_mod, gym, viewer, env, data, frame_idx, action=None):
     if viewer is None:
         return
@@ -1041,8 +1068,7 @@ def draw_float_ik_replay_markers(float_mod, gym, viewer, env, data, frame_idx, a
         float_mod.gymutil.draw_lines(float_mod.ThickAxesGeometry(scale=0.12, thickness=0.004), gym, viewer, env, ee_pose)
     if action is None:
         return
-    target = np.asarray(action[2:5], dtype=np.float32)
-    target_quat = np.asarray(action[5:9], dtype=np.float32)
+    target, target_quat = float_ik_action_target_world(float_mod, data, frame_idx, action)
     target_pose = float_mod.gymapi.Transform(
         float_mod.gymapi.Vec3(float(target[0]), float(target[1]), float(target[2])),
         float_mod.gymapi.Quat(float(target_quat[0]), float(target_quat[1]), float(target_quat[2]), float(target_quat[3])),
@@ -1089,9 +1115,10 @@ def print_float_ik_replay_log(data, frame_idx, replay_step, action=None):
     if "replay_door_dof_pos" in data.files:
         pieces.append(f"door_dof={np.round(np.asarray(data['replay_door_dof_pos'][frame_idx]), 4).tolist()}")
     if action is not None:
+        action_frame = action_frame_from_data(data)
         pieces.append(
             "action="
-            f"vx:{float(action[0]):.3f} yaw:{float(action[1]):.3f} "
+            f"frame:{action_frame} vx:{float(action[0]):.3f} yaw:{float(action[1]):.3f} "
             f"ee:[{float(action[2]):.3f},{float(action[3]):.3f},{float(action[4]):.3f}] "
             f"grip:{float(action[9]):.3f}"
         )
@@ -1108,6 +1135,9 @@ def replay_float_ik_episode(args, episode_path, data, vision_mode):
         preload_keys.extend(image_keys_for_vision_mode(vision_mode))
     preload_episode_fields(data, preload_keys, "ikpush replay")
     actions = data["action"].astype(np.float32) if "action" in data.files else None
+    action_frame = action_frame_from_data(data)
+    if action_frame not in ("world", "base"):
+        raise ValueError(f"Unsupported ikpush action_frame={action_frame!r}; expected 'world' or 'base'.")
     total_frames = int(actions.shape[0] if actions is not None else data["state"].shape[0])
     indices = frame_indices(args, total_frames)
     if not indices:
@@ -1120,6 +1150,7 @@ def replay_float_ik_episode(args, episode_path, data, vision_mode):
             "mode": "ikpush",
             "replay_mode": args.replay_mode,
             "vision_mode": vision_mode,
+            "action_frame": action_frame,
             "frames": total_frames,
             "selected_frames": len(indices),
             "door_cfg": str(_resolve_existing_path(args.door_cfg)),

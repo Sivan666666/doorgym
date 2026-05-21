@@ -350,7 +350,7 @@ def _zero_image_like(image):
 
 
 class DoorDPLeRobotRecorder:
-    def __init__(self, root, repo_id, fps, state_feature_names, task, resume=True, vision_mode="depth"):
+    def __init__(self, root, repo_id, fps, state_feature_names, task, resume=True, vision_mode="depth", metadata=None):
         from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
         self.root = Path(root)
@@ -360,6 +360,7 @@ class DoorDPLeRobotRecorder:
         self.vision_mode = normalize_vision_mode(vision_mode)
         self.state_feature_names = list(state_feature_names)
         self.action_names = list(ACTION_NAMES)
+        self.metadata = dict(metadata or {})
         self.root.mkdir(parents=True, exist_ok=True)
         self.dataset_root = self.root / repo_id
         features = {
@@ -409,6 +410,9 @@ class DoorDPLeRobotRecorder:
         }
         if self.vision_mode == "rgb":
             sidecar["vision_mode"] = self.vision_mode
+        for key in ("action_frame", "action_pose_frame", "target_pose_frame"):
+            if hasattr(self, "metadata") and key in self.metadata:
+                sidecar[key] = self.metadata[key]
         out = self.dataset_root / "door_dp_feature_names.json"
         out.parent.mkdir(parents=True, exist_ok=True)
         with open(out, "w", encoding="utf-8") as f:
@@ -492,6 +496,9 @@ class RawDoorDPRecorder:
         }
         if self.vision_mode == "rgb":
             sidecar["vision_mode"] = self.vision_mode
+        for key in ("action_frame", "action_pose_frame", "target_pose_frame"):
+            if key in self.metadata:
+                sidecar[key] = self.metadata[key]
         out = self.raw_root / "door_dp_feature_names.json"
         with open(out, "w", encoding="utf-8") as f:
             json.dump(sidecar, f, indent=2)
@@ -591,6 +598,9 @@ class DoorDPPolicyController:
         ckpt = torch.load(checkpoint, map_location=self.device)
         self.config = ckpt["config"]
         self.vision_mode = normalize_vision_mode(self.config.get("vision_mode", "depth"))
+        self.action_frame = str(
+            self.config.get("action_frame", self.config.get("action_pose_frame", "world"))
+        ).lower()
         self.stats = {k: v.to(self.device) for k, v in ckpt["stats"].items()}
         self.obs_horizon = int(self.config.get("obs_horizon", 16))
         self.pred_horizon = int(self.config.get("pred_horizon", 32))

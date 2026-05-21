@@ -1916,6 +1916,11 @@ def main():
                 f"DP checkpoint vision_mode={getattr(dp_controller, 'vision_mode', 'depth')!r}, "
                 f"but play was run with {DOOR_RUNTIME['dp_vision_mode']!r}."
             )
+        if getattr(dp_controller, "action_frame", "world") != "world":
+            raise ValueError(
+                f"Old push DP play expects world-frame EE actions, but checkpoint "
+                f"action_frame={getattr(dp_controller, 'action_frame', None)!r}. Use --mode ikpush for base-frame policies."
+            )
         print(f"Loaded Door DP policy from {args.dp_policy_checkpoint}")
         print(
             f"Door DP controls only env {args.dp_control_env_id}; other envs keep the scripted target trajectory.",

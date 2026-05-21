@@ -65,6 +65,17 @@ def scalar_str(value):
     return str(arr.reshape(-1)[0])
 
 
+def detect_action_frame(data, sidecar):
+    for source in (data, sidecar or {}):
+        for key in ("action_frame", "action_pose_frame", "target_pose_frame"):
+            if isinstance(source, dict):
+                if key in source:
+                    return str(source[key]).lower()
+            elif key in source.files:
+                return scalar_str(source[key]).lower()
+    return "world"
+
+
 def detect_raw_vision_mode(data, sidecar):
     if sidecar and sidecar.get("vision_mode") is not None:
         return normalize_vision_mode(sidecar["vision_mode"])
@@ -108,6 +119,9 @@ def main():
     fps = int(args.fps or (sidecar.get("fps") if sidecar else raw_fps))
     vision_mode = "rgb" if args.rgb else "depth"
     raw_vision_mode = detect_raw_vision_mode(first, sidecar)
+    action_frame = detect_action_frame(first, sidecar)
+    if action_frame not in ("world", "base"):
+        raise ValueError(f"Unsupported raw action_frame={action_frame!r}; expected 'world' or 'base'.")
     if raw_vision_mode != vision_mode:
         raise ValueError(
             f"Raw data vision_mode={raw_vision_mode!r}, but converter was run with "
@@ -123,6 +137,14 @@ def main():
                 f"Existing LeRobot dataset at {out_dir} has vision_mode={existing_vision_mode!r}; "
                 "use a different --repo_id or pass --overwrite."
             )
+        existing_action_frame = str(
+            existing_sidecar.get("action_frame", existing_sidecar.get("action_pose_frame", "world"))
+        ).lower()
+        if existing_action_frame != action_frame:
+            raise ValueError(
+                f"Existing LeRobot dataset at {out_dir} has action_frame={existing_action_frame!r}, "
+                f"but raw data has action_frame={action_frame!r}; use a different --repo_id or pass --overwrite."
+            )
     if args.overwrite and out_dir.exists():
         shutil.rmtree(out_dir)
 
@@ -135,9 +157,20 @@ def main():
         task=initial_task,
         resume=not args.overwrite,
         vision_mode=vision_mode,
+        metadata={
+            "action_frame": action_frame,
+            "action_pose_frame": action_frame,
+            "target_pose_frame": action_frame,
+        },
     )
     for ep_idx, path in enumerate(files):
         data = np.load(path, allow_pickle=True)
+        episode_action_frame = detect_action_frame(data, sidecar)
+        if episode_action_frame != action_frame:
+            raise ValueError(
+                f"Episode {path} action_frame={episode_action_frame!r}, expected {action_frame!r}; "
+                "do not mix world-frame and base-frame action datasets."
+            )
         task = scalar_str(data["task"]) if "task" in data else initial_task
         recorder.task = task
         states = data["state"].astype(np.float32)
@@ -188,6 +221,9 @@ def main():
         "action": ACTION_NAMES,
         "image_features": lerobot_image_keys_for_vision_mode(vision_mode),
         "source_raw_root": str(raw_root),
+        "action_frame": action_frame,
+        "action_pose_frame": action_frame,
+        "target_pose_frame": action_frame,
     }
     if vision_mode == "rgb":
         sidecar_payload["vision_mode"] = vision_mode

@@ -498,6 +498,9 @@ def main():
             f"LeRobot dataset vision_mode={dataset_vision_mode!r}, but train was run with "
             f"{'--rgb' if args.rgb else 'depth mode'}."
         )
+    action_frame = str(sidecar_data.get("action_frame", sidecar_data.get("action_pose_frame", "world"))).lower()
+    if action_frame not in ("world", "base"):
+        raise ValueError(f"LeRobot dataset action_frame={action_frame!r}; expected 'world' or 'base'.")
     dataset = DoorDPSequenceDataset(dataset_root, args.repo_id, args.obs_horizon, args.pred_horizon, vision_mode=vision_mode)
     stats = compute_stats(dataset)
     if sidecar_data:
@@ -538,6 +541,9 @@ def main():
             "image_width": IMAGE_WIDTH,
             "vision_mode": vision_mode,
             "image_features": lerobot_image_keys_for_vision_mode(vision_mode),
+            "action_frame": action_frame,
+            "action_pose_frame": action_frame,
+            "target_pose_frame": action_frame,
         }
     )
     wandb_run = None

@@ -1123,12 +1123,37 @@ def make_float_dp_state(dof_names, dof_pos, dof_vel, ee_pos, ee_quat, base_xy, b
     ).astype(np.float32)
 
 
-def make_float_dp_action(vx, yaw_rate, target_pos, target_quat, gripper):
+def base_position(base_xy, base_z):
+    return np.asarray([base_xy[0], base_xy[1], base_z], dtype=np.float32)
+
+
+def world_pos_to_base(pos_world, base_xy, base_z, yaw):
+    rel = np.asarray(pos_world, dtype=np.float32) - base_position(base_xy, base_z)
+    return quat_apply(base_ik.quat_conjugate(base_ik.yaw_quat(float(yaw))), rel).astype(np.float32)
+
+
+def base_pos_to_world(pos_base, base_xy, base_z, yaw):
+    return (base_position(base_xy, base_z) + quat_apply(base_ik.yaw_quat(float(yaw)), pos_base)).astype(np.float32)
+
+
+def world_quat_to_base(quat_world, yaw):
+    return base_ik.normalize_quat(
+        base_ik.quat_multiply(base_ik.quat_conjugate(base_ik.yaw_quat(float(yaw))), quat_world)
+    ).astype(np.float32)
+
+
+def base_quat_to_world(quat_base, yaw):
+    return base_ik.normalize_quat(base_ik.quat_multiply(base_ik.yaw_quat(float(yaw)), quat_base)).astype(np.float32)
+
+
+def make_float_dp_action(vx, yaw_rate, target_pos, target_quat, gripper, base_xy, base_z, yaw):
+    target_pos_base = world_pos_to_base(target_pos, base_xy, base_z, yaw)
+    target_quat_base = world_quat_to_base(base_ik.normalize_quat(target_quat), yaw)
     return np.concatenate(
         [
             np.asarray([vx, yaw_rate], dtype=np.float32),
-            np.asarray(target_pos, dtype=np.float32).reshape(3),
-            base_ik.normalize_quat(target_quat).astype(np.float32).reshape(4),
+            target_pos_base.reshape(3),
+            target_quat_base.reshape(4),
             np.asarray([gripper], dtype=np.float32),
         ],
         axis=0,
@@ -1618,6 +1643,9 @@ def run_demo(
                 "door_asset_path": door.spec.get("path", ""),
                 "door_cfg": str(args.door_cfg),
                 "source_script": Path(__file__).name,
+                "action_frame": "base",
+                "action_pose_frame": "base",
+                "target_pose_frame": "base",
             },
         )
         print(
@@ -1712,7 +1740,16 @@ def run_demo(
                     yaw_rate_cmd,
                     gripper_actual,
                 )
-                dp_action = make_float_dp_action(vx_cmd, yaw_rate_cmd, target_pos, dp_target_quat, gripper)
+                dp_action = make_float_dp_action(
+                    vx_cmd,
+                    yaw_rate_cmd,
+                    target_pos,
+                    dp_target_quat,
+                    gripper,
+                    base_xy,
+                    args.robot_z,
+                    yaw,
+                )
                 dp_recorder.add_frame(
                     dp_state,
                     wrist_mask_rgb,

@@ -1951,6 +1951,11 @@ def main():
             num_inference_steps=args.dp_inference_steps,
             action_horizon=args.dp_action_horizon,
         )
+        if getattr(dp_controller, "action_frame", "world") != "world":
+            raise ValueError(
+                f"Old pull DP play expects world-frame EE actions, but checkpoint "
+                f"action_frame={getattr(dp_controller, 'action_frame', None)!r}. Base-frame policies are only wired for ikpush."
+            )
         print(f"Loaded Door DP policy from {args.dp_policy_checkpoint}")
         print(
             f"Door DP controls only env {args.dp_control_env_id}; other envs keep the scripted target trajectory.",
