@@ -322,10 +322,10 @@ worker subprocess. By default it tries conda env `door_dp`; override with
 conda run -n b1z1_lerobot python -m pip install -r high-level/dp/requirements_dp.txt
 ```
 
-Pull-door DP play:
+Pull-door policy play:
 
 ```bash
-conda run -n b1z1 python high-level/dp/play_door_dp_policy.py \
+conda run -n b1z1 python high-level/dp/play_door_policy.py \
   --checkpoint high-level/logs/door-dp/door_dp_v1/checkpoints/model_latest.pt \
   --mode pull \
   --num_envs 1 \
@@ -334,10 +334,10 @@ conda run -n b1z1 python high-level/dp/play_door_dp_policy.py \
   --sim_device cuda:0
 ```
 
-Push-door DP play:
+Push-door policy play:
 
 ```bash
-conda run -n b1z1 python high-level/dp/play_door_dp_policy.py \
+conda run -n b1z1 python high-level/dp/play_door_policy.py \
   --checkpoint high-level/logs/door-dp/door_dp_v1/checkpoints/model_latest.pt \
   --mode push \
   --num_envs 1 \
@@ -349,7 +349,7 @@ conda run -n b1z1 python high-level/dp/play_door_dp_policy.py \
 Play the smoke checkpoint, only for checking load/run:
 
 ```bash
-conda run -n b1z1 python high-level/dp/play_door_dp_policy.py \
+conda run -n b1z1 python high-level/dp/play_door_policy.py \
   --checkpoint high-level/logs/door-dp/smoke/checkpoints/model_latest.pt \
   --mode pull \
   --num_envs 1 \

@@ -52,6 +52,8 @@ OBS_IMAGES = "observation.images"
 ACTION = "action"
 ACTION_IS_PAD = "action_is_pad"
 BACKEND_LEROBOT_DIFFUSION = "lerobot_diffusion"
+BACKEND_LEROBOT_ACT = "lerobot_act"
+BACKEND_LEROBOT_PI05 = "lerobot_pi05"
 CHECKPOINT_META = "door_policy_meta.json"
 CHECKPOINT_STATS = "door_policy_stats.pt"
 CHECKPOINT_POLICY_DIR = "policy"
@@ -85,6 +87,53 @@ def import_lerobot_policy_modules():
         "LeRobotDataset": LeRobotDataset,
         "DiffusionConfig": DiffusionConfig,
         "DiffusionPolicy": DiffusionPolicy,
+    }
+
+
+def import_lerobot_act_modules():
+    _ensure_hf_cache_env()
+    try:
+        from lerobot.configs.types import FeatureType, NormalizationMode, PolicyFeature
+        from lerobot.datasets.lerobot_dataset import LeRobotDataset
+        from lerobot.policies.act.configuration_act import ACTConfig
+        from lerobot.policies.act.modeling_act import ACTPolicy
+    except Exception as exc:
+        raise RuntimeError(
+            "LeRobot ACTPolicy is required for Door ACT. Use a Python>=3.10 environment "
+            "with LeRobot and torchvision/transformers dependencies installed."
+        ) from exc
+    return {
+        "FeatureType": FeatureType,
+        "NormalizationMode": NormalizationMode,
+        "PolicyFeature": PolicyFeature,
+        "LeRobotDataset": LeRobotDataset,
+        "ACTConfig": ACTConfig,
+        "ACTPolicy": ACTPolicy,
+    }
+
+
+def import_lerobot_pi05_modules():
+    _ensure_hf_cache_env()
+    try:
+        from lerobot.configs.types import FeatureType, NormalizationMode, PolicyFeature
+        from lerobot.datasets.lerobot_dataset import LeRobotDataset
+        from lerobot.policies.pi05.configuration_pi05 import PI05Config
+        from lerobot.policies.pi05.modeling_pi05 import PI05Policy
+        from lerobot.utils.constants import OBS_LANGUAGE_ATTENTION_MASK, OBS_LANGUAGE_TOKENS
+    except Exception as exc:
+        raise RuntimeError(
+            "LeRobot PI05Policy is required for Door pi0.5. Use a Python>=3.10 environment "
+            "with LeRobot transformers dependencies installed."
+        ) from exc
+    return {
+        "FeatureType": FeatureType,
+        "NormalizationMode": NormalizationMode,
+        "PolicyFeature": PolicyFeature,
+        "LeRobotDataset": LeRobotDataset,
+        "PI05Config": PI05Config,
+        "PI05Policy": PI05Policy,
+        "OBS_LANGUAGE_TOKENS": OBS_LANGUAGE_TOKENS,
+        "OBS_LANGUAGE_ATTENTION_MASK": OBS_LANGUAGE_ATTENTION_MASK,
     }
 
 
@@ -484,6 +533,65 @@ class DoorPolicySequenceDataset(Dataset):
         return sample
 
 
+class DoorPolicyChunkDataset(Dataset):
+    """LeRobotDataset wrapper for single-observation chunking policies such as ACT and pi0.5."""
+
+    def __init__(
+        self,
+        root: Union[str, Path],
+        repo_id: str,
+        chunk_size: int,
+        vision_mode: str = "depth",
+    ):
+        self.dataset_root = _resolve_lerobot_root(root, repo_id)
+        self.dataset = _load_lerobot_dataset(self.dataset_root, repo_id)
+        self.vision_mode = normalize_vision_mode(vision_mode)
+        self.image_keys = lerobot_image_keys_for_vision_mode(self.vision_mode)
+        self.chunk_size = int(chunk_size)
+        self.length = len(self.dataset)
+        if self.length < self.chunk_size:
+            raise ValueError("Dataset is too short for the requested action chunk size.")
+        self.episode_ranges = load_episode_ranges(self.dataset_root, self.dataset, self.length)
+        self.indices = self._build_indices()
+        meta = getattr(self.dataset, "meta", None)
+        self.stats = getattr(meta, "stats", None)
+        if self.stats is None:
+            raise ValueError("LeRobotDataset has no meta.stats; run conversion/stat generation before training.")
+
+    def _build_indices(self) -> List[int]:
+        indices: List[int] = []
+        for start, end in self.episode_ranges:
+            last = int(end) - self.chunk_size
+            if last >= int(start):
+                indices.extend(range(int(start), last + 1))
+        if not indices:
+            raise ValueError("No valid train chunks found. Record longer episodes or reduce chunk_size.")
+        return indices
+
+    def _frame(self, idx: int) -> Mapping[str, Any]:
+        return self.dataset[int(idx)]
+
+    def __len__(self) -> int:
+        return len(self.indices)
+
+    def __getitem__(self, item: int) -> Dict[str, torch.Tensor]:
+        center = self.indices[int(item)]
+        frame = self._frame(center)
+        image_required = self.vision_mode == "rgb"
+        sample: Dict[str, torch.Tensor] = {
+            OBS_STATE: torch.as_tensor(_as_numpy(_field(frame, OBS_STATE)), dtype=torch.float32),
+            ACTION_IS_PAD: torch.zeros(self.chunk_size, dtype=torch.bool),
+        }
+        for key in self.image_keys:
+            sample[key] = _image_from_frame(frame, key, required=image_required)
+        actions: List[torch.Tensor] = []
+        for idx in range(center, center + self.chunk_size):
+            action_frame = self._frame(idx)
+            actions.append(torch.as_tensor(_as_numpy(_field(action_frame, ACTION)), dtype=torch.float32))
+        sample[ACTION] = torch.stack(actions, dim=0)
+        return sample
+
+
 class DoorPolicyNormalizer:
     """Small equivalent of LeRobot normalization for the direct policy API path."""
 
@@ -704,10 +812,170 @@ def make_lerobot_diffusion_config(
     return config
 
 
+def make_lerobot_act_config(
+    *,
+    state_dim: int,
+    action_dim: int,
+    chunk_size: int,
+    action_horizon: int,
+    image_keys: Sequence[str],
+    device: str,
+    normalization_mapping: Optional[Mapping[str, Any]] = None,
+    vision_backbone: str = "resnet18",
+    pretrained_backbone_weights: Optional[str] = "ResNet18_Weights.IMAGENET1K_V1",
+    replace_final_stride_with_dilation: bool = False,
+    pre_norm: bool = False,
+    dim_model: int = 512,
+    n_heads: int = 8,
+    dim_feedforward: int = 3200,
+    feedforward_activation: str = "relu",
+    n_encoder_layers: int = 4,
+    n_decoder_layers: int = 1,
+    use_vae: bool = True,
+    latent_dim: int = 32,
+    n_vae_encoder_layers: int = 4,
+    temporal_ensemble_coeff: Optional[float] = None,
+    dropout: float = 0.1,
+    kl_weight: float = 10.0,
+):
+    modules = import_lerobot_act_modules()
+    ACTConfig = modules["ACTConfig"]
+    FeatureType = modules["FeatureType"]
+    NormalizationMode = modules["NormalizationMode"]
+    PolicyFeature = modules["PolicyFeature"]
+
+    if action_horizon > chunk_size:
+        raise ValueError(f"action_horizon={action_horizon} must be <= ACT chunk_size={chunk_size}.")
+    if normalization_mapping is None:
+        normalization_mapping = {
+            "VISUAL": "MEAN_STD",
+            "STATE": "MEAN_STD",
+            "ACTION": "MEAN_STD",
+        }
+    norm_map = {
+        str(k): v if hasattr(v, "value") else NormalizationMode(str(v))
+        for k, v in normalization_mapping.items()
+    }
+    input_features = {
+        OBS_STATE: PolicyFeature(type=FeatureType.STATE, shape=(int(state_dim),)),
+    }
+    for key in image_keys:
+        input_features[key] = PolicyFeature(type=FeatureType.VISUAL, shape=(3, IMAGE_HEIGHT, IMAGE_WIDTH))
+    output_features = {
+        ACTION: PolicyFeature(type=FeatureType.ACTION, shape=(int(action_dim),)),
+    }
+    return ACTConfig(
+        n_obs_steps=1,
+        input_features=input_features,
+        output_features=output_features,
+        device=str(device),
+        push_to_hub=False,
+        chunk_size=int(chunk_size),
+        n_action_steps=int(action_horizon),
+        normalization_mapping=norm_map,
+        vision_backbone=str(vision_backbone),
+        pretrained_backbone_weights=pretrained_backbone_weights,
+        replace_final_stride_with_dilation=bool(replace_final_stride_with_dilation),
+        pre_norm=bool(pre_norm),
+        dim_model=int(dim_model),
+        n_heads=int(n_heads),
+        dim_feedforward=int(dim_feedforward),
+        feedforward_activation=str(feedforward_activation),
+        n_encoder_layers=int(n_encoder_layers),
+        n_decoder_layers=int(n_decoder_layers),
+        use_vae=bool(use_vae),
+        latent_dim=int(latent_dim),
+        n_vae_encoder_layers=int(n_vae_encoder_layers),
+        temporal_ensemble_coeff=temporal_ensemble_coeff,
+        dropout=float(dropout),
+        kl_weight=float(kl_weight),
+    )
+
+
+def make_lerobot_pi05_config(
+    *,
+    state_dim: int,
+    action_dim: int,
+    chunk_size: int,
+    action_horizon: int,
+    image_keys: Sequence[str],
+    device: str,
+    normalization_mapping: Optional[Mapping[str, Any]] = None,
+    paligemma_variant: str = "gemma_2b",
+    action_expert_variant: str = "gemma_300m",
+    dtype: str = "float32",
+    max_state_dim: int = 128,
+    max_action_dim: int = 32,
+    num_inference_steps: int = 10,
+    image_resolution: Sequence[int] = (224, 224),
+    tokenizer_max_length: int = 200,
+    gradient_checkpointing: bool = False,
+    compile_model: bool = False,
+    compile_mode: str = "max-autotune",
+    freeze_vision_encoder: bool = False,
+    train_expert_only: bool = False,
+):
+    modules = import_lerobot_pi05_modules()
+    PI05Config = modules["PI05Config"]
+    FeatureType = modules["FeatureType"]
+    NormalizationMode = modules["NormalizationMode"]
+    PolicyFeature = modules["PolicyFeature"]
+
+    if action_horizon > chunk_size:
+        raise ValueError(f"action_horizon={action_horizon} must be <= pi0.5 chunk_size={chunk_size}.")
+    if max_state_dim < state_dim:
+        raise ValueError(f"max_state_dim={max_state_dim} must be >= state_dim={state_dim}.")
+    if max_action_dim < action_dim:
+        raise ValueError(f"max_action_dim={max_action_dim} must be >= action_dim={action_dim}.")
+    if normalization_mapping is None:
+        normalization_mapping = {
+            "VISUAL": "IDENTITY",
+            "STATE": "QUANTILES",
+            "ACTION": "QUANTILES",
+        }
+    norm_map = {
+        str(k): v if hasattr(v, "value") else NormalizationMode(str(v))
+        for k, v in normalization_mapping.items()
+    }
+    image_resolution = tuple(int(x) for x in image_resolution)
+    input_features = {
+        OBS_STATE: PolicyFeature(type=FeatureType.STATE, shape=(int(state_dim),)),
+    }
+    for key in image_keys:
+        input_features[key] = PolicyFeature(type=FeatureType.VISUAL, shape=(3, image_resolution[0], image_resolution[1]))
+    output_features = {
+        ACTION: PolicyFeature(type=FeatureType.ACTION, shape=(int(action_dim),)),
+    }
+    return PI05Config(
+        n_obs_steps=1,
+        input_features=input_features,
+        output_features=output_features,
+        device=str(device),
+        push_to_hub=False,
+        paligemma_variant=str(paligemma_variant),
+        action_expert_variant=str(action_expert_variant),
+        dtype=str(dtype),
+        chunk_size=int(chunk_size),
+        n_action_steps=int(action_horizon),
+        max_state_dim=int(max_state_dim),
+        max_action_dim=int(max_action_dim),
+        num_inference_steps=int(num_inference_steps),
+        image_resolution=image_resolution,
+        tokenizer_max_length=int(tokenizer_max_length),
+        normalization_mapping=norm_map,
+        gradient_checkpointing=bool(gradient_checkpointing),
+        compile_model=bool(compile_model),
+        compile_mode=str(compile_mode),
+        freeze_vision_encoder=bool(freeze_vision_encoder),
+        train_expert_only=bool(train_expert_only),
+    )
+
+
 class LeRobotDiffusionDoorPolicyBackend:
     """Backend implementation backed by LeRobot's DiffusionPolicy."""
 
     backend_name = BACKEND_LEROBOT_DIFFUSION
+    uses_observation_sequence = True
 
     def __init__(
         self,
@@ -1017,6 +1285,552 @@ class LeRobotDiffusionDoorPolicyBackend:
         return checkpoint_dir
 
 
+class LeRobotActDoorPolicyBackend:
+    """Backend implementation backed by LeRobot's ACTPolicy."""
+
+    backend_name = BACKEND_LEROBOT_ACT
+    uses_observation_sequence = False
+
+    def __init__(
+        self,
+        policy: Any,
+        config: Any,
+        stats: Mapping[str, Mapping[str, Any]],
+        vision_mode: str,
+        action_frame: str,
+        sidecar_config: Optional[Mapping[str, Any]] = None,
+        device: Optional[Union[str, torch.device]] = None,
+    ):
+        self.policy = policy
+        self.policy.eval()
+        self.config = config
+        self.device = torch.device(device or getattr(config, "device", "cpu"))
+        self.policy.to(self.device)
+        self.vision_mode = normalize_vision_mode(vision_mode)
+        self.image_keys = lerobot_image_keys_for_vision_mode(self.vision_mode)
+        self.action_frame = str(action_frame or "world").lower()
+        self.sidecar_config = dict(sidecar_config or {})
+        self.stats = _stats_to_cpu(stats)
+        self.normalizer = DoorPolicyNormalizer(
+            self.stats,
+            getattr(config, "normalization_mapping", {}),
+            self.image_keys,
+            self.device,
+        )
+
+    @property
+    def obs_horizon(self) -> int:
+        return 1
+
+    @property
+    def horizon(self) -> int:
+        return int(self.config.chunk_size)
+
+    @property
+    def action_horizon(self) -> int:
+        return int(self.config.n_action_steps)
+
+    @property
+    def action_dim(self) -> int:
+        return int(self.config.action_feature.shape[0])
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        stats: Mapping[str, Mapping[str, Any]],
+        vision_mode: str,
+        action_frame: str,
+        sidecar_config: Optional[Mapping[str, Any]],
+        device: Union[str, torch.device],
+        chunk_size: int,
+        action_horizon: int,
+        state_dim: Optional[int] = None,
+        action_dim: Optional[int] = None,
+        pretrained_path: Optional[str] = None,
+        **policy_kwargs: Any,
+    ) -> "LeRobotActDoorPolicyBackend":
+        modules = import_lerobot_act_modules()
+        ACTPolicy = modules["ACTPolicy"]
+        vision_mode = normalize_vision_mode(vision_mode)
+        image_keys = lerobot_image_keys_for_vision_mode(vision_mode)
+        state_dim = int(state_dim or _feature_dim_from_stats(stats, OBS_STATE))
+        action_dim = int(action_dim or _feature_dim_from_stats(stats, ACTION))
+        config = make_lerobot_act_config(
+            state_dim=state_dim,
+            action_dim=action_dim,
+            chunk_size=chunk_size,
+            action_horizon=action_horizon,
+            image_keys=image_keys,
+            device=str(device),
+            **policy_kwargs,
+        )
+        if pretrained_path:
+            policy = ACTPolicy.from_pretrained(pretrained_path, config=config, strict=False)
+        else:
+            policy = ACTPolicy(config)
+        policy.to(str(device))
+        return cls(policy, config, stats, vision_mode, action_frame, sidecar_config, device)
+
+    @classmethod
+    def load(
+        cls,
+        checkpoint: Union[str, Path],
+        device: Optional[Union[str, torch.device]] = None,
+        num_inference_steps: Optional[int] = None,
+        action_horizon: Optional[int] = None,
+    ) -> "LeRobotActDoorPolicyBackend":
+        modules = import_lerobot_act_modules()
+        ACTPolicy = modules["ACTPolicy"]
+        ckpt_dir = resolve_checkpoint_dir(checkpoint)
+        meta = _read_json(ckpt_dir / CHECKPOINT_META)
+        cfg = dict(meta.get("policy_config", {}))
+        if device is not None:
+            cfg["device"] = str(device)
+        if action_horizon is not None:
+            cfg["action_horizon"] = int(action_horizon)
+        config = make_lerobot_act_config(
+            state_dim=int(cfg["state_dim"]),
+            action_dim=int(cfg["action_dim"]),
+            chunk_size=int(cfg["chunk_size"]),
+            action_horizon=int(cfg["action_horizon"]),
+            image_keys=cfg["image_features"],
+            device=cfg.get("device", "cpu"),
+            normalization_mapping=cfg.get("normalization_mapping"),
+            vision_backbone=cfg.get("vision_backbone", "resnet18"),
+            pretrained_backbone_weights=cfg.get("pretrained_backbone_weights"),
+            replace_final_stride_with_dilation=bool(cfg.get("replace_final_stride_with_dilation", False)),
+            pre_norm=bool(cfg.get("pre_norm", False)),
+            dim_model=int(cfg.get("dim_model", 512)),
+            n_heads=int(cfg.get("n_heads", 8)),
+            dim_feedforward=int(cfg.get("dim_feedforward", 3200)),
+            feedforward_activation=cfg.get("feedforward_activation", "relu"),
+            n_encoder_layers=int(cfg.get("n_encoder_layers", 4)),
+            n_decoder_layers=int(cfg.get("n_decoder_layers", 1)),
+            use_vae=bool(cfg.get("use_vae", True)),
+            latent_dim=int(cfg.get("latent_dim", 32)),
+            n_vae_encoder_layers=int(cfg.get("n_vae_encoder_layers", 4)),
+            temporal_ensemble_coeff=cfg.get("temporal_ensemble_coeff"),
+            dropout=float(cfg.get("dropout", 0.1)),
+            kl_weight=float(cfg.get("kl_weight", 10.0)),
+        )
+        policy = ACTPolicy.from_pretrained(
+            ckpt_dir / CHECKPOINT_POLICY_DIR,
+            config=config,
+            local_files_only=True,
+            strict=True,
+        )
+        stats = torch.load(ckpt_dir / CHECKPOINT_STATS, map_location="cpu")
+        return cls(
+            policy,
+            config,
+            stats,
+            meta.get("vision_mode", cfg.get("vision_mode", "depth")),
+            meta.get("action_frame", cfg.get("action_frame", "world")),
+            meta.get("sidecar_config", {}),
+            device=config.device,
+        )
+
+    def train(self, mode: bool = True):
+        self.policy.train(mode)
+        return self
+
+    def eval(self):
+        self.policy.eval()
+        return self
+
+    def compute_loss(self, batch: Mapping[str, Any]) -> torch.Tensor:
+        batch_norm = self.normalizer.normalize_batch(batch, include_action=True)
+        self.policy.train()
+        loss, _ = self.policy(batch_norm)
+        return loss
+
+    @torch.no_grad()
+    def predict_action_chunks_from_batch(self, batch: Mapping[str, Any], noise: Optional[torch.Tensor] = None) -> torch.Tensor:
+        batch_norm = self.normalizer.normalize_batch(batch, include_action=False)
+        self.policy.eval()
+        actions = self.policy.predict_action_chunk(batch_norm)
+        return self.normalizer.denormalize_action(actions)
+
+    def metadata(self, extra_config: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+        policy_config = {
+            "state_dim": int(self.config.robot_state_feature.shape[0]),
+            "action_dim": int(self.config.action_feature.shape[0]),
+            "obs_horizon": 1,
+            "chunk_size": int(self.config.chunk_size),
+            "horizon": int(self.config.chunk_size),
+            "pred_horizon": int(self.config.chunk_size),
+            "action_horizon": int(self.config.n_action_steps),
+            "image_height": IMAGE_HEIGHT,
+            "image_width": IMAGE_WIDTH,
+            "vision_mode": self.vision_mode,
+            "image_features": list(self.image_keys),
+            "action_frame": self.action_frame,
+            "action_pose_frame": self.action_frame,
+            "target_pose_frame": self.action_frame,
+            "normalization_mapping": _json_safe(getattr(self.config, "normalization_mapping", {})),
+            "vision_backbone": self.config.vision_backbone,
+            "pretrained_backbone_weights": self.config.pretrained_backbone_weights,
+            "replace_final_stride_with_dilation": bool(self.config.replace_final_stride_with_dilation),
+            "pre_norm": bool(self.config.pre_norm),
+            "dim_model": int(self.config.dim_model),
+            "n_heads": int(self.config.n_heads),
+            "dim_feedforward": int(self.config.dim_feedforward),
+            "feedforward_activation": self.config.feedforward_activation,
+            "n_encoder_layers": int(self.config.n_encoder_layers),
+            "n_decoder_layers": int(self.config.n_decoder_layers),
+            "use_vae": bool(self.config.use_vae),
+            "latent_dim": int(self.config.latent_dim),
+            "n_vae_encoder_layers": int(self.config.n_vae_encoder_layers),
+            "temporal_ensemble_coeff": self.config.temporal_ensemble_coeff,
+            "dropout": float(self.config.dropout),
+            "kl_weight": float(self.config.kl_weight),
+            "ikpush_state_version": str(self.sidecar_config.get("ikpush_state_version", "legacy")),
+        }
+        if extra_config:
+            policy_config.update({k: _json_safe(v) for k, v in extra_config.items() if k not in policy_config})
+        return {
+            "backend": BACKEND_LEROBOT_ACT,
+            "format_version": 1,
+            "policy_config": policy_config,
+            "config": policy_config,
+            "vision_mode": self.vision_mode,
+            "action_frame": self.action_frame,
+            "sidecar_config": _json_safe(self.sidecar_config),
+            "action_names": list(ACTION_NAMES),
+        }
+
+    def save_checkpoint(
+        self,
+        checkpoint_dir: Union[str, Path],
+        optimizer: Optional[torch.optim.Optimizer] = None,
+        extra_config: Optional[Mapping[str, Any]] = None,
+        manifest_path: Optional[Union[str, Path]] = None,
+    ) -> Path:
+        checkpoint_dir = Path(checkpoint_dir)
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        policy_dir = checkpoint_dir / CHECKPOINT_POLICY_DIR
+        policy_dir.mkdir(parents=True, exist_ok=True)
+        self.policy.save_pretrained(policy_dir, push_to_hub=False)
+        meta = self.metadata(extra_config=extra_config)
+        with (checkpoint_dir / CHECKPOINT_META).open("w", encoding="utf-8") as f:
+            json.dump(_json_safe(meta), f, indent=2, ensure_ascii=False)
+        torch.save(_stats_to_cpu(self.stats), checkpoint_dir / CHECKPOINT_STATS)
+        if optimizer is not None:
+            torch.save({"optimizer": optimizer.state_dict()}, checkpoint_dir / CHECKPOINT_OPTIMIZER)
+        if manifest_path is not None:
+            manifest_path = Path(manifest_path)
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            torch.save(
+                {
+                    "backend": BACKEND_LEROBOT_ACT,
+                    "format_version": 1,
+                    "checkpoint_dir": str(checkpoint_dir),
+                    "checkpoint_dir_name": checkpoint_dir.name,
+                    "policy_dir": str(policy_dir),
+                    "config": meta["policy_config"],
+                    "action_names": list(ACTION_NAMES),
+                },
+                manifest_path,
+            )
+        return checkpoint_dir
+
+
+class LeRobotPI05DoorPolicyBackend:
+    """Backend implementation backed by LeRobot's PI05Policy."""
+
+    backend_name = BACKEND_LEROBOT_PI05
+    uses_observation_sequence = False
+
+    def __init__(
+        self,
+        policy: Any,
+        config: Any,
+        stats: Mapping[str, Mapping[str, Any]],
+        vision_mode: str,
+        action_frame: str,
+        sidecar_config: Optional[Mapping[str, Any]] = None,
+        device: Optional[Union[str, torch.device]] = None,
+        task_prompt: str = "open the door",
+        tokenizer_name: str = "google/paligemma-3b-pt-224",
+    ):
+        self.policy = policy
+        self.policy.eval()
+        self.config = config
+        self.device = torch.device(device or getattr(config, "device", "cpu"))
+        self.policy.to(self.device)
+        self.vision_mode = normalize_vision_mode(vision_mode)
+        self.image_keys = lerobot_image_keys_for_vision_mode(self.vision_mode)
+        self.action_frame = str(action_frame or "world").lower()
+        self.sidecar_config = dict(sidecar_config or {})
+        self.stats = _stats_to_cpu(stats)
+        self.task_prompt = str(task_prompt)
+        self.tokenizer_name = str(tokenizer_name)
+        self._tokenizer = None
+        self.normalizer = DoorPolicyNormalizer(
+            self.stats,
+            getattr(config, "normalization_mapping", {}),
+            self.image_keys,
+            self.device,
+        )
+        self._pi05_modules = import_lerobot_pi05_modules()
+
+    @property
+    def obs_horizon(self) -> int:
+        return 1
+
+    @property
+    def horizon(self) -> int:
+        return int(self.config.chunk_size)
+
+    @property
+    def action_horizon(self) -> int:
+        return int(self.config.n_action_steps)
+
+    @property
+    def action_dim(self) -> int:
+        return int(self.config.action_feature.shape[0])
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        stats: Mapping[str, Mapping[str, Any]],
+        vision_mode: str,
+        action_frame: str,
+        sidecar_config: Optional[Mapping[str, Any]],
+        device: Union[str, torch.device],
+        chunk_size: int,
+        action_horizon: int,
+        state_dim: Optional[int] = None,
+        action_dim: Optional[int] = None,
+        pretrained_path: Optional[str] = None,
+        task_prompt: str = "open the door",
+        tokenizer_name: str = "google/paligemma-3b-pt-224",
+        **policy_kwargs: Any,
+    ) -> "LeRobotPI05DoorPolicyBackend":
+        modules = import_lerobot_pi05_modules()
+        PI05Policy = modules["PI05Policy"]
+        vision_mode = normalize_vision_mode(vision_mode)
+        image_keys = lerobot_image_keys_for_vision_mode(vision_mode)
+        state_dim = int(state_dim or _feature_dim_from_stats(stats, OBS_STATE))
+        action_dim = int(action_dim or _feature_dim_from_stats(stats, ACTION))
+        config = make_lerobot_pi05_config(
+            state_dim=state_dim,
+            action_dim=action_dim,
+            chunk_size=chunk_size,
+            action_horizon=action_horizon,
+            image_keys=image_keys,
+            device=str(device),
+            **policy_kwargs,
+        )
+        if pretrained_path:
+            policy = PI05Policy.from_pretrained(pretrained_path, config=config, strict=False)
+        else:
+            policy = PI05Policy(config)
+        policy.to(str(device))
+        return cls(policy, config, stats, vision_mode, action_frame, sidecar_config, device, task_prompt, tokenizer_name)
+
+    @classmethod
+    def load(
+        cls,
+        checkpoint: Union[str, Path],
+        device: Optional[Union[str, torch.device]] = None,
+        num_inference_steps: Optional[int] = None,
+        action_horizon: Optional[int] = None,
+    ) -> "LeRobotPI05DoorPolicyBackend":
+        modules = import_lerobot_pi05_modules()
+        PI05Policy = modules["PI05Policy"]
+        ckpt_dir = resolve_checkpoint_dir(checkpoint)
+        meta = _read_json(ckpt_dir / CHECKPOINT_META)
+        cfg = dict(meta.get("policy_config", {}))
+        if device is not None:
+            cfg["device"] = str(device)
+        if action_horizon is not None:
+            cfg["action_horizon"] = int(action_horizon)
+        if num_inference_steps is not None:
+            cfg["num_inference_steps"] = int(num_inference_steps)
+        config = make_lerobot_pi05_config(
+            state_dim=int(cfg["state_dim"]),
+            action_dim=int(cfg["action_dim"]),
+            chunk_size=int(cfg["chunk_size"]),
+            action_horizon=int(cfg["action_horizon"]),
+            image_keys=cfg["image_features"],
+            device=cfg.get("device", "cpu"),
+            normalization_mapping=cfg.get("normalization_mapping"),
+            paligemma_variant=cfg.get("paligemma_variant", "gemma_2b"),
+            action_expert_variant=cfg.get("action_expert_variant", "gemma_300m"),
+            dtype=cfg.get("dtype", "float32"),
+            max_state_dim=int(cfg.get("max_state_dim", 128)),
+            max_action_dim=int(cfg.get("max_action_dim", 32)),
+            num_inference_steps=int(cfg.get("num_inference_steps", 10)),
+            image_resolution=cfg.get("image_resolution", (224, 224)),
+            tokenizer_max_length=int(cfg.get("tokenizer_max_length", 200)),
+            gradient_checkpointing=bool(cfg.get("gradient_checkpointing", False)),
+            compile_model=bool(cfg.get("compile_model", False)),
+            compile_mode=cfg.get("compile_mode", "max-autotune"),
+            freeze_vision_encoder=bool(cfg.get("freeze_vision_encoder", False)),
+            train_expert_only=bool(cfg.get("train_expert_only", False)),
+        )
+        policy = PI05Policy.from_pretrained(
+            ckpt_dir / CHECKPOINT_POLICY_DIR,
+            config=config,
+            local_files_only=True,
+            strict=False,
+        )
+        stats = torch.load(ckpt_dir / CHECKPOINT_STATS, map_location="cpu")
+        return cls(
+            policy,
+            config,
+            stats,
+            meta.get("vision_mode", cfg.get("vision_mode", "depth")),
+            meta.get("action_frame", cfg.get("action_frame", "world")),
+            meta.get("sidecar_config", {}),
+            device=config.device,
+            task_prompt=cfg.get("task_prompt", "open the door"),
+            tokenizer_name=cfg.get("tokenizer_name", "google/paligemma-3b-pt-224"),
+        )
+
+    def _get_tokenizer(self):
+        if self._tokenizer is None:
+            from transformers import AutoTokenizer
+
+            self._tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_name)
+        return self._tokenizer
+
+    def _add_language_tokens(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        tokens_key = self._pi05_modules["OBS_LANGUAGE_TOKENS"]
+        mask_key = self._pi05_modules["OBS_LANGUAGE_ATTENTION_MASK"]
+        state = batch[OBS_STATE]
+        if state.ndim != 2:
+            state = state.reshape(state.shape[0], -1)
+        bsz = state.shape[0]
+        padded = torch.zeros(bsz, int(self.config.max_state_dim), dtype=state.dtype, device=state.device)
+        width = min(state.shape[1], padded.shape[1])
+        padded[:, :width] = state[:, :width]
+        bins = torch.linspace(-1.0, 1.0, 257, device=state.device, dtype=state.dtype)[:-1]
+        discretized = torch.bucketize(padded.clamp(-1.0, 1.0), bins).sub(1).clamp(0, 255).cpu().numpy()
+        prompts = []
+        for row in discretized:
+            state_str = " ".join(str(int(v)) for v in row)
+            prompts.append(f"Task: {self.task_prompt.strip()}, State: {state_str};\nAction: ")
+        tokenized = self._get_tokenizer()(
+            prompts,
+            padding="max_length",
+            truncation=True,
+            max_length=int(self.config.tokenizer_max_length),
+            return_tensors="pt",
+        )
+        batch[tokens_key] = tokenized["input_ids"].to(self.device)
+        batch[mask_key] = tokenized["attention_mask"].to(self.device, dtype=torch.bool)
+        return batch
+
+    def train(self, mode: bool = True):
+        self.policy.train(mode)
+        return self
+
+    def eval(self):
+        self.policy.eval()
+        return self
+
+    def compute_loss(self, batch: Mapping[str, Any]) -> torch.Tensor:
+        batch_norm = self.normalizer.normalize_batch(batch, include_action=True)
+        batch_norm = self._add_language_tokens(batch_norm)
+        self.policy.train()
+        loss, _ = self.policy(batch_norm)
+        return loss
+
+    @torch.no_grad()
+    def predict_action_chunks_from_batch(self, batch: Mapping[str, Any], noise: Optional[torch.Tensor] = None) -> torch.Tensor:
+        batch_norm = self.normalizer.normalize_batch(batch, include_action=False)
+        batch_norm = self._add_language_tokens(batch_norm)
+        self.policy.eval()
+        actions = self.policy.predict_action_chunk(batch_norm)
+        return self.normalizer.denormalize_action(actions)
+
+    def metadata(self, extra_config: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+        policy_config = {
+            "state_dim": int(self.config.input_features[OBS_STATE].shape[0]),
+            "action_dim": int(self.config.action_feature.shape[0]),
+            "obs_horizon": 1,
+            "chunk_size": int(self.config.chunk_size),
+            "horizon": int(self.config.chunk_size),
+            "pred_horizon": int(self.config.chunk_size),
+            "action_horizon": int(self.config.n_action_steps),
+            "image_height": IMAGE_HEIGHT,
+            "image_width": IMAGE_WIDTH,
+            "vision_mode": self.vision_mode,
+            "image_features": list(self.image_keys),
+            "action_frame": self.action_frame,
+            "action_pose_frame": self.action_frame,
+            "target_pose_frame": self.action_frame,
+            "normalization_mapping": _json_safe(getattr(self.config, "normalization_mapping", {})),
+            "paligemma_variant": self.config.paligemma_variant,
+            "action_expert_variant": self.config.action_expert_variant,
+            "dtype": self.config.dtype,
+            "max_state_dim": int(self.config.max_state_dim),
+            "max_action_dim": int(self.config.max_action_dim),
+            "num_inference_steps": int(self.config.num_inference_steps),
+            "image_resolution": list(self.config.image_resolution),
+            "tokenizer_max_length": int(self.config.tokenizer_max_length),
+            "tokenizer_name": self.tokenizer_name,
+            "task_prompt": self.task_prompt,
+            "gradient_checkpointing": bool(self.config.gradient_checkpointing),
+            "compile_model": bool(self.config.compile_model),
+            "compile_mode": self.config.compile_mode,
+            "freeze_vision_encoder": bool(self.config.freeze_vision_encoder),
+            "train_expert_only": bool(self.config.train_expert_only),
+            "ikpush_state_version": str(self.sidecar_config.get("ikpush_state_version", "legacy")),
+        }
+        if extra_config:
+            policy_config.update({k: _json_safe(v) for k, v in extra_config.items() if k not in policy_config})
+        return {
+            "backend": BACKEND_LEROBOT_PI05,
+            "format_version": 1,
+            "policy_config": policy_config,
+            "config": policy_config,
+            "vision_mode": self.vision_mode,
+            "action_frame": self.action_frame,
+            "sidecar_config": _json_safe(self.sidecar_config),
+            "action_names": list(ACTION_NAMES),
+        }
+
+    def save_checkpoint(
+        self,
+        checkpoint_dir: Union[str, Path],
+        optimizer: Optional[torch.optim.Optimizer] = None,
+        extra_config: Optional[Mapping[str, Any]] = None,
+        manifest_path: Optional[Union[str, Path]] = None,
+    ) -> Path:
+        checkpoint_dir = Path(checkpoint_dir)
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        policy_dir = checkpoint_dir / CHECKPOINT_POLICY_DIR
+        policy_dir.mkdir(parents=True, exist_ok=True)
+        self.policy.save_pretrained(policy_dir, push_to_hub=False)
+        meta = self.metadata(extra_config=extra_config)
+        with (checkpoint_dir / CHECKPOINT_META).open("w", encoding="utf-8") as f:
+            json.dump(_json_safe(meta), f, indent=2, ensure_ascii=False)
+        torch.save(_stats_to_cpu(self.stats), checkpoint_dir / CHECKPOINT_STATS)
+        if optimizer is not None:
+            torch.save({"optimizer": optimizer.state_dict()}, checkpoint_dir / CHECKPOINT_OPTIMIZER)
+        if manifest_path is not None:
+            manifest_path = Path(manifest_path)
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            torch.save(
+                {
+                    "backend": BACKEND_LEROBOT_PI05,
+                    "format_version": 1,
+                    "checkpoint_dir": str(checkpoint_dir),
+                    "checkpoint_dir_name": checkpoint_dir.name,
+                    "policy_dir": str(policy_dir),
+                    "config": meta["policy_config"],
+                    "action_names": list(ACTION_NAMES),
+                },
+                manifest_path,
+            )
+        return checkpoint_dir
+
+
 def resolve_checkpoint_dir(checkpoint: Union[str, Path]) -> Path:
     path = Path(checkpoint).expanduser().resolve()
     if path.is_dir():
@@ -1024,9 +1838,13 @@ def resolve_checkpoint_dir(checkpoint: Union[str, Path]) -> Path:
     if not path.is_file():
         raise FileNotFoundError(f"Door policy checkpoint not found: {path}")
     manifest = torch.load(path, map_location="cpu")
-    if not isinstance(manifest, Mapping) or manifest.get("backend") != BACKEND_LEROBOT_DIFFUSION:
+    if not isinstance(manifest, Mapping) or manifest.get("backend") not in (
+        BACKEND_LEROBOT_DIFFUSION,
+        BACKEND_LEROBOT_ACT,
+        BACKEND_LEROBOT_PI05,
+    ):
         raise ValueError(
-            f"{path} is not a LeRobot Door policy checkpoint manifest. "
+            f"{path} is not a supported LeRobot Door policy checkpoint manifest. "
             "Retrain with high-level/dp/train_door_dp.py after the LeRobot backend migration."
         )
     candidates = []
@@ -1043,6 +1861,46 @@ def resolve_checkpoint_dir(checkpoint: Union[str, Path]) -> Path:
     raise FileNotFoundError(f"Could not resolve Door policy checkpoint directory from manifest: {path}")
 
 
+def checkpoint_backend_name(checkpoint: Union[str, Path]) -> str:
+    ckpt_dir = resolve_checkpoint_dir(checkpoint)
+    meta = _read_json(ckpt_dir / CHECKPOINT_META)
+    backend = str(meta.get("backend", ""))
+    if backend not in (BACKEND_LEROBOT_DIFFUSION, BACKEND_LEROBOT_ACT, BACKEND_LEROBOT_PI05):
+        raise ValueError(f"Unsupported Door policy backend in {ckpt_dir}: {backend!r}")
+    return backend
+
+
+def load_door_policy_backend(
+    checkpoint: Union[str, Path],
+    device: Optional[Union[str, torch.device]] = None,
+    num_inference_steps: Optional[int] = None,
+    action_horizon: Optional[int] = None,
+):
+    backend = checkpoint_backend_name(checkpoint)
+    if backend == BACKEND_LEROBOT_DIFFUSION:
+        return LeRobotDiffusionDoorPolicyBackend.load(
+            checkpoint,
+            device=device,
+            num_inference_steps=num_inference_steps,
+            action_horizon=action_horizon,
+        )
+    if backend == BACKEND_LEROBOT_ACT:
+        return LeRobotActDoorPolicyBackend.load(
+            checkpoint,
+            device=device,
+            num_inference_steps=num_inference_steps,
+            action_horizon=action_horizon,
+        )
+    if backend == BACKEND_LEROBOT_PI05:
+        return LeRobotPI05DoorPolicyBackend.load(
+            checkpoint,
+            device=device,
+            num_inference_steps=num_inference_steps,
+            action_horizon=action_horizon,
+        )
+    raise ValueError(f"Unsupported Door policy backend: {backend!r}")
+
+
 class DoorPolicyController:
     """Runtime controller with the old DoorDPPolicyController call contract."""
 
@@ -1053,7 +1911,7 @@ class DoorPolicyController:
         num_inference_steps: Optional[int] = None,
         action_horizon: Optional[int] = None,
     ):
-        self.backend = LeRobotDiffusionDoorPolicyBackend.load(
+        self.backend = load_door_policy_backend(
             checkpoint,
             device=device,
             num_inference_steps=num_inference_steps,
@@ -1121,11 +1979,17 @@ class DoorPolicyController:
         for key in self.image_keys:
             batch[key] = []
         for window in windows:
-            if len(window) != self.obs_horizon:
-                raise ValueError(f"Expected obs window length {self.obs_horizon}, got {len(window)}")
-            batch[OBS_STATE].append(torch.stack([item[OBS_STATE] for item in window], dim=0))
-            for key in self.image_keys:
-                batch[key].append(torch.stack([item[key] for item in window], dim=0))
+            if getattr(self.backend, "uses_observation_sequence", True):
+                if len(window) != self.obs_horizon:
+                    raise ValueError(f"Expected obs window length {self.obs_horizon}, got {len(window)}")
+                batch[OBS_STATE].append(torch.stack([item[OBS_STATE] for item in window], dim=0))
+                for key in self.image_keys:
+                    batch[key].append(torch.stack([item[key] for item in window], dim=0))
+            else:
+                item = window[-1]
+                batch[OBS_STATE].append(item[OBS_STATE])
+                for key in self.image_keys:
+                    batch[key].append(item[key])
         return {key: torch.stack(values, dim=0) for key, values in batch.items()}
 
     def _current_batch(self) -> Dict[str, torch.Tensor]:
