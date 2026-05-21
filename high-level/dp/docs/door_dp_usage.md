@@ -393,7 +393,9 @@ Current state is 73D when `num_dofs=19` and `num_actions=18`:
 `wrist_masked_depth` and `front_masked_depth` are stored as 3-channel images for
 LeRobot/video tooling and for the shared 3-channel CNN image encoder. They are
 still grayscale masked depth visualizations internally; the three channels contain
-the same value.
+the same value. In depth mode, valid handle pixels are encoded with a fixed metric
+scale, `depth_meters / camera_depth_clip_far`, rather than per-frame min-max
+normalization.
 
 State/action feature names are stored in:
 

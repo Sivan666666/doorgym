@@ -934,12 +934,7 @@ class ManipLocoDoorAsset(ManipLoco):
             valid_depth = masked_depth[mask_image > 0.5]
             valid_depth = valid_depth[np.isfinite(valid_depth) & (valid_depth > 0.0)]
             if valid_depth.size > 0:
-                depth_min = float(valid_depth.min())
-                depth_max = float(valid_depth.max())
-                if depth_max - depth_min < 1e-4:
-                    depth_scaled = masked_depth / max(depth_max, 1e-4)
-                else:
-                    depth_scaled = (masked_depth - depth_min) / (depth_max - depth_min)
+                depth_scaled = masked_depth / max(float(DOOR_RUNTIME["camera_depth_clip_far"]), 1e-4)
                 masked_depth_vis = (255.0 * np.clip(depth_scaled, 0.0, 1.0) * mask_image).astype(np.uint8)
             if display_scale > 1:
                 masked_depth_vis = cv2.resize(masked_depth_vis, None, fx=display_scale, fy=display_scale, interpolation=cv2.INTER_NEAREST)
@@ -2428,6 +2423,7 @@ def main():
                 dp_camera_images,
                 dp_env_id,
                 vision_mode=DOOR_RUNTIME["dp_vision_mode"],
+                depth_far=DOOR_RUNTIME["camera_depth_clip_far"],
             )
             if args.rgb and (front_mask_rgb is None or front_second_rgb is None):
                 raise RuntimeError("RGB DP policy inference requires wrist/front RGB and mask camera tensors.")
@@ -2476,6 +2472,7 @@ def main():
                     camera_images,
                     env_id,
                     vision_mode=DOOR_RUNTIME["dp_vision_mode"],
+                    depth_far=DOOR_RUNTIME["camera_depth_clip_far"],
                 )
                 should_close = bool(pass_done[env_id].item()) or step == args.steps - 1
                 missing_required_camera = mask_rgb is None or second_rgb is None or (

@@ -900,12 +900,7 @@ def show_camera_handle_images(gym, sim, env, camera_handles, args):
         valid_depth = masked_depth[handle_mask > 0.5]
         valid_depth = valid_depth[np.isfinite(valid_depth) & (valid_depth > 0.0)]
         if valid_depth.size > 0:
-            depth_min = float(valid_depth.min())
-            depth_max = float(valid_depth.max())
-            if depth_max - depth_min < 1.0e-4:
-                depth_scaled = masked_depth / max(depth_max, 1.0e-4)
-            else:
-                depth_scaled = (masked_depth - depth_min) / (depth_max - depth_min)
+            depth_scaled = masked_depth / max(float(args.camera_depth_clip_far), 1.0e-4)
             masked_depth_vis = (255.0 * np.clip(depth_scaled, 0.0, 1.0) * handle_mask).astype(np.uint8)
 
         printed = getattr(args, "_camera_image_stats_printed", set())
@@ -956,18 +951,13 @@ def mask_to_rgb(mask):
     return np.repeat(mask_u8[..., None], 3, axis=-1)
 
 
-def masked_depth_to_rgb(depth_image, handle_mask):
+def masked_depth_to_rgb(depth_image, handle_mask, depth_far):
     masked_depth = depth_image * handle_mask
     depth_u8 = np.zeros_like(masked_depth, dtype=np.uint8)
     valid = masked_depth[handle_mask > 0.5]
     valid = valid[np.isfinite(valid) & (valid > 0.0)]
     if valid.size > 0:
-        d_min = float(valid.min())
-        d_max = float(valid.max())
-        if d_max - d_min < 1.0e-4:
-            scaled = masked_depth / max(d_max, 1.0e-4)
-        else:
-            scaled = (masked_depth - d_min) / (d_max - d_min)
+        scaled = masked_depth / max(float(depth_far), 1.0e-4)
         depth_u8 = (255.0 * np.clip(scaled, 0.0, 1.0) * handle_mask).astype(np.uint8)
     return np.repeat(depth_u8[..., None], 3, axis=-1), int(valid.size)
 
@@ -1011,7 +1001,11 @@ def capture_dp_camera_images(gym, sim, env, camera_handles, args):
         depth_image = np.nan_to_num(np.abs(depth_image), nan=0.0, posinf=0.0, neginf=0.0)
         depth_image[depth_image < float(args.camera_depth_clip_lower)] = 0.0
         depth_image = np.clip(depth_image, 0.0, float(args.camera_depth_clip_far))
-        masked_depth_rgb, valid_depth_count = masked_depth_to_rgb(depth_image, handle_mask)
+        masked_depth_rgb, valid_depth_count = masked_depth_to_rgb(
+            depth_image,
+            handle_mask,
+            args.camera_depth_clip_far,
+        )
         images[f"{prefix}_masked_depth"] = masked_depth_rgb
         if args.headless and not getattr(args, f"_{prefix}_headless_depth_checked", False):
             if valid_depth_count == 0:
