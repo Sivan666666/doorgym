@@ -97,11 +97,25 @@ def main() -> None:
             elif cmd == "reset":
                 controller.reset()
                 ok()
+            elif cmd == "reset_envs":
+                env_ids = request.get("env_ids")
+                controller.reset_envs(None if env_ids is None else [int(x) for x in env_ids])
+                ok()
             elif cmd == "clear_action_queue":
                 controller.action_queue.clear()
                 ok()
             elif cmd == "append_observation":
                 controller.append_observation(
+                    np.asarray(request["state"], dtype=np.float32),
+                    request["mask_rgb"],
+                    request["masked_depth_rgb"],
+                    request.get("front_mask_rgb"),
+                    request.get("front_masked_depth_rgb"),
+                )
+                ok()
+            elif cmd == "append_observation_for_env":
+                controller.append_observation_for_env(
+                    int(request["env_id"]),
                     np.asarray(request["state"], dtype=np.float32),
                     request["mask_rgb"],
                     request["masked_depth_rgb"],
@@ -124,6 +138,16 @@ def main() -> None:
                     request.get("front_masked_depth_rgb"),
                 )
                 ok(action=np.asarray(action, dtype=np.float32).tolist())
+            elif cmd == "act_batch":
+                actions = controller.act_batch(
+                    [int(x) for x in request["env_ids"]],
+                    np.asarray(request["states"], dtype=np.float32),
+                    request["mask_rgbs"],
+                    request["masked_depth_rgbs"],
+                    request.get("front_mask_rgbs"),
+                    request.get("front_masked_depth_rgbs"),
+                )
+                ok(actions=np.asarray(actions, dtype=np.float32).tolist())
             elif cmd == "close":
                 ok()
                 return

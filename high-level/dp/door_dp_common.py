@@ -615,11 +615,32 @@ class DoorDPPolicyController:
     def reset(self):
         return self._impl.reset()
 
+    def reset_envs(self, env_ids=None):
+        return self._impl.reset_envs(env_ids)
+
     def _normalize_state(self, state):
         return self._impl._normalize_state(state)
 
     def append_observation(self, state, mask_rgb, masked_depth_rgb, front_mask_rgb=None, front_masked_depth_rgb=None):
         return self._impl.append_observation(state, mask_rgb, masked_depth_rgb, front_mask_rgb, front_masked_depth_rgb)
+
+    def append_observation_for_env(
+        self,
+        env_id,
+        state,
+        mask_rgb,
+        masked_depth_rgb,
+        front_mask_rgb=None,
+        front_masked_depth_rgb=None,
+    ):
+        return self._impl.append_observation_for_env(
+            env_id,
+            state,
+            mask_rgb,
+            masked_depth_rgb,
+            front_mask_rgb,
+            front_masked_depth_rgb,
+        )
 
     def _denormalize_action(self, action):
         return self._impl._denormalize_action(action)
@@ -630,6 +651,24 @@ class DoorDPPolicyController:
 
     def act(self, state, mask_rgb, masked_depth_rgb, front_mask_rgb=None, front_masked_depth_rgb=None):
         return self._impl.act(state, mask_rgb, masked_depth_rgb, front_mask_rgb, front_masked_depth_rgb)
+
+    def act_batch(
+        self,
+        env_ids,
+        states,
+        mask_rgbs,
+        masked_depth_rgbs,
+        front_mask_rgbs=None,
+        front_masked_depth_rgbs=None,
+    ):
+        return self._impl.act_batch(
+            env_ids,
+            states,
+            mask_rgbs,
+            masked_depth_rgbs,
+            front_mask_rgbs,
+            front_masked_depth_rgbs,
+        )
 
 
 def apply_door_dp_action(env, action, env_id=0, delta_rpy_fn=None):

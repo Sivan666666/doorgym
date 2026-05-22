@@ -1928,10 +1928,36 @@ class DoorPolicyController:
         self.action_dim = self.backend.action_dim
         self.obs_buffer: deque = deque(maxlen=self.obs_horizon)
         self.action_queue: deque = deque()
+        self.multi_obs_buffers: Dict[int, deque] = {}
+        self.multi_action_queues: Dict[int, deque] = {}
 
     def reset(self) -> None:
         self.obs_buffer.clear()
         self.action_queue.clear()
+        self.multi_obs_buffers.clear()
+        self.multi_action_queues.clear()
+
+    def reset_envs(self, env_ids: Optional[Sequence[int]] = None) -> None:
+        if env_ids is None:
+            self.multi_obs_buffers.clear()
+            self.multi_action_queues.clear()
+            return
+        for env_id in env_ids:
+            env_id = int(env_id)
+            self.multi_obs_buffers.pop(env_id, None)
+            self.multi_action_queues.pop(env_id, None)
+
+    def _ensure_env_buffers(self, env_id: int) -> Tuple[deque, deque]:
+        env_id = int(env_id)
+        obs_buffer = self.multi_obs_buffers.get(env_id)
+        if obs_buffer is None:
+            obs_buffer = deque(maxlen=self.obs_horizon)
+            self.multi_obs_buffers[env_id] = obs_buffer
+        action_queue = self.multi_action_queues.get(env_id)
+        if action_queue is None:
+            action_queue = deque()
+            self.multi_action_queues[env_id] = action_queue
+        return obs_buffer, action_queue
 
     def _normalize_state(self, state: Any) -> torch.Tensor:
         return self.backend.normalizer.normalize_state(state)
@@ -1974,6 +2000,23 @@ class DoorPolicyController:
         else:
             self.obs_buffer.append(item)
 
+    def append_observation_for_env(
+        self,
+        env_id: int,
+        state: Any,
+        mask_rgb: Any,
+        masked_depth_rgb: Any,
+        front_mask_rgb: Any = None,
+        front_masked_depth_rgb: Any = None,
+    ) -> None:
+        item = self._make_item(state, mask_rgb, masked_depth_rgb, front_mask_rgb, front_masked_depth_rgb)
+        obs_buffer, _ = self._ensure_env_buffers(int(env_id))
+        if len(obs_buffer) == 0:
+            for _ in range(self.obs_horizon):
+                obs_buffer.append(item)
+        else:
+            obs_buffer.append(item)
+
     def _batch_from_windows(self, windows: Sequence[Sequence[Mapping[str, torch.Tensor]]]) -> Dict[str, torch.Tensor]:
         batch: Dict[str, List[torch.Tensor]] = {OBS_STATE: []}
         for key in self.image_keys:
@@ -2014,6 +2057,29 @@ class DoorPolicyController:
         return self.predict_action_chunks_from_batch(self._batch_from_windows(windows), noise=noise)
 
     @torch.no_grad()
+    def sample_action_chunks_for_envs(
+        self,
+        env_ids: Sequence[int],
+        noise: Optional[torch.Tensor] = None,
+    ) -> None:
+        env_ids = [int(env_id) for env_id in env_ids]
+        if not env_ids:
+            return
+        windows = []
+        for env_id in env_ids:
+            obs_buffer, _ = self._ensure_env_buffers(env_id)
+            if len(obs_buffer) != self.obs_horizon:
+                raise RuntimeError(f"Observation buffer for env {env_id} is not initialized.")
+            windows.append(list(obs_buffer))
+        actions = self.predict_action_chunks_from_windows(windows, noise=noise)
+        actions_np = actions.detach().cpu().numpy().astype(np.float32)
+        for row_idx, env_id in enumerate(env_ids):
+            _, action_queue = self._ensure_env_buffers(env_id)
+            action_queue.clear()
+            for row in actions_np[row_idx, : self.action_horizon]:
+                action_queue.append(row)
+
+    @torch.no_grad()
     def sample_action_chunk(self, noise: Optional[torch.Tensor] = None) -> None:
         actions = self.backend.predict_action_chunks_from_batch(self._current_batch(), noise=noise)
         actions_np = actions[0].detach().cpu().numpy().astype(np.float32)
@@ -2033,6 +2099,49 @@ class DoorPolicyController:
         if not self.action_queue:
             self.sample_action_chunk()
         return self.action_queue.popleft()
+
+    def act_batch(
+        self,
+        env_ids: Sequence[int],
+        states: Any,
+        mask_rgbs: Any,
+        masked_depth_rgbs: Any,
+        front_mask_rgbs: Any = None,
+        front_masked_depth_rgbs: Any = None,
+    ) -> np.ndarray:
+        env_ids = [int(env_id) for env_id in env_ids]
+        if not env_ids:
+            return np.zeros((0, self.action_dim), dtype=np.float32)
+        states_seq = list(states)
+        mask_seq = list(mask_rgbs)
+        second_seq = list(masked_depth_rgbs)
+        if len(states_seq) != len(env_ids) or len(mask_seq) != len(env_ids) or len(second_seq) != len(env_ids):
+            raise ValueError("act_batch inputs must have the same length as env_ids.")
+        front_mask_seq = [None] * len(env_ids) if front_mask_rgbs is None else list(front_mask_rgbs)
+        front_second_seq = [None] * len(env_ids) if front_masked_depth_rgbs is None else list(front_masked_depth_rgbs)
+        if len(front_mask_seq) != len(env_ids) or len(front_second_seq) != len(env_ids):
+            raise ValueError("act_batch front image inputs must have the same length as env_ids.")
+
+        for idx, env_id in enumerate(env_ids):
+            self.append_observation_for_env(
+                env_id,
+                states_seq[idx],
+                mask_seq[idx],
+                second_seq[idx],
+                front_mask_seq[idx],
+                front_second_seq[idx],
+            )
+
+        empty_env_ids = [env_id for env_id in env_ids if not self._ensure_env_buffers(env_id)[1]]
+        if empty_env_ids:
+            self.sample_action_chunks_for_envs(empty_env_ids)
+        actions = []
+        for env_id in env_ids:
+            _, action_queue = self._ensure_env_buffers(env_id)
+            if not action_queue:
+                raise RuntimeError(f"Action queue for env {env_id} is empty after sampling.")
+            actions.append(action_queue.popleft())
+        return np.stack(actions, axis=0).astype(np.float32)
 
 
 def _write_pickle_message(stream: Any, payload: Mapping[str, Any]) -> None:
@@ -2161,6 +2270,9 @@ class DoorPolicySubprocessController:
     def reset(self) -> None:
         self._request({"cmd": "reset"})
 
+    def reset_envs(self, env_ids: Optional[Sequence[int]] = None) -> None:
+        self._request({"cmd": "reset_envs", "env_ids": None if env_ids is None else [int(x) for x in env_ids]})
+
     def append_observation(
         self,
         state: Any,
@@ -2172,6 +2284,29 @@ class DoorPolicySubprocessController:
         self._request(
             {
                 "cmd": "append_observation",
+                "state": np.asarray(state, dtype=np.float32),
+                "mask_rgb": np.asarray(mask_rgb),
+                "masked_depth_rgb": np.asarray(masked_depth_rgb),
+                "front_mask_rgb": None if front_mask_rgb is None else np.asarray(front_mask_rgb),
+                "front_masked_depth_rgb": None
+                if front_masked_depth_rgb is None
+                else np.asarray(front_masked_depth_rgb),
+            }
+        )
+
+    def append_observation_for_env(
+        self,
+        env_id: int,
+        state: Any,
+        mask_rgb: Any,
+        masked_depth_rgb: Any,
+        front_mask_rgb: Any = None,
+        front_masked_depth_rgb: Any = None,
+    ) -> None:
+        self._request(
+            {
+                "cmd": "append_observation_for_env",
+                "env_id": int(env_id),
                 "state": np.asarray(state, dtype=np.float32),
                 "mask_rgb": np.asarray(mask_rgb),
                 "masked_depth_rgb": np.asarray(masked_depth_rgb),
@@ -2211,6 +2346,30 @@ class DoorPolicySubprocessController:
             }
         )
         return np.asarray(response["action"], dtype=np.float32)
+
+    def act_batch(
+        self,
+        env_ids: Sequence[int],
+        states: Any,
+        mask_rgbs: Any,
+        masked_depth_rgbs: Any,
+        front_mask_rgbs: Any = None,
+        front_masked_depth_rgbs: Any = None,
+    ) -> np.ndarray:
+        response = self._request(
+            {
+                "cmd": "act_batch",
+                "env_ids": [int(env_id) for env_id in env_ids],
+                "states": np.asarray(states, dtype=np.float32),
+                "mask_rgbs": np.asarray(mask_rgbs),
+                "masked_depth_rgbs": np.asarray(masked_depth_rgbs),
+                "front_mask_rgbs": None if front_mask_rgbs is None else np.asarray(front_mask_rgbs),
+                "front_masked_depth_rgbs": None
+                if front_masked_depth_rgbs is None
+                else np.asarray(front_masked_depth_rgbs),
+            }
+        )
+        return np.asarray(response["actions"], dtype=np.float32)
 
     def close(self) -> None:
         proc = getattr(self, "_proc", None)

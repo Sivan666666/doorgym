@@ -31,6 +31,8 @@ def parse_args():
     parser.add_argument("--dp_inference_steps", type=int, default=100)
     parser.add_argument("--dp_action_horizon", type=int, default=None)
     parser.add_argument("--dp_control_env_id", type=int, default=0)
+    parser.add_argument("--dp_control_all_envs", dest="dp_control_all_envs", action="store_true", default=True)
+    parser.add_argument("--no_dp_control_all_envs", dest="dp_control_all_envs", action="store_false")
     parser.add_argument("--dp_log_path", type=str, default=None)
     parser.add_argument("--dp_log_interval", type=int, default=25)
     parser.add_argument("--no_dp_print", dest="dp_print", action="store_false", default=True)
@@ -70,6 +72,8 @@ def main():
         args.dp_warmstart_step is not None,
         "--dp_warmstart_expert_obs" in sys.argv or "--no_dp_warmstart_expert_obs" in sys.argv,
     ]
+    if args.dp_control_all_envs and args.num_envs > 1 and args.dp_warmstart:
+        raise ValueError("--dp_warmstart currently supports a single controlled env; add --no_dp_control_all_envs.")
     if not args.dp_warmstart and any(warmstart_params):
         raise ValueError("Warm-start options require --dp_warmstart.")
     if args.dp_warmstart:
@@ -136,6 +140,10 @@ def main():
         cmd.append("--camera_depth")
     if not args.dp_print:
         cmd.append("--no_dp_print")
+    if args.dp_control_all_envs:
+        cmd.append("--dp_control_all_envs")
+    else:
+        cmd.append("--no_dp_control_all_envs")
     if args.dp_action_horizon is not None:
         cmd += ["--dp_action_horizon", str(args.dp_action_horizon)]
     if args.dp_warmstart:
@@ -161,7 +169,11 @@ def main():
     print(f"Running Door policy: {' '.join(cmd)}", flush=True)
     print(
         f"Door policy log will be saved to: {dp_log_path}\n"
-        f"Only env {args.dp_control_env_id} is controlled by the learned policy; other envs keep scripted targets.",
+        + (
+            "All envs are controlled by the learned policy."
+            if args.dp_control_all_envs
+            else f"Only env {args.dp_control_env_id} is controlled by the learned policy; other envs keep scripted targets."
+        ),
         flush=True,
     )
     subprocess.run(cmd, cwd=str(HIGH_LEVEL_ROOT), check=True)

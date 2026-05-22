@@ -1522,6 +1522,8 @@ def parse_args():
     parser.add_argument("--dp_fps", type=int, default=50)
     parser.add_argument("--dp_policy_checkpoint", type=str, default=None)
     parser.add_argument("--dp_control_env_id", type=int, default=0)
+    parser.add_argument("--dp_control_all_envs", dest="dp_control_all_envs", action="store_true", default=True)
+    parser.add_argument("--no_dp_control_all_envs", dest="dp_control_all_envs", action="store_false")
     parser.add_argument("--dp_inference_steps", type=int, default=100)
     parser.add_argument("--dp_action_horizon", type=int, default=None)
     parser.add_argument("--dp_log_path", type=str, default=None)
@@ -1940,11 +1942,13 @@ def main():
         )
     dp_controller = None
     dp_logger = None
+    dp_control_env_ids = []
     if args.dp_policy_checkpoint:
         if DoorDPPolicyController is None:
             raise RuntimeError("DP inference requires diffusers and the Door DP model code.")
         if args.dp_control_env_id < 0 or args.dp_control_env_id >= args.num_envs:
             raise ValueError(f"--dp_control_env_id must be in [0, {args.num_envs - 1}]")
+        dp_control_env_ids = list(range(args.num_envs)) if args.dp_control_all_envs else [args.dp_control_env_id]
         dp_controller = DoorDPPolicyController(
             args.dp_policy_checkpoint,
             device=args.rl_device,
@@ -1957,10 +1961,13 @@ def main():
                 f"action_frame={getattr(dp_controller, 'action_frame', None)!r}. Base-frame policies are only wired for ikpush."
             )
         print(f"Loaded Door DP policy from {args.dp_policy_checkpoint}")
-        print(
-            f"Door DP controls only env {args.dp_control_env_id}; other envs keep the scripted target trajectory.",
-            flush=True,
-        )
+        if args.dp_control_all_envs:
+            print(f"Door DP controls all {len(dp_control_env_ids)} envs with one batched policy.", flush=True)
+        else:
+            print(
+                f"Door DP controls only env {args.dp_control_env_id}; other envs keep the scripted target trajectory.",
+                flush=True,
+            )
         if args.dp_log_path:
             if DoorDPJsonlLogger is None:
                 raise RuntimeError("DP logging requires door_dp_common.py")
@@ -2464,46 +2471,64 @@ def main():
             ),
         )
         if dp_controller is not None:
-            dp_env_id = args.dp_control_env_id
             dp_camera_images = env.capture_wrist_camera_images()
-            mask_rgb, masked_depth_rgb, front_mask_rgb, front_masked_depth_rgb = dp_image_inputs_from_camera_tensors(
-                dp_camera_images,
-                dp_env_id,
-                depth_lower=DOOR_RUNTIME["camera_depth_clip_lower"],
-                depth_far=DOOR_RUNTIME["camera_depth_clip_far"],
-            )
-            if mask_rgb is not None and masked_depth_rgb is not None:
-                dp_action = dp_controller.act(
-                    get_door_dp_state(env, phase_id, phase_name, dp_env_id),
-                    mask_rgb,
-                    masked_depth_rgb,
-                    front_mask_rgb,
-                    front_masked_depth_rgb,
+            batch_env_ids = []
+            batch_states = []
+            batch_masks = []
+            batch_seconds = []
+            batch_front_masks = []
+            batch_front_seconds = []
+            for dp_env_id in dp_control_env_ids:
+                mask_rgb, masked_depth_rgb, front_mask_rgb, front_masked_depth_rgb = dp_image_inputs_from_camera_tensors(
+                    dp_camera_images,
+                    dp_env_id,
+                    depth_lower=DOOR_RUNTIME["camera_depth_clip_lower"],
+                    depth_far=DOOR_RUNTIME["camera_depth_clip_far"],
                 )
-                apply_door_dp_action(env, dp_action, dp_env_id, ee_goal_delta_rpy_from_quat)
-                if make_door_dp_log_record is not None:
-                    dp_extra = {
-                        "stopped_by_door": bool(stopped_by_door[dp_env_id].item()),
-                        "front_to_door_distance": float(front_to_door_distance[dp_env_id].item()),
-                        "pass_started": bool(pass_started[dp_env_id].item()),
-                        "pass_done": bool(pass_done[dp_env_id].item()),
-                        "door_open_stage": bool(env.open_door_stage[dp_env_id].item()),
-                        "handle_open_ratio": float(env.handle_open_ratio[dp_env_id].item()),
-                        "door_open_ratio": float(env.door_open_ratio[dp_env_id].item()),
-                    }
-                    dp_record = make_door_dp_log_record(
-                        env,
-                        step,
-                        dp_action,
-                        dp_env_id,
-                        phase_id=phase_id,
-                        phase_names=phase_name,
-                        extra=dp_extra,
-                    )
-                    if dp_logger is not None:
-                        dp_logger.write(dp_record)
-                    if args.dp_print and step % max(1, args.dp_log_interval) == 0:
-                        print_door_dp_log_record(dp_record)
+                if mask_rgb is None or masked_depth_rgb is None:
+                    continue
+                batch_env_ids.append(dp_env_id)
+                batch_states.append(get_door_dp_state(env, phase_id, phase_name, dp_env_id))
+                batch_masks.append(mask_rgb)
+                batch_seconds.append(masked_depth_rgb)
+                batch_front_masks.append(front_mask_rgb)
+                batch_front_seconds.append(front_masked_depth_rgb)
+            if batch_env_ids:
+                front_masks_arg = None if all(x is None for x in batch_front_masks) else batch_front_masks
+                front_seconds_arg = None if all(x is None for x in batch_front_seconds) else batch_front_seconds
+                dp_actions = dp_controller.act_batch(
+                    batch_env_ids,
+                    batch_states,
+                    batch_masks,
+                    batch_seconds,
+                    front_masks_arg,
+                    front_seconds_arg,
+                )
+                for dp_env_id, dp_action in zip(batch_env_ids, dp_actions):
+                    apply_door_dp_action(env, dp_action, dp_env_id, ee_goal_delta_rpy_from_quat)
+                    if make_door_dp_log_record is not None:
+                        dp_extra = {
+                            "stopped_by_door": bool(stopped_by_door[dp_env_id].item()),
+                            "front_to_door_distance": float(front_to_door_distance[dp_env_id].item()),
+                            "pass_started": bool(pass_started[dp_env_id].item()),
+                            "pass_done": bool(pass_done[dp_env_id].item()),
+                            "door_open_stage": bool(env.open_door_stage[dp_env_id].item()),
+                            "handle_open_ratio": float(env.handle_open_ratio[dp_env_id].item()),
+                            "door_open_ratio": float(env.door_open_ratio[dp_env_id].item()),
+                        }
+                        dp_record = make_door_dp_log_record(
+                            env,
+                            step,
+                            dp_action,
+                            dp_env_id,
+                            phase_id=phase_id,
+                            phase_names=phase_name,
+                            extra=dp_extra,
+                        )
+                        if dp_logger is not None:
+                            dp_logger.write(dp_record)
+                        if args.dp_print and step % max(1, args.dp_log_interval) == 0:
+                            print_door_dp_log_record(dp_record)
         actions = policy(obs.detach(), hist_encoding=True)
         obs, _, _, _, dones, infos = env.step(actions.detach())
         if pos_error_plotter is not None and step % max(1, args.plot_interval) == 0:

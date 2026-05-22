@@ -380,6 +380,8 @@ def parse_args():
             {"name": "--dp_fps", "type": int, "default": 50},
             {"name": "--dp_policy_checkpoint", "type": str, "default": ""},
             {"name": "--dp_control_env_id", "type": int, "default": 0},
+            {"name": "--dp_control_all_envs", "action": "store_true"},
+            {"name": "--no_dp_control_all_envs", "action": "store_true"},
             {"name": "--dp_inference_steps", "type": int, "default": 100},
             {"name": "--dp_action_horizon", "type": int, "default": -1},
             {"name": "--dp_log_path", "type": str, "default": ""},
@@ -421,6 +423,7 @@ def parse_args():
     args.camera_depth = bool((args.camera_depth or not args.no_camera_depth) and not args.rgb)
     args.camera_seg = bool(args.camera_seg or not args.no_camera_seg)
     args.dp_record_all_envs = not bool(args.no_dp_record_all_envs)
+    args.dp_control_all_envs = not bool(args.no_dp_control_all_envs)
     args.dp_print = "--no_dp_print" not in argv
     args.dp_action_horizon = None if int(args.dp_action_horizon) < 0 else int(args.dp_action_horizon)
     if args.num_envs <= 0:
@@ -429,6 +432,8 @@ def parse_args():
         raise ValueError("--dp_record_env_id must be in [0, num_envs - 1].")
     if args.dp_policy_checkpoint and (args.dp_control_env_id < 0 or args.dp_control_env_id >= args.num_envs):
         raise ValueError("--dp_control_env_id must be in [0, num_envs - 1].")
+    if args.dp_policy_checkpoint and args.dp_warmstart and args.dp_control_all_envs and args.num_envs > 1:
+        raise ValueError("--dp_warmstart currently supports a single controlled env; add --no_dp_control_all_envs.")
     if args.record_dp_dataset and args.dp_policy_checkpoint:
         raise ValueError("--record_dp_dataset and --dp_policy_checkpoint are separate modes; run recording or policy play, not both.")
     warmstart_params = [
@@ -1885,21 +1890,28 @@ def apply_warmstart_state(gym, sim, st, data, step, dof_names):
     gym.refresh_jacobian_tensors(sim)
 
 
-def prefill_dp_controller_from_expert_obs(controller, data, step, vision_mode):
+def prefill_dp_controller_from_expert_obs(controller, data, step, vision_mode, env_id=None):
     if raw_image_keys_for_vision_mode is None:
         raise RuntimeError("Expert observation warm-start requires door_dp_common.raw_image_keys_for_vision_mode.")
     image_keys = raw_image_keys_for_vision_mode(vision_mode)
-    controller.obs_buffer.clear()
-    controller.action_queue.clear()
+    if env_id is None:
+        controller.obs_buffer.clear()
+        controller.action_queue.clear()
+    else:
+        controller.reset_envs([int(env_id)])
     start = max(0, int(step) - int(controller.obs_horizon) + 1)
     for idx in range(start, int(step) + 1):
-        controller.append_observation(
+        args = (
             np.asarray(data["state"][idx], dtype=np.float32),
             np.asarray(data[image_keys[0]][idx], dtype=np.uint8),
             np.asarray(data[image_keys[1]][idx], dtype=np.uint8),
             np.asarray(data[image_keys[2]][idx], dtype=np.uint8),
             np.asarray(data[image_keys[3]][idx], dtype=np.uint8),
         )
+        if env_id is None:
+            controller.append_observation(*args)
+        else:
+            controller.append_observation_for_env(int(env_id), *args)
 
 
 def apply_dp_warmstart_if_requested(gym, sim, args, controller, st, dof_names):
@@ -1916,7 +1928,7 @@ def apply_dp_warmstart_if_requested(gym, sim, args, controller, st, dof_names):
     apply_warmstart_state(gym, sim, st, data, step, dof_names)
     vision_mode = "rgb" if args.rgb else "depth"
     if args.dp_warmstart_expert_obs:
-        prefill_dp_controller_from_expert_obs(controller, data, step, vision_mode)
+        prefill_dp_controller_from_expert_obs(controller, data, step, vision_mode, env_id=st.index)
     print(
         f"DP warm-start loaded raw={raw_path} step={step} "
         f"expert_obs_prefill={bool(args.dp_warmstart_expert_obs)} "
@@ -2816,9 +2828,13 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
     dp_controller = None
     dp_logger = None
     dp_control_state = None
+    dp_control_env_ids = []
+    dp_control_env_id_set = set()
     if args.dp_policy_checkpoint:
         if DoorDPPolicyController is None:
             raise RuntimeError("DP policy execution requires high-level/dp/door_dp_common.py and diffusers.")
+        dp_control_env_ids = list(range(args.num_envs)) if args.dp_control_all_envs else [int(args.dp_control_env_id)]
+        dp_control_env_id_set = set(dp_control_env_ids)
         dp_controller = DoorDPPolicyController(
             args.dp_policy_checkpoint,
             device=args.rl_device,
@@ -2843,19 +2859,24 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                 f"but this ikpush play script emits {IKPUSH_STATE_VERSION!r}. "
                 "Reconvert/retrain with the current ikpush state format."
             )
-        dp_control_state = env_states[int(args.dp_control_env_id)]
-        dp_control_state.dp_action_frame = getattr(dp_controller, "action_frame", "world")
-        if not dp_control_state.camera_handles:
-            raise RuntimeError("ikpush DP policy execution requires camera sensors; do not disable wrist/front cameras.")
+        controlled_states = [env_states[env_id] for env_id in dp_control_env_ids]
+        for controlled_state in controlled_states:
+            controlled_state.dp_action_frame = getattr(dp_controller, "action_frame", "world")
+            if not controlled_state.camera_handles:
+                raise RuntimeError("ikpush DP policy execution requires camera sensors; do not disable wrist/front cameras.")
+        dp_control_state = controlled_states[0]
         print(
             f"Loaded Door DP policy from {args.dp_policy_checkpoint} "
             f"action_frame={getattr(dp_controller, 'action_frame', 'world')}",
             flush=True,
         )
-        print(
-            f"Door DP controls only env {args.dp_control_env_id}; other envs keep the scripted target trajectory.",
-            flush=True,
-        )
+        if args.dp_control_all_envs:
+            print(f"Door DP controls all {len(dp_control_env_ids)} envs with one batched policy.", flush=True)
+        else:
+            print(
+                f"Door DP controls only env {args.dp_control_env_id}; other envs keep the scripted target trajectory.",
+                flush=True,
+            )
         if args.dp_log_path:
             if DoorDPJsonlLogger is None:
                 raise RuntimeError("DP policy logging requires high-level/dp/door_dp_common.py")
@@ -2874,9 +2895,18 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
             gym.refresh_dof_state_tensor(sim)
             gym.refresh_jacobian_tensors(sim)
 
-        for st in env_states:
-            if dp_controller is not None and st.index == int(args.dp_control_env_id):
-                phase = "dp_policy"
+        dp_policy_inputs_by_env = {}
+        dp_actions_by_env = {}
+        if dp_controller is not None:
+            batch_env_ids = []
+            batch_states = []
+            batch_wrist_masks = []
+            batch_wrist_seconds = []
+            batch_front_masks = []
+            batch_front_seconds = []
+            for st in env_states:
+                if st.index not in dp_control_env_id_set:
+                    continue
                 base_xy_current = np.asarray(st.traj.get("base_xy", st.base_start), dtype=np.float32)
                 yaw_current = float(st.traj.get("yaw", st.yaw_start))
                 handle_pos, handle_quat = get_body_pose(gym, st.env, st.door_actor, st.door.handle_body_index)
@@ -2918,13 +2948,43 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                 if missing_required_camera:
                     missing_desc = "wrist/front camera RGB or mask images" if st.args.rgb else "wrist camera mask/depth images"
                     raise RuntimeError(f"ikpush DP policy execution cannot run because {missing_desc} are missing.")
-                dp_action = dp_controller.act(
-                    dp_state,
-                    wrist_mask_rgb,
-                    wrist_second_rgb,
-                    front_mask_rgb,
-                    front_second_rgb,
+                dp_policy_inputs_by_env[st.index] = {
+                    "base_xy_current": base_xy_current,
+                    "yaw_current": yaw_current,
+                    "handle_goal": handle_goal,
+                    "ee_pos": ee_pos,
+                    "ee_quat": ee_quat,
+                    "dp_state": dp_state,
+                }
+                batch_env_ids.append(st.index)
+                batch_states.append(dp_state)
+                batch_wrist_masks.append(wrist_mask_rgb)
+                batch_wrist_seconds.append(wrist_second_rgb)
+                batch_front_masks.append(front_mask_rgb)
+                batch_front_seconds.append(front_second_rgb)
+            if batch_env_ids:
+                dp_actions = dp_controller.act_batch(
+                    batch_env_ids,
+                    batch_states,
+                    batch_wrist_masks,
+                    batch_wrist_seconds,
+                    batch_front_masks,
+                    batch_front_seconds,
                 )
+                for env_id, dp_action in zip(batch_env_ids, dp_actions):
+                    dp_actions_by_env[int(env_id)] = np.asarray(dp_action, dtype=np.float32)
+
+        for st in env_states:
+            if dp_controller is not None and st.index in dp_actions_by_env:
+                phase = "dp_policy"
+                dp_policy_input = dp_policy_inputs_by_env[st.index]
+                base_xy_current = dp_policy_input["base_xy_current"]
+                yaw_current = dp_policy_input["yaw_current"]
+                handle_goal = dp_policy_input["handle_goal"]
+                ee_pos = dp_policy_input["ee_pos"]
+                ee_quat = dp_policy_input["ee_quat"]
+                dp_state = dp_policy_input["dp_state"]
+                dp_action = dp_actions_by_env[st.index]
                 st.last_dp_action = np.asarray(dp_action, dtype=np.float32).copy()
                 base_xy, yaw, target_pos, target_quat, gripper = apply_float_dp_action(
                     dp_action,
