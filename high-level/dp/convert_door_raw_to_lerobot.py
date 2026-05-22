@@ -1,6 +1,8 @@
 import argparse
 import json
 import shutil
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -35,6 +37,15 @@ def parse_args():
     parser.add_argument("--fps", type=int, default=None)
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--rgb", action="store_true", help="Convert raw RGB+mask Door DP data. Required for RGB raw data.")
+    parser.add_argument(
+        "--num_workers",
+        type=int,
+        default=1,
+        help=(
+            "Number of worker threads used to preload/validate raw npz episodes. "
+            "LeRobot writing stays ordered in the main process. Default 1 preserves the old serial path."
+        ),
+    )
     parser.add_argument(
         "--keep_phase_state",
         action="store_true",
@@ -102,8 +113,94 @@ def require_fields(data, keys, path):
         raise KeyError(f"{path} is missing required fields for this vision mode: {missing}")
 
 
+def load_episode_payload(path, sidecar, image_keys, keep_state_indices, action_frame, ikpush_state_version, vision_mode, initial_task):
+    with np.load(path, allow_pickle=True) as data:
+        episode_action_frame = detect_action_frame(data, sidecar)
+        if episode_action_frame != action_frame:
+            raise ValueError(
+                f"Episode {path} action_frame={episode_action_frame!r}, expected {action_frame!r}; "
+                "do not mix world-frame and base-frame action datasets."
+            )
+        episode_state_version = detect_ikpush_state_version(data, sidecar)
+        if episode_state_version != ikpush_state_version:
+            raise ValueError(
+                f"Episode {path} ikpush_state_version={episode_state_version!r}, expected {ikpush_state_version!r}; "
+                "do not mix old and new ikpush state semantics."
+            )
+        task = scalar_str(data["task"]) if "task" in data else initial_task
+        states = data["state"].astype(np.float32)
+        if keep_state_indices and states.shape[-1] <= max(keep_state_indices):
+            raise ValueError(f"Episode {path} has state_dim={states.shape[-1]}, cannot apply selected state columns.")
+        states = states[:, keep_state_indices]
+        actions = data["action"].astype(np.float32)
+        require_fields(data, image_keys[:2], path)
+        wrist_first = data[image_keys[0]].astype(np.uint8)
+        wrist_second = data[image_keys[1]].astype(np.uint8)
+        if vision_mode == "rgb":
+            require_fields(data, image_keys[2:], path)
+            front_first = data[image_keys[2]].astype(np.uint8)
+            front_second = data[image_keys[3]].astype(np.uint8)
+        else:
+            front_first = data[image_keys[2]].astype(np.uint8) if image_keys[2] in data else np.zeros_like(wrist_first)
+            front_second = data[image_keys[3]].astype(np.uint8) if image_keys[3] in data else np.zeros_like(wrist_second)
+        subtasks = data["subtask_index"].astype(np.int64).reshape(-1)
+    n = states.shape[0]
+    if not (
+        actions.shape[0]
+        == wrist_first.shape[0]
+        == wrist_second.shape[0]
+        == front_first.shape[0]
+        == front_second.shape[0]
+        == subtasks.shape[0]
+        == n
+    ):
+        raise ValueError(f"Episode {path} has inconsistent lengths.")
+    return {
+        "path_name": Path(path).name,
+        "task": task,
+        "states": states,
+        "actions": actions,
+        "wrist_first": wrist_first,
+        "wrist_second": wrist_second,
+        "front_first": front_first,
+        "front_second": front_second,
+        "subtasks": subtasks,
+        "n": n,
+    }
+
+
+def iter_episode_payloads(files, num_workers, **kwargs):
+    if num_workers <= 1:
+        for ep_idx, path in enumerate(files):
+            yield ep_idx, load_episode_payload(path, **kwargs)
+        return
+
+    # Keep output deterministic: at most num_workers episodes are prepared ahead,
+    # and payloads are yielded in sorted filename order for the single writer.
+    def submit_next(executor, iterator, pending):
+        try:
+            ep_idx, path = next(iterator)
+        except StopIteration:
+            return False
+        pending.append((ep_idx, executor.submit(load_episode_payload, path, **kwargs)))
+        return True
+
+    iterator = iter(enumerate(files))
+    pending = deque()
+    with ThreadPoolExecutor(max_workers=num_workers) as executor:
+        for _ in range(min(num_workers, len(files))):
+            submit_next(executor, iterator, pending)
+        while pending:
+            ep_idx, future = pending.popleft()
+            payload = future.result()
+            yield ep_idx, payload
+            submit_next(executor, iterator, pending)
+
+
 def main():
     args = parse_args()
+    if args.num_workers < 1:
+        raise ValueError("--num_workers must be >= 1")
     raw_root = Path(args.raw_root)
     files = episode_files(raw_root)
     sidecar = load_sidecar(raw_root)
@@ -181,49 +278,28 @@ def main():
             "ikpush_state_version": ikpush_state_version,
         },
     )
-    for ep_idx, path in enumerate(files):
-        data = np.load(path, allow_pickle=True)
-        episode_action_frame = detect_action_frame(data, sidecar)
-        if episode_action_frame != action_frame:
-            raise ValueError(
-                f"Episode {path} action_frame={episode_action_frame!r}, expected {action_frame!r}; "
-                "do not mix world-frame and base-frame action datasets."
-            )
-        episode_state_version = detect_ikpush_state_version(data, sidecar)
-        if episode_state_version != ikpush_state_version:
-            raise ValueError(
-                f"Episode {path} ikpush_state_version={episode_state_version!r}, expected {ikpush_state_version!r}; "
-                "do not mix old and new ikpush state semantics."
-            )
-        task = scalar_str(data["task"]) if "task" in data else initial_task
+    payloads = iter_episode_payloads(
+        files,
+        args.num_workers,
+        sidecar=sidecar,
+        image_keys=image_keys,
+        keep_state_indices=keep_state_indices,
+        action_frame=action_frame,
+        ikpush_state_version=ikpush_state_version,
+        vision_mode=vision_mode,
+        initial_task=initial_task,
+    )
+    for ep_idx, payload in payloads:
+        task = payload["task"]
         recorder.task = task
-        states = data["state"].astype(np.float32)
-        if keep_state_indices and states.shape[-1] <= max(keep_state_indices):
-            raise ValueError(f"Episode {path} has state_dim={states.shape[-1]}, cannot apply selected state columns.")
-        states = states[:, keep_state_indices]
-        actions = data["action"].astype(np.float32)
-        require_fields(data, image_keys[:2], path)
-        wrist_first = data[image_keys[0]].astype(np.uint8)
-        wrist_second = data[image_keys[1]].astype(np.uint8)
-        if vision_mode == "rgb":
-            require_fields(data, image_keys[2:], path)
-            front_first = data[image_keys[2]].astype(np.uint8)
-            front_second = data[image_keys[3]].astype(np.uint8)
-        else:
-            front_first = data[image_keys[2]].astype(np.uint8) if image_keys[2] in data else np.zeros_like(wrist_first)
-            front_second = data[image_keys[3]].astype(np.uint8) if image_keys[3] in data else np.zeros_like(wrist_second)
-        subtasks = data["subtask_index"].astype(np.int64).reshape(-1)
-        n = states.shape[0]
-        if not (
-            actions.shape[0]
-            == wrist_first.shape[0]
-            == wrist_second.shape[0]
-            == front_first.shape[0]
-            == front_second.shape[0]
-            == subtasks.shape[0]
-            == n
-        ):
-            raise ValueError(f"Episode {path} has inconsistent lengths.")
+        states = payload["states"]
+        actions = payload["actions"]
+        wrist_first = payload["wrist_first"]
+        wrist_second = payload["wrist_second"]
+        front_first = payload["front_first"]
+        front_second = payload["front_second"]
+        subtasks = payload["subtasks"]
+        n = payload["n"]
         for i in range(n):
             recorder.add_frame(
                 states[i],
@@ -235,7 +311,7 @@ def main():
                 front_second_rgb=front_second[i],
             )
         recorder.save_episode()
-        print(f"Converted {path.name}: {n} frames task={task!r} ({ep_idx + 1}/{len(files)})", flush=True)
+        print(f"Converted {payload['path_name']}: {n} frames task={task!r} ({ep_idx + 1}/{len(files)})", flush=True)
     recorder.finalize()
     feature_sidecar = Path(args.root) / args.repo_id / "door_dp_feature_names.json"
     feature_sidecar.parent.mkdir(parents=True, exist_ok=True)
