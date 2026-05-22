@@ -8,8 +8,8 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RECORD_SCRIPT = REPO_ROOT / "high-level" / "dp" / "record_door_dp_dataset.py"
-DEFAULT_DOOR_CFG = REPO_ROOT / "high-level" / "experiments" / "isaacgym" / "b1z1_opendoor_single_99650089960001.yaml"
-DEFAULT_RAW_ROOT = REPO_ROOT / "high-level" / "data" / "door_dp_raw" / "single_99650089960001_push_sweep"
+DEFAULT_DOOR_CFG = REPO_ROOT / "high-level" / "experiments" / "isaacgym" / "b1z1_opendoor_single_door0.yaml"
+DEFAULT_RAW_ROOT = REPO_ROOT / "high-level" / "data" / "door_dp_raw" / "single_door0_push_sweep"
 
 
 def parse_args():
