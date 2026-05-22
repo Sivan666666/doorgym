@@ -2751,7 +2751,7 @@ def create_parallel_env_states(
     env_states = []
     for env_index, env_args, env, arm_actor, actor_handles, door, door_actor in created:
         camera_handles = {}
-        if (env_args.show_camera_images or env_args.record_dp_dataset) and (
+        if (env_args.show_camera_images or env_args.record_dp_dataset or env_args.dp_policy_checkpoint) and (
             env_args.enable_wrist_camera or env_args.enable_front_camera
         ):
             camera_handles = create_low_level_cameras(gym, env, arm_actor, actor_handles, env_args)
