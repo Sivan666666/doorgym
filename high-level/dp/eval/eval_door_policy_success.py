@@ -24,9 +24,10 @@ from typing import Any
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-HIGH_LEVEL_ROOT = SCRIPT_DIR.parent
+DP_ROOT = SCRIPT_DIR.parent
+HIGH_LEVEL_ROOT = DP_ROOT.parent
 REPO_ROOT = HIGH_LEVEL_ROOT.parent
-PLAY_SCRIPT = SCRIPT_DIR / "play_door_policy.py"
+PLAY_SCRIPT = DP_ROOT / "play" / "play_door_policy.py"
 PRINT_LOCK = Lock()
 PROGRESS_RENDERER: "InlineProgress | None" = None
 

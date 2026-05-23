@@ -1,82 +1,69 @@
 import argparse
 import json
+import sys
 import time
 from pathlib import Path
 
 import torch
 from torch.utils.data import DataLoader
 
-try:
-    from .door_dp_common import ACTION_NAMES, normalize_vision_mode
-    from .door_policy_backend import (
-        ACTION,
-        BACKEND_LEROBOT_ACT,
-        OBS_STATE,
-        DoorPolicyChunkDataset,
-        LeRobotActDoorPolicyBackend,
-        _feature_dim_from_stats,
-        _resolve_lerobot_root,
-    )
-except ImportError:
-    from door_dp_common import ACTION_NAMES, normalize_vision_mode
-    from door_policy_backend import (
-        ACTION,
-        BACKEND_LEROBOT_ACT,
-        OBS_STATE,
-        DoorPolicyChunkDataset,
-        LeRobotActDoorPolicyBackend,
-        _feature_dim_from_stats,
-        _resolve_lerobot_root,
-    )
-
-
-DP_ROOT = Path(__file__).resolve().parent
+DP_ROOT = Path(__file__).resolve().parents[1]
 HIGH_LEVEL_ROOT = DP_ROOT.parent
+if str(DP_ROOT) not in sys.path:
+    sys.path.insert(0, str(DP_ROOT))
+
+from door_dp_common import ACTION_NAMES, normalize_vision_mode  # noqa: E402
+from door_policy_backend import (  # noqa: E402
+    ACTION,
+    BACKEND_LEROBOT_PI05,
+    OBS_STATE,
+    DoorPolicyChunkDataset,
+    LeRobotPI05DoorPolicyBackend,
+    _feature_dim_from_stats,
+    _resolve_lerobot_root,
+)
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Train Door policy with LeRobot's ACTPolicy.")
+    parser = argparse.ArgumentParser(description="Train Door policy with LeRobot's PI05Policy.")
     parser.add_argument("--root", type=str, default=str(HIGH_LEVEL_ROOT / "data" / "lerobot"))
     parser.add_argument("--repo_id", type=str, default="local/door_dp")
-    parser.add_argument("--run_name", type=str, default="act_debug")
+    parser.add_argument("--run_name", type=str, default="pi05_debug")
     parser.add_argument("--steps", type=int, default=100000)
-    parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--lr", type=float, default=1e-5)
-    parser.add_argument("--lr_backbone", type=float, default=1e-5)
-    parser.add_argument("--weight_decay", type=float, default=1e-4)
+    parser.add_argument("--batch_size", type=int, default=1)
+    parser.add_argument("--lr", type=float, default=2.5e-5)
+    parser.add_argument("--weight_decay", type=float, default=0.01)
     parser.add_argument("--grad_clip_norm", type=float, default=1.0)
-    parser.add_argument("--num_workers", type=int, default=2)
+    parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--device", type=str, default="cuda:0")
-    parser.add_argument("--chunk_size", type=int, default=100)
+    parser.add_argument("--chunk_size", type=int, default=32)
     parser.add_argument("--action_horizon", type=int, default=16)
     parser.add_argument("--rgb", action="store_true", help="Train on RGB+mask image fields instead of depth+mask.")
-    parser.add_argument("--pretrained_path", type=str, default=None, help="Optional LeRobot ACT checkpoint to initialize from.")
+    parser.add_argument("--pretrained_path", type=str, default=None, help="Optional LeRobot pi0.5/OpenPI checkpoint.")
 
-    parser.add_argument("--vision_backbone", type=str, default="resnet18")
-    parser.add_argument("--pretrained_backbone_weights", type=str, default="ResNet18_Weights.IMAGENET1K_V1")
-    parser.add_argument("--no_pretrained_backbone", dest="pretrained_backbone_weights", action="store_const", const=None)
-    parser.add_argument("--replace_final_stride_with_dilation", action="store_true")
-    parser.add_argument("--pre_norm", action="store_true")
-    parser.add_argument("--dim_model", type=int, default=512)
-    parser.add_argument("--n_heads", type=int, default=8)
-    parser.add_argument("--dim_feedforward", type=int, default=3200)
-    parser.add_argument("--feedforward_activation", type=str, default="relu")
-    parser.add_argument("--n_encoder_layers", type=int, default=4)
-    parser.add_argument("--n_decoder_layers", type=int, default=1)
-    parser.add_argument("--no_vae", dest="use_vae", action="store_false", default=True)
-    parser.add_argument("--latent_dim", type=int, default=32)
-    parser.add_argument("--n_vae_encoder_layers", type=int, default=4)
-    parser.add_argument("--temporal_ensemble_coeff", type=float, default=None)
-    parser.add_argument("--dropout", type=float, default=0.1)
-    parser.add_argument("--kl_weight", type=float, default=10.0)
-    parser.add_argument("--visual_normalization", choices=["MEAN_STD", "MIN_MAX", "IDENTITY"], default="MEAN_STD")
-    parser.add_argument("--state_normalization", choices=["MEAN_STD", "MIN_MAX", "IDENTITY"], default="MEAN_STD")
-    parser.add_argument("--action_normalization", choices=["MEAN_STD", "MIN_MAX", "IDENTITY"], default="MEAN_STD")
+    parser.add_argument("--task_prompt", type=str, default="open the door")
+    parser.add_argument("--tokenizer_name", type=str, default="google/paligemma-3b-pt-224")
+    parser.add_argument("--paligemma_variant", choices=["gemma_300m", "gemma_2b"], default="gemma_2b")
+    parser.add_argument("--action_expert_variant", choices=["gemma_300m", "gemma_2b"], default="gemma_300m")
+    parser.add_argument("--dtype", choices=["float32", "bfloat16"], default="float32")
+    parser.add_argument("--max_state_dim", type=int, default=128)
+    parser.add_argument("--max_action_dim", type=int, default=32)
+    parser.add_argument("--num_inference_steps", type=int, default=10)
+    parser.add_argument("--image_resolution", type=int, nargs=2, default=[224, 224])
+    parser.add_argument("--tokenizer_max_length", type=int, default=200)
+    parser.add_argument("--gradient_checkpointing", action="store_true")
+    parser.add_argument("--compile_model", action="store_true")
+    parser.add_argument("--compile_mode", type=str, default="max-autotune")
+    parser.add_argument("--freeze_vision_encoder", action="store_true")
+    parser.add_argument("--train_expert_only", action="store_true")
+    parser.add_argument("--visual_normalization", choices=["MEAN_STD", "MIN_MAX", "IDENTITY"], default="IDENTITY")
+    parser.add_argument("--state_normalization", choices=["QUANTILES", "QUANTILE10", "MEAN_STD", "MIN_MAX", "IDENTITY"], default="QUANTILES")
+    parser.add_argument("--action_normalization", choices=["QUANTILES", "QUANTILE10", "MEAN_STD", "MIN_MAX", "IDENTITY"], default="QUANTILES")
 
     parser.add_argument("--save_interval", type=int, default=5000)
-    parser.add_argument("--log_interval", type=int, default=100)
+    parser.add_argument("--log_interval", type=int, default=10)
     parser.add_argument("--wandb", action="store_true")
-    parser.add_argument("--wandb_project", type=str, default="door-act")
+    parser.add_argument("--wandb_project", type=str, default="door-pi05")
     parser.add_argument("--wandb_entity", type=str, default=None)
     parser.add_argument("--wandb_group", type=str, default=None)
     parser.add_argument("--wandb_save_checkpoints", action="store_true")
@@ -135,7 +122,7 @@ def main():
         "STATE": args.state_normalization,
         "ACTION": args.action_normalization,
     }
-    backend = LeRobotActDoorPolicyBackend.create(
+    backend = LeRobotPI05DoorPolicyBackend.create(
         stats=stats,
         vision_mode=vision_mode,
         action_frame=action_frame,
@@ -146,25 +133,24 @@ def main():
         state_dim=state_dim,
         action_dim=action_dim,
         pretrained_path=args.pretrained_path,
+        task_prompt=args.task_prompt,
+        tokenizer_name=args.tokenizer_name,
         normalization_mapping=normalization_mapping,
-        vision_backbone=args.vision_backbone,
-        pretrained_backbone_weights=args.pretrained_backbone_weights,
-        replace_final_stride_with_dilation=args.replace_final_stride_with_dilation,
-        pre_norm=args.pre_norm,
-        dim_model=args.dim_model,
-        n_heads=args.n_heads,
-        dim_feedforward=args.dim_feedforward,
-        feedforward_activation=args.feedforward_activation,
-        n_encoder_layers=args.n_encoder_layers,
-        n_decoder_layers=args.n_decoder_layers,
-        use_vae=args.use_vae,
-        latent_dim=args.latent_dim,
-        n_vae_encoder_layers=args.n_vae_encoder_layers,
-        temporal_ensemble_coeff=args.temporal_ensemble_coeff,
-        dropout=args.dropout,
-        kl_weight=args.kl_weight,
+        paligemma_variant=args.paligemma_variant,
+        action_expert_variant=args.action_expert_variant,
+        dtype=args.dtype,
+        max_state_dim=args.max_state_dim,
+        max_action_dim=args.max_action_dim,
+        num_inference_steps=args.num_inference_steps,
+        image_resolution=args.image_resolution,
+        tokenizer_max_length=args.tokenizer_max_length,
+        gradient_checkpointing=args.gradient_checkpointing,
+        compile_model=args.compile_model,
+        compile_mode=args.compile_mode,
+        freeze_vision_encoder=args.freeze_vision_encoder,
+        train_expert_only=args.train_expert_only,
     )
-    backend.config.optimizer_lr_backbone = float(args.lr_backbone)
+
     loader = DataLoader(
         dataset,
         batch_size=args.batch_size,
@@ -178,12 +164,12 @@ def main():
         lr=args.lr,
         weight_decay=args.weight_decay,
     )
-    run_dir = DP_ROOT / "logs" / "door-act" / args.run_name
+    run_dir = DP_ROOT / "logs" / "door-pi05" / args.run_name
     ckpt_dir = run_dir / "checkpoints"
     train_config = vars(args).copy()
     train_config.update(
         {
-            "backend": BACKEND_LEROBOT_ACT,
+            "backend": BACKEND_LEROBOT_PI05,
             "state_dim": state_dim,
             "action_dim": action_dim,
             "vision_mode": vision_mode,
@@ -194,7 +180,7 @@ def main():
         }
     )
     print(
-        f"Training backend={BACKEND_LEROBOT_ACT} state_dim={state_dim} action_dim={action_dim} "
+        f"Training backend={BACKEND_LEROBOT_PI05} state_dim={state_dim} action_dim={action_dim} "
         f"chunk_size={args.chunk_size} action_horizon={args.action_horizon} vision_mode={vision_mode}",
         flush=True,
     )

@@ -1,0 +1,282 @@
+# Door DP 常用命令
+# 默认从 doorgym 根目录运行。现在 ikpush 是主调试路径。
+
+
+## 0. 数据流程备忘
+
+Phase A: scripted / float-IK expert 生成 raw .npz
+Phase B: raw .npz 转 LeRobotDataset
+Phase C: 训练 DP / ACT / pi0.5 policy
+Phase D: play / eval success / expert obs 对比
+
+
+## 1. ikpush scripted play，只看环境不录数据
+
+python high-level/float_ik/isaacgym_float_ik_b1z1_basearn_push_door_parallel.py \
+    --door_cfg high-level/experiments/isaacgym/b1z1_opendoor_single_99650089960001.yaml \
+    --num_envs 4 \
+    --steps 2850 \
+    --rl_device cuda:0 \
+    --sim_device cuda:0 \
+    --no_show_seg
+
+
+## 2. 录 raw Door DP 数据
+
+# 单次 ikpush 录制，保存成功 env。depth+mask。
+python high-level/dp/record/record_door_dp_dataset.py \
+    --mode ikpush \
+    --num_envs 16 \
+    --num_rollouts 1 \
+    --steps 2850 \
+    --seed 123456 \
+    --raw_root high-level/data/door_dp_raw/4door_ikpush \
+    --rl_device cuda:0 \
+    --sim_device cuda:0 \
+    --headless \
+    -- \
+    --door_cfg high-level/experiments/isaacgym/b1z1_opendoor.yaml \
+    --no_show_seg
+
+# 单次 ikpush 录制，RGB+mask。训练 RGB checkpoint 时使用。
+python high-level/dp/record/record_door_dp_dataset.py \
+    --mode ikpush \
+    --num_envs 16 \
+    --num_rollouts 1 \
+    --steps 2850 \
+    --seed 123456 \
+    --raw_root high-level/data/door_dp_raw/4door_ikpush_rgb \
+    --rl_device cuda:0 \
+    --sim_device cuda:0 \
+    --headless \
+    --rgb \
+    -- \
+    --door_cfg high-level/experiments/isaacgym/b1z1_opendoor.yaml \
+    --no_show_seg
+
+# 单门批量 sweep，反复启动 recorder，直到达到 target_episodes 或 max_runs。
+python high-level/dp/record/record_single_door_push_sweep.py \
+    --target_episodes 160 \
+    --max_runs 30 \
+    --num_envs 16 \
+    --steps 2850 \
+    --raw_root high-level/data/door_dp_raw/sgikpush_new \
+    --door_cfg high-level/experiments/isaacgym/b1z1_opendoor_single_99650089960001.yaml \
+    --rl_device cuda:0 \
+    --sim_device cuda:0 \
+    --headless
+
+
+## 3. Replay raw episode
+
+# 用 raw 里的 replay state 重放一条 ikpush 数据。
+python high-level/dp/record/replay_door_dp_raw_in_isaacgym.py \
+    --raw_episode high-level/data/door_dp_raw/4door_ikpush/episode_000000.npz \
+    --replay_mode state \
+    --mode ikpush \
+    --door_cfg high-level/experiments/isaacgym/b1z1_opendoor_single_99650089960001.yaml \
+    --num_envs 1 \
+    --rl_device cuda:0 \
+    --sim_device cuda:0
+
+# 如果 raw 是 RGB，额外加 --rgb。
+
+
+## 4. raw 转 LeRobotDataset
+
+# depth+mask 数据转换。
+conda run -n door_dp python high-level/dp/convert_door_raw_to_lerobot.py \
+    --raw_root high-level/data/door_dp_raw/4door_ikpush \
+    --root high-level/data/lerobot \
+    --repo_id local/4door_ikpush \
+    --overwrite \
+    --num_workers 4
+
+# RGB+mask 数据转换，额外加 --rgb。
+conda run -n door_dp python high-level/dp/convert_door_raw_to_lerobot.py \
+    --raw_root high-level/data/door_dp_raw/4door_ikpush_rgb \
+    --root high-level/data/lerobot \
+    --repo_id local/4door_ikpush_rgb \
+    --overwrite \
+    --num_workers 4 \
+    --rgb
+
+# 可视化检查 LeRobotDataset。
+conda run -n door_dp python -m lerobot.scripts.visualize_dataset \
+    --repo-id local/4door_ikpush \
+    --root high-level/data/lerobot/local/4door_ikpush \
+    --episode-index 0 \
+    --mode local
+
+# 转换 roundtrip 检查。
+conda run -n door_dp python high-level/dp/roundtrip_lerobot_to_raw_and_check.py \
+    --raw_root high-level/data/door_dp_raw/4door_ikpush \
+    --root high-level/data/lerobot \
+    --repo_id local/4door_ikpush \
+    --out_raw_root high-level/data/door_dp_raw/4door_ikpush_lerobot_roundtrip \
+    --overwrite
+
+
+## 5. 训练 policy
+
+# DP 训练。训练侧仍是 DDPM 100 train timesteps；play/eval 推理默认是 DDIM 10 steps。
+conda run -n door_dp python high-level/dp/train/train_door_dp.py \
+    --root high-level/data/lerobot \
+    --repo_id local/4door_ikpush \
+    --run_name lerodp_4door_ikpush \
+    --steps 100000 \
+    --batch_size 32 \
+    --num_workers 2 \
+    --device cuda:0 \
+    --obs_horizon 16 \
+    --pred_horizon 48 \
+    --action_horizon 16 \
+    --num_diffusion_iters 100 \
+    --clip_sample_range 7.0 \
+    --wandb
+
+# ACT 训练。chunk_size 是训练/模型输出 chunk 长度，action_horizon 是推理执行多少步后重算。
+conda run -n door_dp python high-level/dp/train/train_door_act.py \
+    --root high-level/data/lerobot \
+    --repo_id local/4door_ikpush \
+    --run_name leroact_4door_ikpush \
+    --steps 100000 \
+    --batch_size 32 \
+    --num_workers 2 \
+    --device cuda:0 \
+    --chunk_size 100 \
+    --action_horizon 16 \
+    --wandb
+
+# pi0.5 训练，需要先准备 pretrained_path。
+conda run -n door_dp python high-level/dp/train/train_door_pi05.py \
+    --root high-level/data/lerobot \
+    --repo_id local/4door_ikpush \
+    --run_name pi05_4door_ikpush \
+    --steps 100000 \
+    --batch_size 1 \
+    --num_workers 0 \
+    --device cuda:0 \
+    --pretrained_path <pi05_checkpoint_or_repo>
+
+
+## 6. Play trained policy
+
+# DP / ACT / pi0.5 统一入口，会自动根据 checkpoint metadata 识别 policy 类型。
+python high-level/dp/play/play_door_policy.py \
+    --mode ikpush \
+    --checkpoint high-level/dp/logs/door-dp/lerodp_4door_ikpush/checkpoints/model_latest.pt \
+    --num_envs 4 \
+    --steps 2500 \
+    --rl_device cuda:0 \
+    --sim_device cuda:0 \
+    --dp_inference_steps 10 \
+    --dp_noise_scheduler_type DDIM \
+    --dp_action_horizon 16 \
+    -- \
+    --door_cfg high-level/experiments/isaacgym/b1z1_opendoor.yaml
+
+# ACT checkpoint 示例。dp_inference_steps 对 ACT 没作用，保留在命令里方便切回 DP。
+python high-level/dp/play/play_door_policy.py \
+    --mode ikpush \
+    --checkpoint high-level/dp/logs/door-act/leroact_4door_ikpush/checkpoints/model_latest.pt \
+    --num_envs 4 \
+    --steps 2500 \
+    --rl_device cuda:0 \
+    --sim_device cuda:0 \
+    --dp_inference_steps 10 \
+    --dp_noise_scheduler_type DDIM \
+    --dp_action_horizon 16 \
+    -- \
+    --door_cfg high-level/experiments/isaacgym/b1z1_opendoor.yaml
+
+# 从 raw expert 某一帧 warmstart，再闭环 play policy。
+python high-level/dp/play/play_door_policy.py \
+    --mode ikpush \
+    --checkpoint high-level/dp/logs/door-dp/lerodp_4door_ikpush/checkpoints/model_latest.pt \
+    --num_envs 1 \
+    --steps 1200 \
+    --dp_warmstart \
+    --dp_warmstart_raw_episode high-level/data/door_dp_raw/4door_ikpush/episode_000000.npz \
+    --dp_warmstart_step 300 \
+    --dp_inference_steps 10 \
+    --dp_noise_scheduler_type DDIM \
+    --dp_action_horizon 16 \
+    -- \
+    --door_cfg high-level/experiments/isaacgym/b1z1_opendoor_single_99650089960001.yaml
+
+
+## 7. Eval: expert obs 对比
+
+# 按区间扫一条 expert episode，比较 policy action 和 expert action。
+python high-level/dp/eval/eval_door_dp_on_expert_obs.py \
+    --raw_episode high-level/data/door_dp_raw/4door_ikpush/episode_000000.npz \
+    --checkpoint high-level/dp/logs/door-dp/lerodp_4door_ikpush/checkpoints/model_latest.pt \
+    --device cuda:0 \
+    --start 15 \
+    --end 2160 \
+    --stride 25 \
+    --report_every 300 \
+    --dp_inference_steps 10 \
+    --dp_noise_scheduler_type DDIM
+
+# 看几个关键帧。
+python high-level/dp/eval/eval_door_dp_on_expert_obs.py \
+    --raw_episode high-level/data/door_dp_raw/4door_ikpush/episode_000000.npz \
+    --checkpoint high-level/dp/logs/door-act/leroact_4door_ikpush/checkpoints/model_latest.pt \
+    --device cuda:0 \
+    --steps 300 600 900 \
+    --dp_inference_steps 10 \
+    --dp_noise_scheduler_type DDIM
+
+
+## 8. Eval: success rate
+
+# 并行评估 policy 成功率。base_seed 固定时，total_trials/num_envs 不变则随机化可复现。
+python high-level/dp/eval/eval_door_policy_success.py \
+    --checkpoint high-level/dp/logs/door-act/leroact_4door_ikpush/checkpoints/model_latest.pt \
+    --yaml high-level/experiments/isaacgym/b1z1_opendoor_single_door2.yaml \
+    --mode ikpush \
+    --num_envs 16 \
+    --parallel_batches 2 \
+    --total_trials 64 \
+    --steps 2500 \
+    --pass_open_angle_deg 80 \
+    --base_seed 123456 \
+    --headless \
+    --graphics_device_id 0 \
+    --dp_inference_steps 10 \
+    --dp_noise_scheduler_type DDIM
+
+# 只评估 yaml 里的某个门，底层 play 参数放在最后的 -- 后。
+python high-level/dp/eval/eval_door_policy_success.py \
+    --checkpoint high-level/dp/logs/door-dp/lerodp_4door_ikpush/checkpoints/model_latest.pt \
+    --yaml high-level/experiments/isaacgym/b1z1_opendoor.yaml \
+    --mode ikpush \
+    --num_envs 16 \
+    --parallel_batches 2 \
+    --total_trials 64 \
+    --steps 2500 \
+    --base_seed 123456 \
+    --headless \
+    --graphics_device_id 0 \
+    --dp_inference_steps 10 \
+    --dp_noise_scheduler_type DDIM \
+    -- \
+    --door_name 99650089960001
+
+
+## 9. 推理测速
+
+conda run -n door_dp python high-level/dp/bench_door_policy_speed.py \
+    --dp_checkpoint high-level/dp/logs/door-dp/lerodp_4door_ikpush/checkpoints/model_latest.pt \
+    --act_checkpoint high-level/dp/logs/door-act/leroact_4door_ikpush/checkpoints/model_latest.pt \
+    --device cuda:0 \
+    --warmup 3 \
+    --iters 10
+
+
+## 10. 打包推理 checkpoint，排除 optimizer
+
+cd high-level/dp/logs/door-act/leroact_4door_ikpush/checkpoints
+zip -r door_policy_infer.zip model_latest.pt model_latest -x "model_latest/optimizer.pt"

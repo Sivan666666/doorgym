@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 
 
-DP_ROOT = Path(__file__).resolve().parent
+DP_ROOT = Path(__file__).resolve().parents[1]
 HIGH_LEVEL_ROOT = DP_ROOT.parent
 REPO_ROOT = HIGH_LEVEL_ROOT.parent
 LOW_LEVEL_ROOT = REPO_ROOT / "low-level"

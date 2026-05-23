@@ -70,7 +70,7 @@ a convenient alias: if `--num_envs` is not given, the script uses `--num_envs = 
 Record both pull and push:
 
 ```bash
-conda run -n b1z1 python high-level/dp/record_door_dp_dataset.py \
+conda run -n b1z1 python high-level/dp/record/record_door_dp_dataset.py \
   --mode both \
   --num_envs 80 \
   --num_rollouts 1 \
@@ -82,7 +82,7 @@ conda run -n b1z1 python high-level/dp/record_door_dp_dataset.py \
 Record pull only:
 
 ```bash
-conda run -n b1z1 python high-level/dp/record_door_dp_dataset.py \
+conda run -n b1z1 python high-level/dp/record/record_door_dp_dataset.py \
   --mode pull \
   --num_envs 80 \
   --num_rollouts 1 \
@@ -94,7 +94,7 @@ conda run -n b1z1 python high-level/dp/record_door_dp_dataset.py \
 Record old push only:
 
 ```bash
-conda run -n b1z1 python high-level/dp/record_door_dp_dataset.py \
+conda run -n b1z1 python high-level/dp/record/record_door_dp_dataset.py \
   --mode push \
   --num_envs 80 \
   --num_rollouts 1 \
@@ -106,7 +106,7 @@ conda run -n b1z1 python high-level/dp/record_door_dp_dataset.py \
 Record float-IK push only:
 
 ```bash
-conda run -n b1z1 python high-level/dp/record_door_dp_dataset.py \
+conda run -n b1z1 python high-level/dp/record/record_door_dp_dataset.py \
   --mode ikpush \
   --num_envs 16 \
   --num_rollouts 1 \
@@ -118,7 +118,7 @@ conda run -n b1z1 python high-level/dp/record_door_dp_dataset.py \
 Record only one env, useful for debugging:
 
 ```bash
-conda run -n b1z1 python high-level/dp/record_door_dp_dataset.py \
+conda run -n b1z1 python high-level/dp/record/record_door_dp_dataset.py \
   --mode pull \
   --num_episodes 1 \
   --num_envs 4 \
@@ -181,7 +181,7 @@ door from `--door_cfg`.
 Replay float-IK push data in the float-IK scene:
 
 ```bash
-conda run -n b1z1 python high-level/dp/replay_door_dp_raw_in_isaacgym.py \
+conda run -n b1z1 python high-level/dp/record/replay_door_dp_raw_in_isaacgym.py \
   --raw_episode data/door_dp_raw/local_door_dp/episode_000000.npz \
   --replay_mode state \
   --mode ikpush \
@@ -204,7 +204,7 @@ Use action replay to re-run the recorded 10D high-level actions through the low-
 This is only for the old `pull`/`push` play environments, not `ikpush`:
 
 ```bash
-conda run -n b1z1 python high-level/dp/replay_door_dp_raw_in_isaacgym.py \
+conda run -n b1z1 python high-level/dp/record/replay_door_dp_raw_in_isaacgym.py \
   --raw_episode data/door_dp_raw/local_door_dp/episode_000000.npz \
   --replay_mode action \
   --mode push \
@@ -264,14 +264,14 @@ conda run -n b1z1_lerobot rerun \
 
 ## 6. Train Door DP
 
-`train_door_dp.py` now trains the Door policy through LeRobot's built-in
+`train/train_door_dp.py` now trains the Door policy through LeRobot's built-in
 `DiffusionPolicy`. The external contract is unchanged: 73D
 `observation.state` plus four images in, 10D `action` out.
 
 Short smoke training, only checks the training pipeline:
 
 ```bash
-conda run -n b1z1_lerobot python high-level/dp/train_door_dp.py \
+conda run -n b1z1_lerobot python high-level/dp/train/train_door_dp.py \
   --root /home/sivan/whole_body/visual_whole_body/data/lerobot/local/door_dp \
   --repo_id local/door_dp \
   --run_name smoke \
@@ -284,7 +284,7 @@ conda run -n b1z1_lerobot python high-level/dp/train_door_dp.py \
 Full training example:
 
 ```bash
-conda run -n b1z1_lerobot python high-level/dp/train_door_dp.py \
+conda run -n b1z1_lerobot python high-level/dp/train/train_door_dp.py \
   --root /home/sivan/whole_body/visual_whole_body/data/lerobot/local/door_dp \
   --repo_id local/door_dp \
   --run_name door_dp_v1 \
@@ -325,7 +325,7 @@ conda run -n b1z1_lerobot python -m pip install -r high-level/dp/requirements_dp
 Pull-door policy play:
 
 ```bash
-conda run -n b1z1 python high-level/dp/play_door_policy.py \
+conda run -n b1z1 python high-level/dp/play/play_door_policy.py \
   --checkpoint high-level/logs/door-dp/door_dp_v1/checkpoints/model_latest.pt \
   --mode pull \
   --num_envs 1 \
@@ -337,7 +337,7 @@ conda run -n b1z1 python high-level/dp/play_door_policy.py \
 Push-door policy play:
 
 ```bash
-conda run -n b1z1 python high-level/dp/play_door_policy.py \
+conda run -n b1z1 python high-level/dp/play/play_door_policy.py \
   --checkpoint high-level/logs/door-dp/door_dp_v1/checkpoints/model_latest.pt \
   --mode push \
   --num_envs 1 \
@@ -349,7 +349,7 @@ conda run -n b1z1 python high-level/dp/play_door_policy.py \
 Play the smoke checkpoint, only for checking load/run:
 
 ```bash
-conda run -n b1z1 python high-level/dp/play_door_policy.py \
+conda run -n b1z1 python high-level/dp/play/play_door_policy.py \
   --checkpoint high-level/logs/door-dp/smoke/checkpoints/model_latest.pt \
   --mode pull \
   --num_envs 1 \

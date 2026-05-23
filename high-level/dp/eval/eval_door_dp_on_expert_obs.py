@@ -19,8 +19,9 @@ import torch
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-if str(SCRIPT_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPT_DIR))
+DP_ROOT = SCRIPT_DIR.parent
+if str(DP_ROOT) not in sys.path:
+    sys.path.insert(0, str(DP_ROOT))
 
 from door_dp_common import (  # noqa: E402
     ACTION_NAMES,

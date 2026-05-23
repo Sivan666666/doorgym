@@ -5,7 +5,7 @@ from pathlib import Path
 from datetime import datetime
 
 
-DP_ROOT = Path(__file__).resolve().parent
+DP_ROOT = Path(__file__).resolve().parents[1]
 HIGH_LEVEL_ROOT = DP_ROOT.parent
 
 

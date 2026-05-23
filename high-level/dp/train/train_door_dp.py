@@ -1,37 +1,27 @@
 import argparse
 import json
+import sys
 import time
 from pathlib import Path
 
 import torch
 from torch.utils.data import DataLoader
 
-try:
-    from .door_dp_common import ACTION_NAMES, normalize_vision_mode
-    from .door_policy_backend import (
-        ACTION,
-        BACKEND_LEROBOT_DIFFUSION,
-        OBS_STATE,
-        DoorPolicySequenceDataset,
-        LeRobotDiffusionDoorPolicyBackend,
-        _feature_dim_from_stats,
-        _resolve_lerobot_root,
-    )
-except ImportError:
-    from door_dp_common import ACTION_NAMES, normalize_vision_mode
-    from door_policy_backend import (
-        ACTION,
-        BACKEND_LEROBOT_DIFFUSION,
-        OBS_STATE,
-        DoorPolicySequenceDataset,
-        LeRobotDiffusionDoorPolicyBackend,
-        _feature_dim_from_stats,
-        _resolve_lerobot_root,
-    )
-
-
-DP_ROOT = Path(__file__).resolve().parent
+DP_ROOT = Path(__file__).resolve().parents[1]
 HIGH_LEVEL_ROOT = DP_ROOT.parent
+if str(DP_ROOT) not in sys.path:
+    sys.path.insert(0, str(DP_ROOT))
+
+from door_dp_common import ACTION_NAMES, normalize_vision_mode  # noqa: E402
+from door_policy_backend import (  # noqa: E402
+    ACTION,
+    BACKEND_LEROBOT_DIFFUSION,
+    OBS_STATE,
+    DoorPolicySequenceDataset,
+    LeRobotDiffusionDoorPolicyBackend,
+    _feature_dim_from_stats,
+    _resolve_lerobot_root,
+)
 
 
 def parse_args():

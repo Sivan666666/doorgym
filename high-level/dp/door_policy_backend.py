@@ -1862,7 +1862,7 @@ def resolve_checkpoint_dir(checkpoint: Union[str, Path]) -> Path:
     ):
         raise ValueError(
             f"{path} is not a supported LeRobot Door policy checkpoint manifest. "
-            "Retrain with high-level/dp/train_door_dp.py after the LeRobot backend migration."
+            "Retrain with high-level/dp/train/train_door_dp.py after the LeRobot backend migration."
         )
     candidates = []
     if manifest.get("checkpoint_dir"):
