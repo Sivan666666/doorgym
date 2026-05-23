@@ -125,7 +125,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--graphics_device_id", type=int, default=None)
     parser.add_argument("--rl_device", type=str, default="cuda:0")
     parser.add_argument("--sim_device", type=str, default="cuda:0")
-    parser.add_argument("--dp_inference_steps", type=int, default=100)
+    parser.add_argument("--dp_inference_steps", type=int, default=10)
+    parser.add_argument("--dp_noise_scheduler_type", type=str.upper, choices=["DDIM", "DDPM"], default="DDIM")
     parser.add_argument("--dp_action_horizon", type=int, default=None)
     parser.add_argument("--rgb", action="store_true")
     parser.add_argument("--camera_display_scale", type=int, default=5)
@@ -337,6 +338,8 @@ def build_play_command(args: argparse.Namespace, batch_envs: int, batch_idx: int
         "--dp_control_all_envs",
         "--dp_inference_steps",
         str(args.dp_inference_steps),
+        "--dp_noise_scheduler_type",
+        args.dp_noise_scheduler_type,
         "--dp_log_path",
         str(log_path),
         "--no_show_seg",
@@ -550,6 +553,7 @@ def main() -> None:
         "headless": bool(args.headless),
         "graphics_device_id": args.graphics_device_id,
         "dp_inference_steps": int(args.dp_inference_steps),
+        "dp_noise_scheduler_type": args.dp_noise_scheduler_type,
         "successes": total_successes,
         "trials": total,
         "success_rate": success_rate,

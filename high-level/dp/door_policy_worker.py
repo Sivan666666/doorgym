@@ -92,6 +92,7 @@ def main() -> None:
                     device=request.get("device"),
                     num_inference_steps=request.get("num_inference_steps"),
                     action_horizon=request.get("action_horizon"),
+                    noise_scheduler_type=request.get("noise_scheduler_type"),
                 )
                 ok(metadata=metadata(controller))
             elif cmd == "reset":

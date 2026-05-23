@@ -1494,7 +1494,8 @@ def parse_args():
     parser.add_argument("--dp_control_env_id", type=int, default=0)
     parser.add_argument("--dp_control_all_envs", dest="dp_control_all_envs", action="store_true", default=True)
     parser.add_argument("--no_dp_control_all_envs", dest="dp_control_all_envs", action="store_false")
-    parser.add_argument("--dp_inference_steps", type=int, default=100)
+    parser.add_argument("--dp_inference_steps", type=int, default=10)
+    parser.add_argument("--dp_noise_scheduler_type", type=str.upper, choices=["DDIM", "DDPM"], default="DDIM")
     parser.add_argument("--dp_action_horizon", type=int, default=None)
     parser.add_argument("--dp_log_path", type=str, default=None)
     parser.add_argument("--dp_log_interval", type=int, default=25)
@@ -1914,6 +1915,7 @@ def main():
             device=args.rl_device,
             num_inference_steps=args.dp_inference_steps,
             action_horizon=args.dp_action_horizon,
+            noise_scheduler_type=args.dp_noise_scheduler_type,
         )
         if getattr(dp_controller, "vision_mode", "depth") != DOOR_RUNTIME["dp_vision_mode"]:
             raise ValueError(

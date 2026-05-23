@@ -28,7 +28,8 @@ def parse_args():
         action="store_true",
         help="Keep viewer-only debug markers such as EE target spheres and camera axes.",
     )
-    parser.add_argument("--dp_inference_steps", type=int, default=100)
+    parser.add_argument("--dp_inference_steps", type=int, default=10)
+    parser.add_argument("--dp_noise_scheduler_type", type=str.upper, choices=["DDIM", "DDPM"], default="DDIM")
     parser.add_argument("--dp_action_horizon", type=int, default=None)
     parser.add_argument("--dp_control_env_id", type=int, default=0)
     parser.add_argument("--dp_control_all_envs", dest="dp_control_all_envs", action="store_true", default=True)
@@ -120,6 +121,8 @@ def main():
         str(checkpoint_path),
         "--dp_inference_steps",
         str(args.dp_inference_steps),
+        "--dp_noise_scheduler_type",
+        args.dp_noise_scheduler_type,
         "--dp_control_env_id",
         str(args.dp_control_env_id),
         "--dp_log_path",

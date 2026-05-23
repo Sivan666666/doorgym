@@ -58,6 +58,19 @@ CHECKPOINT_META = "door_policy_meta.json"
 CHECKPOINT_STATS = "door_policy_stats.pt"
 CHECKPOINT_POLICY_DIR = "policy"
 CHECKPOINT_OPTIMIZER = "optimizer.pt"
+DEFAULT_DP_INFERENCE_STEPS = 10
+DEFAULT_DP_INFERENCE_SCHEDULER = "DDIM"
+_VALID_DP_NOISE_SCHEDULERS = {"DDPM", "DDIM"}
+
+
+def normalize_dp_noise_scheduler_type(noise_scheduler_type: Optional[str]) -> Optional[str]:
+    if noise_scheduler_type is None:
+        return None
+    value = str(noise_scheduler_type).upper()
+    if value not in _VALID_DP_NOISE_SCHEDULERS:
+        valid = ", ".join(sorted(_VALID_DP_NOISE_SCHEDULERS))
+        raise ValueError(f"Unsupported DP noise scheduler type {noise_scheduler_type!r}; expected one of: {valid}")
+    return value
 
 
 def _ensure_hf_cache_env() -> None:
@@ -774,6 +787,7 @@ def make_lerobot_diffusion_config(
     }
 
     resize_tuple = None if resize_shape is None else tuple(int(x) for x in resize_shape)
+    scheduler_type = normalize_dp_noise_scheduler_type(noise_scheduler_type) or "DDPM"
     config = DiffusionConfig(
         n_obs_steps=int(obs_horizon),
         input_features=input_features,
@@ -796,7 +810,7 @@ def make_lerobot_diffusion_config(
         n_groups=int(n_groups),
         diffusion_step_embed_dim=int(diffusion_step_embed_dim),
         use_film_scale_modulation=bool(use_film_scale_modulation),
-        noise_scheduler_type=str(noise_scheduler_type),
+        noise_scheduler_type=scheduler_type,
         num_train_timesteps=int(num_train_timesteps),
         beta_schedule=str(beta_schedule),
         beta_start=float(beta_start),
@@ -1069,8 +1083,9 @@ class LeRobotDiffusionDoorPolicyBackend:
         cls,
         checkpoint: Union[str, Path],
         device: Optional[Union[str, torch.device]] = None,
-        num_inference_steps: Optional[int] = None,
+        num_inference_steps: Optional[int] = DEFAULT_DP_INFERENCE_STEPS,
         action_horizon: Optional[int] = None,
+        noise_scheduler_type: Optional[str] = DEFAULT_DP_INFERENCE_SCHEDULER,
     ) -> "LeRobotDiffusionDoorPolicyBackend":
         modules = import_lerobot_policy_modules()
         DiffusionPolicy = modules["DiffusionPolicy"]
@@ -1096,6 +1111,8 @@ class LeRobotDiffusionDoorPolicyBackend:
             cfg["action_horizon"] = int(action_horizon)
         if num_inference_steps is not None:
             cfg["num_inference_steps"] = int(num_inference_steps)
+        if noise_scheduler_type is not None:
+            cfg["noise_scheduler_type"] = normalize_dp_noise_scheduler_type(noise_scheduler_type)
 
         config = make_lerobot_diffusion_config(
             state_dim=int(cfg["state_dim"]),
@@ -1873,8 +1890,9 @@ def checkpoint_backend_name(checkpoint: Union[str, Path]) -> str:
 def load_door_policy_backend(
     checkpoint: Union[str, Path],
     device: Optional[Union[str, torch.device]] = None,
-    num_inference_steps: Optional[int] = None,
+    num_inference_steps: Optional[int] = DEFAULT_DP_INFERENCE_STEPS,
     action_horizon: Optional[int] = None,
+    noise_scheduler_type: Optional[str] = DEFAULT_DP_INFERENCE_SCHEDULER,
 ):
     backend = checkpoint_backend_name(checkpoint)
     if backend == BACKEND_LEROBOT_DIFFUSION:
@@ -1883,6 +1901,7 @@ def load_door_policy_backend(
             device=device,
             num_inference_steps=num_inference_steps,
             action_horizon=action_horizon,
+            noise_scheduler_type=noise_scheduler_type,
         )
     if backend == BACKEND_LEROBOT_ACT:
         return LeRobotActDoorPolicyBackend.load(
@@ -1908,14 +1927,16 @@ class DoorPolicyController:
         self,
         checkpoint: Union[str, Path],
         device: Optional[Union[str, torch.device]] = None,
-        num_inference_steps: Optional[int] = None,
+        num_inference_steps: Optional[int] = DEFAULT_DP_INFERENCE_STEPS,
         action_horizon: Optional[int] = None,
+        noise_scheduler_type: Optional[str] = DEFAULT_DP_INFERENCE_SCHEDULER,
     ):
         self.backend = load_door_policy_backend(
             checkpoint,
             device=device,
             num_inference_steps=num_inference_steps,
             action_horizon=action_horizon,
+            noise_scheduler_type=noise_scheduler_type,
         )
         self.device = self.backend.device
         self.config = dict(self.backend.metadata()["policy_config"])
@@ -2215,8 +2236,9 @@ class DoorPolicySubprocessController:
         self,
         checkpoint: Union[str, Path],
         device: Optional[Union[str, torch.device]] = None,
-        num_inference_steps: Optional[int] = None,
+        num_inference_steps: Optional[int] = DEFAULT_DP_INFERENCE_STEPS,
         action_horizon: Optional[int] = None,
+        noise_scheduler_type: Optional[str] = DEFAULT_DP_INFERENCE_SCHEDULER,
         startup_error: Optional[BaseException] = None,
     ):
         self.checkpoint = str(Path(checkpoint).expanduser().resolve())
@@ -2235,6 +2257,7 @@ class DoorPolicySubprocessController:
                     "device": None if device is None else str(device),
                     "num_inference_steps": num_inference_steps,
                     "action_horizon": action_horizon,
+                    "noise_scheduler_type": noise_scheduler_type,
                 }
             )
         except Exception:

@@ -588,7 +588,14 @@ def import_lerobot_or_raise():
 
 
 class DoorDPPolicyController:
-    def __init__(self, checkpoint, device=None, num_inference_steps=None, action_horizon=None):
+    def __init__(
+        self,
+        checkpoint,
+        device=None,
+        num_inference_steps=10,
+        action_horizon=None,
+        noise_scheduler_type="DDIM",
+    ):
         try:
             from .door_policy_backend import DoorPolicyController, DoorPolicySubprocessController
         except ImportError:
@@ -599,6 +606,7 @@ class DoorDPPolicyController:
                 device=device,
                 num_inference_steps=num_inference_steps,
                 action_horizon=action_horizon,
+                noise_scheduler_type=noise_scheduler_type,
             )
         except RuntimeError as exc:
             self._impl = DoorPolicySubprocessController(
@@ -606,6 +614,7 @@ class DoorDPPolicyController:
                 device=device,
                 num_inference_steps=num_inference_steps,
                 action_horizon=action_horizon,
+                noise_scheduler_type=noise_scheduler_type,
                 startup_error=exc,
             )
 

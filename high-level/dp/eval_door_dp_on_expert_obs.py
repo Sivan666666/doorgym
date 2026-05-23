@@ -104,7 +104,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--raw_episode", type=str, required=True, help="Path to one raw Door DP episode_*.npz file.")
     parser.add_argument("--checkpoint", type=str, required=True, help="Door DP checkpoint, usually model_latest.pt.")
     parser.add_argument("--device", type=str, default="cuda:0")
-    parser.add_argument("--num_inference_steps", type=int, default=None)
+    parser.add_argument(
+        "--num_inference_steps",
+        "--dp_inference_steps",
+        dest="num_inference_steps",
+        type=int,
+        default=10,
+    )
+    parser.add_argument(
+        "--noise_scheduler_type",
+        "--dp_noise_scheduler_type",
+        dest="noise_scheduler_type",
+        type=str.upper,
+        choices=["DDIM", "DDPM"],
+        default="DDIM",
+    )
     parser.add_argument("--action_horizon", type=int, default=None)
     parser.add_argument("--compare_horizon", type=int, default=None, help="Actions per queried step to compare.")
     parser.add_argument("--seed", type=int, default=0)
@@ -327,6 +341,7 @@ def main() -> None:
         device=args.device,
         num_inference_steps=args.num_inference_steps,
         action_horizon=args.action_horizon,
+        noise_scheduler_type=args.noise_scheduler_type,
     )
     raw_frame, raw_state_version, image_keys = validate_inputs(data, controller, expected_vision_mode)
     t0 = time.perf_counter()

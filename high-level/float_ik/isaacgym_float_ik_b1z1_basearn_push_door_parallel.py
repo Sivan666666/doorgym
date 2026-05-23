@@ -382,7 +382,8 @@ def parse_args():
             {"name": "--dp_control_env_id", "type": int, "default": 0},
             {"name": "--dp_control_all_envs", "action": "store_true"},
             {"name": "--no_dp_control_all_envs", "action": "store_true"},
-            {"name": "--dp_inference_steps", "type": int, "default": 100},
+            {"name": "--dp_inference_steps", "type": int, "default": 10},
+            {"name": "--dp_noise_scheduler_type", "type": str, "default": "DDIM"},
             {"name": "--dp_action_horizon", "type": int, "default": -1},
             {"name": "--dp_log_path", "type": str, "default": ""},
             {"name": "--dp_log_interval", "type": int, "default": 25},
@@ -2840,6 +2841,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
             device=args.rl_device,
             num_inference_steps=args.dp_inference_steps,
             action_horizon=args.dp_action_horizon,
+            noise_scheduler_type=args.dp_noise_scheduler_type,
         )
         expected_vision_mode = "rgb" if args.rgb else "depth"
         if getattr(dp_controller, "vision_mode", "depth") != expected_vision_mode:

@@ -47,7 +47,7 @@ def parse_args():
     parser.add_argument("--grad_clip_norm", type=float, default=1.0)
     parser.add_argument("--num_workers", type=int, default=2)
     parser.add_argument("--device", type=str, default="cuda:0")
-    parser.add_argument("--chunk_size", type=int, default=32)
+    parser.add_argument("--chunk_size", type=int, default=100)
     parser.add_argument("--action_horizon", type=int, default=16)
     parser.add_argument("--rgb", action="store_true", help="Train on RGB+mask image fields instead of depth+mask.")
     parser.add_argument("--pretrained_path", type=str, default=None, help="Optional LeRobot ACT checkpoint to initialize from.")
