@@ -108,7 +108,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate Door policy success rate by repeatedly running play.")
     parser.add_argument("--checkpoint", required=True, type=str, help="Door policy checkpoint (.pt manifest or directory).")
     parser.add_argument("--yaml", "--door_cfg", dest="door_cfg", required=True, type=str, help="Door YAML config.")
-    parser.add_argument("--mode", choices=["ikpush", "push", "pull"], default="ikpush")
+    parser.add_argument("--mode", choices=["ikpush", "a2wpush", "push", "pull"], default="ikpush")
     parser.add_argument("--num_envs", type=int, default=16, help="Number of envs per play run.")
     parser.add_argument("--total_trials", type=int, default=64, help="Total policy-controlled attempts to run.")
     parser.add_argument(

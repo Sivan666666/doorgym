@@ -32,6 +32,7 @@ from torch.utils.data import Dataset
 try:
     from .door_dp_common import (
         ACTION_NAMES,
+        DATASET_METADATA_KEYS,
         IMAGE_HEIGHT,
         IMAGE_WIDTH,
         lerobot_image_keys_for_vision_mode,
@@ -40,6 +41,7 @@ try:
 except ImportError:
     from door_dp_common import (
         ACTION_NAMES,
+        DATASET_METADATA_KEYS,
         IMAGE_HEIGHT,
         IMAGE_WIDTH,
         lerobot_image_keys_for_vision_mode,
@@ -465,6 +467,12 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, (np.integer, np.floating)):
         return value.item()
     return value
+
+
+def _copy_runtime_metadata(policy_config: Dict[str, Any], sidecar_config: Mapping[str, Any]) -> None:
+    for key in DATASET_METADATA_KEYS:
+        if key in sidecar_config and key not in policy_config:
+            policy_config[key] = _json_safe(sidecar_config[key])
 
 
 class DoorPolicySequenceDataset(Dataset):
@@ -1250,6 +1258,7 @@ class LeRobotDiffusionDoorPolicyBackend:
             policy_config["ikpush_state_version"] = str(extra_config["ikpush_state_version"])
         else:
             policy_config["ikpush_state_version"] = "legacy"
+        _copy_runtime_metadata(policy_config, self.sidecar_config)
         if extra_config:
             for key, value in extra_config.items():
                 if key not in policy_config:
@@ -1504,6 +1513,7 @@ class LeRobotActDoorPolicyBackend:
             "kl_weight": float(self.config.kl_weight),
             "ikpush_state_version": str(self.sidecar_config.get("ikpush_state_version", "legacy")),
         }
+        _copy_runtime_metadata(policy_config, self.sidecar_config)
         if extra_config:
             policy_config.update({k: _json_safe(v) for k, v in extra_config.items() if k not in policy_config})
         return {
@@ -1799,6 +1809,7 @@ class LeRobotPI05DoorPolicyBackend:
             "train_expert_only": bool(self.config.train_expert_only),
             "ikpush_state_version": str(self.sidecar_config.get("ikpush_state_version", "legacy")),
         }
+        _copy_runtime_metadata(policy_config, self.sidecar_config)
         if extra_config:
             policy_config.update({k: _json_safe(v) for k, v in extra_config.items() if k not in policy_config})
         return {

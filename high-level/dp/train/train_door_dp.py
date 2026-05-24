@@ -240,11 +240,19 @@ def main():
             "action_frame": action_frame,
             "action_pose_frame": action_frame,
             "target_pose_frame": action_frame,
+            "mode": str(sidecar_data.get("mode", "ikpush")),
             "ikpush_state_version": str(sidecar_data.get("ikpush_state_version", "legacy")),
+            "a2wpush_state_version": str(sidecar_data.get("a2wpush_state_version", "legacy")),
             "dataset_root": str(dataset_root),
             "repo_id": args.repo_id,
         }
     )
+    metadata_aliases = {"z1_asset_root": "a2wz1_asset_root", "z1_asset_file": "a2wz1_asset_file"}
+    for key in ("state_dof_names", "z1_asset_root", "z1_asset_file", "a2w_wheel_radius", "a2w_track_width", "a2w_wheel_velocity_sign"):
+        if key in sidecar_data:
+            train_config[key] = sidecar_data[key]
+        elif metadata_aliases.get(key) in sidecar_data:
+            train_config[key] = sidecar_data[metadata_aliases[key]]
 
     wandb_run = None
     if args.wandb:

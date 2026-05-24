@@ -1,4 +1,5 @@
 import argparse
+import contextlib
 import importlib
 import importlib.util
 import math
@@ -18,6 +19,9 @@ LOW_LEVEL_ROOT = REPO_ROOT / "low-level"
 FLOAT_IK_SOURCE_SCRIPTS = (
     "isaacgym_float_ik_b1z1_basearn_push_door.py",
     "isaacgym_float_ik_b1z1_basearn_push_door_parallel.py",
+)
+A2W_IK_SOURCE_SCRIPTS = (
+    "isaacgym_a2w_ik_push_door_parallel.py",
 )
 REPLAY_STATE_KEYS = (
     "state",
@@ -114,9 +118,9 @@ def parse_args():
     parser.add_argument("--episode_index", type=int, default=0)
     parser.add_argument(
         "--mode",
-        choices=["ikpush", "auto", "pull", "push"],
+        choices=["ikpush", "a2wpush", "auto", "pull", "push"],
         default="ikpush",
-        help="Replay environment: ikpush uses the float_ik recorder scene; pull/push use the old play scenes; auto infers from raw metadata.",
+        help="Replay environment: ikpush/a2wpush use IK recorder scenes; pull/push use old play scenes; auto infers from raw metadata.",
     )
     parser.add_argument("--replay_mode", choices=["state", "action"], default="state")
     parser.add_argument("--control_env_id", type=int, default=0)
@@ -282,6 +286,13 @@ def scalar_to_int(value):
     return int(arr.reshape(-1)[0])
 
 
+def scalar_to_float(value):
+    arr = np.asarray(value)
+    if arr.shape == ():
+        return float(arr.item())
+    return float(arr.reshape(-1)[0])
+
+
 def source_script_from_episode(data):
     if "source_script" not in data.files:
         return ""
@@ -291,6 +302,13 @@ def source_script_from_episode(data):
 def is_float_ik_episode(data):
     source_script = source_script_from_episode(data)
     return any(source_script.endswith(name) for name in FLOAT_IK_SOURCE_SCRIPTS)
+
+
+def is_a2w_ik_episode(data):
+    if "mode" in data.files and scalar_to_str(data["mode"]) == "a2wpush":
+        return True
+    source_script = source_script_from_episode(data)
+    return any(source_script.endswith(name) for name in A2W_IK_SOURCE_SCRIPTS)
 
 
 def door_asset_selection_from_episode(data, args):
@@ -311,6 +329,8 @@ def door_asset_selection_from_episode(data, args):
 def infer_mode(data, requested_mode):
     if requested_mode != "auto":
         return requested_mode
+    if is_a2w_ik_episode(data):
+        return "a2wpush"
     if is_float_ik_episode(data):
         return "ikpush"
     task = scalar_to_str(data["task"]) if "task" in data.files else ""
@@ -319,7 +339,7 @@ def infer_mode(data, requested_mode):
         return "push"
     if "pull" in task_l or "walk" in task_l:
         return "pull"
-    raise ValueError("cannot infer --mode from raw episode task/source_script; pass --mode ikpush, pull, or push")
+    raise ValueError("cannot infer --mode from raw episode task/source_script; pass --mode ikpush, a2wpush, pull, or push")
 
 
 def load_play_module(mode):
@@ -332,12 +352,17 @@ def load_play_module(mode):
     return importlib.import_module(module_name)
 
 
-def load_float_ik_module():
-    module_path = HIGH_LEVEL_ROOT / "float_ik" / "isaacgym_float_ik_b1z1_basearn_push_door.py"
+def load_float_ik_module(mode="ikpush"):
+    if mode == "a2wpush":
+        module_path = HIGH_LEVEL_ROOT / "a2w_ik" / "isaacgym_a2w_ik_push_door_parallel.py"
+        module_name = "door_dp_a2w_ik_replay_module"
+    else:
+        module_path = HIGH_LEVEL_ROOT / "float_ik" / "isaacgym_float_ik_b1z1_basearn_push_door.py"
+        module_name = "door_dp_float_ik_replay_module"
     for path in (str(module_path.parent), str(HIGH_LEVEL_ROOT), str(DP_ROOT), str(REPO_ROOT), str(LOW_LEVEL_ROOT)):
         if path not in sys.path:
             sys.path.insert(0, path)
-    spec = importlib.util.spec_from_file_location("door_dp_float_ik_replay_module", module_path)
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"failed to import float_ik replay module: {module_path}")
     module = importlib.util.module_from_spec(spec)
@@ -838,6 +863,32 @@ def set_missing_attr(args, name, value):
         setattr(args, name, value)
 
 
+def scalar_or_default(data, key, default):
+    return scalar_to_str(data[key]) if key in data.files else default
+
+
+def z1_asset_root_from_episode(float_mod, data):
+    if "z1_asset_root" in data.files:
+        return scalar_to_str(data["z1_asset_root"])
+    if "a2wz1_asset_root" in data.files:
+        legacy_root = scalar_to_str(data["a2wz1_asset_root"])
+        if Path(legacy_root).name == "a2wz1":
+            return str(float_mod.DEFAULT_Z1_ASSET_ROOT)
+        return legacy_root
+    return str(float_mod.DEFAULT_Z1_ASSET_ROOT)
+
+
+def z1_asset_file_from_episode(float_mod, data):
+    if "z1_asset_file" in data.files:
+        return scalar_to_str(data["z1_asset_file"])
+    if "a2wz1_asset_file" in data.files:
+        legacy_file = scalar_to_str(data["a2wz1_asset_file"])
+        if Path(legacy_file).name == "a2wz1.urdf":
+            return float_mod.DEFAULT_Z1_ASSET_FILE
+        return legacy_file
+    return float_mod.DEFAULT_Z1_ASSET_FILE
+
+
 def prepare_float_ik_replay_args(float_mod, args, data):
     if args.num_envs != 1:
         raise ValueError("--mode ikpush uses the single-env float_ik scene; pass --num_envs 1.")
@@ -859,6 +910,47 @@ def prepare_float_ik_replay_args(float_mod, args, data):
 
     set_missing_attr(args, "asset_root", str(float_mod.base_ik.DEFAULT_ASSET_ROOT))
     set_missing_attr(args, "asset_file", float_mod.base_ik.DEFAULT_ASSET_FILE)
+    if hasattr(float_mod, "DEFAULT_Z1_ASSET_ROOT"):
+        set_missing_attr(
+            args,
+            "a2w_asset_root",
+            scalar_or_default(data, "a2w_asset_root", str(float_mod.DEFAULT_A2W_ASSET_ROOT)),
+        )
+        set_missing_attr(
+            args,
+            "a2w_asset_file",
+            scalar_or_default(data, "a2w_asset_file", float_mod.DEFAULT_A2W_ASSET_FILE),
+        )
+        set_missing_attr(
+            args,
+            "z1_asset_root",
+            z1_asset_root_from_episode(float_mod, data),
+        )
+        set_missing_attr(
+            args,
+            "z1_asset_file",
+            z1_asset_file_from_episode(float_mod, data),
+        )
+        set_missing_attr(
+            args,
+            "a2w_wheel_radius",
+            scalar_to_float(data["a2w_wheel_radius"]) if "a2w_wheel_radius" in data.files else 0.0948,
+        )
+        set_missing_attr(
+            args,
+            "a2w_track_width",
+            scalar_to_float(data["a2w_track_width"]) if "a2w_track_width" in data.files else 0.4058,
+        )
+        set_missing_attr(
+            args,
+            "a2w_wheel_velocity_sign",
+            scalar_to_float(data["a2w_wheel_velocity_sign"]) if "a2w_wheel_velocity_sign" in data.files else 1.0,
+        )
+        set_missing_attr(args, "a2w_leg_stiffness", 160.0)
+        set_missing_attr(args, "a2w_leg_damping", 12.0)
+        set_missing_attr(args, "a2w_wheel_damping", 2.0)
+        set_missing_attr(args, "a2w_wheel_effort", 24.5)
+        set_missing_attr(args, "a2w_leg_home", "")
     set_missing_attr(args, "single_asset", False)
     set_missing_attr(args, "flip_visual_attachments", False)
     set_missing_attr(args, "disable_arm_visual_flip", False)
@@ -937,8 +1029,9 @@ def set_float_ik_arm_dofs(float_mod, gym, env, arm_actor, dof_names, dp_pos, dp_
     states = gym.get_actor_dof_states(env, arm_actor, float_mod.gymapi.STATE_ALL)
     dp_pos = np.asarray(dp_pos, dtype=np.float32).reshape(-1)
     dp_vel = np.zeros_like(dp_pos) if dp_vel is None else np.asarray(dp_vel, dtype=np.float32).reshape(-1)
+    mapping = getattr(float_mod, "A2W_DOF_TO_DP_DOF", getattr(float_mod, "FLOAT_ARM_TO_DP_DOF", {}))
     for src_idx, name in enumerate(dof_names):
-        dp_idx = float_mod.FLOAT_ARM_TO_DP_DOF.get(name)
+        dp_idx = mapping.get(name)
         if dp_idx is None or dp_idx >= dp_pos.size:
             continue
         states["pos"][src_idx] = float(dp_pos[dp_idx])
@@ -946,6 +1039,26 @@ def set_float_ik_arm_dofs(float_mod, gym, env, arm_actor, dof_names, dp_pos, dp_
             states["vel"][src_idx] = float(dp_vel[dp_idx])
     gym.set_actor_dof_states(env, arm_actor, states, float_mod.gymapi.STATE_ALL)
     gym.set_actor_dof_position_targets(env, arm_actor, states["pos"])
+
+
+def set_float_ik_robot_dofs(
+    float_mod,
+    gym,
+    env,
+    arm_actor,
+    actor_handles,
+    dof_names,
+    dp_pos,
+    dp_vel=None,
+    base_actor=None,
+    base_dof_names=None,
+    arm_dof_names=None,
+):
+    if base_actor is None or base_dof_names is None or arm_dof_names is None:
+        set_float_ik_arm_dofs(float_mod, gym, env, arm_actor, dof_names, dp_pos, dp_vel)
+        return
+    set_float_ik_arm_dofs(float_mod, gym, env, base_actor, base_dof_names, dp_pos, dp_vel)
+    set_float_ik_arm_dofs(float_mod, gym, env, arm_actor, arm_dof_names, dp_pos, dp_vel)
 
 
 def set_float_ik_door_dofs(float_mod, gym, env, door_actor, door_pos, door_vel=None):
@@ -971,6 +1084,9 @@ def apply_float_ik_state_frame(
     dof_names,
     data,
     frame_idx,
+    base_actor=None,
+    base_dof_names=None,
+    arm_dof_names=None,
 ):
     required = ("replay_root_state", "replay_dof_pos", "replay_door_dof_pos")
     missing = [key for key in required if key not in data.files]
@@ -978,11 +1094,27 @@ def apply_float_ik_state_frame(
         raise ValueError(f"--mode ikpush state replay requires replay snapshot fields; missing {missing}")
 
     root_state = np.asarray(data["replay_root_state"][frame_idx], dtype=np.float32)
-    yaw = yaw_from_quat_xyzw(root_state[3:7])
-    float_mod.set_robot_base_pose(gym, env, actor_handles, root_state[:2], root_state[2], yaw)
+    if base_actor is not None:
+        for actor in actor_handles:
+            set_float_actor_root_pose(float_mod, gym, env, actor, root_state)
+    else:
+        yaw = yaw_from_quat_xyzw(root_state[3:7])
+        float_mod.set_robot_base_pose(gym, env, actor_handles, root_state[:2], root_state[2], yaw)
 
     dof_vel = data["replay_dof_vel"][frame_idx] if "replay_dof_vel" in data.files else None
-    set_float_ik_arm_dofs(float_mod, gym, env, arm_actor, dof_names, data["replay_dof_pos"][frame_idx], dof_vel)
+    set_float_ik_robot_dofs(
+        float_mod,
+        gym,
+        env,
+        arm_actor,
+        actor_handles,
+        dof_names,
+        data["replay_dof_pos"][frame_idx],
+        dof_vel,
+        base_actor=base_actor,
+        base_dof_names=base_dof_names,
+        arm_dof_names=arm_dof_names,
+    )
 
     if "replay_door_root_state" in data.files:
         set_float_actor_root_pose(float_mod, gym, env, door_actor, data["replay_door_root_state"][frame_idx])
@@ -1035,9 +1167,9 @@ def float_ik_action_target_world(float_mod, data, frame_idx, action):
     if action_frame == "world":
         return target_pos, target_quat
     if action_frame != "base":
-        raise ValueError(f"Unsupported ikpush action_frame={action_frame!r}; expected 'world' or 'base'.")
+        raise ValueError(f"Unsupported IK replay action_frame={action_frame!r}; expected 'world' or 'base'.")
     if "replay_root_state" not in data.files:
-        raise ValueError("ikpush base-frame action visualization requires replay_root_state.")
+        raise ValueError("IK replay base-frame action visualization requires replay_root_state.")
     root_state = np.asarray(data["replay_root_state"][frame_idx], dtype=np.float32)
     yaw = yaw_from_quat_xyzw(root_state[3:7])
     return (
@@ -1108,8 +1240,8 @@ def render_float_ik_state_frame(float_mod, gym, sim, env, arm_actor, actor_handl
     return True
 
 
-def print_float_ik_replay_log(data, frame_idx, replay_step, action=None):
-    pieces = [f"[DoorDPReplay] mode=ikpush", f"step={replay_step}", f"frame={frame_idx}"]
+def print_float_ik_replay_log(data, frame_idx, replay_step, action=None, mode="ikpush"):
+    pieces = [f"[DoorDPReplay] mode={mode}", f"step={replay_step}", f"frame={frame_idx}"]
     if "subtask_index" in data.files:
         pieces.append(f"subtask={int(np.asarray(data['subtask_index'][frame_idx]).reshape(-1)[0])}")
     if "replay_door_dof_pos" in data.files:
@@ -1125,19 +1257,19 @@ def print_float_ik_replay_log(data, frame_idx, replay_step, action=None):
     print(" ".join(pieces), flush=True)
 
 
-def replay_float_ik_episode(args, episode_path, data, vision_mode):
+def replay_float_ik_episode(args, episode_path, data, vision_mode, mode="ikpush"):
     if args.replay_mode != "state":
-        raise ValueError("--mode ikpush currently supports --replay_mode state only.")
-    float_mod = load_float_ik_module()
+        raise ValueError(f"--mode {mode} currently supports --replay_mode state only.")
+    float_mod = load_float_ik_module(mode)
     door_asset_selection = prepare_float_ik_replay_args(float_mod, args, data)
     preload_keys = list(REPLAY_STATE_KEYS)
     if args.show_seg and float_mod.cv2 is not None:
         preload_keys.extend(image_keys_for_vision_mode(vision_mode))
-    preload_episode_fields(data, preload_keys, "ikpush replay")
+    preload_episode_fields(data, preload_keys, f"{mode} replay")
     actions = data["action"].astype(np.float32) if "action" in data.files else None
     action_frame = action_frame_from_data(data)
     if action_frame not in ("world", "base"):
-        raise ValueError(f"Unsupported ikpush action_frame={action_frame!r}; expected 'world' or 'base'.")
+        raise ValueError(f"Unsupported {mode} action_frame={action_frame!r}; expected 'world' or 'base'.")
     total_frames = int(actions.shape[0] if actions is not None else data["state"].shape[0])
     indices = frame_indices(args, total_frames)
     if not indices:
@@ -1147,7 +1279,7 @@ def replay_float_ik_episode(args, episode_path, data, vision_mode):
         {
             "episode": str(episode_path),
             "task": scalar_to_str(data["task"]) if "task" in data.files else None,
-            "mode": "ikpush",
+            "mode": mode,
             "replay_mode": args.replay_mode,
             "vision_mode": vision_mode,
             "action_frame": action_frame,
@@ -1168,18 +1300,55 @@ def replay_float_ik_episode(args, episode_path, data, vision_mode):
         plane_params = float_mod.gymapi.PlaneParams()
         plane_params.normal = float_mod.gymapi.Vec3(0.0, 0.0, 1.0)
         gym.add_ground(sim, plane_params)
-        with tempfile.TemporaryDirectory(prefix="b1z1_float_ik_replay_assets_") as temp_dir:
-            base_asset, arm_asset = float_mod.base_ik.load_robot_assets(gym, sim, args, Path(temp_dir))
+        asset_temp_context = (
+            contextlib.nullcontext(None)
+            if mode == "a2wpush"
+            else tempfile.TemporaryDirectory(prefix=f"{mode}_replay_assets_")
+        )
+        with asset_temp_context as temp_dir:
+            if mode == "a2wpush":
+                base_asset = float_mod.load_a2w_base_asset(gym, sim, args)
+                arm_asset = float_mod.load_z1_arm_asset(gym, sim, args)
+            else:
+                base_asset, arm_asset = float_mod.base_ik.load_robot_assets(gym, sim, args, Path(temp_dir))
             door = float_mod.load_door_asset(gym, sim, args)
-            dof_data = float_mod.base_ik.configure_dofs(gym, arm_asset, args)
-            dof_names, dof_props, dof_states, dof_positions, lower, upper, defaults, speeds, selected = dof_data
-            if "jointGripper" in dof_names:
-                gripper_idx = dof_names.index("jointGripper")
-                dof_states["pos"][gripper_idx] = args.gripper_open
-                dof_positions[gripper_idx] = args.gripper_open
-            env, arm_actor, actor_handles, door_actor, _ = float_mod.create_env_actors(
-                gym, sim, base_asset, arm_asset, door, dof_props, dof_states, args
-            )
+            if mode == "a2wpush":
+                dof_config = float_mod.configure_a2w_split_dofs(gym, base_asset, arm_asset, args)
+                if "jointGripper" in dof_config.arm_names:
+                    gripper_idx = dof_config.arm_names.index("jointGripper")
+                    dof_config.arm_states["pos"][gripper_idx] = args.gripper_open
+                    dof_config.arm_positions[gripper_idx] = args.gripper_open
+                    dof_config.arm_defaults[gripper_idx] = args.gripper_open
+                dof_names = list(dof_config.combined_names)
+                dof_props = dof_states = dof_positions = lower = upper = defaults = speeds = selected = None
+            else:
+                dof_data = float_mod.base_ik.configure_dofs(gym, arm_asset, args)
+                dof_names, dof_props, dof_states, dof_positions, lower, upper, defaults, speeds, selected = dof_data
+                if "jointGripper" in dof_names:
+                    gripper_idx = dof_names.index("jointGripper")
+                    dof_states["pos"][gripper_idx] = args.gripper_open
+                    dof_positions[gripper_idx] = args.gripper_open
+            if mode == "a2wpush":
+                env, base_actor, arm_actor, actor_handles, door_actor, _ = float_mod.create_parallel_env_actors(
+                    gym,
+                    sim,
+                    base_asset,
+                    arm_asset,
+                    door,
+                    dof_config,
+                    args,
+                    0,
+                    1,
+                )
+                base_dof_names = list(dof_config.base_names)
+                arm_dof_names = list(dof_config.arm_names)
+            else:
+                base_actor = None
+                base_dof_names = None
+                arm_dof_names = None
+                env, arm_actor, actor_handles, door_actor, _ = float_mod.create_env_actors(
+                    gym, sim, base_asset, arm_asset, door, dof_props, dof_states, args
+                )
             viewer = float_mod.setup_viewer(gym, sim, args)
             manual_frame_period = None
             if args.real_time and viewer is None:
@@ -1200,6 +1369,9 @@ def replay_float_ik_episode(args, episode_path, data, vision_mode):
                         dof_names,
                         data,
                         frame_idx,
+                        base_actor=base_actor,
+                        base_dof_names=base_dof_names,
+                        arm_dof_names=arm_dof_names,
                     )
                     keep_running = render_float_ik_state_frame(
                         float_mod,
@@ -1218,7 +1390,7 @@ def replay_float_ik_episode(args, episode_path, data, vision_mode):
                     if not keep_running:
                         return
                     if args.print_logs and replay_step % max(1, args.log_interval) == 0:
-                        print_float_ik_replay_log(data, frame_idx, replay_step, action=action)
+                        print_float_ik_replay_log(data, frame_idx, replay_step, action=action, mode=mode)
                     replay_step += 1
                     if manual_frame_period is not None:
                         elapsed = time.time() - loop_start
@@ -1247,8 +1419,8 @@ def main():
             f"{'--rgb' if args.rgb else 'depth mode'}."
         )
     mode = infer_mode(data, args.mode)
-    if mode == "ikpush":
-        replay_float_ik_episode(args, episode_path, data, requested_vision_mode)
+    if mode in ("ikpush", "a2wpush"):
+        replay_float_ik_episode(args, episode_path, data, requested_vision_mode, mode=mode)
         return
 
     base = load_play_module(mode)

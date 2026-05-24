@@ -167,6 +167,27 @@ def ikpush_state_version(data) -> str:
     return "legacy"
 
 
+def a2wpush_state_version(data) -> str:
+    if "a2wpush_state_version" in data.files:
+        return scalar_str(data["a2wpush_state_version"])
+    return "legacy"
+
+
+def policy_mode(data, controller: DoorDPPolicyController) -> str:
+    if "mode" in data.files:
+        return scalar_str(data["mode"])
+    ckpt_mode = str(controller.config.get("mode", "ikpush"))
+    if ckpt_mode != "ikpush":
+        return ckpt_mode
+    if a2wpush_state_version(data) != "legacy":
+        return "a2wpush"
+    return "ikpush"
+
+
+def state_version_for_mode(data, mode: str) -> str:
+    return a2wpush_state_version(data) if mode == "a2wpush" else ikpush_state_version(data)
+
+
 def quat_angle_deg(q1, q2) -> float:
     q1 = np.asarray(q1, dtype=np.float64)
     q2 = np.asarray(q2, dtype=np.float64)
@@ -209,18 +230,20 @@ def validate_inputs(data, controller: DoorDPPolicyController, expected_vision_mo
     ckpt_frame = str(getattr(controller, "action_frame", "world")).lower()
     if ckpt_frame != raw_frame:
         raise ValueError(f"Checkpoint action_frame={ckpt_frame!r}, raw episode action_frame={raw_frame!r}.")
-    raw_state_version = ikpush_state_version(data)
-    ckpt_state_version = str(controller.config.get("ikpush_state_version", "legacy"))
+    mode = policy_mode(data, controller)
+    raw_state_version = state_version_for_mode(data, mode)
+    version_key = "a2wpush_state_version" if mode == "a2wpush" else "ikpush_state_version"
+    ckpt_state_version = str(controller.config.get(version_key, "legacy"))
     if ckpt_state_version != raw_state_version:
         raise ValueError(
-            f"Checkpoint ikpush_state_version={ckpt_state_version!r}, "
-            f"raw episode ikpush_state_version={raw_state_version!r}."
+            f"Checkpoint {version_key}={ckpt_state_version!r}, "
+            f"raw episode {version_key}={raw_state_version!r}."
         )
     image_keys = raw_image_keys_for_vision_mode(expected_vision_mode)
     missing = [key for key in image_keys if key not in data.files]
     if missing:
         raise KeyError(f"Raw episode is missing image fields: {missing}")
-    return raw_frame, raw_state_version, image_keys
+    return raw_frame, f"{mode}:{raw_state_version}", image_keys
 
 
 def preload_episode_arrays(data, image_keys: list[str]) -> dict[str, np.ndarray]:
@@ -361,7 +384,7 @@ def main() -> None:
     print(
         f"raw_episode={raw_path}\n"
         f"checkpoint={ckpt_path}\n"
-        f"vision_mode={expected_vision_mode} action_frame={raw_frame} ikpush_state_version={raw_state_version} "
+        f"vision_mode={expected_vision_mode} action_frame={raw_frame} state_version={raw_state_version} "
         f"obs_horizon={controller.obs_horizon} pred_horizon={controller.pred_horizon} "
         f"action_horizon={controller.action_horizon} compare_horizon={compare_horizon}\n"
         f"eval_steps={len(steps)} stride={args.stride if not args.steps else 'explicit'} "

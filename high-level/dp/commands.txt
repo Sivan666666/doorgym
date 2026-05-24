@@ -13,7 +13,7 @@ Phase D: play / eval success / expert obs 对比
 ## 1. ikpush scripted play，只看环境不录数据
 
 python high-level/float_ik/isaacgym_float_ik_b1z1_basearn_push_door_parallel.py \
-    --door_cfg high-level/experiments/isaacgym/b1z1_opendoor_single_99650089960001.yaml \
+    --door_cfg high-level/experiments/isaacgym/b1z1_opendoor_single_door0.yaml \
     --num_envs 4 \
     --steps 2850 \
     --rl_device cuda:0 \

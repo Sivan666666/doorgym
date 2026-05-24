@@ -10,6 +10,7 @@ import numpy as np
 try:
     from .door_dp_common import (
         ACTION_NAMES,
+        DATASET_METADATA_KEYS,
         DoorDPLeRobotRecorder,
         lerobot_image_keys_for_vision_mode,
         normalize_vision_mode,
@@ -18,6 +19,7 @@ try:
 except ImportError:
     from door_dp_common import (
         ACTION_NAMES,
+        DATASET_METADATA_KEYS,
         DoorDPLeRobotRecorder,
         lerobot_image_keys_for_vision_mode,
         normalize_vision_mode,
@@ -76,6 +78,54 @@ def scalar_str(value):
     return str(arr.reshape(-1)[0])
 
 
+def jsonable_metadata_value(value):
+    if isinstance(value, np.ndarray):
+        if value.shape == ():
+            return jsonable_metadata_value(value.item())
+        return [jsonable_metadata_value(item) for item in value.tolist()]
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, (list, tuple)):
+        return [jsonable_metadata_value(item) for item in value]
+    if isinstance(value, dict):
+        return {str(k): jsonable_metadata_value(v) for k, v in value.items()}
+    return value
+
+
+def metadata_value_from_sources(data, sidecar, key):
+    aliases = {
+        "z1_asset_root": ("a2wz1_asset_root",),
+        "z1_asset_file": ("a2wz1_asset_file",),
+    }
+    for candidate in (key, *aliases.get(key, ())):
+        if sidecar and candidate in sidecar:
+            return jsonable_metadata_value(sidecar[candidate])
+        if candidate in data.files:
+            return jsonable_metadata_value(data[candidate])
+    return None
+
+
+def metadata_equal(a, b):
+    return json.dumps(jsonable_metadata_value(a), sort_keys=True) == json.dumps(jsonable_metadata_value(b), sort_keys=True)
+
+
+def collect_dataset_metadata(data, sidecar, mode, action_frame, version_key, state_version):
+    metadata = {
+        "mode": mode,
+        "action_frame": action_frame,
+        "action_pose_frame": action_frame,
+        "target_pose_frame": action_frame,
+        version_key: state_version,
+    }
+    for key in DATASET_METADATA_KEYS:
+        if key in metadata:
+            continue
+        value = metadata_value_from_sources(data, sidecar, key)
+        if value is not None:
+            metadata[key] = value
+    return metadata
+
+
 def detect_action_frame(data, sidecar):
     for source in (data, sidecar or {}):
         for key in ("action_frame", "action_pose_frame", "target_pose_frame"):
@@ -97,6 +147,38 @@ def detect_ikpush_state_version(data, sidecar):
     return "legacy"
 
 
+def detect_a2wpush_state_version(data, sidecar):
+    for source in (data, sidecar or {}):
+        if isinstance(source, dict):
+            if "a2wpush_state_version" in source:
+                return str(source["a2wpush_state_version"])
+        elif "a2wpush_state_version" in source.files:
+            return scalar_str(source["a2wpush_state_version"])
+    return "legacy"
+
+
+def detect_mode(data, sidecar):
+    for source in (data, sidecar or {}):
+        if isinstance(source, dict):
+            if "mode" in source:
+                return str(source["mode"])
+        elif "mode" in source.files:
+            return scalar_str(source["mode"])
+    if detect_a2wpush_state_version(data, sidecar) != "legacy":
+        return "a2wpush"
+    return "ikpush"
+
+
+def state_version_key(mode):
+    return "a2wpush_state_version" if str(mode) == "a2wpush" else "ikpush_state_version"
+
+
+def detect_state_version(data, sidecar, mode):
+    if str(mode) == "a2wpush":
+        return detect_a2wpush_state_version(data, sidecar)
+    return detect_ikpush_state_version(data, sidecar)
+
+
 def detect_raw_vision_mode(data, sidecar):
     if sidecar and sidecar.get("vision_mode") is not None:
         return normalize_vision_mode(sidecar["vision_mode"])
@@ -113,7 +195,18 @@ def require_fields(data, keys, path):
         raise KeyError(f"{path} is missing required fields for this vision mode: {missing}")
 
 
-def load_episode_payload(path, sidecar, image_keys, keep_state_indices, action_frame, ikpush_state_version, vision_mode, initial_task):
+def load_episode_payload(
+    path,
+    sidecar,
+    image_keys,
+    keep_state_indices,
+    action_frame,
+    mode,
+    state_version,
+    vision_mode,
+    initial_task,
+    metadata_reference,
+):
     with np.load(path, allow_pickle=True) as data:
         episode_action_frame = detect_action_frame(data, sidecar)
         if episode_action_frame != action_frame:
@@ -121,12 +214,23 @@ def load_episode_payload(path, sidecar, image_keys, keep_state_indices, action_f
                 f"Episode {path} action_frame={episode_action_frame!r}, expected {action_frame!r}; "
                 "do not mix world-frame and base-frame action datasets."
             )
-        episode_state_version = detect_ikpush_state_version(data, sidecar)
-        if episode_state_version != ikpush_state_version:
+        episode_mode = detect_mode(data, sidecar)
+        if episode_mode != mode:
+            raise ValueError(f"Episode {path} mode={episode_mode!r}, expected {mode!r}; do not mix robot modes.")
+        episode_state_version = detect_state_version(data, sidecar, mode)
+        if episode_state_version != state_version:
+            key = state_version_key(mode)
             raise ValueError(
-                f"Episode {path} ikpush_state_version={episode_state_version!r}, expected {ikpush_state_version!r}; "
-                "do not mix old and new ikpush state semantics."
+                f"Episode {path} {key}={episode_state_version!r}, expected {state_version!r}; "
+                "do not mix old and new state semantics."
             )
+        for key, expected_value in metadata_reference.items():
+            actual_value = metadata_value_from_sources(data, sidecar, key)
+            if actual_value is not None and not metadata_equal(actual_value, expected_value):
+                raise ValueError(
+                    f"Episode {path} metadata {key}={actual_value!r}, expected {expected_value!r}; "
+                    "do not mix different robot/asset/control metadata in one dataset."
+                )
         task = scalar_str(data["task"]) if "task" in data else initial_task
         states = data["state"].astype(np.float32)
         if keep_state_indices and states.shape[-1] <= max(keep_state_indices):
@@ -227,15 +331,18 @@ def main():
     vision_mode = "rgb" if args.rgb else "depth"
     raw_vision_mode = detect_raw_vision_mode(first, sidecar)
     action_frame = detect_action_frame(first, sidecar)
-    ikpush_state_version = detect_ikpush_state_version(first, sidecar)
+    mode = detect_mode(first, sidecar)
+    state_version = detect_state_version(first, sidecar, mode)
+    version_key = state_version_key(mode)
     if action_frame not in ("world", "base"):
         raise ValueError(f"Unsupported raw action_frame={action_frame!r}; expected 'world' or 'base'.")
     if raw_vision_mode != vision_mode:
         raise ValueError(
             f"Raw data vision_mode={raw_vision_mode!r}, but converter was run with "
             f"{'--rgb' if args.rgb else 'depth mode'}. Use --rgb only for RGB raw data."
-        )
+            )
     image_keys = raw_image_keys_for_vision_mode(vision_mode)
+    metadata_payload = collect_dataset_metadata(first, sidecar, mode, action_frame, version_key, state_version)
     out_dir = Path(args.root) / args.repo_id
     existing_sidecar = load_sidecar(out_dir) if out_dir.exists() else None
     if existing_sidecar and not args.overwrite:
@@ -253,12 +360,24 @@ def main():
                 f"Existing LeRobot dataset at {out_dir} has action_frame={existing_action_frame!r}, "
                 f"but raw data has action_frame={action_frame!r}; use a different --repo_id or pass --overwrite."
             )
-        existing_state_version = str(existing_sidecar.get("ikpush_state_version", "legacy"))
-        if existing_state_version != ikpush_state_version:
+        existing_mode = str(existing_sidecar.get("mode", "ikpush"))
+        if existing_mode != mode:
             raise ValueError(
-                f"Existing LeRobot dataset at {out_dir} has ikpush_state_version={existing_state_version!r}, "
-                f"but raw data has {ikpush_state_version!r}; use a different --repo_id or pass --overwrite."
+                f"Existing LeRobot dataset at {out_dir} has mode={existing_mode!r}, "
+                f"but raw data has mode={mode!r}; use a different --repo_id or pass --overwrite."
             )
+        existing_state_version = str(existing_sidecar.get(version_key, "legacy"))
+        if existing_state_version != state_version:
+            raise ValueError(
+                f"Existing LeRobot dataset at {out_dir} has {version_key}={existing_state_version!r}, "
+                f"but raw data has {state_version!r}; use a different --repo_id or pass --overwrite."
+            )
+        for key, value in metadata_payload.items():
+            if key in existing_sidecar and not metadata_equal(existing_sidecar[key], value):
+                raise ValueError(
+                    f"Existing LeRobot dataset at {out_dir} has metadata {key}={existing_sidecar[key]!r}, "
+                    f"but raw data has {value!r}; use a different --repo_id or pass --overwrite."
+                )
     if args.overwrite and out_dir.exists():
         shutil.rmtree(out_dir)
 
@@ -271,12 +390,7 @@ def main():
         task=initial_task,
         resume=not args.overwrite,
         vision_mode=vision_mode,
-        metadata={
-            "action_frame": action_frame,
-            "action_pose_frame": action_frame,
-            "target_pose_frame": action_frame,
-            "ikpush_state_version": ikpush_state_version,
-        },
+        metadata=metadata_payload,
     )
     payloads = iter_episode_payloads(
         files,
@@ -285,9 +399,11 @@ def main():
         image_keys=image_keys,
         keep_state_indices=keep_state_indices,
         action_frame=action_frame,
-        ikpush_state_version=ikpush_state_version,
+        mode=mode,
+        state_version=state_version,
         vision_mode=vision_mode,
         initial_task=initial_task,
+        metadata_reference=metadata_payload,
     )
     for ep_idx, payload in payloads:
         task = payload["task"]
@@ -324,8 +440,11 @@ def main():
         "action_frame": action_frame,
         "action_pose_frame": action_frame,
         "target_pose_frame": action_frame,
-        "ikpush_state_version": ikpush_state_version,
+        "mode": mode,
+        version_key: state_version,
     }
+    for key, value in metadata_payload.items():
+        sidecar_payload[key] = value
     if vision_mode == "rgb":
         sidecar_payload["vision_mode"] = vision_mode
     with open(feature_sidecar, "w", encoding="utf-8") as f:
