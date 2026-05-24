@@ -35,6 +35,7 @@ IsaacGymEnvs/
 *.rrd
 *.zarr/
 *.safetensors
+!/high-level/lerobot/**/*.safetensors
 
 # Local/generated door asset dumps; keep the small tracked default assets only.
 /high-level/data/asset/aigc_reference_export_fixed/
