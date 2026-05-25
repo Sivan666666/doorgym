@@ -9,20 +9,26 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 RECORD_SCRIPT = REPO_ROOT / "high-level" / "dp" / "record" / "record_door_dp_dataset.py"
 DEFAULT_DOOR_CFG = REPO_ROOT / "high-level" / "experiments" / "isaacgym" / "b1z1_opendoor_single_door0.yaml"
-DEFAULT_RAW_ROOT = REPO_ROOT / "high-level" / "data" / "door_dp_raw" / "single_door0_push_sweep"
+DEFAULT_RAW_ROOT = REPO_ROOT / "high-level" / "data" / "door_dp_raw" / "single_door0_a2wpush_sweep"
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
         description=(
-            "Record ikpush Door DP raw episodes on one door asset by repeatedly launching "
-            "the float_ik recorder with a new seed for each run."
+            "Record Door DP raw episodes on one door asset by repeatedly launching "
+            "the IK recorder with a new seed for each run. Defaults to a2wpush."
         )
     )
+    parser.add_argument("--mode", choices=["a2wpush", "ikpush"], default="a2wpush")
     parser.add_argument("--target_episodes", type=int, default=128, help="Stop once raw_root contains this many .npz episodes.")
     parser.add_argument("--max_runs", type=int, default=30, help="Maximum simulator launches before stopping.")
-    parser.add_argument("--num_envs", type=int, default=16, help="Parallel float_ik envs per sweep run.")
-    parser.add_argument("--steps", type=int, default=2210)
+    parser.add_argument("--num_envs", type=int, default=16, help="Parallel IK envs per sweep run.")
+    parser.add_argument(
+        "--steps",
+        type=int,
+        default=None,
+        help="Simulator steps. If omitted, record_door_dp_dataset.py uses the mode-specific default.",
+    )
     parser.add_argument("--raw_root", type=Path, default=DEFAULT_RAW_ROOT)
     parser.add_argument("--door_cfg", type=Path, default=DEFAULT_DOOR_CFG)
     parser.add_argument("--rl_device", type=str, default="cuda:0")
@@ -52,13 +58,11 @@ def build_command(args, play_args, num_envs, seed):
         sys.executable,
         str(RECORD_SCRIPT),
         "--mode",
-        "ikpush",
+        args.mode,
         "--num_envs",
         str(num_envs),
         "--num_rollouts",
         "1",
-        "--steps",
-        str(args.steps),
         "--seed",
         str(int(seed)),
         "--raw_root",
@@ -68,6 +72,8 @@ def build_command(args, play_args, num_envs, seed):
         "--sim_device",
         args.sim_device,
     ]
+    if args.steps is not None:
+        cmd += ["--steps", str(args.steps)]
     if args.graphics_device_id is not None:
         cmd += ["--graphics_device_id", str(args.graphics_device_id)]
     if args.headless:
@@ -94,7 +100,8 @@ def main():
     before_total = count_episodes(args.raw_root.expanduser().resolve())
     print(
         f"Recording single-door push sweep to {args.raw_root} "
-        f"target_episodes={args.target_episodes} current={before_total} num_envs={args.num_envs}",
+        f"mode={args.mode} target_episodes={args.target_episodes} "
+        f"current={before_total} num_envs={args.num_envs}",
         flush=True,
     )
 

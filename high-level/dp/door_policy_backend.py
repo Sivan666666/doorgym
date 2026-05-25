@@ -63,6 +63,7 @@ CHECKPOINT_OPTIMIZER = "optimizer.pt"
 DEFAULT_DP_INFERENCE_STEPS = 10
 DEFAULT_DP_INFERENCE_SCHEDULER = "DDIM"
 _VALID_DP_NOISE_SCHEDULERS = {"DDPM", "DDIM"}
+_DEFAULT_LEROBOT_CONDA_ENVS = ("door_dp", "b1z1_lerobot")
 
 
 def normalize_dp_noise_scheduler_type(noise_scheduler_type: Optional[str]) -> Optional[str]:
@@ -2201,15 +2202,51 @@ def _read_pickle_message(stream: Any) -> Mapping[str, Any]:
     return pickle.loads(_read_exact(stream, size))
 
 
+def _conda_env_names(conda_exe: str) -> set[str]:
+    try:
+        result = subprocess.run(
+            [conda_exe, "env", "list", "--json"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        envs = json.loads(result.stdout).get("envs", [])
+        return {Path(env).name for env in envs}
+    except Exception:
+        return set()
+
+
+def _select_lerobot_conda_env(conda_exe: str) -> str:
+    requested = os.environ.get("DOOR_DP_LEROBOT_CONDA_ENV")
+    if requested and requested.lower() != "auto":
+        return requested
+
+    current_env = os.environ.get("CONDA_DEFAULT_ENV")
+    if current_env in _DEFAULT_LEROBOT_CONDA_ENVS:
+        return current_env
+
+    available_envs = _conda_env_names(conda_exe)
+    for env_name in _DEFAULT_LEROBOT_CONDA_ENVS:
+        if env_name in available_envs:
+            return env_name
+
+    candidates = ", ".join(_DEFAULT_LEROBOT_CONDA_ENVS)
+    raise RuntimeError(
+        f"Could not find a LeRobot conda env. Tried: {candidates}. "
+        "Set DOOR_DP_LEROBOT_CONDA_ENV to an existing env name, or set "
+        "DOOR_DP_LEROBOT_PYTHON to a Python>=3.10 executable."
+    )
+
+
 def _worker_python_command() -> List[str]:
     worker = Path(__file__).resolve().parent / "door_policy_worker.py"
     explicit = os.environ.get("DOOR_DP_LEROBOT_PYTHON")
     if explicit:
         return shlex.split(explicit) + [str(worker)]
 
-    env_name = os.environ.get("DOOR_DP_LEROBOT_CONDA_ENV", "b1z1_lerobot")
     conda_exe = shutil.which("conda")
     if conda_exe:
+        env_name = _select_lerobot_conda_env(conda_exe)
         return [conda_exe, "run", "--no-capture-output", "-n", env_name, "python", str(worker)]
 
     raise RuntimeError(
