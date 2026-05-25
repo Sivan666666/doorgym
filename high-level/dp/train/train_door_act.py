@@ -185,12 +185,16 @@ def main():
             "repo_id": args.repo_id,
         }
     )
-    metadata_aliases = {"z1_asset_root": "a2wz1_asset_root", "z1_asset_file": "a2wz1_asset_file"}
-    for key in ("state_dof_names", "z1_asset_root", "z1_asset_file", "a2w_wheel_radius", "a2w_track_width", "a2w_wheel_velocity_sign"):
+    for key in (
+        "state_dof_names",
+        "a2wz1_asset_root",
+        "a2wz1_asset_file",
+        "a2w_wheel_radius",
+        "a2w_track_width",
+        "a2w_wheel_velocity_sign",
+    ):
         if key in sidecar_data:
             train_config[key] = sidecar_data[key]
-        elif metadata_aliases.get(key) in sidecar_data:
-            train_config[key] = sidecar_data[metadata_aliases[key]]
     print(
         f"Training backend={BACKEND_LEROBOT_ACT} state_dim={state_dim} action_dim={action_dim} "
         f"chunk_size={args.chunk_size} action_horizon={args.action_horizon} vision_mode={vision_mode}",

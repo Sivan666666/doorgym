@@ -12,8 +12,11 @@ import importlib.util
 import json
 import math
 import os
+import shutil
 import sys
+import tempfile
 import time
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -50,10 +53,8 @@ DEFAULT_FRONT_CAMERA_CFG = {
     "position": [0.425, 0.04, 0.12],
     "rotation": [0.0, 0.0, 0.0],
 }
-DEFAULT_A2W_ASSET_ROOT = HIGH_LEVEL_ROOT / "data" / "asset" / "a2w"
-DEFAULT_A2W_ASSET_FILE = "a2_wheel.urdf"
-DEFAULT_Z1_ASSET_ROOT = HIGH_LEVEL_ROOT / "data" / "asset" / "z1"
-DEFAULT_Z1_ASSET_FILE = "urdf/z1_arm.urdf"
+DEFAULT_A2WZ1_ASSET_ROOT = HIGH_LEVEL_ROOT / "data" / "asset" / "a2wz1"
+DEFAULT_A2WZ1_ASSET_FILE = "urdf/a2wz1.urdf"
 A2WPUSH_STATE_VERSION = "a2w_4wheel_7z1_base_rp_v1"
 A2W_LEG_DOF_NAMES = [
     "FL_hip_joint",
@@ -73,6 +74,41 @@ A2W_WHEEL_DOF_NAMES = ["FL_wheel_joint", "RL_wheel_joint", "FR_wheel_joint", "RR
 A2W_Z1_DOF_NAMES = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "jointGripper"]
 A2W_STATE_DOF_NAMES = A2W_WHEEL_DOF_NAMES + A2W_Z1_DOF_NAMES + [f"reserved_zero_{i}" for i in range(8)]
 A2W_DOF_TO_DP_DOF = {name: idx for idx, name in enumerate(A2W_WHEEL_DOF_NAMES + A2W_Z1_DOF_NAMES)}
+A2W_BASE_LINKS = {
+    "world",
+    "base_link",
+    "front_bumper",
+    "rear_bumper",
+    "FL_hip",
+    "FL_thigh",
+    "FL_calf",
+    "FL_wheel",
+    "RL_hip",
+    "RL_thigh",
+    "RL_calf",
+    "RL_wheel",
+    "FR_hip",
+    "FR_thigh",
+    "FR_calf",
+    "FR_wheel",
+    "RR_hip",
+    "RR_thigh",
+    "RR_calf",
+    "RR_wheel",
+}
+A2W_ARM_LINKS = {
+    "base",
+    "link00",
+    "link01",
+    "link02",
+    "link03",
+    "link04",
+    "link05",
+    "link06",
+    "gripperStator",
+    "ee_gripper_link",
+    "gripperMover",
+}
 A2W_DEFAULT_LEG_POS = {
     "FL_hip_joint": 0.0,
     "FL_thigh_joint": 0.8,
@@ -250,7 +286,10 @@ def load_robot_asset(gym, sim, asset_root, asset_file, args, flip_visual_attachm
     asset_file = str(asset_file)
     asset_path = asset_root / asset_file
     if not asset_path.exists():
-        raise FileNotFoundError(f"{label} URDF not found: {asset_path}. Build assets with: python high-level/a2w_ik/build_z1_asset.py")
+        raise FileNotFoundError(
+            f"{label} URDF not found: {asset_path}. "
+            "Build assets with: python high-level/a2w_ik/build_a2wz1_asset.py"
+        )
     print(
         f"Loading {label}: root={asset_root}, file={asset_file}, "
         f"flip_visual_attachments={bool(flip_visual_attachments)}, "
@@ -262,36 +301,94 @@ def load_robot_asset(gym, sim, asset_root, asset_file, args, flip_visual_attachm
     return asset
 
 
-def load_a2w_base_asset(gym, sim, args):
-    return load_robot_asset(
+def find_child(node, tag):
+    for child in node:
+        if child.tag == tag:
+            return child
+    return None
+
+
+def populate_mesh_dir(source_mesh_dir, mesh_dir):
+    if not source_mesh_dir.exists():
+        raise FileNotFoundError(f"A2WZ1 mesh directory not found: {source_mesh_dir}")
+    mesh_dir.mkdir(parents=True, exist_ok=True)
+    for source_path in source_mesh_dir.iterdir():
+        target_path = mesh_dir / source_path.name
+        if target_path.exists():
+            continue
+        try:
+            target_path.symlink_to(source_path)
+        except OSError:
+            shutil.copy2(source_path, target_path)
+
+
+def write_filtered_urdf(source_urdf, output_urdf, keep_links, robot_name):
+    source_root = ET.parse(source_urdf).getroot()
+    output_root = ET.Element(source_root.tag, {"name": robot_name})
+
+    for child in source_root:
+        if child.tag == "material":
+            output_root.append(child)
+        elif child.tag == "link" and child.get("name") in keep_links:
+            output_root.append(child)
+        elif child.tag == "joint":
+            parent = find_child(child, "parent")
+            child_link = find_child(child, "child")
+            if parent is None or child_link is None:
+                continue
+            if parent.get("link") in keep_links and child_link.get("link") in keep_links:
+                output_root.append(child)
+
+    output_urdf.parent.mkdir(parents=True, exist_ok=True)
+    ET.ElementTree(output_root).write(output_urdf, encoding="utf-8", xml_declaration=True)
+
+
+def build_a2wz1_split_asset_root(source_asset_root, asset_file, temp_root):
+    source_asset_root = Path(source_asset_root).expanduser().resolve()
+    source_urdf = source_asset_root / asset_file
+    if not source_urdf.exists():
+        raise FileNotFoundError(
+            f"A2WZ1 URDF not found: {source_urdf}. "
+            "Build it with: python high-level/a2w_ik/build_a2wz1_asset.py"
+        )
+
+    split_root = Path(temp_root) / "a2wz1_split_assets"
+    split_urdf_dir = split_root / "urdf"
+    split_urdf_dir.mkdir(parents=True, exist_ok=True)
+    populate_mesh_dir(source_asset_root / "meshes", split_root / "meshes")
+
+    base_file = "urdf/a2w_base_visual_only.urdf"
+    arm_file = "urdf/z1_arm_visual_flip.urdf"
+    write_filtered_urdf(source_urdf, split_root / base_file, A2W_BASE_LINKS, "a2w_base")
+    write_filtered_urdf(source_urdf, split_root / arm_file, A2W_ARM_LINKS, "z1")
+    return split_root, base_file, arm_file
+
+
+def load_a2wz1_split_assets(gym, sim, args, temp_root):
+    split_root, base_file, arm_file = build_a2wz1_split_asset_root(
+        args.a2wz1_asset_root,
+        args.a2wz1_asset_file,
+        temp_root,
+    )
+    base_asset = load_robot_asset(
         gym,
         sim,
-        args.a2w_asset_root,
-        args.a2w_asset_file,
+        split_root,
+        base_file,
         args,
         False,
         "A2W base actor",
     )
-
-
-def load_z1_arm_asset(gym, sim, args):
-    return load_robot_asset(
+    arm_asset = load_robot_asset(
         gym,
         sim,
-        args.z1_asset_root,
-        args.z1_asset_file,
+        split_root,
+        arm_file,
         args,
         not bool(getattr(args, "disable_arm_visual_flip", False)),
         "Z1 arm actor",
     )
-
-
-def load_a2w_z1_asset(gym, sim, args, temp_root=None):
-    del gym, sim, args, temp_root
-    raise RuntimeError(
-        "a2wpush now uses split actors. Load A2W and Z1 separately with "
-        "load_a2w_base_asset(...) and load_z1_arm_asset(...)."
-    )
+    return base_asset, arm_asset
 
 
 def state_feature_names_for_a2wpush():
@@ -464,10 +561,8 @@ def parse_args():
         headless=True,
         no_graphics=True,
         custom_parameters=[
-            {"name": "--a2w_asset_root", "type": str, "default": str(DEFAULT_A2W_ASSET_ROOT)},
-            {"name": "--a2w_asset_file", "type": str, "default": DEFAULT_A2W_ASSET_FILE},
-            {"name": "--z1_asset_root", "type": str, "default": str(DEFAULT_Z1_ASSET_ROOT)},
-            {"name": "--z1_asset_file", "type": str, "default": DEFAULT_Z1_ASSET_FILE},
+            {"name": "--a2wz1_asset_root", "type": str, "default": str(DEFAULT_A2WZ1_ASSET_ROOT)},
+            {"name": "--a2wz1_asset_file", "type": str, "default": DEFAULT_A2WZ1_ASSET_FILE},
             {"name": "--a2w_wheel_radius", "type": float, "default": 0.0948},
             {"name": "--a2w_track_width", "type": float, "default": 0.4058},
             {"name": "--a2w_wheel_velocity_sign", "type": float, "default": 1.0},
@@ -3025,10 +3120,8 @@ def run_demo(
                 "target_pose_frame": "base",
                 "a2wpush_state_version": A2WPUSH_STATE_VERSION,
                 "state_dof_names": list(A2W_STATE_DOF_NAMES),
-                "a2w_asset_root": str(Path(args.a2w_asset_root).expanduser()),
-                "a2w_asset_file": str(args.a2w_asset_file),
-                "z1_asset_root": str(Path(args.z1_asset_root).expanduser()),
-                "z1_asset_file": str(args.z1_asset_file),
+                "a2wz1_asset_root": str(Path(args.a2wz1_asset_root).expanduser()),
+                "a2wz1_asset_file": str(args.a2wz1_asset_file),
                 "a2w_wheel_radius": float(args.a2w_wheel_radius),
                 "a2w_track_width": float(args.a2w_track_width),
                 "a2w_wheel_velocity_sign": float(args.a2w_wheel_velocity_sign),
@@ -3265,10 +3358,8 @@ def make_parallel_dp_recorder(args, door, env_index, vision_mode):
             "target_pose_frame": "base",
             "a2wpush_state_version": A2WPUSH_STATE_VERSION,
             "state_dof_names": list(A2W_STATE_DOF_NAMES),
-            "a2w_asset_root": str(Path(args.a2w_asset_root).expanduser()),
-            "a2w_asset_file": str(args.a2w_asset_file),
-            "z1_asset_root": str(Path(args.z1_asset_root).expanduser()),
-            "z1_asset_file": str(args.z1_asset_file),
+            "a2wz1_asset_root": str(Path(args.a2wz1_asset_root).expanduser()),
+            "a2wz1_asset_file": str(args.a2wz1_asset_file),
             "a2w_wheel_radius": float(args.a2w_wheel_radius),
             "a2w_track_width": float(args.a2w_track_width),
             "a2w_wheel_velocity_sign": float(args.a2w_wheel_velocity_sign),
@@ -3993,30 +4084,30 @@ def main():
     plane_params.normal = gymapi.Vec3(0.0, 0.0, 1.0)
     gym.add_ground(sim, plane_params)
 
-    base_asset = load_a2w_base_asset(gym, sim, args)
-    arm_asset = load_z1_arm_asset(gym, sim, args)
-    door_templates = load_door_assets(gym, sim, args)
-    base_ik.print_collision_summary(gym, base_asset, "A2W base actor", verbose=args.print_collision_summary)
-    base_ik.print_collision_summary(gym, arm_asset, "Z1 arm actor", verbose=args.print_collision_summary)
-    dof_config = configure_a2w_split_dofs(gym, base_asset, arm_asset, args)
-    env_states, _vision_mode = create_parallel_env_states(
-        gym,
-        sim,
-        base_asset,
-        arm_asset,
-        door_templates,
-        dof_config,
-        args,
-    )
-    viewer = setup_viewer(gym, sim, args)
-    try:
-        run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_config.combined_names)
-    finally:
-        if args.show_camera_images and cv2 is not None:
-            cv2.destroyAllWindows()
-        if viewer is not None:
-            gym.destroy_viewer(viewer)
-        gym.destroy_sim(sim)
+    with tempfile.TemporaryDirectory(prefix="a2wz1_isaacgym_assets_") as temp_dir:
+        base_asset, arm_asset = load_a2wz1_split_assets(gym, sim, args, Path(temp_dir))
+        door_templates = load_door_assets(gym, sim, args)
+        base_ik.print_collision_summary(gym, base_asset, "A2W base actor", verbose=args.print_collision_summary)
+        base_ik.print_collision_summary(gym, arm_asset, "Z1 arm actor", verbose=args.print_collision_summary)
+        dof_config = configure_a2w_split_dofs(gym, base_asset, arm_asset, args)
+        env_states, _vision_mode = create_parallel_env_states(
+            gym,
+            sim,
+            base_asset,
+            arm_asset,
+            door_templates,
+            dof_config,
+            args,
+        )
+        viewer = setup_viewer(gym, sim, args)
+        try:
+            run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_config.combined_names)
+        finally:
+            if args.show_camera_images and cv2 is not None:
+                cv2.destroyAllWindows()
+            if viewer is not None:
+                gym.destroy_viewer(viewer)
+            gym.destroy_sim(sim)
 
 
 if __name__ == "__main__":

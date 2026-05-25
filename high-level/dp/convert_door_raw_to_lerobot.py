@@ -93,15 +93,10 @@ def jsonable_metadata_value(value):
 
 
 def metadata_value_from_sources(data, sidecar, key):
-    aliases = {
-        "z1_asset_root": ("a2wz1_asset_root",),
-        "z1_asset_file": ("a2wz1_asset_file",),
-    }
-    for candidate in (key, *aliases.get(key, ())):
-        if sidecar and candidate in sidecar:
-            return jsonable_metadata_value(sidecar[candidate])
-        if candidate in data.files:
-            return jsonable_metadata_value(data[candidate])
+    if sidecar and key in sidecar:
+        return jsonable_metadata_value(sidecar[key])
+    if key in data.files:
+        return jsonable_metadata_value(data[key])
     return None
 
 

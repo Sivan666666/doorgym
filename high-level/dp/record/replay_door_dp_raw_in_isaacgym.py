@@ -1,5 +1,4 @@
 import argparse
-import contextlib
 import importlib
 import importlib.util
 import math
@@ -863,30 +862,16 @@ def set_missing_attr(args, name, value):
         setattr(args, name, value)
 
 
-def scalar_or_default(data, key, default):
-    return scalar_to_str(data[key]) if key in data.files else default
-
-
-def z1_asset_root_from_episode(float_mod, data):
-    if "z1_asset_root" in data.files:
-        return scalar_to_str(data["z1_asset_root"])
+def a2wz1_asset_root_from_episode(float_mod, data):
     if "a2wz1_asset_root" in data.files:
-        legacy_root = scalar_to_str(data["a2wz1_asset_root"])
-        if Path(legacy_root).name == "a2wz1":
-            return str(float_mod.DEFAULT_Z1_ASSET_ROOT)
-        return legacy_root
-    return str(float_mod.DEFAULT_Z1_ASSET_ROOT)
+        return scalar_to_str(data["a2wz1_asset_root"])
+    return str(float_mod.DEFAULT_A2WZ1_ASSET_ROOT)
 
 
-def z1_asset_file_from_episode(float_mod, data):
-    if "z1_asset_file" in data.files:
-        return scalar_to_str(data["z1_asset_file"])
+def a2wz1_asset_file_from_episode(float_mod, data):
     if "a2wz1_asset_file" in data.files:
-        legacy_file = scalar_to_str(data["a2wz1_asset_file"])
-        if Path(legacy_file).name == "a2wz1.urdf":
-            return float_mod.DEFAULT_Z1_ASSET_FILE
-        return legacy_file
-    return float_mod.DEFAULT_Z1_ASSET_FILE
+        return scalar_to_str(data["a2wz1_asset_file"])
+    return float_mod.DEFAULT_A2WZ1_ASSET_FILE
 
 
 def prepare_float_ik_replay_args(float_mod, args, data):
@@ -910,26 +895,16 @@ def prepare_float_ik_replay_args(float_mod, args, data):
 
     set_missing_attr(args, "asset_root", str(float_mod.base_ik.DEFAULT_ASSET_ROOT))
     set_missing_attr(args, "asset_file", float_mod.base_ik.DEFAULT_ASSET_FILE)
-    if hasattr(float_mod, "DEFAULT_Z1_ASSET_ROOT"):
+    if hasattr(float_mod, "DEFAULT_A2WZ1_ASSET_ROOT"):
         set_missing_attr(
             args,
-            "a2w_asset_root",
-            scalar_or_default(data, "a2w_asset_root", str(float_mod.DEFAULT_A2W_ASSET_ROOT)),
+            "a2wz1_asset_root",
+            a2wz1_asset_root_from_episode(float_mod, data),
         )
         set_missing_attr(
             args,
-            "a2w_asset_file",
-            scalar_or_default(data, "a2w_asset_file", float_mod.DEFAULT_A2W_ASSET_FILE),
-        )
-        set_missing_attr(
-            args,
-            "z1_asset_root",
-            z1_asset_root_from_episode(float_mod, data),
-        )
-        set_missing_attr(
-            args,
-            "z1_asset_file",
-            z1_asset_file_from_episode(float_mod, data),
+            "a2wz1_asset_file",
+            a2wz1_asset_file_from_episode(float_mod, data),
         )
         set_missing_attr(
             args,
@@ -1300,25 +1275,15 @@ def replay_float_ik_episode(args, episode_path, data, vision_mode, mode="ikpush"
         plane_params = float_mod.gymapi.PlaneParams()
         plane_params.normal = float_mod.gymapi.Vec3(0.0, 0.0, 1.0)
         gym.add_ground(sim, plane_params)
-        asset_temp_context = (
-            contextlib.nullcontext(None)
-            if mode == "a2wpush"
-            else tempfile.TemporaryDirectory(prefix=f"{mode}_replay_assets_")
-        )
+        asset_temp_context = tempfile.TemporaryDirectory(prefix=f"{mode}_replay_assets_")
         with asset_temp_context as temp_dir:
             if mode == "a2wpush":
-                base_asset = float_mod.load_a2w_base_asset(gym, sim, args)
-                arm_asset = float_mod.load_z1_arm_asset(gym, sim, args)
+                base_asset, arm_asset = float_mod.load_a2wz1_split_assets(gym, sim, args, Path(temp_dir))
             else:
                 base_asset, arm_asset = float_mod.base_ik.load_robot_assets(gym, sim, args, Path(temp_dir))
             door = float_mod.load_door_asset(gym, sim, args)
             if mode == "a2wpush":
                 dof_config = float_mod.configure_a2w_split_dofs(gym, base_asset, arm_asset, args)
-                if "jointGripper" in dof_config.arm_names:
-                    gripper_idx = dof_config.arm_names.index("jointGripper")
-                    dof_config.arm_states["pos"][gripper_idx] = args.gripper_open
-                    dof_config.arm_positions[gripper_idx] = args.gripper_open
-                    dof_config.arm_defaults[gripper_idx] = args.gripper_open
                 dof_names = list(dof_config.combined_names)
                 dof_props = dof_states = dof_positions = lower = upper = defaults = speeds = selected = None
             else:
