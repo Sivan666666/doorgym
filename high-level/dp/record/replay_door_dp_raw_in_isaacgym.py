@@ -1333,11 +1333,15 @@ def initialize_float_ik_action_replay(
     ik_state,
     data,
     frame_idx,
+    mode="ikpush",
+    base_actor=None,
+    base_dof_names=None,
+    arm_dof_names=None,
 ):
     required = ("replay_root_state", "replay_dof_pos", "replay_door_dof_pos")
     missing = [key for key in required if key not in data.files]
     if missing:
-        raise ValueError(f"--mode ikpush action replay requires initial replay snapshot fields; missing {missing}")
+        raise ValueError(f"--mode {mode} action replay requires initial replay snapshot fields; missing {missing}")
 
     apply_float_ik_state_frame(
         float_mod,
@@ -1350,6 +1354,9 @@ def initialize_float_ik_action_replay(
         dof_names,
         data,
         frame_idx,
+        base_actor=base_actor,
+        base_dof_names=base_dof_names,
+        arm_dof_names=arm_dof_names,
     )
     arm_states = gym.get_actor_dof_states(env, arm_actor, float_mod.gymapi.STATE_ALL)
     if len(arm_states) != len(dof_positions):
@@ -1382,6 +1389,9 @@ def step_float_ik_action_replay(
     yaw,
     dt,
     action_frame,
+    base_actor=None,
+    base_dof_names=None,
+    base_home_positions=None,
 ):
     base_xy, yaw, target_pos, target_quat, gripper = apply_float_ik_recorded_action(
         float_mod,
@@ -1394,7 +1404,22 @@ def step_float_ik_action_replay(
     )
     float_mod.set_robot_base_pose(gym, env, actor_handles, base_xy, args.robot_z, yaw)
     float_mod.set_ik_target(ik_state, target_pos, target_quat)
-    float_mod.update_arm_ik_targets(gym, sim, dof_positions, ik_state, args, len(dof_positions))
+    if base_actor is not None and hasattr(float_mod, "update_arm_ik_targets_for_env"):
+        gym.refresh_rigid_body_state_tensor(sim)
+        gym.refresh_dof_state_tensor(sim)
+        gym.refresh_jacobian_tensors(sim)
+        float_mod.update_arm_ik_targets_for_env(
+            gym,
+            env,
+            arm_actor,
+            0,
+            dof_positions,
+            ik_state,
+            args,
+            len(dof_positions),
+        )
+    else:
+        float_mod.update_arm_ik_targets(gym, sim, dof_positions, ik_state, args, len(dof_positions))
     if "jointGripper" in dof_names:
         gripper_idx = dof_names.index("jointGripper")
         dof_positions[gripper_idx] = np.clip(
@@ -1403,6 +1428,13 @@ def step_float_ik_action_replay(
             ik_state.upper[gripper_idx].item(),
         )
     gym.set_actor_dof_position_targets(env, arm_actor, dof_positions)
+    if (
+        base_actor is not None
+        and base_dof_names is not None
+        and hasattr(float_mod, "hard_lock_a2w_leg_dof_states")
+        and base_home_positions is not None
+    ):
+        float_mod.hard_lock_a2w_leg_dof_states(gym, env, base_actor, base_dof_names, base_home_positions)
 
     float_mod.enforce_locked_door_hinge(gym, env, door_actor, door)
     door_pos, door_vel = float_mod.get_actor_dof_state(gym, env, door_actor)
@@ -1412,6 +1444,13 @@ def step_float_ik_action_replay(
 
     gym.simulate(sim)
     gym.fetch_results(sim, True)
+    if (
+        base_actor is not None
+        and base_dof_names is not None
+        and hasattr(float_mod, "hard_lock_a2w_leg_dof_states")
+        and base_home_positions is not None
+    ):
+        float_mod.hard_lock_a2w_leg_dof_states(gym, env, base_actor, base_dof_names, base_home_positions)
     float_mod.current_ee_pose(gym, sim, ik_state)
     door_pos, _door_vel = float_mod.get_actor_dof_state(gym, env, door_actor)
     return base_xy, float(yaw), door_pos
@@ -1436,8 +1475,6 @@ def print_float_ik_replay_log(data, frame_idx, replay_step, action=None, sim_doo
     print(" ".join(pieces), flush=True)
 
 def replay_float_ik_episode(args, episode_path, data, vision_mode, mode="ikpush"):
-    if mode != "ikpush" and args.replay_mode != "state":
-        raise ValueError(f"--mode {mode} currently supports --replay_mode state only.")
     float_mod = load_float_ik_module(mode)
     door_asset_selection = prepare_float_ik_replay_args(float_mod, args, data)
     preload_keys = ["action"]
@@ -1450,7 +1487,7 @@ def replay_float_ik_episode(args, episode_path, data, vision_mode, mode="ikpush"
     preload_episode_fields(data, preload_keys, f"{mode} replay")
     actions = data["action"].astype(np.float32) if "action" in data.files else None
     if args.replay_mode == "action" and (actions is None or actions.ndim != 2 or actions.shape[1] < 10):
-        raise ValueError("ikpush action replay requires raw episode field action with shape [T, 10]")
+        raise ValueError(f"{mode} action replay requires raw episode field action with shape [T, 10]")
     action_frame = action_frame_from_data(data)
     if action_frame not in ("world", "base"):
         raise ValueError(f"Unsupported {mode} action_frame={action_frame!r}; expected 'world' or 'base'.")
@@ -1493,9 +1530,14 @@ def replay_float_ik_episode(args, episode_path, data, vision_mode, mode="ikpush"
             door = float_mod.load_door_asset(gym, sim, args)
             if mode == "a2wpush":
                 dof_config = float_mod.configure_a2w_split_dofs(gym, base_asset, arm_asset, args)
-                dof_names = list(dof_config.combined_names)
-                dof_props = dof_states = dof_positions = lower = upper = defaults = speeds = selected = None
+                dof_names = list(dof_config.arm_names)
+                dof_positions = np.asarray(dof_config.arm_positions, dtype=np.float32).copy()
+                lower = dof_config.arm_lower
+                upper = dof_config.arm_upper
+                base_home_positions = np.asarray(dof_config.base_defaults, dtype=np.float32).copy()
+                dof_props = dof_states = defaults = speeds = selected = None
             else:
+                base_home_positions = None
                 dof_data = float_mod.base_ik.configure_dofs(gym, arm_asset, args)
                 dof_names, dof_props, dof_states, dof_positions, lower, upper, defaults, speeds, selected = dof_data
                 if "jointGripper" in dof_names:
@@ -1544,7 +1586,9 @@ def replay_float_ik_episode(args, episode_path, data, vision_mode, mode="ikpush"
                     args,
                 )
                 if ik_state is None:
-                    raise RuntimeError("ikpush action replay requires the float IK controller to be enabled.")
+                    raise RuntimeError(f"{mode} action replay requires the IK controller to be enabled.")
+                if mode == "a2wpush" and hasattr(float_mod, "configure_a2w_ik_jacobian_mapping"):
+                    float_mod.configure_a2w_ik_jacobian_mapping(gym, arm_asset, dof_names, ik_state, args)
                 base_xy, yaw = initialize_float_ik_action_replay(
                     float_mod,
                     gym,
@@ -1559,6 +1603,10 @@ def replay_float_ik_episode(args, episode_path, data, vision_mode, mode="ikpush"
                     ik_state,
                     data,
                     indices[0],
+                    mode=mode,
+                    base_actor=base_actor,
+                    base_dof_names=base_dof_names,
+                    arm_dof_names=arm_dof_names,
                 )
             manual_frame_period = None
             if args.real_time and viewer is None:
@@ -1618,6 +1666,9 @@ def replay_float_ik_episode(args, episode_path, data, vision_mode, mode="ikpush"
                             yaw,
                             sim_dt,
                             action_frame,
+                            base_actor=base_actor,
+                            base_dof_names=base_dof_names,
+                            base_home_positions=base_home_positions,
                         )
                         keep_running = render_float_ik_action_frame(
                             float_mod,

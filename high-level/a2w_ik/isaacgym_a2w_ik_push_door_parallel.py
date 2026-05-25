@@ -1881,14 +1881,20 @@ def current_ee_pose(gym, sim, ik_state):
     eef_state = ik_state.rb_states[ik_state.eef_body_sim_index]
     pos = eef_state[:3].detach().cpu().numpy().astype(np.float32).copy()
     quat = eef_state[3:7].detach().cpu().numpy().astype(np.float32).copy()
-    return pos, base_ik.normalize_quat(quat)
+    quat = base_ik.normalize_quat(quat)
+    ik_state.current_pos_np = pos.copy()
+    ik_state.current_quat_np = quat.copy()
+    return pos, quat
 
 
 def current_ee_pose_from_refreshed_tensors(ik_state):
     eef_state = ik_state.rb_states[ik_state.eef_body_sim_index]
     pos = eef_state[:3].detach().cpu().numpy().astype(np.float32).copy()
     quat = eef_state[3:7].detach().cpu().numpy().astype(np.float32).copy()
-    return pos, base_ik.normalize_quat(quat)
+    quat = base_ik.normalize_quat(quat)
+    ik_state.current_pos_np = pos.copy()
+    ik_state.current_quat_np = quat.copy()
+    return pos, quat
 
 
 def configure_a2w_ik_jacobian_mapping(gym, asset, dof_names, ik_state, args):
