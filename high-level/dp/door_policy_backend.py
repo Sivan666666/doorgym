@@ -2207,7 +2207,7 @@ def _worker_python_command() -> List[str]:
     if explicit:
         return shlex.split(explicit) + [str(worker)]
 
-    env_name = os.environ.get("DOOR_DP_LEROBOT_CONDA_ENV", "door_dp")
+    env_name = os.environ.get("DOOR_DP_LEROBOT_CONDA_ENV", "b1z1_lerobot")
     conda_exe = shutil.which("conda")
     if conda_exe:
         return [conda_exe, "run", "--no-capture-output", "-n", env_name, "python", str(worker)]

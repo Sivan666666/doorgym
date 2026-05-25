@@ -1748,6 +1748,9 @@ def run_demo(
         gym.fetch_results(sim, True)
 
         need_camera_render = bool(camera_handles and (args.show_camera_images or args.record_dp_dataset))
+        if viewer is not None and need_camera_render and (args.draw_ik_target or args.draw_camera_axes):
+            # Clear viewer-only debug lines before camera rendering so depth/RGB tensors stay clean.
+            gym.clear_lines(viewer)
         if viewer is not None or need_camera_render:
             gym.step_graphics(sim)
         if args.show_camera_images and camera_handles and step % max(1, args.camera_display_interval) == 0:
