@@ -1408,6 +1408,17 @@ def trajectory_targets(
     base_xy = base_start.copy()
     yaw = yaw_start
     phase = "walk"
+    if "home_ee_base_pos" not in traj and ik_state.current_pos_np is not None:
+        home_base_xy = traj.get("base_xy", base_start)
+        home_yaw = float(traj.get("yaw", yaw_start))
+        traj["home_ee_base_pos"] = world_pos_to_base(
+            ik_state.current_pos_np,
+            home_base_xy,
+            args.robot_z,
+            home_yaw,
+        )
+        if ik_state.current_quat_np is not None:
+            traj["home_ee_base_quat"] = world_quat_to_base(ik_state.current_quat_np, home_yaw)
 
     if step < walk_end:
         t = smoothstep((step + 1) / max(1, args.walk_steps))
@@ -1561,26 +1572,58 @@ def trajectory_targets(
             phase = "push_door"
         elif step < return_home_end:
             t = smoothstep((step - push_end + 1) / max(1, args.return_home_steps))
-            target_pos = ik_state.current_pos_np.copy() if ik_state.current_pos_np is not None else traj["push"].copy()
-            target_quat = None if args.ik_position_only else base_ik.quat_multiply(
-                traj["goal_quat"],
-                quat_from_angle_axis(-args.handle_rotate_angle, np.array([1.0, 0.0, 0.0], dtype=np.float32)),
-            )
             if "return_home_start_base_xy" not in traj:
                 traj["return_home_start_base_xy"] = traj.get("base_xy", base_push).copy()
                 traj["return_home_start_yaw"] = float(traj.get("yaw", yaw_push))
+                traj["return_home_start_target_pos"] = (
+                    traj["last_target_pos"].copy()
+                    if "last_target_pos" in traj
+                    else (ik_state.current_pos_np.copy() if ik_state.current_pos_np is not None else traj["push"].copy())
+                )
+                if not args.ik_position_only:
+                    if "last_target_quat" in traj and traj["last_target_quat"] is not None:
+                        traj["return_home_start_target_quat"] = traj["last_target_quat"].copy()
+                    elif ik_state.current_quat_np is not None:
+                        traj["return_home_start_target_quat"] = base_ik.normalize_quat(ik_state.current_quat_np).astype(np.float32)
+                    else:
+                        traj["return_home_start_target_quat"] = base_ik.quat_multiply(
+                            traj["goal_quat"],
+                            quat_from_angle_axis(-args.handle_rotate_angle, np.array([1.0, 0.0, 0.0], dtype=np.float32)),
+                        )
             base_xy = lerp(traj["return_home_start_base_xy"], base_push, t)
             yaw = float(lerp(
                 np.array([traj["return_home_start_yaw"]], dtype=np.float32),
                 np.array([yaw_push], dtype=np.float32),
                 t,
             )[0])
+            home_base_pos = traj.get("home_ee_base_pos")
+            if home_base_pos is not None:
+                return_home_goal_pos = base_pos_to_world(home_base_pos, base_xy, args.robot_z, yaw)
+            else:
+                return_home_goal_pos = traj["push"].copy()
+            target_pos = lerp(traj["return_home_start_target_pos"], return_home_goal_pos, t)
+            target_quat = None
+            if not args.ik_position_only:
+                home_base_quat = traj.get("home_ee_base_quat")
+                return_home_goal_quat = (
+                    base_quat_to_world(home_base_quat, yaw)
+                    if home_base_quat is not None
+                    else traj["goal_quat"].copy()
+                )
+                target_quat = quat_nlerp(traj["return_home_start_target_quat"], return_home_goal_quat, t)
             gripper = args.gripper_open
             traj["return_home_alpha"] = t
             phase = "return_home"
         else:
-            target_pos = ik_state.current_pos_np.copy() if ik_state.current_pos_np is not None else traj["push"].copy()
+            home_base_pos = traj.get("home_ee_base_pos")
+            target_pos = (
+                base_pos_to_world(home_base_pos, base_push, args.robot_z, yaw_push)
+                if home_base_pos is not None
+                else traj["push"].copy()
+            )
             target_quat = None
+            if not args.ik_position_only and "home_ee_base_quat" in traj:
+                target_quat = base_quat_to_world(traj["home_ee_base_quat"], yaw_push)
             base_xy = base_push.copy()
             yaw = yaw_push
             gripper = args.gripper_open
@@ -1589,6 +1632,12 @@ def trajectory_targets(
 
     traj["base_xy"] = base_xy.copy()
     traj["yaw"] = float(yaw)
+    traj["last_target_pos"] = np.asarray(target_pos, dtype=np.float32).copy()
+    traj["last_target_quat"] = (
+        None
+        if target_quat is None
+        else base_ik.normalize_quat(np.asarray(target_quat, dtype=np.float32)).astype(np.float32)
+    )
     return phase, base_xy, yaw, target_pos, target_quat, gripper, handle_goal
 
 
@@ -1837,11 +1886,14 @@ def run_demo(
                 draw_low_level_camera_axes(gym, viewer, env, arm_actor, actor_handles, args)
             if args.draw_ik_target:
                 if phase in ("return_home", "hold_home"):
-                    refresh_current_ee_pose(gym, sim, ik_state)
                     saved_target_pos_np = ik_state.target_pos_np
                     saved_target_quat_np = ik_state.target_quat_np
-                    ik_state.target_pos_np = ik_state.current_pos_np.copy()
-                    ik_state.target_quat_np = None
+                    ik_state.target_pos_np = np.asarray(target_pos, dtype=np.float32).copy()
+                    ik_state.target_quat_np = (
+                        None
+                        if target_quat is None
+                        else base_ik.normalize_quat(target_quat).astype(np.float32)
+                    )
                     try:
                         base_ik.draw_ik_target(gym, viewer, env, ik_state)
                     finally:
