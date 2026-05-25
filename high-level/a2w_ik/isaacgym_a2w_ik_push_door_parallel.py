@@ -657,6 +657,10 @@ def parse_args():
     # so keep these visualization helpers on by default and let --no_* flags opt out.
     argv = set(sys.argv[1:])
     args._explicit_cli_flags = argv
+
+    def cli_has_flag(flag):
+        return flag in argv or any(arg.startswith(f"{flag}=") for arg in argv)
+
     default_true_flags = (
         ("draw_ik_target", "--draw_ik_target", "--no_draw_ik_target"),
         ("draw_camera_axes", "--draw_camera_axes", "--no_draw_camera_axes"),
@@ -710,14 +714,25 @@ def parse_args():
     if args.a2w_dynamic_base and not args.no_disable_gravity:
         raise ValueError("--a2w_dynamic_base requires --no_disable_gravity so the wheels have ground contact.")
     if args.a2w_dynamic_base:
-        if "--stiffness" not in argv:
+        if not cli_has_flag("--stiffness"):
             args.stiffness = 400.0
-        if "--damping" not in argv:
+        if not cli_has_flag("--damping"):
             args.damping = 40.0
-        if "--stiffness" not in argv or "--damping" not in argv:
+        if not cli_has_flag("--a2w_leg_stiffness"):
+            args.a2w_leg_stiffness = 400.0
+        if not cli_has_flag("--a2w_leg_damping"):
+            args.a2w_leg_damping = 40.0
+        if (
+            not cli_has_flag("--stiffness")
+            or not cli_has_flag("--damping")
+            or not cli_has_flag("--a2w_leg_stiffness")
+            or not cli_has_flag("--a2w_leg_damping")
+        ):
             print(
                 f"a2w dynamic base: using Z1 arm PD stiffness={float(args.stiffness):.1f}, "
-                f"damping={float(args.damping):.1f}. Override with --stiffness/--damping.",
+                f"damping={float(args.damping):.1f}; leg PD stiffness={float(args.a2w_leg_stiffness):.1f}, "
+                f"damping={float(args.a2w_leg_damping):.1f}. "
+                "Override with --stiffness/--damping/--a2w_leg_stiffness/--a2w_leg_damping.",
                 flush=True,
             )
 
