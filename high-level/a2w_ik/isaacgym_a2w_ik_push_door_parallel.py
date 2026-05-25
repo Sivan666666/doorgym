@@ -89,12 +89,11 @@ A2W_DEFAULT_LEG_POS = {
 }
 A2W_DEFAULT_Z1_POS = {
     "joint1": 0.0,
-    "joint2": 1.48,
-    "joint3": -0.63,
-    "joint4": -0.84,
+    "joint2": 0.0,
+    "joint3": 0.0,
+    "joint4": 0.0,
     "joint5": 0.0,
-    "joint6": 1.57,
-    "jointGripper": -0.785,
+    "joint6": 0.0,
 }
 
 
@@ -407,6 +406,13 @@ def configure_a2w_split_dofs(gym, base_asset, arm_asset, args):
         idx = arm_name_to_idx.get(name)
         if idx is not None:
             arm_defaults[idx] = np.clip(float(value), float(arm_lower[idx]), float(arm_upper[idx]))
+    gripper_idx = arm_name_to_idx.get("jointGripper")
+    if gripper_idx is not None:
+        arm_defaults[gripper_idx] = np.clip(
+            float(args.gripper_open),
+            float(arm_lower[gripper_idx]),
+            float(arm_upper[gripper_idx]),
+        )
 
     base_states = np.zeros(base_count, dtype=gymapi.DofState.dtype)
     arm_states = np.zeros(arm_count, dtype=gymapi.DofState.dtype)
@@ -3993,11 +3999,6 @@ def main():
     base_ik.print_collision_summary(gym, base_asset, "A2W base actor", verbose=args.print_collision_summary)
     base_ik.print_collision_summary(gym, arm_asset, "Z1 arm actor", verbose=args.print_collision_summary)
     dof_config = configure_a2w_split_dofs(gym, base_asset, arm_asset, args)
-    if "jointGripper" in dof_config.arm_names:
-        gripper_idx = dof_config.arm_names.index("jointGripper")
-        dof_config.arm_states["pos"][gripper_idx] = args.gripper_open
-        dof_config.arm_positions[gripper_idx] = args.gripper_open
-        dof_config.arm_defaults[gripper_idx] = args.gripper_open
     env_states, _vision_mode = create_parallel_env_states(
         gym,
         sim,
