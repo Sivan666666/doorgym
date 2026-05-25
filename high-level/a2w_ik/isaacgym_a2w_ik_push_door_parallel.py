@@ -122,7 +122,6 @@ try:
         DoorDPJsonlLogger,
         DoorDPPolicyController,
         RawDoorDPRecorder,
-        make_state_feature_names,
         normalize_vision_mode,
         raw_image_keys_for_vision_mode,
     )
@@ -131,7 +130,6 @@ except ImportError:
     DoorDPJsonlLogger = None
     DoorDPPolicyController = None
     RawDoorDPRecorder = None
-    make_state_feature_names = None
     normalize_vision_mode = None
     raw_image_keys_for_vision_mode = None
 
@@ -150,47 +148,6 @@ DP_PHASE_NAMES = [
     "hold_home",
 ]
 DP_PHASE_ID = {name: idx for idx, name in enumerate(DP_PHASE_NAMES)}
-IKPUSH_STATE_VERSION = "zero_leg_dof_pos_prev_action_v1"
-B1Z1_DEFAULT_DOF_POS = np.asarray(
-    [
-        -0.2,
-        0.8,
-        -1.5,
-        0.2,
-        0.8,
-        -1.5,
-        -0.2,
-        0.8,
-        -1.5,
-        0.2,
-        0.8,
-        -1.5,
-        0.0,
-        1.48,
-        -0.63,
-        -0.84,
-        0.0,
-        1.57,
-        -0.785,
-    ],
-    dtype=np.float32,
-)
-FLOAT_ARM_TO_DP_DOF = {
-    "joint1": 12,
-    "joint2": 13,
-    "joint3": 14,
-    "joint4": 15,
-    "joint5": 16,
-    "joint6": 17,
-    "jointGripper": 18,
-    "z1_waist": 12,
-    "z1_shoulder": 13,
-    "z1_elbow": 14,
-    "z1_wrist_angle": 15,
-    "z1_forearm_roll": 16,
-    "z1_wrist_rotate": 17,
-    "z1_jointGripper": 18,
-}
 
 
 class ThickAxesGeometry(gymutil.LineGeometry):
@@ -2008,7 +1965,7 @@ def make_last_low_action_from_dp(last_dp_action):
     return last_low_action
 
 
-def make_float_dp_state(
+def make_a2w_dp_state(
     dof_names,
     dof_pos,
     dof_vel,
@@ -2079,7 +2036,7 @@ def base_quat_to_world(quat_base, yaw):
     return base_ik.normalize_quat(base_ik.quat_multiply(base_ik.yaw_quat(float(yaw)), quat_base)).astype(np.float32)
 
 
-def make_float_dp_action(vx, yaw_rate, target_pos, target_quat, gripper, base_xy, base_z, yaw):
+def make_a2w_dp_action(vx, yaw_rate, target_pos, target_quat, gripper, base_xy, base_z, yaw):
     target_pos_base = world_pos_to_base(target_pos, base_xy, base_z, yaw)
     target_quat_base = world_quat_to_base(base_ik.normalize_quat(target_quat), yaw)
     return np.concatenate(
@@ -2166,7 +2123,7 @@ def _round_list(value, precision=5):
     return np.round(np.asarray(value, dtype=np.float64), precision).tolist()
 
 
-def make_float_dp_policy_log_record(step, st, dp_action, dp_state, ee_pos, ee_quat, door_pos, phase):
+def make_a2w_dp_policy_log_record(step, st, dp_action, dp_state, ee_pos, ee_quat, door_pos, phase):
     action_frame = str(getattr(st, "dp_action_frame", "base"))
     return {
         "step": int(step),
@@ -2194,11 +2151,11 @@ def make_float_dp_policy_log_record(step, st, dp_action, dp_state, ee_pos, ee_qu
     }
 
 
-def print_float_dp_policy_log_record(record):
+def print_a2w_dp_policy_log_record(record):
     action = record["dp_action_raw"]
     ee = record["ee"]
     print(
-        "[DoorDP-FloatIK]"
+        "[DoorPolicy-A2W]"
         f" step={record['step']}"
         f" env={record['controlled_env_id']}/{record['num_envs']}"
         f" phase={record['phase_name']}"
@@ -2212,7 +2169,7 @@ def print_float_dp_policy_log_record(record):
     )
 
 
-def make_float_replay_snapshot(
+def make_a2w_replay_snapshot(
     args,
     door,
     dof_names,
@@ -2301,9 +2258,17 @@ def raw_action_frame_from_data(data):
     return "world"
 
 
-def raw_ikpush_state_version_from_data(data):
-    if "ikpush_state_version" in data.files:
-        return scalar_to_str(data["ikpush_state_version"])
+def raw_a2wpush_state_version_from_data(data):
+    if "a2wpush_state_version" in data.files:
+        return scalar_to_str(data["a2wpush_state_version"])
+    return "legacy"
+
+
+def raw_mode_from_data(data):
+    if "mode" in data.files:
+        return scalar_to_str(data["mode"])
+    if raw_a2wpush_state_version_from_data(data) != "legacy":
+        return "a2wpush"
     return "legacy"
 
 
@@ -2347,18 +2312,21 @@ def validate_warmstart_raw(data, args, controller, st):
     raw_vision = raw_vision_mode_from_data(data)
     if raw_vision != expected_vision_mode:
         raise ValueError(
-            f"Warm-start raw episode vision_mode={raw_vision!r}, but ikpush play is running {expected_vision_mode!r}."
+            f"Warm-start raw episode vision_mode={raw_vision!r}, but a2wpush play is running {expected_vision_mode!r}."
         )
     raw_frame = raw_action_frame_from_data(data)
     ckpt_frame = str(getattr(controller, "action_frame", "world")).lower()
     if raw_frame != ckpt_frame:
         raise ValueError(f"Warm-start raw action_frame={raw_frame!r}, checkpoint action_frame={ckpt_frame!r}.")
-    raw_state_version = raw_ikpush_state_version_from_data(data)
-    ckpt_state_version = str(controller.config.get("ikpush_state_version", "legacy"))
+    raw_mode = raw_mode_from_data(data)
+    if raw_mode != "a2wpush":
+        raise ValueError(f"Warm-start raw mode={raw_mode!r}; expected 'a2wpush'.")
+    raw_state_version = raw_a2wpush_state_version_from_data(data)
+    ckpt_state_version = str(controller.config.get("a2wpush_state_version", "legacy"))
     if raw_state_version != ckpt_state_version:
         raise ValueError(
-            f"Warm-start raw ikpush_state_version={raw_state_version!r}, "
-            f"checkpoint ikpush_state_version={ckpt_state_version!r}."
+            f"Warm-start raw a2wpush_state_version={raw_state_version!r}, "
+            f"checkpoint a2wpush_state_version={ckpt_state_version!r}."
         )
     if "door_cfg" in data.files:
         raw_cfg = normalize_config_path_for_match(data["door_cfg"])
@@ -3017,7 +2985,7 @@ def run_demo(
     dp_record_success = False
     dp_record_warned_no_camera = False
     if args.record_dp_dataset:
-        if RawDoorDPRecorder is None or make_state_feature_names is None:
+        if RawDoorDPRecorder is None:
             raise RuntimeError("DP raw recording requires high-level/dp/door_dp_common.py.")
         if not camera_handles:
             print(
@@ -3036,10 +3004,11 @@ def run_demo(
         dp_recorder = RawDoorDPRecorder(
             raw_root=args.dp_raw_root,
             fps=args.dp_fps,
-            state_feature_names=make_state_feature_names(DP_NUM_DOFS, DP_NUM_ACTIONS, DP_PHASE_NAMES),
+            state_feature_names=state_feature_names_for_a2wpush(),
             task=args.dp_task,
             vision_mode=vision_mode,
             metadata={
+                "mode": "a2wpush",
                 "door_asset_index": int(args.door_index) if int(args.door_index) >= 0 else 0,
                 "door_asset_name": door.spec.get("name", ""),
                 "door_asset_path": door.spec.get("path", ""),
@@ -3048,7 +3017,15 @@ def run_demo(
                 "action_frame": "base",
                 "action_pose_frame": "base",
                 "target_pose_frame": "base",
-                "ikpush_state_version": IKPUSH_STATE_VERSION,
+                "a2wpush_state_version": A2WPUSH_STATE_VERSION,
+                "state_dof_names": list(A2W_STATE_DOF_NAMES),
+                "a2w_asset_root": str(Path(args.a2w_asset_root).expanduser()),
+                "a2w_asset_file": str(args.a2w_asset_file),
+                "z1_asset_root": str(Path(args.z1_asset_root).expanduser()),
+                "z1_asset_file": str(args.z1_asset_file),
+                "a2w_wheel_radius": float(args.a2w_wheel_radius),
+                "a2w_track_width": float(args.a2w_track_width),
+                "a2w_wheel_velocity_sign": float(args.a2w_wheel_velocity_sign),
             },
         )
         print(
@@ -3147,7 +3124,7 @@ def run_demo(
                     )
                     dp_record_warned_no_camera = True
             else:
-                dp_state = make_float_dp_state(
+                dp_state = make_a2w_dp_state(
                     dof_names,
                     dof_pos_actual,
                     dof_vel_actual,
@@ -3160,7 +3137,7 @@ def run_demo(
                     gripper_actual,
                     prev_dp_action,
                 )
-                dp_action = make_float_dp_action(
+                dp_action = make_a2w_dp_action(
                     vx_cmd,
                     yaw_rate_cmd,
                     target_pos,
@@ -3178,7 +3155,7 @@ def run_demo(
                     DP_PHASE_ID.get(phase, 0),
                     front_mask_rgb=front_mask_rgb,
                     front_second_rgb=front_second_rgb,
-                    replay_snapshot=make_float_replay_snapshot(
+                    replay_snapshot=make_a2w_replay_snapshot(
                         args,
                         door,
                         dof_names,
@@ -3386,7 +3363,7 @@ def create_parallel_env_states(
     dof_config,
     args,
 ):
-    if args.record_dp_dataset and (RawDoorDPRecorder is None or make_state_feature_names is None):
+    if args.record_dp_dataset and RawDoorDPRecorder is None:
         raise RuntimeError("DP raw recording requires high-level/dp/door_dp_common.py.")
     vision_mode = "rgb" if args.rgb else "depth"
     if normalize_vision_mode is not None:
@@ -3601,7 +3578,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                     else float(st.args.gripper_open)
                 )
                 yaw_rate_state = float(base_ang_vel[2])
-                dp_state = make_float_dp_state(
+                dp_state = make_a2w_dp_state(
                     dof_names,
                     dof_pos_actual,
                     dof_vel_actual,
@@ -3720,7 +3697,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
             st.commanded_base_xy = np.asarray(base_xy, dtype=np.float32).copy()
             st.commanded_yaw = float(yaw)
             if dp_action is not None:
-                dp_record = make_float_dp_policy_log_record(
+                dp_record = make_a2w_dp_policy_log_record(
                     step,
                     st,
                     dp_action,
@@ -3733,7 +3710,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                 if dp_logger is not None:
                     dp_logger.write(dp_record)
                 if args.dp_print and step % max(1, int(args.dp_log_interval)) == 0:
-                    print_float_dp_policy_log_record(dp_record)
+                    print_a2w_dp_policy_log_record(dp_record)
             if phase == "return_home":
                 if "return_home_start_dofs" not in st.traj:
                     st.traj["return_home_start_dofs"] = np.asarray(st.dof_positions, dtype=np.float32).copy()
@@ -3860,7 +3837,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                         )
                         st.dp_record_warned_no_camera = True
                 else:
-                    dp_state = make_float_dp_state(
+                    dp_state = make_a2w_dp_state(
                         dof_names,
                         dof_pos_actual,
                         dof_vel_actual,
@@ -3875,7 +3852,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                         base_quat=base_quat_actual,
                         base_ang_vel_xyz=base_ang_vel,
                     )
-                    dp_action = make_float_dp_action(
+                    dp_action = make_a2w_dp_action(
                         vx_cmd,
                         yaw_rate_cmd,
                         st.last_target_pos,
@@ -3893,7 +3870,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                         DP_PHASE_ID.get(st.last_phase, 0),
                         front_mask_rgb=front_mask_rgb,
                         front_second_rgb=front_second_rgb,
-                        replay_snapshot=make_float_replay_snapshot(
+                        replay_snapshot=make_a2w_replay_snapshot(
                             st.args,
                             st.door,
                             dof_names,

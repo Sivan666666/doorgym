@@ -37,7 +37,7 @@ def parse_args():
     parser.add_argument("--dp_log_path", type=str, default=None)
     parser.add_argument("--dp_log_interval", type=int, default=25)
     parser.add_argument("--no_dp_print", dest="dp_print", action="store_false", default=True)
-    parser.add_argument("--dp_warmstart", action="store_true", help="Initialize ikpush policy play from a raw expert frame.")
+    parser.add_argument("--dp_warmstart", action="store_true", help="Initialize ikpush/a2wpush policy play from a raw expert frame.")
     parser.add_argument("--dp_warmstart_raw_episode", type=str, default=None)
     parser.add_argument("--dp_warmstart_step", type=int, default=None)
     parser.add_argument(
@@ -78,8 +78,8 @@ def main():
     if not args.dp_warmstart and any(warmstart_params):
         raise ValueError("Warm-start options require --dp_warmstart.")
     if args.dp_warmstart:
-        if args.mode != "ikpush":
-            raise ValueError("--dp_warmstart is only wired for --mode ikpush.")
+        if args.mode not in ("ikpush", "a2wpush"):
+            raise ValueError("--dp_warmstart is only wired for --mode ikpush or --mode a2wpush.")
         if args.dp_warmstart_raw_episode is None:
             raise ValueError("--dp_warmstart requires --dp_warmstart_raw_episode.")
         if args.dp_warmstart_step is None:
