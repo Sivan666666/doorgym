@@ -479,6 +479,18 @@ def parse_args():
                 "action": "store_true",
                 "help": "Use wheel-ground physics for the A2W base. Default uses SDK-style kinematic base execution.",
             },
+            {
+                "name": "--a2w_actual_base_targets",
+                "dest": "a2w_actual_base_targets",
+                "action": "store_true",
+                "help": "Compute scripted EE targets from the measured A2W base pose.",
+            },
+            {
+                "name": "--no_a2w_actual_base_targets",
+                "dest": "a2w_actual_base_targets",
+                "action": "store_false",
+                "help": "Compute scripted EE targets from the ideal scripted base pose.",
+            },
             {"name": "--rl_device", "type": str, "default": "cuda:0"},
             {"name": "--num_envs", "type": int, "default": 1},
             {"name": "--steps", "type": int, "default": 2900},
@@ -687,6 +699,12 @@ def parse_args():
     args.dp_control_all_envs = not bool(args.no_dp_control_all_envs)
     args.dp_print = "--no_dp_print" not in argv
     args.dp_action_horizon = None if int(args.dp_action_horizon) < 0 else int(args.dp_action_horizon)
+    if cli_has_flag("--a2w_actual_base_targets"):
+        args.a2w_actual_base_targets = True
+    elif cli_has_flag("--no_a2w_actual_base_targets"):
+        args.a2w_actual_base_targets = False
+    else:
+        args.a2w_actual_base_targets = bool(args.a2w_dynamic_base)
     if args.num_envs <= 0:
         raise ValueError("--num_envs must be positive.")
     if not args.dp_record_all_envs and (args.dp_record_env_id < 0 or args.dp_record_env_id >= args.num_envs):
@@ -735,6 +753,8 @@ def parse_args():
                 "Override with --stiffness/--damping/--a2w_leg_stiffness/--a2w_leg_damping.",
                 flush=True,
             )
+    if args.a2w_actual_base_targets:
+        print("a2w scripted targets: using measured base pose/yaw for EE target solving.", flush=True)
 
     if args.headless and args.show_camera_images:
         print(
@@ -2688,11 +2708,20 @@ def trajectory_targets(
     handle_pos, handle_quat = get_body_pose(gym, env, door_actor, door.handle_body_index)
     handle_goal = quat_apply(handle_quat, door.handle_goal_offset) + handle_pos
     base_xy_current = traj.get("base_xy", base_start)
-    approach_dir = np.array([base_xy_current[0], base_xy_current[1], args.robot_z], dtype=np.float32) - handle_goal
+    use_actual_base_targets = bool(getattr(args, "a2w_actual_base_targets", False) and actual_base_xy is not None)
+    target_base_xy = (
+        np.asarray(actual_base_xy, dtype=np.float32)
+        if use_actual_base_targets
+        else np.asarray(base_xy_current, dtype=np.float32)
+    )
+    target_base_z = float(actual_base_z) if use_actual_base_targets and actual_base_z is not None else float(args.robot_z)
+    target_yaw = float(actual_yaw) if use_actual_base_targets and actual_yaw is not None else float(yaw_start)
+
+    approach_dir = np.array([target_base_xy[0], target_base_xy[1], target_base_z], dtype=np.float32) - handle_goal
     approach_dir[2] = 0.0
     approach_dir = normalize(approach_dir)
     if np.linalg.norm(approach_dir) < 1.0e-5:
-        approach_dir = np.array([math.cos(yaw_start), math.sin(yaw_start), 0.0], dtype=np.float32)
+        approach_dir = np.array([math.cos(target_yaw), math.sin(target_yaw), 0.0], dtype=np.float32)
 
     pregrasp = handle_goal + approach_dir * args.pregrasp_offset
     grasp = handle_goal + approach_dir * args.grasp_offset
@@ -2700,7 +2729,7 @@ def trajectory_targets(
     pregrasp[2] += args.grasp_z_offset
     grasp[0] += args.grasp_x_offset
     grasp[2] += args.grasp_z_offset
-    goal_quat = forward_ee_quat(args, yaw_start)
+    goal_quat = forward_ee_quat(args, target_yaw)
 
     rotate_offset = np.zeros(3, dtype=np.float32)
     rotate_offset[1] = args.handle_rotate_right_distance
@@ -2737,21 +2766,14 @@ def trajectory_targets(
     yaw = yaw_start
     phase = "walk"
     if "home_ee_base_pos" not in traj and ik_state.current_pos_np is not None:
-        home_base_xy = (
-            np.asarray(actual_base_xy, dtype=np.float32)
-            if actual_base_xy is not None
-            else np.asarray(traj.get("base_xy", base_start), dtype=np.float32)
-        )
-        home_base_z = float(actual_base_z) if actual_base_z is not None else float(args.robot_z)
-        home_yaw = float(actual_yaw) if actual_yaw is not None else float(traj.get("yaw", yaw_start))
         traj["home_ee_base_pos"] = world_pos_to_base(
             ik_state.current_pos_np,
-            home_base_xy,
-            home_base_z,
-            home_yaw,
+            target_base_xy,
+            target_base_z,
+            target_yaw,
         )
         if ik_state.current_quat_np is not None:
-            traj["home_ee_base_quat"] = world_quat_to_base(ik_state.current_quat_np, home_yaw)
+            traj["home_ee_base_quat"] = world_quat_to_base(ik_state.current_quat_np, target_yaw)
 
     if step < walk_end:
         t = smoothstep((step + 1) / max(1, args.walk_steps))
@@ -2759,7 +2781,7 @@ def trajectory_targets(
         target_pos = ik_state.current_pos_np.copy() if ik_state.current_pos_np is not None else pregrasp.copy()
         target_quat = None if args.ik_position_only else ik_state.target_quat_np
     else:
-        if "pregrasp" not in traj:
+        if "pregrasp" not in traj or use_actual_base_targets:
             traj["pregrasp"] = pregrasp.copy()
             traj["grasp"] = grasp.copy()
             traj["rotate"] = rotate_pos.copy()
@@ -2767,10 +2789,11 @@ def trajectory_targets(
             traj["goal_quat"] = goal_quat.copy()
             traj["push_dir"] = push_dir.copy()
             traj["approach_dir"] = approach_dir.copy()
-            traj["initial_hold_start_pos"] = (
-                ik_state.current_pos_np.copy() if ik_state.current_pos_np is not None else pregrasp.copy()
-            )
-            if not args.ik_position_only:
+            if "initial_hold_start_pos" not in traj:
+                traj["initial_hold_start_pos"] = (
+                    ik_state.current_pos_np.copy() if ik_state.current_pos_np is not None else pregrasp.copy()
+                )
+            if not args.ik_position_only and "initial_hold_start_quat" not in traj:
                 start_quat = ik_state.target_quat_np
                 if start_quat is None:
                     start_quat = ik_state.current_quat_np if ik_state.current_quat_np is not None else goal_quat
@@ -3097,6 +3120,8 @@ def run_demo(
                 "a2w_wheel_radius": float(args.a2w_wheel_radius),
                 "a2w_track_width": float(args.a2w_track_width),
                 "a2w_wheel_velocity_sign": float(args.a2w_wheel_velocity_sign),
+                "a2w_dynamic_base": bool(args.a2w_dynamic_base),
+                "a2w_actual_base_targets": bool(args.a2w_actual_base_targets),
             },
         )
         print(
@@ -3114,7 +3139,7 @@ def run_demo(
         actual_base_xy = None
         actual_base_z = None
         actual_yaw = None
-        if args.a2w_dynamic_base:
+        if args.a2w_actual_base_targets:
             base_actor_for_state = actor_handles[0] if actor_handles else arm_actor
             base_pos_actual, _base_quat_actual, _base_lin_vel, _base_ang_vel, _roll, _pitch, yaw_actual = get_a2w_base_state(
                 gym, env, base_actor_for_state
@@ -3351,6 +3376,8 @@ def make_parallel_dp_recorder(args, door, env_index, vision_mode):
             "a2w_wheel_radius": float(args.a2w_wheel_radius),
             "a2w_track_width": float(args.a2w_track_width),
             "a2w_wheel_velocity_sign": float(args.a2w_wheel_velocity_sign),
+            "a2w_dynamic_base": bool(args.a2w_dynamic_base),
+            "a2w_actual_base_targets": bool(args.a2w_actual_base_targets),
             "parallel_env_id": int(env_index),
             "parallel_num_envs": int(args.num_envs),
             "seed": int(getattr(args, "seed", -1)),
@@ -3763,9 +3790,13 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                 base_pos_current, _base_quat_current, _base_lin_vel, _base_ang_vel, _roll, _pitch, yaw_current = get_a2w_base_state(
                     gym, st.env, st.base_actor
                 )
-                actual_base_xy = np.asarray(base_pos_current[:2], dtype=np.float32) if st.args.a2w_dynamic_base else None
-                actual_base_z = float(base_pos_current[2]) if st.args.a2w_dynamic_base else None
-                actual_yaw = float(yaw_current) if st.args.a2w_dynamic_base else None
+                actual_base_xy = (
+                    np.asarray(base_pos_current[:2], dtype=np.float32)
+                    if st.args.a2w_actual_base_targets
+                    else None
+                )
+                actual_base_z = float(base_pos_current[2]) if st.args.a2w_actual_base_targets else None
+                actual_yaw = float(yaw_current) if st.args.a2w_actual_base_targets else None
                 phase, base_xy, yaw, target_pos, target_quat, gripper, handle_goal = trajectory_targets(
                     step,
                     st.args,
