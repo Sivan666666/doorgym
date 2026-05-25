@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 import time
+from contextlib import nullcontext
 from pathlib import Path
 
 import numpy as np
@@ -926,10 +927,7 @@ def prepare_float_ik_replay_args(float_mod, args, data):
         set_missing_attr(args, "a2w_wheel_damping", 2.0)
         set_missing_attr(args, "a2w_wheel_effort", 24.5)
         set_missing_attr(args, "a2w_leg_home", "")
-    set_missing_attr(args, "single_asset", False)
-    set_missing_attr(args, "flip_visual_attachments", False)
-    set_missing_attr(args, "disable_arm_visual_flip", False)
-    set_missing_attr(args, "base_visual_flip", False)
+        set_missing_attr(args, "a2w_dynamic_base", False)
     set_missing_attr(args, "no_disable_gravity", False)
     set_missing_attr(args, "disable_self_collisions", False)
     set_missing_attr(args, "print_collision_summary", False)
@@ -1275,16 +1273,21 @@ def replay_float_ik_episode(args, episode_path, data, vision_mode, mode="ikpush"
         plane_params = float_mod.gymapi.PlaneParams()
         plane_params.normal = float_mod.gymapi.Vec3(0.0, 0.0, 1.0)
         gym.add_ground(sim, plane_params)
-        asset_temp_context = tempfile.TemporaryDirectory(prefix=f"{mode}_replay_assets_")
+        asset_temp_context = (
+            nullcontext(None)
+            if mode == "a2wpush"
+            else tempfile.TemporaryDirectory(prefix=f"{mode}_replay_assets_")
+        )
         with asset_temp_context as temp_dir:
             if mode == "a2wpush":
-                base_asset, arm_asset = float_mod.load_a2wz1_split_assets(gym, sim, args, Path(temp_dir))
+                base_asset = float_mod.load_a2wz1_single_asset(gym, sim, args)
+                arm_asset = None
             else:
                 base_asset, arm_asset = float_mod.base_ik.load_robot_assets(gym, sim, args, Path(temp_dir))
             door = float_mod.load_door_asset(gym, sim, args)
             if mode == "a2wpush":
-                dof_config = float_mod.configure_a2w_split_dofs(gym, base_asset, arm_asset, args)
-                dof_names = list(dof_config.combined_names)
+                dof_config = float_mod.configure_a2w_single_dofs(gym, base_asset, args)
+                dof_names = list(dof_config.actor_names)
                 dof_props = dof_states = dof_positions = lower = upper = defaults = speeds = selected = None
             else:
                 dof_data = float_mod.base_ik.configure_dofs(gym, arm_asset, args)
@@ -1298,15 +1301,14 @@ def replay_float_ik_episode(args, episode_path, data, vision_mode, mode="ikpush"
                     gym,
                     sim,
                     base_asset,
-                    arm_asset,
                     door,
                     dof_config,
                     args,
                     0,
                     1,
                 )
-                base_dof_names = list(dof_config.base_names)
-                arm_dof_names = list(dof_config.arm_names)
+                base_dof_names = None
+                arm_dof_names = None
             else:
                 base_actor = None
                 base_dof_names = None

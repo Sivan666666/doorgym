@@ -15,10 +15,34 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 HIGH_LEVEL_ROOT = SCRIPT_DIR.parents[0]
 DEFAULT_A2W_ROOT = HIGH_LEVEL_ROOT / "data" / "asset" / "a2w"
 DEFAULT_A2W_FILE = "a2_wheel.urdf"
-DEFAULT_Z1_ROOT = HIGH_LEVEL_ROOT / "data" / "asset" / "z1"
-DEFAULT_Z1_FILE = "urdf/z1_arm.urdf"
+DEFAULT_Z1_ROOT = HIGH_LEVEL_ROOT.parent / "low-level" / "resources" / "robots" / "b1z1"
+DEFAULT_Z1_FILE = "urdf/b1z1.urdf"
 DEFAULT_OUT_ROOT = HIGH_LEVEL_ROOT / "data" / "asset" / "a2wz1"
 DEFAULT_OUT_FILE = "urdf/a2wz1.urdf"
+
+Z1_LINKS_FROM_B1Z1 = {
+    "base",
+    "link00",
+    "link01",
+    "link02",
+    "link03",
+    "link04",
+    "link05",
+    "link06",
+    "gripperStator",
+    "gripperMover",
+    "ee_gripper_link",
+}
+Z1_JOINT_RENAMES = {
+    "z1_waist": "joint1",
+    "z1_shoulder": "joint2",
+    "z1_elbow": "joint3",
+    "z1_wrist_angle": "joint4",
+    "z1_forearm_roll": "joint5",
+    "z1_wrist_rotate": "joint6",
+    "z1_gripperStator": "gripperStator",
+    "z1_jointGripper": "jointGripper",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -85,12 +109,44 @@ def rewrite_mujoco_meshdir(root: ET.Element) -> None:
             compiler.set("meshdir", "../meshes")
 
 
+def sanitize_origin_values(root: ET.Element) -> None:
+    for origin in root.iter("origin"):
+        for key in ("xyz", "rpy"):
+            value = origin.get(key)
+            if value is not None:
+                origin.set(key, value.replace(">", "").strip())
+
+
 def build_mount_joint() -> ET.Element:
     joint = ET.Element("joint", {"name": "a2w_z1_mount_joint", "type": "fixed", "dont_collapse": "true"})
     ET.SubElement(joint, "origin", {"xyz": "0 0 0", "rpy": "0 0 0"})
     ET.SubElement(joint, "parent", {"link": "base_link"})
     ET.SubElement(joint, "child", {"link": "base"})
     return joint
+
+
+def keep_z1_child(child: ET.Element) -> bool:
+    if child.tag == "material":
+        return True
+    if child.tag == "link":
+        return child.get("name") in Z1_LINKS_FROM_B1Z1
+    if child.tag != "joint":
+        return False
+    parent = find_child(child, "parent")
+    child_link = find_child(child, "child")
+    if parent is None or child_link is None:
+        return False
+    return parent.get("link") in Z1_LINKS_FROM_B1Z1 and child_link.get("link") in Z1_LINKS_FROM_B1Z1
+
+
+def normalize_z1_child(child: ET.Element) -> ET.Element:
+    copied = deepcopy(child)
+    if copied.tag == "joint":
+        name = copied.get("name")
+        if name in Z1_JOINT_RENAMES:
+            copied.set("name", Z1_JOINT_RENAMES[name])
+    sanitize_origin_values(copied)
+    return copied
 
 
 def build_asset(args: argparse.Namespace) -> Path:
@@ -124,7 +180,9 @@ def build_asset(args: argparse.Namespace) -> Path:
     output_root.append(build_mount_joint())
 
     for child in list(z1_root_xml):
-        copied = deepcopy(child)
+        if not keep_z1_child(child):
+            continue
+        copied = normalize_z1_child(child)
         rewrite_mujoco_meshdir(copied)
         output_root.append(copied)
         rewrite_meshes(copied, z1_root, out_mesh_dir, args.copy_meshes)

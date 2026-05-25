@@ -12,12 +12,9 @@ import importlib.util
 import json
 import math
 import os
-import shutil
 import sys
-import tempfile
 import time
-import xml.etree.ElementTree as ET
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -74,41 +71,6 @@ A2W_WHEEL_DOF_NAMES = ["FL_wheel_joint", "RL_wheel_joint", "FR_wheel_joint", "RR
 A2W_Z1_DOF_NAMES = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "jointGripper"]
 A2W_STATE_DOF_NAMES = A2W_WHEEL_DOF_NAMES + A2W_Z1_DOF_NAMES + [f"reserved_zero_{i}" for i in range(8)]
 A2W_DOF_TO_DP_DOF = {name: idx for idx, name in enumerate(A2W_WHEEL_DOF_NAMES + A2W_Z1_DOF_NAMES)}
-A2W_BASE_LINKS = {
-    "world",
-    "base_link",
-    "front_bumper",
-    "rear_bumper",
-    "FL_hip",
-    "FL_thigh",
-    "FL_calf",
-    "FL_wheel",
-    "RL_hip",
-    "RL_thigh",
-    "RL_calf",
-    "RL_wheel",
-    "FR_hip",
-    "FR_thigh",
-    "FR_calf",
-    "FR_wheel",
-    "RR_hip",
-    "RR_thigh",
-    "RR_calf",
-    "RR_wheel",
-}
-A2W_ARM_LINKS = {
-    "base",
-    "link00",
-    "link01",
-    "link02",
-    "link03",
-    "link04",
-    "link05",
-    "link06",
-    "gripperStator",
-    "ee_gripper_link",
-    "gripperMover",
-}
 A2W_DEFAULT_LEG_POS = {
     "FL_hip_joint": 0.0,
     "FL_thigh_joint": 0.8,
@@ -234,7 +196,7 @@ class DoorRuntime:
 
 
 @dataclass
-class A2WSplitDofConfig:
+class A2WDofConfig:
     base_names: list[str]
     arm_names: list[str]
     combined_names: list[str]
@@ -250,6 +212,16 @@ class A2WSplitDofConfig:
     arm_upper: np.ndarray
     base_defaults: np.ndarray
     arm_defaults: np.ndarray
+    single_actor: bool = False
+    actor_names: list[str] = field(default_factory=list)
+    actor_props: object = None
+    actor_states: object = None
+    actor_positions: object = None
+    actor_lower: object = None
+    actor_upper: object = None
+    actor_defaults: object = None
+    base_actor_indices: list[int] = field(default_factory=list)
+    arm_actor_indices: list[int] = field(default_factory=list)
 
 
 def sorted_asset_items(asset_dict):
@@ -268,20 +240,20 @@ def sorted_asset_entries(asset_dict):
     return [(idx, item[1]) for idx, item in enumerate(sorted(asset_dict.items(), key=key_fn))]
 
 
-def make_robot_asset_options(args, flip_visual_attachments):
+def make_robot_asset_options(args, fix_base_link=True):
     asset_options = gymapi.AssetOptions()
-    asset_options.fix_base_link = True
+    asset_options.fix_base_link = bool(fix_base_link)
     asset_options.collapse_fixed_joints = False
     asset_options.disable_gravity = not bool(getattr(args, "no_disable_gravity", False))
     asset_options.default_dof_drive_mode = int(gymapi.DOF_MODE_POS)
     asset_options.use_mesh_materials = True
-    asset_options.flip_visual_attachments = bool(flip_visual_attachments)
+    asset_options.flip_visual_attachments = False
     asset_options.thickness = 0.001
     asset_options.armature = 0.01
     return asset_options
 
 
-def load_robot_asset(gym, sim, asset_root, asset_file, args, flip_visual_attachments, label):
+def load_robot_asset(gym, sim, asset_root, asset_file, args, label, fix_base_link=True):
     asset_root = Path(asset_root).expanduser().resolve()
     asset_file = str(asset_file)
     asset_path = asset_root / asset_file
@@ -292,103 +264,30 @@ def load_robot_asset(gym, sim, asset_root, asset_file, args, flip_visual_attachm
         )
     print(
         f"Loading {label}: root={asset_root}, file={asset_file}, "
-        f"flip_visual_attachments={bool(flip_visual_attachments)}, "
+        f"fix_base_link={bool(fix_base_link)}, "
         f"disable_gravity={not bool(getattr(args, 'no_disable_gravity', False))}"
     )
-    asset = gym.load_asset(sim, str(asset_root), asset_file, make_robot_asset_options(args, flip_visual_attachments))
+    asset = gym.load_asset(
+        sim,
+        str(asset_root),
+        asset_file,
+        make_robot_asset_options(args, fix_base_link=fix_base_link),
+    )
     if asset is None:
         raise RuntimeError(f"gym.load_asset returned None for {label}")
     return asset
 
 
-def find_child(node, tag):
-    for child in node:
-        if child.tag == tag:
-            return child
-    return None
-
-
-def populate_mesh_dir(source_mesh_dir, mesh_dir):
-    if not source_mesh_dir.exists():
-        raise FileNotFoundError(f"A2WZ1 mesh directory not found: {source_mesh_dir}")
-    mesh_dir.mkdir(parents=True, exist_ok=True)
-    for source_path in source_mesh_dir.iterdir():
-        target_path = mesh_dir / source_path.name
-        if target_path.exists():
-            continue
-        try:
-            target_path.symlink_to(source_path)
-        except OSError:
-            shutil.copy2(source_path, target_path)
-
-
-def write_filtered_urdf(source_urdf, output_urdf, keep_links, robot_name):
-    source_root = ET.parse(source_urdf).getroot()
-    output_root = ET.Element(source_root.tag, {"name": robot_name})
-
-    for child in source_root:
-        if child.tag == "material":
-            output_root.append(child)
-        elif child.tag == "link" and child.get("name") in keep_links:
-            output_root.append(child)
-        elif child.tag == "joint":
-            parent = find_child(child, "parent")
-            child_link = find_child(child, "child")
-            if parent is None or child_link is None:
-                continue
-            if parent.get("link") in keep_links and child_link.get("link") in keep_links:
-                output_root.append(child)
-
-    output_urdf.parent.mkdir(parents=True, exist_ok=True)
-    ET.ElementTree(output_root).write(output_urdf, encoding="utf-8", xml_declaration=True)
-
-
-def build_a2wz1_split_asset_root(source_asset_root, asset_file, temp_root):
-    source_asset_root = Path(source_asset_root).expanduser().resolve()
-    source_urdf = source_asset_root / asset_file
-    if not source_urdf.exists():
-        raise FileNotFoundError(
-            f"A2WZ1 URDF not found: {source_urdf}. "
-            "Build it with: python high-level/a2w_ik/build_a2wz1_asset.py"
-        )
-
-    split_root = Path(temp_root) / "a2wz1_split_assets"
-    split_urdf_dir = split_root / "urdf"
-    split_urdf_dir.mkdir(parents=True, exist_ok=True)
-    populate_mesh_dir(source_asset_root / "meshes", split_root / "meshes")
-
-    base_file = "urdf/a2w_base_visual_only.urdf"
-    arm_file = "urdf/z1_arm_visual_flip.urdf"
-    write_filtered_urdf(source_urdf, split_root / base_file, A2W_BASE_LINKS, "a2w_base")
-    write_filtered_urdf(source_urdf, split_root / arm_file, A2W_ARM_LINKS, "z1")
-    return split_root, base_file, arm_file
-
-
-def load_a2wz1_split_assets(gym, sim, args, temp_root):
-    split_root, base_file, arm_file = build_a2wz1_split_asset_root(
+def load_a2wz1_single_asset(gym, sim, args):
+    return load_robot_asset(
+        gym,
+        sim,
         args.a2wz1_asset_root,
         args.a2wz1_asset_file,
-        temp_root,
-    )
-    base_asset = load_robot_asset(
-        gym,
-        sim,
-        split_root,
-        base_file,
         args,
-        False,
-        "A2W base actor",
+        "A2W+Z1 single actor",
+        fix_base_link=not bool(args.a2w_dynamic_base),
     )
-    arm_asset = load_robot_asset(
-        gym,
-        sim,
-        split_root,
-        arm_file,
-        args,
-        not bool(getattr(args, "disable_arm_visual_flip", False)),
-        "Z1 arm actor",
-    )
-    return base_asset, arm_asset
 
 
 def state_feature_names_for_a2wpush():
@@ -422,8 +321,8 @@ def parse_named_joint_values(value, defaults, flag_name):
 def configure_a2w_dofs(gym, asset, args):
     del gym, asset, args
     raise RuntimeError(
-        "a2wpush now uses split actors. Configure DOFs with "
-        "configure_a2w_split_dofs(gym, base_asset, arm_asset, args)."
+        "a2wpush now uses a single A2W+Z1 actor. Configure DOFs with "
+        "configure_a2w_single_dofs(gym, robot_asset, args)."
     )
 
 
@@ -451,107 +350,107 @@ def normalized_dof_limits(gym, asset, dof_props):
     return lower_limits, upper_limits, dof_types
 
 
-def configure_a2w_split_dofs(gym, base_asset, arm_asset, args):
-    base_names = list(gym.get_asset_dof_names(base_asset))
-    arm_names = list(gym.get_asset_dof_names(arm_asset))
-    base_props = gym.get_asset_dof_properties(base_asset)
-    arm_props = gym.get_asset_dof_properties(arm_asset)
-    base_count = gym.get_asset_dof_count(base_asset)
-    arm_count = gym.get_asset_dof_count(arm_asset)
-    base_name_to_idx = {name: i for i, name in enumerate(base_names)}
-    arm_name_to_idx = {name: i for i, name in enumerate(arm_names)}
+def configure_a2w_single_dofs(gym, asset, args):
+    actor_names = list(gym.get_asset_dof_names(asset))
+    actor_props = gym.get_asset_dof_properties(asset)
+    actor_count = gym.get_asset_dof_count(asset)
+    name_to_idx = {name: i for i, name in enumerate(actor_names)}
 
-    missing_base = [name for name in A2W_WHEEL_DOF_NAMES if name not in base_name_to_idx]
-    missing_arm = [name for name in A2W_Z1_DOF_NAMES if name not in arm_name_to_idx]
+    missing_base = [name for name in A2W_WHEEL_DOF_NAMES if name not in name_to_idx]
+    missing_arm = [name for name in A2W_Z1_DOF_NAMES if name not in name_to_idx]
     if missing_base:
-        raise RuntimeError(f"A2W base asset is missing required wheel DOFs: {missing_base}")
+        raise RuntimeError(f"A2W+Z1 single asset is missing required wheel DOFs: {missing_base}")
     if missing_arm:
-        raise RuntimeError(f"Z1 arm asset is missing required arm DOFs: {missing_arm}")
-    total_needed = len(A2W_WHEEL_DOF_NAMES) + len(A2W_Z1_DOF_NAMES)
-    if total_needed > DP_NUM_DOFS:
-        raise RuntimeError(
-            f"A2WPush selected obs DOFs={total_needed} exceeds available {DP_NUM_DOFS}; "
-            "stop and confirm the 73D state schema before adding more DOFs."
-        )
+        raise RuntimeError(f"A2W+Z1 single asset is missing required arm DOFs: {missing_arm}")
 
-    base_props["driveMode"].fill(int(gymapi.DOF_MODE_POS))
-    base_props["stiffness"].fill(float(args.a2w_leg_stiffness))
-    base_props["damping"].fill(float(args.a2w_leg_damping))
+    actor_props["driveMode"].fill(int(gymapi.DOF_MODE_POS))
+    actor_props["stiffness"].fill(float(args.a2w_leg_stiffness))
+    actor_props["damping"].fill(float(args.a2w_leg_damping))
+    for name in A2W_Z1_DOF_NAMES:
+        idx = name_to_idx[name]
+        actor_props["stiffness"][idx] = float(args.stiffness)
+        actor_props["damping"][idx] = float(args.damping)
     for name in A2W_WHEEL_DOF_NAMES:
-        idx = base_name_to_idx[name]
-        base_props["driveMode"][idx] = int(gymapi.DOF_MODE_VEL)
-        base_props["stiffness"][idx] = 0.0
-        base_props["damping"][idx] = float(args.a2w_wheel_damping)
-        base_props["effort"][idx] = float(args.a2w_wheel_effort)
+        idx = name_to_idx[name]
+        actor_props["driveMode"][idx] = int(gymapi.DOF_MODE_VEL)
+        actor_props["stiffness"][idx] = 0.0
+        actor_props["damping"][idx] = float(args.a2w_wheel_damping)
+        actor_props["effort"][idx] = float(args.a2w_wheel_effort)
 
-    arm_props["driveMode"].fill(int(gymapi.DOF_MODE_POS))
-    arm_props["stiffness"].fill(float(args.stiffness))
-    arm_props["damping"].fill(float(args.damping))
-
-    base_lower, base_upper, base_types = normalized_dof_limits(gym, base_asset, base_props)
-    arm_lower, arm_upper, arm_types = normalized_dof_limits(gym, arm_asset, arm_props)
-
-    base_defaults = np.zeros(base_count, dtype=np.float32)
+    actor_lower, actor_upper, actor_types = normalized_dof_limits(gym, asset, actor_props)
+    actor_defaults = np.zeros(actor_count, dtype=np.float32)
     leg_home = parse_named_joint_values(args.a2w_leg_home, A2W_DEFAULT_LEG_POS, "--a2w_leg_home")
     for name, value in leg_home.items():
-        idx = base_name_to_idx.get(name)
+        idx = name_to_idx.get(name)
         if idx is not None:
-            base_defaults[idx] = np.clip(float(value), float(base_lower[idx]), float(base_upper[idx]))
-
-    arm_defaults = np.zeros(arm_count, dtype=np.float32)
+            actor_defaults[idx] = np.clip(float(value), float(actor_lower[idx]), float(actor_upper[idx]))
     for name, value in A2W_DEFAULT_Z1_POS.items():
-        idx = arm_name_to_idx.get(name)
+        idx = name_to_idx.get(name)
         if idx is not None:
-            arm_defaults[idx] = np.clip(float(value), float(arm_lower[idx]), float(arm_upper[idx]))
-    gripper_idx = arm_name_to_idx.get("jointGripper")
+            actor_defaults[idx] = np.clip(float(value), float(actor_lower[idx]), float(actor_upper[idx]))
+    gripper_idx = name_to_idx.get("jointGripper")
     if gripper_idx is not None:
-        arm_defaults[gripper_idx] = np.clip(
+        actor_defaults[gripper_idx] = np.clip(
             float(args.gripper_open),
-            float(arm_lower[gripper_idx]),
-            float(arm_upper[gripper_idx]),
+            float(actor_lower[gripper_idx]),
+            float(actor_upper[gripper_idx]),
         )
 
-    base_states = np.zeros(base_count, dtype=gymapi.DofState.dtype)
-    arm_states = np.zeros(arm_count, dtype=gymapi.DofState.dtype)
-    base_positions = base_states["pos"]
-    arm_positions = arm_states["pos"]
-    base_positions[:] = base_defaults
-    arm_positions[:] = arm_defaults
+    actor_states = np.zeros(actor_count, dtype=gymapi.DofState.dtype)
+    actor_positions = actor_states["pos"]
+    actor_positions[:] = actor_defaults
+
+    base_indices = [i for i, name in enumerate(actor_names) if name in set(A2W_LEG_DOF_NAMES + A2W_WHEEL_DOF_NAMES)]
+    arm_indices = [name_to_idx[name] for name in A2W_Z1_DOF_NAMES]
+    base_names = [actor_names[i] for i in base_indices]
+    arm_names = [actor_names[i] for i in arm_indices]
 
     print(
-        f"A2W split assets: base_dofs={base_count}, arm_dofs={arm_count}; "
+        f"A2W+Z1 single asset: actor_dofs={actor_count}; "
         "policy obs uses 4 wheel + 7 Z1 and leaves 8 DOF slots zero.",
         flush=True,
     )
-    for i, name in enumerate(base_names):
-        role = "wheel_obs" if name in A2W_WHEEL_DOF_NAMES else "leg_locked" if name in A2W_LEG_DOF_NAMES else "base_other"
-        print(
-            f"  [base {i:02d}] {name:18s} role={role:10s} type={gym.get_dof_type_string(base_types[i]):11s} "
-            f"default={base_defaults[i]: .3f} limit=[{base_lower[i]: .3f}, {base_upper[i]: .3f}]"
+    for i, name in enumerate(actor_names):
+        role = (
+            "wheel_obs"
+            if name in A2W_WHEEL_DOF_NAMES
+            else "leg_locked"
+            if name in A2W_LEG_DOF_NAMES
+            else "z1_obs"
+            if name in A2W_Z1_DOF_NAMES
+            else "actor_other"
         )
-    for i, name in enumerate(arm_names):
-        role = "z1_obs" if name in A2W_Z1_DOF_NAMES else "arm_other"
         print(
-            f"  [arm  {i:02d}] {name:18s} role={role:10s} type={gym.get_dof_type_string(arm_types[i]):11s} "
-            f"default={arm_defaults[i]: .3f} limit=[{arm_lower[i]: .3f}, {arm_upper[i]: .3f}]"
+            f"  [actor {i:02d}] {name:18s} role={role:11s} type={gym.get_dof_type_string(actor_types[i]):11s} "
+            f"default={actor_defaults[i]: .3f} limit=[{actor_lower[i]: .3f}, {actor_upper[i]: .3f}]"
         )
 
-    return A2WSplitDofConfig(
+    return A2WDofConfig(
         base_names=base_names,
         arm_names=arm_names,
         combined_names=base_names + arm_names,
-        base_props=base_props,
-        arm_props=arm_props,
-        base_states=base_states,
-        arm_states=arm_states,
-        base_positions=base_positions,
-        arm_positions=arm_positions,
-        base_lower=base_lower,
-        base_upper=base_upper,
-        arm_lower=arm_lower,
-        arm_upper=arm_upper,
-        base_defaults=base_defaults,
-        arm_defaults=arm_defaults,
+        base_props=actor_props,
+        arm_props=actor_props,
+        base_states=actor_states,
+        arm_states=actor_states,
+        base_positions=actor_positions[base_indices].copy(),
+        arm_positions=actor_positions[arm_indices].copy(),
+        base_lower=actor_lower[base_indices].copy(),
+        base_upper=actor_upper[base_indices].copy(),
+        arm_lower=actor_lower[arm_indices].copy(),
+        arm_upper=actor_upper[arm_indices].copy(),
+        base_defaults=actor_defaults[base_indices].copy(),
+        arm_defaults=actor_defaults[arm_indices].copy(),
+        single_actor=True,
+        actor_names=actor_names,
+        actor_props=actor_props,
+        actor_states=actor_states,
+        actor_positions=actor_positions,
+        actor_lower=actor_lower,
+        actor_upper=actor_upper,
+        actor_defaults=actor_defaults,
+        base_actor_indices=base_indices,
+        arm_actor_indices=arm_indices,
     )
 
 
@@ -694,22 +593,6 @@ def parse_args():
             {"name": "--speed_scale", "type": float, "default": 0.6},
             {"name": "--range_scale", "type": float, "default": 0.75},
             {"name": "--joint_filter", "type": str, "default": ""},
-            {"name": "--single_asset", "action": "store_true"},
-            {
-                "name": "--flip_visual_attachments",
-                "dest": "flip_visual_attachments",
-                "action": "store_true",
-                "default": False,
-                "help": "Deprecated debug flag. A2W never flips; Z1 flips by default unless --disable_arm_visual_flip is set.",
-            },
-            {
-                "name": "--no_flip_visual_attachments",
-                "dest": "flip_visual_attachments",
-                "action": "store_false",
-                "help": "Deprecated debug flag. Use --disable_arm_visual_flip to disable the Z1 visual flip.",
-            },
-            {"name": "--disable_arm_visual_flip", "action": "store_true"},
-            {"name": "--base_visual_flip", "action": "store_true"},
             {"name": "--no_disable_gravity", "action": "store_true"},
             {"name": "--disable_self_collisions", "action": "store_true"},
             {"name": "--print_collision_summary", "action": "store_true"},
@@ -773,6 +656,7 @@ def parse_args():
     # gymutil's wrapper does not preserve default=True for store_true custom args,
     # so keep these visualization helpers on by default and let --no_* flags opt out.
     argv = set(sys.argv[1:])
+    args._explicit_cli_flags = argv
     default_true_flags = (
         ("draw_ik_target", "--draw_ik_target", "--no_draw_ik_target"),
         ("draw_camera_axes", "--draw_camera_axes", "--no_draw_camera_axes"),
@@ -823,8 +707,6 @@ def parse_args():
             raise ValueError("--dp_warmstart requires --dp_warmstart_raw_episode.")
         if int(args.dp_warmstart_step) < 0:
             raise ValueError("--dp_warmstart requires non-negative --dp_warmstart_step.")
-    args._explicit_cli_flags = set(sys.argv[1:])
-    args.flip_visual_attachments = "--flip_visual_attachments" in args._explicit_cli_flags
     if args.a2w_dynamic_base and not args.no_disable_gravity:
         raise ValueError("--a2w_dynamic_base requires --no_disable_gravity so the wheels have ground contact.")
 
@@ -848,8 +730,6 @@ def parse_args():
     args.base_motion_period = 1.0
     args.door_motion_sign = -1.0
     args.pass_through_door = not bool(args.no_pass_through_door)
-    if getattr(args, "disable_arm_visual_flip", False):
-        args.flip_visual_attachments = False
     return args
 
 
@@ -1087,8 +967,7 @@ def create_env_actors(gym, sim, base_asset, arm_asset, door, dof_props, dof_stat
 def create_parallel_env_actors(
     gym,
     sim,
-    base_asset,
-    arm_asset,
+    robot_asset,
     door,
     dof_config,
     args,
@@ -1108,19 +987,12 @@ def create_parallel_env_actors(
     robot_pose.r = gymapi.Quat.from_euler_zyx(0.0, 0.0, args.robot_yaw)
 
     collision_filter = 1 if args.disable_self_collisions else 0
-    actor_handles = []
-    base_actor = gym.create_actor(env, base_asset, robot_pose, f"a2w_base_{env_index}", env_index, collision_filter)
-    actor_handles.append(base_actor)
-    arm_actor = gym.create_actor(env, arm_asset, robot_pose, base_ik.ARM_ACTOR_NAME, env_index, collision_filter)
-    actor_handles.append(arm_actor)
-    gym.set_actor_dof_properties(env, base_actor, dof_config.base_props)
-    gym.set_actor_dof_properties(env, arm_actor, dof_config.arm_props)
-    base_dof_states = dof_config.base_states.copy()
-    arm_dof_states = dof_config.arm_states.copy()
-    gym.set_actor_dof_states(env, base_actor, base_dof_states, gymapi.STATE_ALL)
-    gym.set_actor_dof_states(env, arm_actor, arm_dof_states, gymapi.STATE_ALL)
-    gym.set_actor_dof_position_targets(env, base_actor, base_dof_states["pos"])
-    gym.set_actor_dof_position_targets(env, arm_actor, arm_dof_states["pos"])
+    robot_actor = gym.create_actor(env, robot_asset, robot_pose, base_ik.ARM_ACTOR_NAME, env_index, collision_filter)
+    actor_handles = [robot_actor]
+    actor_dof_states = dof_config.actor_states.copy()
+    gym.set_actor_dof_properties(env, robot_actor, dof_config.actor_props)
+    gym.set_actor_dof_states(env, robot_actor, actor_dof_states, gymapi.STATE_ALL)
+    gym.set_actor_dof_position_targets(env, robot_actor, actor_dof_states["pos"])
 
     door_pose = gymapi.Transform()
     door_pose.p = gymapi.Vec3(
@@ -1157,7 +1029,7 @@ def create_parallel_env_actors(
         handle_range = max(1.0e-6, float(door.dof_upper[1] - door.dof_lower[1]) if len(door.dof_upper) >= 2 else 1.0)
         door.handle_unlock_threshold = args.handle_unlock_ratio * handle_range
 
-    return env, base_actor, arm_actor, actor_handles, door_actor, np.array([args.robot_x, robot_y], dtype=np.float32)
+    return env, robot_actor, robot_actor, actor_handles, door_actor, np.array([args.robot_x, robot_y], dtype=np.float32)
 
 
 @dataclass
@@ -1185,6 +1057,12 @@ class ParallelEnvState:
     yaw_start: float
     yaw_push: float
     traj: dict
+    single_actor: bool = False
+    actor_dof_names: list[str] = field(default_factory=list)
+    actor_dof_positions: object = None
+    actor_home_positions: object = None
+    base_actor_indices: list[int] = field(default_factory=list)
+    arm_actor_indices: list[int] = field(default_factory=list)
     dp_recorder: object = None
     dp_record_success: bool = False
     dp_record_warned_no_camera: bool = False
@@ -1835,7 +1713,29 @@ def get_actor_dof_state(gym, env, actor):
     return np.asarray(states["pos"], dtype=np.float32), np.asarray(states["vel"], dtype=np.float32)
 
 
+def compose_single_actor_dof_positions(st):
+    positions = np.asarray(st.actor_dof_positions, dtype=np.float32).copy()
+    if len(st.base_actor_indices) > 0:
+        positions[np.asarray(st.base_actor_indices, dtype=np.int64)] = np.asarray(st.base_dof_positions, dtype=np.float32)
+    if len(st.arm_actor_indices) > 0:
+        positions[np.asarray(st.arm_actor_indices, dtype=np.int64)] = np.asarray(st.dof_positions, dtype=np.float32)
+    return positions
+
+
+def sync_single_actor_dof_positions(st, actor_positions):
+    actor_positions = np.asarray(actor_positions, dtype=np.float32).copy()
+    st.actor_dof_positions = actor_positions
+    if len(st.base_actor_indices) > 0:
+        st.base_dof_positions[:] = actor_positions[np.asarray(st.base_actor_indices, dtype=np.int64)]
+    if len(st.arm_actor_indices) > 0:
+        st.dof_positions[:] = actor_positions[np.asarray(st.arm_actor_indices, dtype=np.int64)]
+
+
 def get_combined_robot_dof_state(gym, st):
+    if getattr(st, "single_actor", False):
+        actor_pos, actor_vel = get_actor_dof_state(gym, st.env, st.base_actor)
+        indices = np.asarray(list(st.base_actor_indices) + list(st.arm_actor_indices), dtype=np.int64)
+        return actor_pos[indices].astype(np.float32), actor_vel[indices].astype(np.float32)
     base_pos, base_vel = get_actor_dof_state(gym, st.env, st.base_actor)
     arm_pos, arm_vel = get_actor_dof_state(gym, st.env, st.arm_actor)
     return (
@@ -2492,29 +2392,41 @@ def apply_warmstart_state(gym, sim, st, data, step, dof_names):
     raw_dof_pos = require_warmstart_field(data, "replay_dof_pos", step)[step]
     raw_dof_vel = require_warmstart_field(data, "replay_dof_vel", step)[step]
     fallback_pos = np.concatenate([st.base_dof_positions, st.dof_positions], axis=0).astype(np.float32)
-    actor_dof_pos, actor_dof_vel = raw_dp_dofs_to_actor_dofs(raw_dof_pos, raw_dof_vel, dof_names, fallback_pos)
+    combined_dof_pos, combined_dof_vel = raw_dp_dofs_to_actor_dofs(raw_dof_pos, raw_dof_vel, dof_names, fallback_pos)
     base_len = len(st.base_dof_positions)
-    base_dof_pos = actor_dof_pos[:base_len]
-    base_dof_vel = actor_dof_vel[:base_len]
-    arm_dof_pos = actor_dof_pos[base_len:]
-    arm_dof_vel = actor_dof_vel[base_len:]
-    base_states = gym.get_actor_dof_states(st.env, st.base_actor, gymapi.STATE_ALL)
-    if len(base_states) != len(base_dof_pos):
-        raise ValueError(f"Base DOF count mismatch: actor={len(base_states)} warmstart={len(base_dof_pos)}")
-    base_states["pos"][:] = base_dof_pos
-    base_states["vel"][:] = base_dof_vel
-    gym.set_actor_dof_states(st.env, st.base_actor, base_states, gymapi.STATE_ALL)
-    gym.set_actor_dof_position_targets(st.env, st.base_actor, base_dof_pos)
-    st.base_dof_positions[:] = base_dof_pos
+    base_dof_pos = combined_dof_pos[:base_len]
+    base_dof_vel = combined_dof_vel[:base_len]
+    arm_dof_pos = combined_dof_pos[base_len:]
+    arm_dof_vel = combined_dof_vel[base_len:]
+    if getattr(st, "single_actor", False):
+        actor_states = gym.get_actor_dof_states(st.env, st.base_actor, gymapi.STATE_ALL)
+        if len(actor_states) != len(st.actor_dof_names):
+            raise ValueError(f"Single actor DOF count mismatch: actor={len(actor_states)} expected={len(st.actor_dof_names)}")
+        actor_states["pos"][np.asarray(st.base_actor_indices, dtype=np.int64)] = base_dof_pos
+        actor_states["vel"][np.asarray(st.base_actor_indices, dtype=np.int64)] = base_dof_vel
+        actor_states["pos"][np.asarray(st.arm_actor_indices, dtype=np.int64)] = arm_dof_pos
+        actor_states["vel"][np.asarray(st.arm_actor_indices, dtype=np.int64)] = arm_dof_vel
+        gym.set_actor_dof_states(st.env, st.base_actor, actor_states, gymapi.STATE_ALL)
+        gym.set_actor_dof_position_targets(st.env, st.base_actor, actor_states["pos"])
+        sync_single_actor_dof_positions(st, actor_states["pos"])
+    else:
+        base_states = gym.get_actor_dof_states(st.env, st.base_actor, gymapi.STATE_ALL)
+        if len(base_states) != len(base_dof_pos):
+            raise ValueError(f"Base DOF count mismatch: actor={len(base_states)} warmstart={len(base_dof_pos)}")
+        base_states["pos"][:] = base_dof_pos
+        base_states["vel"][:] = base_dof_vel
+        gym.set_actor_dof_states(st.env, st.base_actor, base_states, gymapi.STATE_ALL)
+        gym.set_actor_dof_position_targets(st.env, st.base_actor, base_dof_pos)
+        st.base_dof_positions[:] = base_dof_pos
 
-    arm_states = gym.get_actor_dof_states(st.env, st.arm_actor, gymapi.STATE_ALL)
-    if len(arm_states) != len(arm_dof_pos):
-        raise ValueError(f"Arm DOF count mismatch: actor={len(arm_states)} warmstart={len(arm_dof_pos)}")
-    arm_states["pos"][:] = arm_dof_pos
-    arm_states["vel"][:] = arm_dof_vel
-    gym.set_actor_dof_states(st.env, st.arm_actor, arm_states, gymapi.STATE_ALL)
-    gym.set_actor_dof_position_targets(st.env, st.arm_actor, arm_dof_pos)
-    st.dof_positions[:] = arm_dof_pos
+        arm_states = gym.get_actor_dof_states(st.env, st.arm_actor, gymapi.STATE_ALL)
+        if len(arm_states) != len(arm_dof_pos):
+            raise ValueError(f"Arm DOF count mismatch: actor={len(arm_states)} warmstart={len(arm_dof_pos)}")
+        arm_states["pos"][:] = arm_dof_pos
+        arm_states["vel"][:] = arm_dof_vel
+        gym.set_actor_dof_states(st.env, st.arm_actor, arm_states, gymapi.STATE_ALL)
+        gym.set_actor_dof_position_targets(st.env, st.arm_actor, arm_dof_pos)
+        st.dof_positions[:] = arm_dof_pos
 
     door_root_state = require_warmstart_field(data, "replay_door_root_state", step)[step].astype(np.float32)
     set_actor_root_from_state(gym, st.env, st.door_actor, door_root_state)
@@ -3365,14 +3277,29 @@ def initialize_parallel_env_state(
     base_home_positions = np.asarray(dof_config.base_defaults, dtype=np.float32).copy()
     dof_positions = np.asarray(dof_config.arm_positions, dtype=np.float32).copy()
     home_positions = np.asarray(dof_config.arm_defaults, dtype=np.float32).copy()
+    actor_dof_positions = (
+        np.asarray(dof_config.actor_positions, dtype=np.float32).copy()
+        if dof_config.single_actor
+        else np.zeros(0, dtype=np.float32)
+    )
+    actor_home_positions = (
+        np.asarray(dof_config.actor_defaults, dtype=np.float32).copy()
+        if dof_config.single_actor
+        else np.zeros(0, dtype=np.float32)
+    )
     gripper_idx = {name: i for i, name in enumerate(dof_config.arm_names)}.get("jointGripper")
     if gripper_idx is not None:
+        lower_idx = dof_config.arm_actor_indices[gripper_idx] if dof_config.single_actor else gripper_idx
         dof_positions[gripper_idx] = args.gripper_open
         home_positions[gripper_idx] = np.clip(
             args.gripper_open,
-            ik_state.lower[gripper_idx].item(),
-            ik_state.upper[gripper_idx].item(),
+            ik_state.lower[lower_idx].item(),
+            ik_state.upper[lower_idx].item(),
         )
+        if dof_config.single_actor:
+            actor_gripper_idx = dof_config.arm_actor_indices[gripper_idx]
+            actor_dof_positions[actor_gripper_idx] = dof_positions[gripper_idx]
+            actor_home_positions[actor_gripper_idx] = home_positions[gripper_idx]
 
     yaw_start = float(args.robot_yaw)
     heading = np.array([math.cos(yaw_start), math.sin(yaw_start)], dtype=np.float32)
@@ -3401,6 +3328,12 @@ def initialize_parallel_env_state(
         base_dof_names=list(dof_config.base_names),
         arm_dof_names=list(dof_config.arm_names),
         combined_dof_names=list(dof_config.combined_names),
+        single_actor=bool(dof_config.single_actor),
+        actor_dof_names=list(dof_config.actor_names),
+        actor_dof_positions=actor_dof_positions,
+        actor_home_positions=actor_home_positions,
+        base_actor_indices=list(dof_config.base_actor_indices),
+        arm_actor_indices=list(dof_config.arm_actor_indices),
         base_start=base_start,
         base_stop=base_stop,
         base_push=base_push,
@@ -3414,8 +3347,7 @@ def initialize_parallel_env_state(
 def create_parallel_env_states(
     gym,
     sim,
-    base_asset,
-    arm_asset,
+    robot_asset,
     door_templates,
     dof_config,
     args,
@@ -3436,8 +3368,7 @@ def create_parallel_env_states(
         env, base_actor, arm_actor, actor_handles, door_actor, _ = create_parallel_env_actors(
             gym,
             sim,
-            base_asset,
-            arm_asset,
+            robot_asset,
             door,
             dof_config,
             env_args,
@@ -3458,13 +3389,13 @@ def create_parallel_env_states(
             sim,
             env,
             arm_actor,
-            arm_asset,
-            dof_config.arm_names,
-            dof_config.arm_lower,
-            dof_config.arm_upper,
+            robot_asset,
+            dof_config.actor_names,
+            dof_config.actor_lower,
+            dof_config.actor_upper,
             env_args,
         )
-        configure_a2w_ik_jacobian_mapping(gym, arm_asset, dof_config.arm_names, ik_state, env_args)
+        configure_a2w_ik_jacobian_mapping(gym, robot_asset, dof_config.actor_names, ik_state, env_args)
         dp_recorder = None
         if env_args.record_dp_dataset and env_index in record_env_ids:
             dp_recorder = make_parallel_dp_recorder(env_args, door, env_index, vision_mode)
@@ -3792,35 +3723,72 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
 
         for st in env_states:
             if st.last_phase not in ("return_home", "hold_home"):
-                update_arm_ik_targets_for_env(
+                if st.single_actor:
+                    actor_targets = compose_single_actor_dof_positions(st)
+                    update_arm_ik_targets_for_env(
+                        gym,
+                        st.env,
+                        st.arm_actor,
+                        st.index,
+                        actor_targets,
+                        st.ik_state,
+                        st.args,
+                        len(actor_targets),
+                    )
+                    if gripper_idx is not None:
+                        actor_gripper_idx = st.arm_actor_indices[gripper_idx]
+                        actor_targets[actor_gripper_idx] = np.clip(
+                            st.last_gripper,
+                            st.ik_state.lower[actor_gripper_idx].item(),
+                            st.ik_state.upper[actor_gripper_idx].item(),
+                        )
+                    sync_single_actor_dof_positions(st, actor_targets)
+                else:
+                    update_arm_ik_targets_for_env(
+                        gym,
+                        st.env,
+                        st.arm_actor,
+                        st.index,
+                        st.dof_positions,
+                        st.ik_state,
+                        st.args,
+                        num_arm_dofs,
+                    )
+                    if gripper_idx is not None:
+                        st.dof_positions[gripper_idx] = np.clip(
+                            st.last_gripper,
+                            st.ik_state.lower[gripper_idx].item(),
+                            st.ik_state.upper[gripper_idx].item(),
+                        )
+            if st.single_actor:
+                actor_targets = compose_single_actor_dof_positions(st)
+                lock_a2w_leg_position_targets(st.actor_dof_names, actor_targets, st.actor_home_positions)
+                hard_lock_a2w_leg_dof_states(gym, st.env, st.base_actor, st.actor_dof_names, st.actor_home_positions)
+                apply_a2w_drive_targets(
                     gym,
                     st.env,
-                    st.arm_actor,
-                    st.index,
-                    st.dof_positions,
-                    st.ik_state,
+                    st.base_actor,
+                    st.actor_dof_names,
+                    actor_targets,
+                    getattr(st, "base_vx_cmd", 0.0),
+                    getattr(st, "base_yaw_rate_cmd", 0.0),
                     st.args,
-                    num_arm_dofs,
                 )
-                if gripper_idx is not None:
-                    st.dof_positions[gripper_idx] = np.clip(
-                        st.last_gripper,
-                        st.ik_state.lower[gripper_idx].item(),
-                        st.ik_state.upper[gripper_idx].item(),
-                    )
-            gym.set_actor_dof_position_targets(st.env, st.arm_actor, st.dof_positions)
-            lock_a2w_leg_position_targets(st.base_dof_names, st.base_dof_positions, st.base_home_positions)
-            hard_lock_a2w_leg_dof_states(gym, st.env, st.base_actor, st.base_dof_names, st.base_home_positions)
-            apply_a2w_drive_targets(
-                gym,
-                st.env,
-                st.base_actor,
-                st.base_dof_names,
-                st.base_dof_positions,
-                getattr(st, "base_vx_cmd", 0.0),
-                getattr(st, "base_yaw_rate_cmd", 0.0),
-                st.args,
-            )
+                sync_single_actor_dof_positions(st, actor_targets)
+            else:
+                gym.set_actor_dof_position_targets(st.env, st.arm_actor, st.dof_positions)
+                lock_a2w_leg_position_targets(st.base_dof_names, st.base_dof_positions, st.base_home_positions)
+                hard_lock_a2w_leg_dof_states(gym, st.env, st.base_actor, st.base_dof_names, st.base_home_positions)
+                apply_a2w_drive_targets(
+                    gym,
+                    st.env,
+                    st.base_actor,
+                    st.base_dof_names,
+                    st.base_dof_positions,
+                    getattr(st, "base_vx_cmd", 0.0),
+                    getattr(st, "base_yaw_rate_cmd", 0.0),
+                    st.args,
+                )
 
             enforce_locked_door_hinge(gym, st.env, st.door_actor, st.door)
             door_pos, door_vel = get_actor_dof_state(gym, st.env, st.door_actor)
@@ -3832,7 +3800,10 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
         gym.simulate(sim)
         gym.fetch_results(sim, True)
         for st in env_states:
-            hard_lock_a2w_leg_dof_states(gym, st.env, st.base_actor, st.base_dof_names, st.base_home_positions)
+            if st.single_actor:
+                hard_lock_a2w_leg_dof_states(gym, st.env, st.base_actor, st.actor_dof_names, st.actor_home_positions)
+            else:
+                hard_lock_a2w_leg_dof_states(gym, st.env, st.base_actor, st.base_dof_names, st.base_home_positions)
             if not args.a2w_dynamic_base:
                 apply_kinematic_base_pose(gym, st)
 
@@ -4043,30 +4014,27 @@ def main():
     plane_params.normal = gymapi.Vec3(0.0, 0.0, 1.0)
     gym.add_ground(sim, plane_params)
 
-    with tempfile.TemporaryDirectory(prefix="a2wz1_isaacgym_assets_") as temp_dir:
-        base_asset, arm_asset = load_a2wz1_split_assets(gym, sim, args, Path(temp_dir))
-        door_templates = load_door_assets(gym, sim, args)
-        base_ik.print_collision_summary(gym, base_asset, "A2W base actor", verbose=args.print_collision_summary)
-        base_ik.print_collision_summary(gym, arm_asset, "Z1 arm actor", verbose=args.print_collision_summary)
-        dof_config = configure_a2w_split_dofs(gym, base_asset, arm_asset, args)
-        env_states, _vision_mode = create_parallel_env_states(
-            gym,
-            sim,
-            base_asset,
-            arm_asset,
-            door_templates,
-            dof_config,
-            args,
-        )
-        viewer = setup_viewer(gym, sim, args)
-        try:
-            run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_config.combined_names)
-        finally:
-            if args.show_camera_images and cv2 is not None:
-                cv2.destroyAllWindows()
-            if viewer is not None:
-                gym.destroy_viewer(viewer)
-            gym.destroy_sim(sim)
+    robot_asset = load_a2wz1_single_asset(gym, sim, args)
+    dof_config = configure_a2w_single_dofs(gym, robot_asset, args)
+    door_templates = load_door_assets(gym, sim, args)
+    base_ik.print_collision_summary(gym, robot_asset, "A2W+Z1 single actor", verbose=args.print_collision_summary)
+    env_states, _vision_mode = create_parallel_env_states(
+        gym,
+        sim,
+        robot_asset,
+        door_templates,
+        dof_config,
+        args,
+    )
+    viewer = setup_viewer(gym, sim, args)
+    try:
+        run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_config.combined_names)
+    finally:
+        if args.show_camera_images and cv2 is not None:
+            cv2.destroyAllWindows()
+        if viewer is not None:
+            gym.destroy_viewer(viewer)
+        gym.destroy_sim(sim)
 
 
 if __name__ == "__main__":
