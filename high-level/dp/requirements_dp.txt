@@ -9,6 +9,8 @@
 #   conda activate door_dp
 #   python -m pip install --upgrade pip
 #   python -m pip install -r high-level/dp/requirements_dp.txt
+# This installs the local LeRobot source tree in editable mode, equivalent to:
+#   cd high-level/lerobot && python -m pip install -e .
 #
 # Keep the +cu124 suffixes below. Dropping them may install CPU wheels and break
 # LeRobot/TorchCodec CUDA compatibility for Door DP training and inference.
@@ -19,8 +21,8 @@ torch==2.6.0+cu124
 torchvision==0.21.0+cu124
 torchcodec==0.2.1+cu124
 
-# LeRobot policy training/inference.
-lerobot==0.4.4
+# LeRobot policy training/inference. Path is relative to this requirements file.
+-e ../lerobot
 diffusers==0.35.2
 accelerate==1.13.0
 safetensors==0.7.0
