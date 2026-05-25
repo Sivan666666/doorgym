@@ -709,6 +709,17 @@ def parse_args():
             raise ValueError("--dp_warmstart requires non-negative --dp_warmstart_step.")
     if args.a2w_dynamic_base and not args.no_disable_gravity:
         raise ValueError("--a2w_dynamic_base requires --no_disable_gravity so the wheels have ground contact.")
+    if args.a2w_dynamic_base:
+        if "--stiffness" not in argv:
+            args.stiffness = 400.0
+        if "--damping" not in argv:
+            args.damping = 40.0
+        if "--stiffness" not in argv or "--damping" not in argv:
+            print(
+                f"a2w dynamic base: using Z1 arm PD stiffness={float(args.stiffness):.1f}, "
+                f"damping={float(args.damping):.1f}. Override with --stiffness/--damping.",
+                flush=True,
+            )
 
     if args.headless and args.show_camera_images:
         print(
@@ -3763,7 +3774,8 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
             if st.single_actor:
                 actor_targets = compose_single_actor_dof_positions(st)
                 lock_a2w_leg_position_targets(st.actor_dof_names, actor_targets, st.actor_home_positions)
-                hard_lock_a2w_leg_dof_states(gym, st.env, st.base_actor, st.actor_dof_names, st.actor_home_positions)
+                if not st.args.a2w_dynamic_base:
+                    hard_lock_a2w_leg_dof_states(gym, st.env, st.base_actor, st.actor_dof_names, st.actor_home_positions)
                 apply_a2w_drive_targets(
                     gym,
                     st.env,
@@ -3778,7 +3790,8 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
             else:
                 gym.set_actor_dof_position_targets(st.env, st.arm_actor, st.dof_positions)
                 lock_a2w_leg_position_targets(st.base_dof_names, st.base_dof_positions, st.base_home_positions)
-                hard_lock_a2w_leg_dof_states(gym, st.env, st.base_actor, st.base_dof_names, st.base_home_positions)
+                if not st.args.a2w_dynamic_base:
+                    hard_lock_a2w_leg_dof_states(gym, st.env, st.base_actor, st.base_dof_names, st.base_home_positions)
                 apply_a2w_drive_targets(
                     gym,
                     st.env,
@@ -3800,10 +3813,11 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
         gym.simulate(sim)
         gym.fetch_results(sim, True)
         for st in env_states:
-            if st.single_actor:
-                hard_lock_a2w_leg_dof_states(gym, st.env, st.base_actor, st.actor_dof_names, st.actor_home_positions)
-            else:
-                hard_lock_a2w_leg_dof_states(gym, st.env, st.base_actor, st.base_dof_names, st.base_home_positions)
+            if not st.args.a2w_dynamic_base:
+                if st.single_actor:
+                    hard_lock_a2w_leg_dof_states(gym, st.env, st.base_actor, st.actor_dof_names, st.actor_home_positions)
+                else:
+                    hard_lock_a2w_leg_dof_states(gym, st.env, st.base_actor, st.base_dof_names, st.base_home_positions)
             if not args.a2w_dynamic_base:
                 apply_kinematic_base_pose(gym, st)
 
