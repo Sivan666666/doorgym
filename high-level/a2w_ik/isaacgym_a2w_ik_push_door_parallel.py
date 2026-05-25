@@ -270,7 +270,7 @@ def sorted_asset_entries(asset_dict):
 
 def make_robot_asset_options(args, flip_visual_attachments):
     asset_options = gymapi.AssetOptions()
-    asset_options.fix_base_link = False
+    asset_options.fix_base_link = True
     asset_options.collapse_fixed_joints = False
     asset_options.disable_gravity = not bool(getattr(args, "no_disable_gravity", False))
     asset_options.default_dof_drive_mode = int(gymapi.DOF_MODE_POS)
@@ -2729,27 +2729,6 @@ def refresh_current_ee_pose(gym, sim, ik_state):
     ik_state.current_quat_np = eef_state[3:7].detach().cpu().numpy().copy()
 
 
-def base_attached_home_ee_target(args, ik_state, traj, base_start, yaw_start, base_xy, yaw, fallback_pos, fallback_quat):
-    if "home_ee_pos_base" not in traj:
-        home_pos_world = (
-            np.asarray(ik_state.current_pos_np, dtype=np.float32).copy()
-            if ik_state.current_pos_np is not None
-            else np.asarray(fallback_pos, dtype=np.float32).copy()
-        )
-        traj["home_ee_pos_base"] = world_pos_to_base(home_pos_world, base_start, args.robot_z, yaw_start)
-        home_quat_world = (
-            base_ik.normalize_quat(np.asarray(ik_state.current_quat_np, dtype=np.float32))
-            if ik_state.current_quat_np is not None
-            else base_ik.normalize_quat(np.asarray(fallback_quat, dtype=np.float32))
-        )
-        traj["home_ee_quat_base"] = world_quat_to_base(home_quat_world, yaw_start)
-
-    target_pos = base_pos_to_world(traj["home_ee_pos_base"], base_xy, args.robot_z, yaw)
-    if args.ik_position_only:
-        return target_pos, None
-    return target_pos, base_quat_to_world(traj["home_ee_quat_base"], yaw)
-
-
 def trajectory_targets(
     step,
     args,
@@ -2820,17 +2799,8 @@ def trajectory_targets(
     if step < walk_end:
         t = smoothstep((step + 1) / max(1, args.walk_steps))
         base_xy = lerp(base_start, base_stop, t)
-        target_pos, target_quat = base_attached_home_ee_target(
-            args,
-            ik_state,
-            traj,
-            base_start,
-            yaw_start,
-            base_xy,
-            yaw,
-            pregrasp,
-            goal_quat,
-        )
+        target_pos = ik_state.current_pos_np.copy() if ik_state.current_pos_np is not None else pregrasp.copy()
+        target_quat = None if args.ik_position_only else ik_state.target_quat_np
     else:
         if "pregrasp" not in traj:
             traj["pregrasp"] = pregrasp.copy()
@@ -2996,19 +2966,10 @@ def trajectory_targets(
             traj["return_home_alpha"] = t
             phase = "return_home"
         else:
+            target_pos = ik_state.current_pos_np.copy() if ik_state.current_pos_np is not None else traj["push"].copy()
+            target_quat = None
             base_xy = base_push.copy()
             yaw = yaw_push
-            target_pos, target_quat = base_attached_home_ee_target(
-                args,
-                ik_state,
-                traj,
-                base_start,
-                yaw_start,
-                base_xy,
-                yaw,
-                traj["push"],
-                goal_quat,
-            )
             gripper = args.gripper_open
             traj["return_home_alpha"] = 1.0
             phase = "hold_home"
@@ -3161,9 +3122,8 @@ def run_demo(
             alpha = float(traj.get("return_home_alpha", 0.0))
             dof_positions[:] = lerp(traj["return_home_start_dofs"], home_positions, alpha)
             ik_state.last_pos_error = 0.0
-        elif phase in ("walk", "hold_home"):
+        elif phase == "hold_home":
             dof_positions[:] = home_positions
-            set_ik_target(ik_state, target_pos, target_quat)
             ik_state.last_pos_error = 0.0
         else:
             set_ik_target(ik_state, target_pos, target_quat)
@@ -3814,9 +3774,8 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                 alpha = float(st.traj.get("return_home_alpha", 0.0))
                 st.dof_positions[:] = lerp(st.traj["return_home_start_dofs"], st.home_positions, alpha)
                 st.ik_state.last_pos_error = 0.0
-            elif phase in ("walk", "hold_home"):
+            elif phase == "hold_home":
                 st.dof_positions[:] = st.home_positions
-                set_ik_target(st.ik_state, target_pos, target_quat)
                 st.ik_state.last_pos_error = 0.0
             else:
                 set_ik_target(st.ik_state, target_pos, target_quat)
@@ -3832,7 +3791,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
         gym.refresh_jacobian_tensors(sim)
 
         for st in env_states:
-            if st.last_phase not in ("walk", "return_home", "hold_home"):
+            if st.last_phase not in ("return_home", "hold_home"):
                 update_arm_ik_targets_for_env(
                     gym,
                     st.env,
