@@ -11,11 +11,11 @@ HIGH_LEVEL_ROOT = DP_ROOT.parent
 def parse_args():
     parser = argparse.ArgumentParser(
         description=(
-            "Record pull/push/ikpush door expert play rollouts into raw .npz episodes. "
+            "Record pull/push/ikpush/ikpull door expert play rollouts into raw .npz episodes. "
             "Only envs that open the door to the scripted pass threshold are saved."
         )
     )
-    parser.add_argument("--mode", choices=["ikpush", "pull", "push", "both"], default="ikpush")
+    parser.add_argument("--mode", choices=["ikpush", "ikpull", "pull", "push", "both"], default="ikpush")
     parser.add_argument(
         "--num_episodes",
         type=int,
@@ -43,19 +43,19 @@ def parse_args():
         "--steps",
         type=int,
         default=None,
-        help="Simulator steps. Defaults to 2210 for ikpush and 2500 for pull/push.",
+        help="Simulator steps. Defaults to 2210 for ikpush, 4300 for ikpull, and 2500 for pull/push.",
     )
     parser.add_argument(
         "--seed",
         type=int,
         default=-1,
-        help="Base seed for ikpush recording. When --num_rollouts > 1, rollout_idx is added.",
+        help="Base seed for float_ik recording. When --num_rollouts > 1, rollout_idx is added.",
     )
     parser.add_argument("--rl_device", type=str, default="cuda:0")
     parser.add_argument("--sim_device", type=str, default="cuda:0")
     parser.add_argument("--graphics_device_id", type=int, default=None)
     parser.add_argument("--headless", action="store_true")
-    parser.add_argument("--rgb", action="store_true", help="Record RGB+mask vision for push/ikpush data instead of full depth+mask.")
+    parser.add_argument("--rgb", action="store_true", help="Record RGB+mask vision for push/ikpush/ikpull data instead of full depth+mask.")
     parser.add_argument("--record_env_id", type=int, default=0)
     parser.add_argument("--record_all_envs", dest="record_all_envs", action="store_true", default=True)
     parser.add_argument("--no_record_all_envs", dest="record_all_envs", action="store_false")
@@ -75,13 +75,15 @@ def script_for_mode(mode):
         return HIGH_LEVEL_ROOT / "play_b1z1_push_with_door_asset_camera.py", "push lever door open", False
     if mode == "ikpush":
         return HIGH_LEVEL_ROOT / "float_ik" / "isaacgym_float_ik_b1z1_basearn_push_door_parallel.py", "push lever door open", True
+    if mode == "ikpull":
+        return HIGH_LEVEL_ROOT / "float_ik" / "isaacgym_float_ik_b1z1_basearn_pull_door_parallel.py", "pull lever door open", True
     raise ValueError(mode)
 
 
 def run_one(mode, rollout_idx, args):
-    script, task, is_float_ik_push = script_for_mode(mode)
+    script, task, is_float_ik = script_for_mode(mode)
     attempts = args.num_envs if args.record_all_envs else 1
-    if is_float_ik_push:
+    if is_float_ik:
         extra = args.play_args[1:] if args.play_args[:1] == ["--"] else args.play_args
         parallel_envs = args.num_envs if args.record_all_envs else max(1, args.record_env_id + 1)
         cmd = [
@@ -189,18 +191,18 @@ def main():
         raise ValueError("--num_rollouts must be positive")
     modes = ["pull", "push"] if args.mode == "both" else [args.mode]
     if args.steps is None:
-        args.steps = 2210 if modes == ["ikpush"] else 2500
-    if args.rgb and any(mode not in ("push", "ikpush") for mode in modes):
-        raise ValueError("--rgb recording is only wired for push/ikpush mode; pass --mode push or --mode ikpush.")
+        args.steps = 2210 if modes == ["ikpush"] else (4300 if modes == ["ikpull"] else 2500)
+    if args.rgb and any(mode not in ("push", "ikpush", "ikpull") for mode in modes):
+        raise ValueError("--rgb recording is only wired for push/ikpush/ikpull mode.")
     if args.headless:
         print(
             "⚠️📷 Headless raw recording requested. If Isaac Gym cannot render camera tensors, "
             "the play script will print a camera-unavailable warning and discard empty episodes.",
             flush=True,
         )
-    if args.record_all_envs and modes == ["ikpush"]:
+    if args.record_all_envs and len(modes) == 1 and modes[0] in ("ikpush", "ikpull"):
         print(
-            f"ikpush raw recording uses the parallel float_ik recorder with {args.num_envs} env(s) "
+            f"{modes[0]} raw recording uses the parallel float_ik recorder with {args.num_envs} env(s) "
             f"for {args.num_rollouts} rollout(s); failed attempts are discarded.",
             flush=True,
         )

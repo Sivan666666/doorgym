@@ -25,7 +25,14 @@ RGB_LEROBOT_IMAGE_KEYS = [
     "observation.images.front_handle_mask",
     "observation.images.front_rgb",
 ]
-DATASET_METADATA_KEYS = ("action_frame", "action_pose_frame", "target_pose_frame", "ikpush_state_version")
+DATASET_METADATA_KEYS = (
+    "action_frame",
+    "action_pose_frame",
+    "target_pose_frame",
+    "ikpush_state_version",
+    "door_dp_mode",
+    "controller_mode",
+)
 ACTION_NAMES = [
     "vx",
     "yaw",

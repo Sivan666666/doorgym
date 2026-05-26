@@ -97,6 +97,17 @@ def detect_ikpush_state_version(data, sidecar):
     return "legacy"
 
 
+def detect_controller_mode(data, sidecar):
+    for source in (data, sidecar or {}):
+        for key in ("door_dp_mode", "controller_mode"):
+            if isinstance(source, dict):
+                if key in source:
+                    return str(source[key])
+            elif key in source.files:
+                return scalar_str(source[key])
+    return "legacy"
+
+
 def detect_raw_vision_mode(data, sidecar):
     if sidecar and sidecar.get("vision_mode") is not None:
         return normalize_vision_mode(sidecar["vision_mode"])
@@ -113,7 +124,17 @@ def require_fields(data, keys, path):
         raise KeyError(f"{path} is missing required fields for this vision mode: {missing}")
 
 
-def load_episode_payload(path, sidecar, image_keys, keep_state_indices, action_frame, ikpush_state_version, vision_mode, initial_task):
+def load_episode_payload(
+    path,
+    sidecar,
+    image_keys,
+    keep_state_indices,
+    action_frame,
+    ikpush_state_version,
+    controller_mode,
+    vision_mode,
+    initial_task,
+):
     with np.load(path, allow_pickle=True) as data:
         episode_action_frame = detect_action_frame(data, sidecar)
         if episode_action_frame != action_frame:
@@ -126,6 +147,12 @@ def load_episode_payload(path, sidecar, image_keys, keep_state_indices, action_f
             raise ValueError(
                 f"Episode {path} ikpush_state_version={episode_state_version!r}, expected {ikpush_state_version!r}; "
                 "do not mix old and new ikpush state semantics."
+            )
+        episode_controller_mode = detect_controller_mode(data, sidecar)
+        if episode_controller_mode != controller_mode:
+            raise ValueError(
+                f"Episode {path} door_dp_mode={episode_controller_mode!r}, expected {controller_mode!r}; "
+                "do not mix ikpush and ikpull datasets."
             )
         task = scalar_str(data["task"]) if "task" in data else initial_task
         states = data["state"].astype(np.float32)
@@ -228,6 +255,7 @@ def main():
     raw_vision_mode = detect_raw_vision_mode(first, sidecar)
     action_frame = detect_action_frame(first, sidecar)
     ikpush_state_version = detect_ikpush_state_version(first, sidecar)
+    controller_mode = detect_controller_mode(first, sidecar)
     if action_frame not in ("world", "base"):
         raise ValueError(f"Unsupported raw action_frame={action_frame!r}; expected 'world' or 'base'.")
     if raw_vision_mode != vision_mode:
@@ -259,6 +287,12 @@ def main():
                 f"Existing LeRobot dataset at {out_dir} has ikpush_state_version={existing_state_version!r}, "
                 f"but raw data has {ikpush_state_version!r}; use a different --repo_id or pass --overwrite."
             )
+        existing_controller_mode = str(existing_sidecar.get("door_dp_mode", existing_sidecar.get("controller_mode", "legacy")))
+        if existing_controller_mode != controller_mode:
+            raise ValueError(
+                f"Existing LeRobot dataset at {out_dir} has door_dp_mode={existing_controller_mode!r}, "
+                f"but raw data has {controller_mode!r}; use a different --repo_id or pass --overwrite."
+            )
     if args.overwrite and out_dir.exists():
         shutil.rmtree(out_dir)
 
@@ -276,6 +310,8 @@ def main():
             "action_pose_frame": action_frame,
             "target_pose_frame": action_frame,
             "ikpush_state_version": ikpush_state_version,
+            "door_dp_mode": controller_mode,
+            "controller_mode": controller_mode,
         },
     )
     payloads = iter_episode_payloads(
@@ -286,6 +322,7 @@ def main():
         keep_state_indices=keep_state_indices,
         action_frame=action_frame,
         ikpush_state_version=ikpush_state_version,
+        controller_mode=controller_mode,
         vision_mode=vision_mode,
         initial_task=initial_task,
     )
@@ -325,6 +362,8 @@ def main():
         "action_pose_frame": action_frame,
         "target_pose_frame": action_frame,
         "ikpush_state_version": ikpush_state_version,
+        "door_dp_mode": controller_mode,
+        "controller_mode": controller_mode,
     }
     if vision_mode == "rgb":
         sidecar_payload["vision_mode"] = vision_mode

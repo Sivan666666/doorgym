@@ -109,6 +109,7 @@ def main():
     if dataset_vision_mode != vision_mode:
         raise ValueError(f"Dataset vision_mode={dataset_vision_mode!r}, train expected {vision_mode!r}.")
     action_frame = str(sidecar_data.get("action_frame", sidecar_data.get("action_pose_frame", "world"))).lower()
+    controller_mode = str(sidecar_data.get("door_dp_mode", sidecar_data.get("controller_mode", "legacy")))
 
     dataset = DoorPolicyChunkDataset(dataset_root, args.repo_id, args.chunk_size, vision_mode=vision_mode)
     stats = dataset.stats
@@ -175,6 +176,8 @@ def main():
             "vision_mode": vision_mode,
             "action_frame": action_frame,
             "ikpush_state_version": str(sidecar_data.get("ikpush_state_version", "legacy")),
+            "door_dp_mode": controller_mode,
+            "controller_mode": controller_mode,
             "dataset_root": str(dataset_root),
             "repo_id": args.repo_id,
         }

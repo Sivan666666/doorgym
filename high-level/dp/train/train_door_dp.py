@@ -150,6 +150,7 @@ def main():
     action_frame = str(sidecar_data.get("action_frame", sidecar_data.get("action_pose_frame", "world"))).lower()
     if action_frame not in ("world", "base"):
         raise ValueError(f"LeRobot dataset action_frame={action_frame!r}; expected 'world' or 'base'.")
+    controller_mode = str(sidecar_data.get("door_dp_mode", sidecar_data.get("controller_mode", "legacy")))
 
     dataset = DoorPolicySequenceDataset(
         dataset_root,
@@ -241,6 +242,8 @@ def main():
             "action_pose_frame": action_frame,
             "target_pose_frame": action_frame,
             "ikpush_state_version": str(sidecar_data.get("ikpush_state_version", "legacy")),
+            "door_dp_mode": controller_mode,
+            "controller_mode": controller_mode,
             "dataset_root": str(dataset_root),
             "repo_id": args.repo_id,
         }

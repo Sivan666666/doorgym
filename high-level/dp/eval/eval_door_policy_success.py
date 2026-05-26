@@ -108,7 +108,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate Door policy success rate by repeatedly running play.")
     parser.add_argument("--checkpoint", required=True, type=str, help="Door policy checkpoint (.pt manifest or directory).")
     parser.add_argument("--yaml", "--door_cfg", dest="door_cfg", required=True, type=str, help="Door YAML config.")
-    parser.add_argument("--mode", choices=["ikpush", "push", "pull"], default="ikpush")
+    parser.add_argument("--mode", choices=["ikpush", "ikpull", "push", "pull"], default="ikpush")
     parser.add_argument("--num_envs", type=int, default=16, help="Number of envs per play run.")
     parser.add_argument("--total_trials", type=int, default=64, help="Total policy-controlled attempts to run.")
     parser.add_argument(
@@ -117,7 +117,7 @@ def parse_args() -> argparse.Namespace:
         default=1,
         help="Number of play batches to run concurrently. Each batch is a separate Isaac Gym subprocess.",
     )
-    parser.add_argument("--steps", type=int, default=2500)
+    parser.add_argument("--steps", type=int, default=None)
     parser.add_argument("--pass_open_angle_deg", type=float, default=80.0)
     parser.add_argument("--success_metric", choices=["auto", "signed", "abs"], default="auto")
     parser.add_argument("--door_motion_sign", type=float, default=-1.0)
@@ -154,7 +154,7 @@ def resolve_path(path: str) -> Path:
 def success_metric_for_mode(mode: str, metric: str) -> str:
     if metric != "auto":
         return metric
-    return "abs" if mode == "pull" else "signed"
+    return "abs" if mode in ("pull", "ikpull") else "signed"
 
 
 def read_jsonl(path: Path):
@@ -446,6 +446,8 @@ def main() -> None:
         raise ValueError("--parallel_batches must be positive.")
     if args.progress_interval <= 0:
         raise ValueError("--progress_interval must be positive.")
+    if args.steps is None:
+        args.steps = 4300 if args.mode == "ikpull" else 2500
     PROGRESS_RENDERER = InlineProgress(enabled=not args.no_progress)
 
     metric = success_metric_for_mode(args.mode, args.success_metric)
