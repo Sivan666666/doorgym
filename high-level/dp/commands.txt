@@ -90,7 +90,9 @@ conda run -n door_dp python high-level/dp/convert_door_raw_to_lerobot.py \
     --root high-level/data/lerobot \
     --repo_id local/4door_ikpush \
     --overwrite \
-    --num_workers 4
+    --num_workers 4 \
+    --image_storage video \
+    --video_codec h264
 
 # RGB+mask 数据转换，额外加 --rgb。
 conda run -n door_dp python high-level/dp/convert_door_raw_to_lerobot.py \
@@ -99,7 +101,9 @@ conda run -n door_dp python high-level/dp/convert_door_raw_to_lerobot.py \
     --repo_id local/4door_ikpush_rgb \
     --overwrite \
     --num_workers 4 \
-    --rgb
+    --rgb \
+    --image_storage video \
+    --video_codec h264
 
 # 可视化检查 LeRobotDataset。
 conda run -n door_dp python -m lerobot.scripts.visualize_dataset \

@@ -38,6 +38,13 @@ def parse_args():
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--rgb", action="store_true", help="Convert raw RGB+mask Door DP data. Required for RGB raw data.")
     parser.add_argument(
+        "--image_storage",
+        choices=["video", "image"],
+        default="video",
+        help="Store visual observations as LeRobot v3 videos by default; use 'image' for embedded parquet images.",
+    )
+    parser.add_argument("--video_codec", type=str, default="h264", help="Video codec used when --image_storage video.")
+    parser.add_argument(
         "--num_workers",
         type=int,
         default=1,
@@ -305,13 +312,15 @@ def main():
         task=initial_task,
         resume=not args.overwrite,
         vision_mode=vision_mode,
+        image_storage=args.image_storage,
+        video_codec=args.video_codec,
         metadata={
             "action_frame": action_frame,
             "action_pose_frame": action_frame,
             "target_pose_frame": action_frame,
             "ikpush_state_version": ikpush_state_version,
-            "door_dp_mode": controller_mode,
-            "controller_mode": controller_mode,
+            "image_storage": args.image_storage,
+            "video_codec": args.video_codec,
         },
     )
     payloads = iter_episode_payloads(
@@ -362,8 +371,8 @@ def main():
         "action_pose_frame": action_frame,
         "target_pose_frame": action_frame,
         "ikpush_state_version": ikpush_state_version,
-        "door_dp_mode": controller_mode,
-        "controller_mode": controller_mode,
+        "image_storage": args.image_storage,
+        "video_codec": args.video_codec,
     }
     if vision_mode == "rgb":
         sidecar_payload["vision_mode"] = vision_mode
