@@ -286,7 +286,7 @@ def parse_args():
             {"name": "--brace_open_direction_sign", "type": float, "default": 1.0},
             {"name": "--door_freeze_blend_start_ratio", "type": float, "default": 0.82},
             {"name": "--door_freeze_target_ratio", "type": float, "default": 0.94},
-            {"name": "--enable_base_door_collision_check", "dest": "enable_base_door_collision_check", "action": "store_true", "default": True},
+            {"name": "--enable_base_door_collision_check", "dest": "enable_base_door_collision_check", "action": "store_true", "default": False},
             {"name": "--no_base_door_collision_check", "dest": "enable_base_door_collision_check", "action": "store_false"},
             {"name": "--base_door_collision_distance", "type": float, "default": 0.04},
             {"name": "--base_collision_front_extent", "type": float, "default": 0.55},
@@ -410,10 +410,7 @@ def parse_args():
 
     argv = set(sys.argv[1:])
     dc.finalize_float_ik_args(args, argv)
-    if "--no_base_door_collision_check" in argv:
-        args.enable_base_door_collision_check = False
-    else:
-        args.enable_base_door_collision_check = True
+    args.enable_base_door_collision_check = "--enable_base_door_collision_check" in argv and "--no_base_door_collision_check" not in argv
     if "--no_unidoor_style_pull" in argv:
         args.unidoor_style_pull = False
     elif "--unidoor_style_pull" in argv:

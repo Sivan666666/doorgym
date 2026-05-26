@@ -1144,7 +1144,7 @@ def monitor_command_jumps(gym, step, st, base_xy, yaw, target_pos, phase):
 
 def monitor_base_door_collision(gym, step, st):
     args = st.args
-    if not bool(getattr(args, "enable_base_door_collision_check", True)):
+    if not bool(getattr(args, "enable_base_door_collision_check", False)):
         return False
     if not hasattr(st, "base_body_handles"):
         base_actor = st.actor_handles[0] if len(st.actor_handles) > 1 else st.arm_actor

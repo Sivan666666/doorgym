@@ -156,7 +156,7 @@ def parse_args():
             {"name": "--handle_follow_push_ratio", "type": float, "default": 0.45},
             {"name": "--door_freeze_blend_start_ratio", "type": float, "default": 0.82},
             {"name": "--door_freeze_target_ratio", "type": float, "default": 0.94},
-            {"name": "--enable_base_door_collision_check", "dest": "enable_base_door_collision_check", "action": "store_true", "default": True},
+            {"name": "--enable_base_door_collision_check", "dest": "enable_base_door_collision_check", "action": "store_true", "default": False},
             {"name": "--no_base_door_collision_check", "dest": "enable_base_door_collision_check", "action": "store_false"},
             {"name": "--base_door_collision_distance", "type": float, "default": 0.04},
             {"name": "--base_collision_front_extent", "type": float, "default": 0.55},
@@ -305,10 +305,7 @@ def parse_args():
     args.dp_record_all_envs = not bool(args.no_dp_record_all_envs)
     args.dp_control_all_envs = not bool(args.no_dp_control_all_envs)
     args.dp_print = "--no_dp_print" not in argv
-    if "--no_base_door_collision_check" in argv:
-        args.enable_base_door_collision_check = False
-    else:
-        args.enable_base_door_collision_check = True
+    args.enable_base_door_collision_check = "--enable_base_door_collision_check" in argv and "--no_base_door_collision_check" not in argv
     args.dp_action_horizon = None if int(args.dp_action_horizon) < 0 else int(args.dp_action_horizon)
     if args.num_envs <= 0:
         raise ValueError("--num_envs must be positive.")
