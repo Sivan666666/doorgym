@@ -179,6 +179,8 @@ class ParallelDoorEnvState:
     last_target_quat: object = None
     last_gripper: float = 0.0
     success: bool = False
+    base_door_collision_detected: bool = False
+    base_door_collision_log_step: int = -10**9
     dp_recorder: object = None
     dp_record_success: bool = False
     dp_record_warned_no_camera: bool = False
@@ -1211,6 +1213,10 @@ def monitor_base_door_collision(gym, step, st):
     collision = bool(frame_contact or gated_rigid_contact or geom_collision)
     if collision:
         st.base_door_collision_detected = True
+        if hasattr(st, "success"):
+            st.success = False
+        if hasattr(st, "dp_record_success"):
+            st.dp_record_success = False
         interval = max(1, int(getattr(args, "collision_log_interval", 30)))
         if int(step) - int(getattr(st, "base_door_collision_log_step", -10**9)) >= interval:
             st.base_door_collision_log_step = int(step)
@@ -2347,7 +2353,10 @@ def record_float_dp_frame(gym, sim, st, dof_names, gripper_idx, dt, phase_id, do
         ),
     )
     st.last_dp_action = dp_action.copy()
-    st.dp_record_success = st.dp_record_success or door_success(door_pos_record, st.args)
+    if bool(getattr(st, "base_door_collision_detected", False)):
+        st.dp_record_success = False
+    elif door_success(door_pos_record, st.args):
+        st.dp_record_success = True
     return True
 
 
@@ -2357,7 +2366,9 @@ def finish_float_dp_recorders(env_states, args):
     for st in env_states:
         if st.dp_recorder is None:
             continue
-        if st.dp_record_success and st.dp_recorder.frame_count > 0:
+        collision_detected = bool(getattr(st, "base_door_collision_detected", False))
+        valid_success = bool(st.dp_record_success) and not collision_detected
+        if valid_success and st.dp_recorder.frame_count > 0:
             st.dp_recorder.save_episode()
             saved += 1
             print(
@@ -2372,9 +2383,14 @@ def finish_float_dp_recorders(env_states, args):
                 flush=True,
             )
         else:
+            reason = (
+                "base-door collision detected"
+                if collision_detected
+                else f"door did not reach {args.pass_open_angle_deg} deg"
+            )
             print(
                 f"Finished raw Door DP recording env={st.index}: saved_successful=0/1 "
-                f"frames={st.dp_recorder.frame_count} reason=door did not reach {args.pass_open_angle_deg} deg",
+                f"frames={st.dp_recorder.frame_count} reason={reason}",
                 flush=True,
             )
         st.dp_recorder.finalize()

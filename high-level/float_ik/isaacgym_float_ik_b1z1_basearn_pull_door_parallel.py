@@ -2620,6 +2620,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
         for st in env_states:
             door_pos_record, _door_vel_record = dc.get_actor_dof_state(gym, st.env, st.door_actor)
             st.last_door_pos = door_pos_record
+            dc.monitor_base_door_collision(gym, step, st)
             if st.dp_recorder is not None:
                 dc.record_float_dp_frame(
                     gym,
@@ -2632,8 +2633,9 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                     door_pos_record,
                     _door_vel_record,
                 )
-            st.success = st.success or dc.door_success(door_pos_record, st.args)
-            dc.monitor_base_door_collision(gym, step, st)
+            st.success = (st.success or dc.door_success(door_pos_record, st.args)) and not bool(
+                getattr(st, "base_door_collision_detected", False)
+            )
             st.prev_base_xy = np.asarray(st.traj.get("base_xy", st.base_start), dtype=np.float32).copy()
             st.prev_yaw = float(st.traj.get("yaw", st.yaw_start))
 

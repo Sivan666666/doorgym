@@ -156,6 +156,14 @@ def parse_args():
             {"name": "--handle_follow_push_ratio", "type": float, "default": 0.45},
             {"name": "--door_freeze_blend_start_ratio", "type": float, "default": 0.82},
             {"name": "--door_freeze_target_ratio", "type": float, "default": 0.94},
+            {"name": "--enable_base_door_collision_check", "dest": "enable_base_door_collision_check", "action": "store_true", "default": True},
+            {"name": "--no_base_door_collision_check", "dest": "enable_base_door_collision_check", "action": "store_false"},
+            {"name": "--base_door_collision_distance", "type": float, "default": 0.04},
+            {"name": "--base_collision_front_extent", "type": float, "default": 0.55},
+            {"name": "--base_collision_rear_extent", "type": float, "default": 0.65},
+            {"name": "--base_collision_half_width", "type": float, "default": 0.24},
+            {"name": "--rigid_contact_geom_gate", "type": float, "default": 0.16},
+            {"name": "--collision_log_interval", "type": int, "default": 30},
             {
                 "name": "--push_follow_orientation",
                 "action": "store_true",
@@ -297,6 +305,10 @@ def parse_args():
     args.dp_record_all_envs = not bool(args.no_dp_record_all_envs)
     args.dp_control_all_envs = not bool(args.no_dp_control_all_envs)
     args.dp_print = "--no_dp_print" not in argv
+    if "--no_base_door_collision_check" in argv:
+        args.enable_base_door_collision_check = False
+    else:
+        args.enable_base_door_collision_check = True
     args.dp_action_horizon = None if int(args.dp_action_horizon) < 0 else int(args.dp_action_horizon)
     if args.num_envs <= 0:
         raise ValueError("--num_envs must be positive.")
@@ -396,6 +408,8 @@ class ParallelEnvState:
     last_target_pos: object = None
     last_target_quat: object = None
     last_gripper: float = 0.0
+    base_door_collision_detected: bool = False
+    base_door_collision_log_step: int = -10**9
 
 
 clone_door_runtime = dc.clone_door_runtime
@@ -1162,14 +1176,19 @@ def run_demo(
             args=args,
             env=env,
             arm_actor=arm_actor,
+            actor_handles=actor_handles,
             door=door,
+            door_actor=door_actor,
             camera_handles=camera_handles,
             ik_state=ik_state,
             base_start=base_start,
+            yaw_start=yaw_start,
             traj=traj,
             dp_recorder=dp_recorder,
             dp_record_success=False,
             dp_record_warned_no_camera=False,
+            base_door_collision_detected=False,
+            base_door_collision_log_step=-10**9,
             last_dp_action=prev_dp_action.copy(),
         )
     while step < max_steps:
@@ -1237,9 +1256,11 @@ def run_demo(
             single_record_state.prev_base_xy = prev_base_xy
             single_record_state.prev_yaw = prev_yaw
             single_record_state.last_phase = phase
+            single_record_state.last_door_pos = door_pos_record
             single_record_state.last_target_pos = np.asarray(target_pos, dtype=np.float32).copy()
             single_record_state.last_target_quat = None if target_quat is None else np.asarray(target_quat, dtype=np.float32).copy()
             single_record_state.last_gripper = float(gripper)
+            dc.monitor_base_door_collision(gym, step, single_record_state)
             dc.record_float_dp_frame(
                 gym,
                 sim,
@@ -1645,6 +1666,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
         for st in env_states:
             door_pos_record, door_vel_record = get_actor_dof_state(gym, st.env, st.door_actor)
             st.last_door_pos = door_pos_record
+            dc.monitor_base_door_collision(gym, step, st)
             if st.dp_recorder is not None:
                 dc.record_float_dp_frame(
                     gym,
