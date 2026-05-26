@@ -1140,8 +1140,10 @@ def apply_float_ik_recorded_action(float_mod, action, base_xy, base_z, yaw, dt, 
     target_quat_action = float_mod.base_ik.normalize_quat(np.asarray(action[5:9], dtype=np.float32))
     action_frame = str(action_frame or "base").lower()
     if action_frame == "base":
-        target_pos = float_mod.base_pos_to_world(target_pos_action, base_xy, base_z, yaw)
-        target_quat = float_mod.base_quat_to_world(target_quat_action, yaw)
+        # Float IK raw actions encode vx/yaw_rate for prev->current, and encode
+        # the target pose in that current-frame base. Reconstruct the same frame.
+        target_pos = float_mod.base_pos_to_world(target_pos_action, base_xy_next, base_z, yaw_next)
+        target_quat = float_mod.base_quat_to_world(target_quat_action, yaw_next)
     elif action_frame == "world":
         target_pos = target_pos_action
         target_quat = target_quat_action

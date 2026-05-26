@@ -1922,8 +1922,11 @@ def apply_float_dp_action(action, base_xy, base_z, yaw, dt, action_frame="base")
     target_quat_action = base_ik.normalize_quat(np.asarray(action[5:9], dtype=np.float32))
     action_frame = str(action_frame or "base").lower()
     if action_frame == "base":
-        target_pos = base_pos_to_world(target_pos_action, base_xy, base_z, yaw)
-        target_quat = base_quat_to_world(target_quat_action, yaw)
+        # Recorded float_ik actions store base velocity for prev->current, while
+        # target pose is encoded in the current-frame base. Decode after applying
+        # the base delta so action replay and policy rollout use the same frame.
+        target_pos = base_pos_to_world(target_pos_action, base_xy_next, base_z, yaw_next)
+        target_quat = base_quat_to_world(target_quat_action, yaw_next)
     elif action_frame == "world":
         target_pos = target_pos_action
         target_quat = target_quat_action
