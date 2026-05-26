@@ -8,19 +8,16 @@ inside one simulator process.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import math
-import os
 import sys
 import tempfile
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
-import yaml
 
 try:
     import cv2
@@ -31,41 +28,19 @@ except ImportError:
 SCRIPT_DIR = Path(__file__).resolve().parent
 HIGH_LEVEL_ROOT = SCRIPT_DIR.parents[0]
 REPO_ROOT = HIGH_LEVEL_ROOT.parents[0]
-BASE_FLOAT_IK_SCRIPT = SCRIPT_DIR / "isaacgym_visualize_b1z1_basearn.py"
-DEFAULT_DOOR_CFG = HIGH_LEVEL_ROOT / "data" / "cfg" / "b1z1_opendoor.yaml"
-DEFAULT_DOOR_ASSET_NAMES = (
-    "99650089960001",
-    "99650089960006",
-    "99655039960001",
-    "99655039960006",
-)
-DEFAULT_WRIST_CAMERA_CFG = {
-    "horizontal_fov": 69,
-    "resolution": [96, 54],
-    "position": [0.0955, 0.22, -0.03175],
-    "rotation": [-1.57, 0.0, -0.87],
-}
-DEFAULT_FRONT_CAMERA_CFG = {
-    "horizontal_fov": 69,
-    "resolution": [96, 54],
-    "position": [0.425, 0.04, 0.12],
-    "rotation": [0.0, 0.0, 0.0],
-}
 
+import door_common as dc
 
-def load_base_float_ik_module():
-    spec = importlib.util.spec_from_file_location("b1z1_basearn_float_ik", BASE_FLOAT_IK_SCRIPT)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Failed to import {BASE_FLOAT_IK_SCRIPT}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-base_ik = load_base_float_ik_module()
-gymapi = base_ik.gymapi
-gymutil = base_ik.gymutil
+base_ik = dc.base_ik
+gymapi = dc.gymapi
+gymutil = dc.gymutil
+DEFAULT_DOOR_CFG = dc.DEFAULT_DOOR_CFG
+DP_NUM_DOFS = dc.DP_NUM_DOFS
+DP_NUM_ACTIONS = dc.DP_NUM_ACTIONS
+B1Z1_DEFAULT_DOF_POS = dc.B1Z1_DEFAULT_DOF_POS
+FLOAT_ARM_TO_DP_DOF = dc.FLOAT_ARM_TO_DP_DOF
+ThickAxesGeometry = dc.ThickAxesGeometry
+DoorRuntime = dc.DoorRuntime
 
 DP_ROOT = HIGH_LEVEL_ROOT / "dp"
 if str(DP_ROOT) not in sys.path:
@@ -91,8 +66,6 @@ except ImportError:
     raw_image_keys_for_vision_mode = None
 
 
-DP_NUM_DOFS = 19
-DP_NUM_ACTIONS = 18
 DP_PHASE_NAMES = [
     "walk",
     "initial_hold",
@@ -106,110 +79,7 @@ DP_PHASE_NAMES = [
 ]
 DP_PHASE_ID = {name: idx for idx, name in enumerate(DP_PHASE_NAMES)}
 IKPUSH_STATE_VERSION = "zero_leg_dof_pos_prev_action_v1"
-B1Z1_DEFAULT_DOF_POS = np.asarray(
-    [
-        -0.2,
-        0.8,
-        -1.5,
-        0.2,
-        0.8,
-        -1.5,
-        -0.2,
-        0.8,
-        -1.5,
-        0.2,
-        0.8,
-        -1.5,
-        0.0,
-        1.48,
-        -0.63,
-        -0.84,
-        0.0,
-        1.57,
-        -0.785,
-    ],
-    dtype=np.float32,
-)
-FLOAT_ARM_TO_DP_DOF = {
-    "joint1": 12,
-    "joint2": 13,
-    "joint3": 14,
-    "joint4": 15,
-    "joint5": 16,
-    "joint6": 17,
-    "jointGripper": 18,
-    "z1_waist": 12,
-    "z1_shoulder": 13,
-    "z1_elbow": 14,
-    "z1_wrist_angle": 15,
-    "z1_forearm_roll": 16,
-    "z1_wrist_rotate": 17,
-    "z1_jointGripper": 18,
-}
-
-
-class ThickAxesGeometry(gymutil.LineGeometry):
-    def __init__(self, scale=1.0, thickness=0.006, pose=None):
-        offsets = {
-            0: [(0, 0, 0), (0, thickness, 0), (0, -thickness, 0), (0, 0, thickness), (0, 0, -thickness)],
-            1: [(0, 0, 0), (thickness, 0, 0), (-thickness, 0, 0), (0, 0, thickness), (0, 0, -thickness)],
-            2: [(0, 0, 0), (thickness, 0, 0), (-thickness, 0, 0), (0, thickness, 0), (0, -thickness, 0)],
-        }
-        axis_end = [(scale, 0, 0), (0, scale, 0), (0, 0, scale)]
-        axis_color = [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)]
-        verts = np.empty((15, 2), gymapi.Vec3.dtype)
-        colors = np.empty(15, gymapi.Vec3.dtype)
-        idx = 0
-        for axis in range(3):
-            for offset in offsets[axis]:
-                verts[idx][0] = offset
-                verts[idx][1] = tuple(axis_end[axis][j] + offset[j] for j in range(3))
-                colors[idx] = axis_color[axis]
-                idx += 1
-        self.verts = pose.transform_points(verts) if pose is not None else verts
-        self._colors = colors
-
-    def vertices(self):
-        return self.verts
-
-    def colors(self):
-        return self._colors
-
-
-@dataclass
-class DoorRuntime:
-    asset_root: str
-    asset_file_door: str
-    asset_index: int
-    spec: dict
-    bounding: dict
-    handle_bounding: dict
-    asset: object
-    body_names: list[str]
-    dof_names: list[str]
-    dof_lower: np.ndarray
-    dof_upper: np.ndarray
-    handle_body_index: int
-    door_body_index: int
-    handle_goal_offset: np.ndarray
-    handle_unlock_threshold: float
-    open_stage: bool = False
-
-
-def sorted_asset_items(asset_dict):
-    def key_fn(item):
-        key = item[0]
-        return (0, int(key)) if str(key).isdigit() else (1, str(key))
-
-    return [item[1] for item in sorted(asset_dict.items(), key=key_fn)]
-
-
-def sorted_asset_entries(asset_dict):
-    def key_fn(item):
-        key = item[0]
-        return (0, int(key)) if str(key).isdigit() else (1, str(key))
-
-    return [(idx, item[1]) for idx, item in enumerate(sorted(asset_dict.items(), key=key_fn))]
+sorted_asset_entries = dc.sorted_asset_entries
 
 
 def parse_args():
@@ -477,336 +347,22 @@ def parse_args():
     return args
 
 
-def smoothstep(value):
-    value = np.clip(value, 0.0, 1.0)
-    return value * value * (3.0 - 2.0 * value)
-
-
-def lerp(a, b, t):
-    return a + (b - a) * float(t)
-
-
-def quat_nlerp(a, b, t):
-    qa = base_ik.normalize_quat(np.asarray(a, dtype=np.float32))
-    qb = base_ik.normalize_quat(np.asarray(b, dtype=np.float32))
-    if float(np.dot(qa, qb)) < 0.0:
-        qb = -qb
-    return base_ik.normalize_quat(lerp(qa, qb, t)).astype(np.float32)
-
-
-def chase_target_to_current_ee(traj, ik_state, args, fallback_pos, fallback_quat=None):
-    alpha = float(np.clip(getattr(args, "return_home_target_chase_alpha", 0.08), 0.0, 1.0))
-    prev_pos = traj.get("last_target_pos")
-    if prev_pos is None:
-        prev_pos = fallback_pos
-    prev_pos = np.asarray(prev_pos, dtype=np.float32)
-    current_pos = (
-        np.asarray(ik_state.current_pos_np, dtype=np.float32)
-        if ik_state.current_pos_np is not None
-        else prev_pos
-    )
-    target_pos = lerp(prev_pos, current_pos, alpha).astype(np.float32)
-
-    target_quat = None
-    if not args.ik_position_only:
-        prev_quat = traj.get("last_target_quat")
-        if prev_quat is None:
-            prev_quat = fallback_quat
-        current_quat = ik_state.current_quat_np if ik_state.current_quat_np is not None else prev_quat
-        if prev_quat is not None and current_quat is not None:
-            target_quat = quat_nlerp(prev_quat, current_quat, alpha)
-        elif current_quat is not None:
-            target_quat = base_ik.normalize_quat(current_quat).astype(np.float32)
-
-    return target_pos, target_quat
-
-
-def normalize(vec, eps=1.0e-6):
-    norm = float(np.linalg.norm(vec))
-    if norm < eps:
-        return vec * 0.0
-    return vec / norm
-
-
-def quat_apply(q, v):
-    q = base_ik.normalize_quat(q)
-    v_quat = np.array([v[0], v[1], v[2], 0.0], dtype=np.float32)
-    return base_ik.quat_multiply(
-        base_ik.quat_multiply(q, v_quat),
-        base_ik.quat_conjugate(q),
-    )[:3]
-
-
-def quat_from_angle_axis(angle, axis):
-    axis = normalize(np.asarray(axis, dtype=np.float32))
-    half = 0.5 * float(angle)
-    return base_ik.normalize_quat(
-        np.array(
-            [axis[0] * math.sin(half), axis[1] * math.sin(half), axis[2] * math.sin(half), math.cos(half)],
-            dtype=np.float32,
-        )
-    )
-
-
-def quat_axis(q, axis):
-    basis = np.zeros(3, dtype=np.float32)
-    basis[int(axis)] = 1.0
-    return quat_apply(q, basis)
-
-
-def forward_ee_quat(args, base_yaw):
-    base_quat = base_ik.rpy_to_quat(args.forward_ee_roll, args.forward_ee_pitch, base_yaw)
-    red_axis_quat = base_ik.rpy_to_quat(args.gripper_red_axis_rot, 0.0, 0.0)
-    return base_ik.quat_multiply(base_quat, red_axis_quat)
-
-
-def load_door_specs(args):
-    cfg_path = Path(args.door_cfg).expanduser()
-    if not cfg_path.is_absolute():
-        cfg_path = (REPO_ROOT / cfg_path).resolve()
-    with cfg_path.open("r", encoding="utf-8") as f:
-        cfg = yaml.safe_load(f)
-
-    asset_cfg = cfg["env"]["asset"]
-    train_assets = asset_cfg["trainAssets"]
-    load_block = asset_cfg.get("load_block") or next(iter(train_assets.keys()))
-    specs = sorted_asset_entries(train_assets[load_block])
-
-    selected_entries = []
-    if args.door_name:
-        selected_entries = [(idx, spec) for idx, spec in specs if spec.get("name") == args.door_name]
-        if not selected_entries:
-            raise RuntimeError(f"Door name {args.door_name!r} not found in {cfg_path}")
-    elif args.door_index >= 0:
-        if args.door_index >= len(specs):
-            raise RuntimeError(f"--door_index={args.door_index} out of range for {len(specs)} doors")
-        selected_entries = [specs[args.door_index]]
-    else:
-        for name in DEFAULT_DOOR_ASSET_NAMES:
-            selected_entries.extend((idx, spec) for idx, spec in specs if spec.get("name") == name)
-        if not selected_entries:
-            selected_entries = specs
-    if not selected_entries:
-        raise RuntimeError(f"No door assets found in {cfg_path}")
-
-    asset_root = HIGH_LEVEL_ROOT / asset_cfg["assetRoot"]
-    asset_file_door = asset_cfg["assetFileDoor"]
-    door_set_root = asset_root / asset_file_door
-    loaded_specs = []
-    for asset_index, selected in selected_entries:
-        with (door_set_root / selected["bounding_box"]).open("r", encoding="utf-8") as f:
-            bounding = json.load(f)
-        with (door_set_root / selected["handle_bounding"]).open("r", encoding="utf-8") as f:
-            handle_bounding = json.load(f)
-        loaded_specs.append((int(asset_index), selected, bounding, handle_bounding))
-
-    return str(asset_root), asset_file_door, loaded_specs
-
-
-def load_door_assets(gym, sim, args):
-    asset_root, asset_file_door, specs = load_door_specs(args)
-    door_opts = gymapi.AssetOptions()
-    door_opts.fix_base_link = True
-    door_opts.collapse_fixed_joints = True
-    door_opts.use_mesh_materials = True
-    door_opts.mesh_normal_mode = gymapi.COMPUTE_PER_VERTEX
-    door_opts.override_com = True
-    door_opts.override_inertia = True
-    door_opts.disable_gravity = True
-    door_opts.vhacd_enabled = True
-    door_opts.vhacd_params = gymapi.VhacdParams()
-    door_opts.vhacd_params.resolution = args.door_vhacd_resolution
-
-    doors = []
-    for asset_index, spec, bounding, handle_bounding in specs:
-        door_file = os.path.join(asset_file_door, spec["path"])
-        print(f"Loading door[{asset_index}]: root={asset_root}, file={door_file}, name={spec['name']}")
-        door_asset = gym.load_asset(sim, asset_root, door_file, door_opts)
-        if door_asset is None:
-            raise RuntimeError(f"Failed to load door asset {door_file}")
-
-        body_names = gym.get_asset_rigid_body_names(door_asset)
-        dof_names = gym.get_asset_dof_names(door_asset)
-        dof_props = gym.get_asset_dof_properties(door_asset)
-        if len(dof_props["upper"]) >= 2:
-            dof_props["upper"][1] = min(float(dof_props["upper"][1]), math.pi / 4)
-        lower = np.asarray(dof_props["lower"], dtype=np.float32)
-        upper = np.asarray(dof_props["upper"], dtype=np.float32)
-
-        shape_props = gym.get_asset_rigid_shape_properties(door_asset)
-        for prop in shape_props:
-            prop.friction = 2.0
-        gym.set_asset_rigid_shape_properties(door_asset, shape_props)
-
-        handle_goal_offset = args.door_actor_scale * np.asarray(handle_bounding["goal_pos"], dtype=np.float32)
-        handle_range = max(1.0e-6, float(upper[1] - lower[1]) if len(upper) >= 2 else 1.0)
-        handle_unlock_threshold = args.handle_unlock_ratio * handle_range
-        print("door_dofs:", dof_names)
-        print("door_bodies:", body_names)
-
-        doors.append(
-            DoorRuntime(
-                asset_root=asset_root,
-                asset_file_door=asset_file_door,
-                asset_index=int(asset_index),
-                spec=spec,
-                bounding=bounding,
-                handle_bounding=handle_bounding,
-                asset=door_asset,
-                body_names=body_names,
-                dof_names=dof_names,
-                dof_lower=lower,
-                dof_upper=upper,
-                handle_body_index=len(body_names) - 1,
-                door_body_index=max(0, len(body_names) - 2),
-                handle_goal_offset=handle_goal_offset,
-                handle_unlock_threshold=handle_unlock_threshold,
-            )
-        )
-    print(f"Loaded {len(doors)} door asset(s) for env cycling.", flush=True)
-    return doors
-
-
-def load_door_asset(gym, sim, args):
-    return load_door_assets(gym, sim, args)[0]
-
-
-def robot_y_for_door(args, handle_bounding):
-    handle_center_y = 0.5 * (
-        float(handle_bounding["handle_min"][1]) + float(handle_bounding["handle_max"][1])
-    )
-    handle_center_world_y = args.door_y - args.door_actor_scale * handle_center_y
-    return args.robot_y + handle_center_world_y
-
-
-def create_env_actors(gym, sim, base_asset, arm_asset, door, dof_props, dof_states, args):
-    env = gym.create_env(sim, gymapi.Vec3(-2.5, -2.5, 0.0), gymapi.Vec3(2.5, 2.5, 2.5), 1)
-    robot_y = robot_y_for_door(args, door.handle_bounding)
-
-    robot_pose = gymapi.Transform()
-    robot_pose.p = gymapi.Vec3(args.robot_x, robot_y, args.robot_z)
-    robot_pose.r = gymapi.Quat.from_euler_zyx(0.0, 0.0, args.robot_yaw)
-
-    collision_filter = 1 if args.disable_self_collisions else 0
-    actor_handles = []
-    if base_asset is not None:
-        base_actor = gym.create_actor(env, base_asset, robot_pose, "b1_base_visual", 0, collision_filter)
-        actor_handles.append(base_actor)
-    arm_actor = gym.create_actor(env, arm_asset, robot_pose, base_ik.ARM_ACTOR_NAME, 0, collision_filter)
-    actor_handles.append(arm_actor)
-    gym.set_actor_dof_properties(env, arm_actor, dof_props)
-    gym.set_actor_dof_states(env, arm_actor, dof_states, gymapi.STATE_ALL)
-    gym.set_actor_dof_position_targets(env, arm_actor, dof_states["pos"])
-
-    door_pose = gymapi.Transform()
-    door_pose.p = gymapi.Vec3(
-        float(args.door_x),
-        float(args.door_y),
-        float(-door.bounding["min"][2] * args.door_actor_scale + args.door_z_offset),
-    )
-    door_pose.r = gymapi.Quat(0.0, 0.0, 1.0, 0.0)
-    door_actor = gym.create_actor(env, door.asset, door_pose, "door", 0, 0, 1)
-    if abs(args.door_actor_scale - 1.0) > 1.0e-6:
-        gym.set_actor_scale(env, door_actor, args.door_actor_scale)
-    try:
-        gym.set_rigid_body_segmentation_id(env, door_actor, door.handle_body_index, int(args.handle_seg_id))
-    except AttributeError:
-        print("set_rigid_body_segmentation_id is not available; handle mask will use the door actor segmentation.")
-
-    door_dof_props = gym.get_actor_dof_properties(env, door_actor)
-    if len(door_dof_props) > 0:
-        door_dof_props["driveMode"][:] = gymapi.DOF_MODE_EFFORT
-        n = min(len(door_dof_props), 2)
-        if n >= 1:
-            door_dof_props["lower"][0] = -math.pi / 2
-            door_dof_props["upper"][0] = 0.0
-            door_dof_props["damping"][0] = args.door_joint_damping
-            door_dof_props["friction"][0] = args.door_joint_friction
-        if n >= 2:
-            door_dof_props["damping"][1] = args.handle_joint_damping
-            door_dof_props["friction"][1] = args.handle_joint_friction
-            door_dof_props["upper"][1] = min(float(door_dof_props["upper"][1]), math.pi / 4)
-        gym.set_actor_dof_properties(env, door_actor, door_dof_props)
-        door.dof_lower = np.asarray(door_dof_props["lower"], dtype=np.float32).copy()
-        door.dof_upper = np.asarray(door_dof_props["upper"], dtype=np.float32).copy()
-        handle_range = max(1.0e-6, float(door.dof_upper[1] - door.dof_lower[1]) if len(door.dof_upper) >= 2 else 1.0)
-        door.handle_unlock_threshold = args.handle_unlock_ratio * handle_range
-
-    return env, arm_actor, actor_handles, door_actor, np.array([args.robot_x, robot_y], dtype=np.float32)
-
-
-def create_parallel_env_actors(
-    gym,
-    sim,
-    base_asset,
-    arm_asset,
-    door,
-    dof_props,
-    dof_states,
-    args,
-    env_index,
-    envs_per_row,
-):
-    env = gym.create_env(
-        sim,
-        gymapi.Vec3(-2.5, -2.5, 0.0),
-        gymapi.Vec3(2.5, 2.5, 2.5),
-        int(envs_per_row),
-    )
-    robot_y = robot_y_for_door(args, door.handle_bounding)
-
-    robot_pose = gymapi.Transform()
-    robot_pose.p = gymapi.Vec3(args.robot_x, robot_y, args.robot_z)
-    robot_pose.r = gymapi.Quat.from_euler_zyx(0.0, 0.0, args.robot_yaw)
-
-    collision_filter = 1 if args.disable_self_collisions else 0
-    actor_handles = []
-    if base_asset is not None:
-        base_actor = gym.create_actor(env, base_asset, robot_pose, f"b1_base_visual_{env_index}", env_index, collision_filter)
-        actor_handles.append(base_actor)
-    arm_actor = gym.create_actor(env, arm_asset, robot_pose, base_ik.ARM_ACTOR_NAME, env_index, collision_filter)
-    actor_handles.append(arm_actor)
-    gym.set_actor_dof_properties(env, arm_actor, dof_props)
-    arm_dof_states = dof_states.copy()
-    gym.set_actor_dof_states(env, arm_actor, arm_dof_states, gymapi.STATE_ALL)
-    gym.set_actor_dof_position_targets(env, arm_actor, arm_dof_states["pos"])
-
-    door_pose = gymapi.Transform()
-    door_pose.p = gymapi.Vec3(
-        float(args.door_x),
-        float(args.door_y),
-        float(-door.bounding["min"][2] * args.door_actor_scale + args.door_z_offset),
-    )
-    door_pose.r = gymapi.Quat(0.0, 0.0, 1.0, 0.0)
-    door_actor = gym.create_actor(env, door.asset, door_pose, f"door_{env_index}", env_index, 0, 1)
-    if abs(args.door_actor_scale - 1.0) > 1.0e-6:
-        gym.set_actor_scale(env, door_actor, args.door_actor_scale)
-    try:
-        gym.set_rigid_body_segmentation_id(env, door_actor, door.handle_body_index, int(args.handle_seg_id))
-    except AttributeError:
-        if env_index == 0:
-            print("set_rigid_body_segmentation_id is not available; handle mask will use the door actor segmentation.")
-
-    door_dof_props = gym.get_actor_dof_properties(env, door_actor)
-    if len(door_dof_props) > 0:
-        door_dof_props["driveMode"][:] = gymapi.DOF_MODE_EFFORT
-        n = min(len(door_dof_props), 2)
-        if n >= 1:
-            door_dof_props["lower"][0] = -math.pi / 2
-            door_dof_props["upper"][0] = 0.0
-            door_dof_props["damping"][0] = args.door_joint_damping
-            door_dof_props["friction"][0] = args.door_joint_friction
-        if n >= 2:
-            door_dof_props["damping"][1] = args.handle_joint_damping
-            door_dof_props["friction"][1] = args.handle_joint_friction
-            door_dof_props["upper"][1] = min(float(door_dof_props["upper"][1]), math.pi / 4)
-        gym.set_actor_dof_properties(env, door_actor, door_dof_props)
-        door.dof_lower = np.asarray(door_dof_props["lower"], dtype=np.float32).copy()
-        door.dof_upper = np.asarray(door_dof_props["upper"], dtype=np.float32).copy()
-        handle_range = max(1.0e-6, float(door.dof_upper[1] - door.dof_lower[1]) if len(door.dof_upper) >= 2 else 1.0)
-        door.handle_unlock_threshold = args.handle_unlock_ratio * handle_range
-
-    return env, arm_actor, actor_handles, door_actor, np.array([args.robot_x, robot_y], dtype=np.float32)
+# Shared door/IK helpers live in door_common; keep local names to avoid changing push control code.
+smoothstep = dc.smoothstep
+lerp = dc.lerp
+quat_nlerp = dc.quat_nlerp
+chase_target_to_current_ee = dc.chase_target_to_current_ee
+normalize = dc.normalize
+quat_apply = dc.quat_apply
+quat_from_angle_axis = dc.quat_from_angle_axis
+quat_axis = dc.quat_axis
+forward_ee_quat = dc.forward_ee_quat
+load_door_specs = dc.load_door_specs
+load_door_assets = dc.load_door_assets
+load_door_asset = dc.load_door_asset
+robot_y_for_door = dc.robot_y_for_door
+create_env_actors = dc.create_env_actors
+create_parallel_env_actors = dc.create_parallel_env_actors
 
 
 @dataclass
@@ -842,30 +398,10 @@ class ParallelEnvState:
     last_gripper: float = 0.0
 
 
-def clone_door_runtime(door):
-    return replace(
-        door,
-        dof_lower=np.asarray(door.dof_lower, dtype=np.float32).copy(),
-        dof_upper=np.asarray(door.dof_upper, dtype=np.float32).copy(),
-        handle_goal_offset=np.asarray(door.handle_goal_offset, dtype=np.float32).copy(),
-        open_stage=False,
-    )
-
-
-def resolve_seed(args):
-    seed = int(getattr(args, "seed", -1))
-    if seed < 0:
-        seed = int(np.random.SeedSequence().generate_state(1, dtype=np.uint32)[0])
-    seed = seed % (2**32)
-    args.seed = seed
-    np.random.seed(seed % (2**32 - 1))
-    return seed
-
-
-def seed_for_env(args, env_index):
-    base_seed = int(getattr(args, "seed", 0))
-    seq = np.random.SeedSequence([base_seed, int(env_index)])
-    return int(seq.generate_state(1, dtype=np.uint32)[0])
+clone_door_runtime = dc.clone_door_runtime
+resolve_seed = dc.resolve_seed
+seed_for_env = dc.seed_for_env
+sample_with_half_range = dc.sample_with_half_range
 
 
 IKPUSH_DEFAULT_ENV_RANGES = {
@@ -901,22 +437,6 @@ IKPUSH_ARG_FLAGS = {
     "handle_spring_damping": "--handle_spring_damping",
 }
 
-
-def sample_with_half_range(rng, center, half_range, lower=None, upper=None):
-    value = float(center)
-    half_range = abs(float(half_range))
-    if half_range > 0.0:
-        if lower is not None and value <= float(lower) + 1.0e-8:
-            value += float(rng.uniform(0.0, half_range))
-        elif upper is not None and value >= float(upper) - 1.0e-8:
-            value -= float(rng.uniform(0.0, half_range))
-        else:
-            value += float(rng.uniform(-half_range, half_range))
-    if lower is not None:
-        value = max(float(lower), value)
-    if upper is not None:
-        value = min(float(upper), value)
-    return value
 
 
 def sample_env_value(rng, args, attr, half_attr, lower=None, upper=None):
@@ -977,643 +497,42 @@ def make_env_args(args, env_index):
     return env_args
 
 
-def set_robot_base_pose(gym, env, actor_handles, xy, z, yaw):
-    quat = base_ik.yaw_quat(yaw)
-    for actor in actor_handles:
-        root_handle = gym.get_actor_root_rigid_body_handle(env, actor)
-        transform = gymapi.Transform()
-        transform.p = gymapi.Vec3(float(xy[0]), float(xy[1]), float(z))
-        transform.r = gymapi.Quat(float(quat[0]), float(quat[1]), float(quat[2]), float(quat[3]))
-        gym.set_rigid_transform(env, root_handle, transform)
-
-
-def compute_base_push_target(args, base_stop, heading):
-    requested_progress = max(0.0, float(args.push_base_distance))
-    if args.pass_through_door:
-        door_xy = np.asarray([args.door_x, args.door_y], dtype=np.float32)
-        clear_center = door_xy + heading * (float(args.robot_rear_offset) + float(args.door_pass_clearance))
-        pass_progress = float(np.dot(clear_center - base_stop, heading))
-        requested_progress = max(requested_progress, pass_progress)
-    return base_stop + heading * requested_progress
-
-
-def get_body_pose(gym, env, actor, body_index):
-    states = gym.get_actor_rigid_body_states(env, actor, gymapi.STATE_POS)
-    pos_raw = states["pose"]["p"][body_index]
-    quat_raw = states["pose"]["r"][body_index]
-    pos = np.array([pos_raw["x"], pos_raw["y"], pos_raw["z"]], dtype=np.float32)
-    quat = np.array([quat_raw["x"], quat_raw["y"], quat_raw["z"], quat_raw["w"]], dtype=np.float32)
-    return pos, base_ik.normalize_quat(quat)
-
-
-def get_actor_body_index(gym, env, actor, body_name):
-    try:
-        body_dict = gym.get_actor_rigid_body_dict(env, actor)
-    except Exception:
-        return None
-    body_index = body_dict.get(body_name)
-    if body_index is None:
-        return None
-    return int(body_index)
-
-
-def gym_quat_to_np(quat):
-    return np.array([quat.x, quat.y, quat.z, quat.w], dtype=np.float32)
-
-
-def local_camera_pose_from_cfg(camera_cfg, local_rot_override=None):
-    local_pos = np.asarray(camera_cfg.get("position", [0.0, 0.0, 0.0]), dtype=np.float32)
-    local_rot = list(camera_cfg.get("rotation", [0.0, 0.0, 0.0]))
-    if local_rot_override is not None:
-        local_rot = list(local_rot_override)
-    local_quat = gym_quat_to_np(gymapi.Quat.from_euler_zyx(*local_rot))
-    return local_pos, base_ik.normalize_quat(local_quat)
-
-
-def draw_local_camera_axes(gym, viewer, env, actor, body_name, local_pos, local_quat, scale, thickness):
-    body_index = get_actor_body_index(gym, env, actor, body_name)
-    if body_index is None:
-        return False
-    body_pos, body_quat = get_body_pose(gym, env, actor, body_index)
-    camera_pos = body_pos + quat_apply(body_quat, local_pos)
-    camera_quat = base_ik.quat_multiply(body_quat, local_quat)
-    pose = gymapi.Transform(
-        gymapi.Vec3(float(camera_pos[0]), float(camera_pos[1]), float(camera_pos[2])),
-        gymapi.Quat(float(camera_quat[0]), float(camera_quat[1]), float(camera_quat[2]), float(camera_quat[3])),
-    )
-    axes_geom = ThickAxesGeometry(scale=scale, thickness=thickness, pose=pose)
-    gymutil.draw_lines(axes_geom, gym, viewer, env, gymapi.Transform())
-    return True
-
-
-def draw_low_level_camera_axes(gym, viewer, env, arm_actor, actor_handles, args):
-    wrist_rot = list(DEFAULT_WRIST_CAMERA_CFG["rotation"])
-    wrist_rot[2] -= float(args.wrist_camera_down_tilt)
-    wrist_pos, wrist_quat = local_camera_pose_from_cfg(DEFAULT_WRIST_CAMERA_CFG, wrist_rot)
-    draw_local_camera_axes(
-        gym,
-        viewer,
-        env,
-        arm_actor,
-        "link06",
-        wrist_pos,
-        wrist_quat,
-        args.camera_axis_scale,
-        args.camera_axis_thickness,
-    )
-
-    front_rot = [
-        math.radians(float(args.front_camera_yaw_deg)),
-        math.radians(float(args.front_camera_pitch_deg)),
-        math.radians(float(args.front_camera_roll_deg)),
-    ]
-    front_pos, front_quat = local_camera_pose_from_cfg(DEFAULT_FRONT_CAMERA_CFG, front_rot)
-    base_actor = actor_handles[0] if len(actor_handles) > 1 else arm_actor
-    if not draw_local_camera_axes(
-        gym,
-        viewer,
-        env,
-        base_actor,
-        "trunk",
-        front_pos,
-        front_quat,
-        args.camera_axis_scale,
-        args.camera_axis_thickness,
-    ):
-        draw_local_camera_axes(
-            gym,
-            viewer,
-            env,
-            base_actor,
-            "base",
-            front_pos,
-            front_quat,
-            args.camera_axis_scale,
-            args.camera_axis_thickness,
-        )
-
-
-def make_camera_properties(camera_cfg):
-    props = gymapi.CameraProperties()
-    props.width = int(camera_cfg.get("resolution", [96, 54])[0])
-    props.height = int(camera_cfg.get("resolution", [96, 54])[1])
-    if camera_cfg.get("horizontal_fov", None) is not None:
-        props.horizontal_fov = float(camera_cfg["horizontal_fov"])
-    return props
-
-
-def attach_camera_to_actor_body(gym, env, actor, body_name, camera_cfg, local_rot_override=None):
-    body_handle = gym.find_actor_rigid_body_handle(env, actor, body_name)
-    if body_handle < 0:
-        return None
-    local_pos, local_quat = local_camera_pose_from_cfg(camera_cfg, local_rot_override)
-    local_transform = gymapi.Transform(
-        gymapi.Vec3(float(local_pos[0]), float(local_pos[1]), float(local_pos[2])),
-        gymapi.Quat(float(local_quat[0]), float(local_quat[1]), float(local_quat[2]), float(local_quat[3])),
-    )
-    camera_handle = gym.create_camera_sensor(env, make_camera_properties(camera_cfg))
-    if camera_handle < 0:
-        return None
-    gym.attach_camera_to_body(camera_handle, env, body_handle, local_transform, gymapi.FOLLOW_TRANSFORM)
-    return camera_handle
-
-
-def create_low_level_cameras(gym, env, arm_actor, actor_handles, args):
-    cameras = {}
-    if args.enable_wrist_camera:
-        wrist_rot = list(DEFAULT_WRIST_CAMERA_CFG["rotation"])
-        wrist_rot[2] -= float(args.wrist_camera_down_tilt)
-        wrist_camera = attach_camera_to_actor_body(
-            gym, env, arm_actor, "link06", DEFAULT_WRIST_CAMERA_CFG, wrist_rot
-        )
-        if wrist_camera is None:
-            print("⚠️📷 Wrist camera sensor creation failed; wrist camera image display is disabled.", flush=True)
-        else:
-            cameras["wrist"] = wrist_camera
-            print(f"Wrist camera sensor enabled: handle={wrist_camera}")
-
-    if args.enable_front_camera:
-        front_rot = [
-            math.radians(float(args.front_camera_yaw_deg)),
-            math.radians(float(args.front_camera_pitch_deg)),
-            math.radians(float(args.front_camera_roll_deg)),
-        ]
-        base_actor = actor_handles[0] if len(actor_handles) > 1 else arm_actor
-        front_camera = attach_camera_to_actor_body(
-            gym, env, base_actor, "trunk", DEFAULT_FRONT_CAMERA_CFG, front_rot
-        )
-        if front_camera is None:
-            front_camera = attach_camera_to_actor_body(
-                gym, env, base_actor, "base", DEFAULT_FRONT_CAMERA_CFG, front_rot
-            )
-        if front_camera is None:
-            print("⚠️📷 Front camera sensor creation failed; front camera image display is disabled.", flush=True)
-        else:
-            cameras["front"] = front_camera
-            print(f"Front camera sensor enabled: handle={front_camera}")
-    if args.show_camera_images:
-        if cv2 is None:
-            print("⚠️📷 cv2 is not available; camera image windows are disabled.", flush=True)
-        elif not cameras:
-            print("⚠️📷 No camera sensors were created; camera image windows are disabled.", flush=True)
-        else:
-            pair_names = (
-                ", ".join(f"{name}_rgb/{name}_mask" for name in cameras.keys())
-                if args.rgb
-                else ", ".join(f"{name}_mask/{name}_full_depth" for name in cameras.keys())
-            )
-            print(
-                "Camera image windows enabled:",
-                pair_names,
-            )
-    return cameras
-
-
-def camera_image_to_array(image, height, width):
-    array = np.asarray(image)
-    if array.size == height * width:
-        return array.reshape(height, width)
-    if array.size >= height * width:
-        return array.reshape(height, -1)[:, :width]
-    return array
-
-
-def camera_color_to_rgb(image, height, width):
-    array = np.asarray(image)
-    if array.size == height * width * 4:
-        array = array.reshape(height, width, 4)
-    elif array.size == height * width * 3:
-        array = array.reshape(height, width, 3)
-    elif array.ndim == 3:
-        array = array[:height, :width]
-    elif array.size >= height * width:
-        channels = max(1, array.size // (height * width))
-        array = array.reshape(height, width, channels)
-    else:
-        array = camera_image_to_array(array, height, width)
-    if array.ndim == 2:
-        array = np.repeat(array[..., None], 3, axis=-1)
-    if array.shape[-1] > 3:
-        array = array[..., :3]
-    if array.shape[-1] == 1:
-        array = np.repeat(array, 3, axis=-1)
-    if np.issubdtype(array.dtype, np.floating):
-        array = np.nan_to_num(array, nan=0.0, posinf=0.0, neginf=0.0)
-        if array.size == 0 or np.max(array) <= 1.0:
-            array = 255.0 * array
-    return np.clip(array, 0, 255).astype(np.uint8)
-
-
-def show_camera_handle_images(gym, sim, env, camera_handles, args):
-    if not args.show_camera_images or not camera_handles or cv2 is None:
-        return
-    gym.render_all_camera_sensors(sim)
-    display_scale = max(1, int(args.camera_display_scale))
-    for prefix, camera_handle in camera_handles.items():
-        seg_raw = gym.get_camera_image(sim, env, camera_handle, gymapi.IMAGE_SEGMENTATION)
-        if seg_raw is None:
-            continue
-
-        camera_cfg = DEFAULT_WRIST_CAMERA_CFG if prefix == "wrist" else DEFAULT_FRONT_CAMERA_CFG
-        width = int(camera_cfg.get("resolution", [96, 54])[0])
-        height = int(camera_cfg.get("resolution", [96, 54])[1])
-        seg_image = camera_image_to_array(seg_raw, height, width).astype(np.int32)
-        handle_mask = (seg_image == int(args.handle_seg_id)).astype(np.float32)
-        mask_vis = (255.0 * handle_mask).astype(np.uint8)
-
-        if args.rgb:
-            rgb_raw = gym.get_camera_image(sim, env, camera_handle, gymapi.IMAGE_COLOR)
-            if rgb_raw is None:
-                continue
-            rgb_image = camera_color_to_rgb(rgb_raw, height, width)
-            rgb_nonzero = int(np.count_nonzero(rgb_image))
-            printed = getattr(args, "_camera_image_stats_printed", set())
-            if prefix not in printed:
-                print(
-                    f"{prefix} camera image stats: "
-                    f"rgb_shape={tuple(rgb_image.shape)} "
-                    f"mask_pixels={int(handle_mask.sum())} "
-                    f"rgb_nonzero_pixels={rgb_nonzero}",
-                    flush=True,
-                )
-                printed.add(prefix)
-                args._camera_image_stats_printed = printed
-            if rgb_nonzero == 0:
-                blank_printed = getattr(args, "_camera_blank_warned", set())
-                if prefix not in blank_printed:
-                    print(
-                        "⚠️📷 Camera render is blank: RGB image has no nonzero pixels. "
-                        "Check graphics_device_id/GPU rendering if this persists.",
-                        flush=True,
-                    )
-                    blank_printed.add(prefix)
-                    args._camera_blank_warned = blank_printed
-
-            if display_scale > 1:
-                mask_vis = cv2.resize(mask_vis, None, fx=display_scale, fy=display_scale, interpolation=cv2.INTER_NEAREST)
-                rgb_image = cv2.resize(rgb_image, None, fx=display_scale, fy=display_scale, interpolation=cv2.INTER_LINEAR)
-            cv2.imshow(f"{prefix.capitalize()} RGB", rgb_image[..., ::-1].copy())
-            cv2.imshow(f"{prefix.capitalize()} Handle Mask", mask_vis)
-            continue
-
-        depth_raw = gym.get_camera_image(sim, env, camera_handle, gymapi.IMAGE_DEPTH)
-        if depth_raw is None:
-            continue
-        depth_image = camera_image_to_array(depth_raw, height, width).astype(np.float32)
-        depth_image = np.abs(depth_image)
-        depth_image = np.nan_to_num(
-            depth_image,
-            nan=0.0,
-            posinf=float(args.camera_depth_clip_far),
-            neginf=float(args.camera_depth_clip_far),
-        )
-        depth_image[depth_image < float(args.camera_depth_clip_lower)] = 0.0
-        depth_image = np.clip(depth_image, 0.0, float(args.camera_depth_clip_far))
-
-        depth_vis = np.zeros_like(depth_image, dtype=np.uint8)
-        valid_depth = depth_image[np.isfinite(depth_image) & (depth_image > 0.0)]
-        valid_depth = valid_depth[np.isfinite(valid_depth) & (valid_depth > 0.0)]
-        if valid_depth.size > 0:
-            depth_scaled = (depth_image - float(args.camera_depth_clip_lower)) / max(
-                float(args.camera_depth_clip_far) - float(args.camera_depth_clip_lower),
-                1.0e-4,
-            )
-            depth_vis = (255.0 * np.clip(depth_scaled, 0.0, 1.0)).astype(np.uint8)
-
-        printed = getattr(args, "_camera_image_stats_printed", set())
-        if prefix not in printed:
-            print(
-                f"{prefix} camera image stats: "
-                f"seg_shape={tuple(seg_image.shape)} "
-                f"mask_pixels={int(handle_mask.sum())} "
-                f"valid_depth_pixels={int(valid_depth.size)}",
-                flush=True,
-            )
-            printed.add(prefix)
-            args._camera_image_stats_printed = printed
-
-        visible_printed = getattr(args, "_camera_handle_visible_printed", set())
-        if prefix not in visible_printed and handle_mask.sum() > 0:
-            print(
-                f"{prefix} camera sees handle: "
-                f"mask_pixels={int(handle_mask.sum())} "
-                f"valid_depth_pixels={int(valid_depth.size)}",
-                flush=True,
-            )
-            visible_printed.add(prefix)
-            args._camera_handle_visible_printed = visible_printed
-        if valid_depth.size == 0:
-            blank_printed = getattr(args, "_camera_blank_warned", set())
-            if prefix not in blank_printed:
-                print(
-                    "⚠️📷 Camera render has no valid depth pixels. "
-                    "Check handle visibility, segmentation id, and graphics rendering if this persists.",
-                    flush=True,
-                )
-                blank_printed.add(prefix)
-                args._camera_blank_warned = blank_printed
-
-        if display_scale > 1:
-            mask_vis = cv2.resize(mask_vis, None, fx=display_scale, fy=display_scale, interpolation=cv2.INTER_NEAREST)
-            depth_vis = cv2.resize(
-                depth_vis, None, fx=display_scale, fy=display_scale, interpolation=cv2.INTER_NEAREST
-            )
-        cv2.imshow(f"{prefix.capitalize()} Handle Mask", mask_vis)
-        cv2.imshow(f"{prefix.capitalize()} Full Depth", depth_vis)
-    cv2.waitKey(1)
-
-
-def mask_to_rgb(mask):
-    mask_u8 = (255.0 * np.clip(mask, 0.0, 1.0)).astype(np.uint8)
-    return np.repeat(mask_u8[..., None], 3, axis=-1)
-
-
-def depth_to_rgb(depth_image, depth_lower, depth_far):
-    depth_u8 = np.zeros_like(depth_image, dtype=np.uint8)
-    valid = depth_image[np.isfinite(depth_image) & (depth_image > 0.0)]
-    valid = valid[np.isfinite(valid) & (valid > 0.0)]
-    if valid.size > 0:
-        scaled = (depth_image - float(depth_lower)) / max(float(depth_far) - float(depth_lower), 1.0e-4)
-        depth_u8 = (255.0 * np.clip(scaled, 0.0, 1.0)).astype(np.uint8)
-    return np.repeat(depth_u8[..., None], 3, axis=-1), int(valid.size)
-
-
-def capture_dp_camera_images(gym, sim, env, camera_handles, args):
-    if not camera_handles:
-        return {}
-    gym.render_all_camera_sensors(sim)
-    return capture_dp_camera_images_from_rendered(gym, sim, env, camera_handles, args)
-
-
-def capture_dp_camera_images_from_rendered(gym, sim, env, camera_handles, args):
-    if not camera_handles:
-        return {}
-    images = {}
-    for prefix, camera_handle in camera_handles.items():
-        seg_raw = gym.get_camera_image(sim, env, camera_handle, gymapi.IMAGE_SEGMENTATION)
-        if seg_raw is None:
-            continue
-        camera_cfg = DEFAULT_WRIST_CAMERA_CFG if prefix == "wrist" else DEFAULT_FRONT_CAMERA_CFG
-        width = int(camera_cfg.get("resolution", [96, 54])[0])
-        height = int(camera_cfg.get("resolution", [96, 54])[1])
-        seg_image = camera_image_to_array(seg_raw, height, width).astype(np.int32)
-        handle_mask = (seg_image == int(args.handle_seg_id)).astype(np.float32)
-        images[f"{prefix}_handle_mask"] = mask_to_rgb(handle_mask)
-
-        if args.rgb:
-            rgb_raw = gym.get_camera_image(sim, env, camera_handle, gymapi.IMAGE_COLOR)
-            if rgb_raw is None:
-                continue
-            rgb_image = camera_color_to_rgb(rgb_raw, height, width)
-            images[f"{prefix}_rgb"] = rgb_image
-            if args.headless and not getattr(args, f"_{prefix}_headless_rgb_checked", False):
-                if int(np.count_nonzero(rgb_image)) == 0:
-                    print(
-                        "⚠️📷 Headless camera render is blank: RGB image has no nonzero pixels. "
-                        "Check graphics_device_id/GPU rendering if this persists.",
-                        flush=True,
-                    )
-                setattr(args, f"_{prefix}_headless_rgb_checked", True)
-            continue
-
-        depth_raw = gym.get_camera_image(sim, env, camera_handle, gymapi.IMAGE_DEPTH)
-        if depth_raw is None:
-            continue
-        depth_image = camera_image_to_array(depth_raw, height, width).astype(np.float32)
-        depth_image = np.abs(depth_image)
-        depth_image = np.nan_to_num(
-            depth_image,
-            nan=0.0,
-            posinf=float(args.camera_depth_clip_far),
-            neginf=float(args.camera_depth_clip_far),
-        )
-        depth_image[depth_image < float(args.camera_depth_clip_lower)] = 0.0
-        depth_image = np.clip(depth_image, 0.0, float(args.camera_depth_clip_far))
-        depth_rgb, valid_depth_count = depth_to_rgb(
-            depth_image,
-            args.camera_depth_clip_lower,
-            args.camera_depth_clip_far,
-        )
-        images[f"{prefix}_masked_depth"] = depth_rgb
-        if args.headless and not getattr(args, f"_{prefix}_headless_depth_checked", False):
-            if valid_depth_count == 0:
-                print(
-                    "⚠️📷 Headless camera render has no valid depth pixels. "
-                    "Check graphics_device_id/GPU rendering if this persists.",
-                    flush=True,
-                )
-            setattr(args, f"_{prefix}_headless_depth_checked", True)
-    return images
-
-
-def dp_image_inputs_from_cpu_cameras(camera_images, args):
-    if args.rgb:
-        return (
-            camera_images.get("wrist_handle_mask"),
-            camera_images.get("wrist_rgb"),
-            camera_images.get("front_handle_mask"),
-            camera_images.get("front_rgb"),
-        )
-    return (
-        camera_images.get("wrist_handle_mask"),
-        camera_images.get("wrist_masked_depth"),
-        camera_images.get("front_handle_mask"),
-        camera_images.get("front_masked_depth"),
-    )
-
-
-def get_actor_dof_state(gym, env, actor):
-    states = gym.get_actor_dof_states(env, actor, gymapi.STATE_ALL)
-    return np.asarray(states["pos"], dtype=np.float32), np.asarray(states["vel"], dtype=np.float32)
-
-
-def wrap_to_pi(angle):
-    return (float(angle) + math.pi) % (2.0 * math.pi) - math.pi
-
-
-def current_ee_pose(gym, sim, ik_state):
-    gym.refresh_rigid_body_state_tensor(sim)
-    eef_state = ik_state.rb_states[ik_state.eef_body_sim_index]
-    pos = eef_state[:3].detach().cpu().numpy().astype(np.float32).copy()
-    quat = eef_state[3:7].detach().cpu().numpy().astype(np.float32).copy()
-    quat = base_ik.normalize_quat(quat)
-    ik_state.current_pos_np = pos.copy()
-    ik_state.current_quat_np = quat.copy()
-    return pos, quat
-
-
-def current_ee_pose_from_refreshed_tensors(ik_state):
-    eef_state = ik_state.rb_states[ik_state.eef_body_sim_index]
-    pos = eef_state[:3].detach().cpu().numpy().astype(np.float32).copy()
-    quat = eef_state[3:7].detach().cpu().numpy().astype(np.float32).copy()
-    quat = base_ik.normalize_quat(quat)
-    ik_state.current_pos_np = pos.copy()
-    ik_state.current_quat_np = quat.copy()
-    return pos, quat
-
-
-def update_arm_ik_targets_for_env(gym, env, arm_actor, env_index, dof_positions, ik_state, args, num_arm_dofs):
-    torch = ik_state.torch
-    eef_state = ik_state.rb_states[ik_state.eef_body_sim_index]
-    eef_pos = eef_state[:3]
-    eef_quat = eef_state[3:7]
-    pos_err = ik_state.target_pos - eef_pos
-
-    jacobian_env_idx = int(env_index) if ik_state.jacobian.ndim >= 4 and ik_state.jacobian.shape[0] > int(env_index) else 0
-    j_eef = ik_state.jacobian[jacobian_env_idx, ik_state.eef_jacobian_index, :, :]
-    j_control = j_eef[:, ik_state.control_indices]
-
-    if ik_state.target_quat is None:
-        task_j = j_control[:3, :]
-        task_err = args.ik_pos_gain * pos_err
-        rot_err_norm = None
-    else:
-        orn_err = base_ik.torch_orientation_error(torch, ik_state.target_quat, eef_quat)
-        dpose = torch.cat((args.ik_pos_gain * pos_err, args.ik_rot_gain * orn_err), dim=0)
-        weights = torch.tensor(
-            [1.0, 1.0, 1.0, args.ik_rot_weight, args.ik_rot_weight, args.ik_rot_weight],
-            dtype=torch.float32,
-            device=j_control.device,
-        )
-        task_j = j_control * weights.view(6, 1)
-        task_err = dpose * weights
-        rot_err_norm = float(torch.linalg.norm(orn_err).detach().cpu())
-
-    j_t = torch.transpose(task_j, 0, 1)
-    damping = max(1.0e-6, float(args.ik_damping))
-    lhs = task_j @ j_t + torch.eye(task_j.shape[0], dtype=torch.float32, device=task_j.device) * (damping * damping)
-    delta = j_t @ torch.linalg.solve(lhs, task_err.unsqueeze(-1)).squeeze(-1)
-    delta = torch.clamp(delta, -args.ik_max_step, args.ik_max_step)
-
-    actor_states = gym.get_actor_dof_states(env, arm_actor, gymapi.STATE_ALL)
-    current_q = torch.as_tensor(actor_states["pos"][:num_arm_dofs], dtype=torch.float32, device=j_control.device)
-    next_q = current_q.clone()
-    next_q[ik_state.control_indices] += delta
-    next_q = torch.max(torch.min(next_q, ik_state.upper), ik_state.lower)
-    dof_positions[:] = next_q.detach().cpu().numpy()
-
-    ik_state.last_pos_error = float(torch.linalg.norm(pos_err).detach().cpu())
-    ik_state.last_rot_error = rot_err_norm
-    ik_state.current_pos_np = eef_pos.detach().cpu().numpy().copy()
-    ik_state.current_quat_np = eef_quat.detach().cpu().numpy().copy()
-
-
-def map_float_dofs_to_dp(dof_names, dof_pos, dof_vel):
-    dp_pos = np.zeros(DP_NUM_DOFS, dtype=np.float32)
-    dp_vel = np.zeros(DP_NUM_DOFS, dtype=np.float32)
-    for src_idx, name in enumerate(dof_names):
-        dst_idx = FLOAT_ARM_TO_DP_DOF.get(name)
-        if dst_idx is None:
-            continue
-        if src_idx < len(dof_pos):
-            dp_pos[dst_idx] = float(dof_pos[src_idx])
-        if src_idx < len(dof_vel):
-            dp_vel[dst_idx] = float(dof_vel[src_idx])
-    return dp_pos, dp_vel
-
-
-def base_command_from_targets(base_xy, yaw, prev_base_xy, prev_yaw, dt):
-    if prev_base_xy is None or prev_yaw is None or dt <= 0.0:
-        return 0.0, 0.0
-    delta_xy = (np.asarray(base_xy, dtype=np.float32) - np.asarray(prev_base_xy, dtype=np.float32)) / float(dt)
-    forward = np.asarray([math.cos(float(prev_yaw)), math.sin(float(prev_yaw))], dtype=np.float32)
-    vx = float(np.dot(delta_xy, forward))
-    yaw_rate = wrap_to_pi(float(yaw) - float(prev_yaw)) / float(dt)
-    return vx, yaw_rate
-
-
-def target_quat_for_dp(target_quat, ik_state, ee_quat):
-    if target_quat is not None:
-        return base_ik.normalize_quat(target_quat)
-    if ik_state.target_quat_np is not None:
-        return base_ik.normalize_quat(ik_state.target_quat_np)
-    return base_ik.normalize_quat(ee_quat)
-
-
-def make_last_low_action_from_dp(last_dp_action):
-    last_low_action = np.zeros(DP_NUM_ACTIONS, dtype=np.float32)
-    if last_dp_action is None:
-        return last_low_action
-    values = np.asarray(last_dp_action, dtype=np.float32).reshape(-1)
-    n = min(10, DP_NUM_ACTIONS, values.shape[0])
-    last_low_action[:n] = values[:n]
-    return last_low_action
-
-
-def make_float_dp_state(
-    dof_names,
-    dof_pos,
-    dof_vel,
-    ee_pos,
-    ee_quat,
-    base_xy,
-    base_z,
-    yaw,
-    yaw_rate,
-    gripper,
-    last_dp_action=None,
-):
-    dp_dof_pos, dp_dof_vel = map_float_dofs_to_dp(dof_names, dof_pos, dof_vel)
-    base_roll_pitch = np.asarray([0.0, 0.0], dtype=np.float32)
-    base_ang_vel = np.asarray([0.0, 0.0, yaw_rate], dtype=np.float32)
-    last_low_action = make_last_low_action_from_dp(last_dp_action)
-    foot_contacts = np.zeros(4, dtype=np.float32)
-    base_pos = np.asarray([base_xy[0], base_xy[1], base_z], dtype=np.float32)
-    rel = np.asarray(ee_pos, dtype=np.float32) - base_pos
-    c = math.cos(-float(yaw))
-    s = math.sin(-float(yaw))
-    ee_base = np.asarray([c * rel[0] - s * rel[1], s * rel[0] + c * rel[1], rel[2]], dtype=np.float32)
-    return np.concatenate(
-        [
-            base_roll_pitch,
-            base_ang_vel,
-            dp_dof_pos,
-            dp_dof_vel,
-            last_low_action,
-            foot_contacts,
-            ee_base,
-            base_ik.normalize_quat(ee_quat).astype(np.float32),
-            np.asarray([gripper], dtype=np.float32),
-        ],
-        axis=0,
-    ).astype(np.float32)
-
-
-def base_position(base_xy, base_z):
-    return np.asarray([base_xy[0], base_xy[1], base_z], dtype=np.float32)
-
-
-def world_pos_to_base(pos_world, base_xy, base_z, yaw):
-    rel = np.asarray(pos_world, dtype=np.float32) - base_position(base_xy, base_z)
-    return quat_apply(base_ik.quat_conjugate(base_ik.yaw_quat(float(yaw))), rel).astype(np.float32)
-
-
-def base_pos_to_world(pos_base, base_xy, base_z, yaw):
-    return (base_position(base_xy, base_z) + quat_apply(base_ik.yaw_quat(float(yaw)), pos_base)).astype(np.float32)
-
-
-def world_quat_to_base(quat_world, yaw):
-    return base_ik.normalize_quat(
-        base_ik.quat_multiply(base_ik.quat_conjugate(base_ik.yaw_quat(float(yaw))), quat_world)
-    ).astype(np.float32)
-
-
-def base_quat_to_world(quat_base, yaw):
-    return base_ik.normalize_quat(base_ik.quat_multiply(base_ik.yaw_quat(float(yaw)), quat_base)).astype(np.float32)
-
-
-def make_float_dp_action(vx, yaw_rate, target_pos, target_quat, gripper, base_xy, base_z, yaw):
-    target_pos_base = world_pos_to_base(target_pos, base_xy, base_z, yaw)
-    target_quat_base = world_quat_to_base(base_ik.normalize_quat(target_quat), yaw)
-    return np.concatenate(
-        [
-            np.asarray([vx, yaw_rate], dtype=np.float32),
-            target_pos_base.reshape(3),
-            target_quat_base.reshape(4),
-            np.asarray([gripper], dtype=np.float32),
-        ],
-        axis=0,
-    ).astype(np.float32)
+set_robot_base_pose = dc.set_robot_base_pose
+compute_base_push_target = dc.compute_base_push_target
+get_body_pose = dc.get_body_pose
+get_actor_body_index = dc.get_actor_body_index
+gym_quat_to_np = dc.gym_quat_to_np
+local_camera_pose_from_cfg = dc.local_camera_pose_from_cfg
+draw_local_camera_axes = dc.draw_local_camera_axes
+draw_low_level_camera_axes = dc.draw_low_level_camera_axes
+make_camera_properties = dc.make_camera_properties
+attach_camera_to_actor_body = dc.attach_camera_to_actor_body
+create_low_level_cameras = dc.create_low_level_cameras
+camera_image_to_array = dc.camera_image_to_array
+camera_color_to_rgb = dc.camera_color_to_rgb
+show_camera_handle_images = dc.show_camera_handle_images
+mask_to_rgb = dc.mask_to_rgb
+depth_to_rgb = dc.depth_to_rgb
+capture_dp_camera_images = dc.capture_dp_camera_images
+capture_dp_camera_images_from_rendered = dc.capture_dp_camera_images_from_rendered
+dp_image_inputs_from_cpu_cameras = dc.dp_image_inputs_from_cpu_cameras
+get_actor_dof_state = dc.get_actor_dof_state
+wrap_to_pi = dc.wrap_to_pi
+current_ee_pose = dc.current_ee_pose
+current_ee_pose_from_refreshed_tensors = dc.current_ee_pose_from_refreshed_tensors
+update_arm_ik_targets_for_env = dc.update_arm_ik_targets_for_env
+map_float_dofs_to_dp = dc.map_float_dofs_to_dp
+base_command_from_targets = dc.base_command_from_targets
+target_quat_for_dp = dc.target_quat_for_dp
+make_last_low_action_from_dp = dc.make_last_low_action_from_dp
+make_float_dp_state = dc.make_float_dp_state
+base_position = dc.base_position
+world_pos_to_base = dc.world_pos_to_base
+base_pos_to_world = dc.base_pos_to_world
+world_quat_to_base = dc.world_quat_to_base
+base_quat_to_world = dc.base_quat_to_world
+make_float_dp_action = dc.make_float_dp_action
+make_float_replay_snapshot = dc.make_float_replay_snapshot
 
 
 def apply_float_dp_action(action, base_xy, base_z, yaw, dt, action_frame="base"):
@@ -1689,35 +608,6 @@ def print_float_dp_policy_log_record(record):
         flush=True,
     )
 
-
-def make_float_replay_snapshot(args, door, dof_names, dof_pos, dof_vel, door_pos, door_vel, ee_pos, ee_quat, base_xy, yaw, vx, yaw_rate):
-    dp_dof_pos, dp_dof_vel = map_float_dofs_to_dp(dof_names, dof_pos, dof_vel)
-    root_state = np.zeros(13, dtype=np.float32)
-    root_state[:3] = np.asarray([base_xy[0], base_xy[1], args.robot_z], dtype=np.float32)
-    root_state[3:7] = base_ik.yaw_quat(float(yaw))
-    root_state[7:10] = np.asarray([vx * math.cos(float(yaw)), vx * math.sin(float(yaw)), 0.0], dtype=np.float32)
-    root_state[10:13] = np.asarray([0.0, 0.0, yaw_rate], dtype=np.float32)
-
-    door_root_state = np.zeros(13, dtype=np.float32)
-    door_root_state[:3] = np.asarray(
-        [
-            args.door_x,
-            args.door_y,
-            -float(door.bounding["min"][2]) * args.door_actor_scale + args.door_z_offset,
-        ],
-        dtype=np.float32,
-    )
-    door_root_state[3:7] = np.asarray([0.0, 0.0, 1.0, 0.0], dtype=np.float32)
-    return {
-        "replay_root_state": root_state,
-        "replay_dof_pos": dp_dof_pos,
-        "replay_dof_vel": dp_dof_vel,
-        "replay_ee_pos": np.asarray(ee_pos, dtype=np.float32).copy(),
-        "replay_ee_quat": base_ik.normalize_quat(ee_quat).astype(np.float32),
-        "replay_door_root_state": door_root_state,
-        "replay_door_dof_pos": np.asarray(door_pos, dtype=np.float32).copy(),
-        "replay_door_dof_vel": np.asarray(door_vel, dtype=np.float32).copy(),
-    }
 
 
 def scalar_to_str(value):
@@ -1974,125 +864,11 @@ def apply_dp_warmstart_if_requested(gym, sim, args, controller, st, dof_names):
     return data
 
 
-def door_hinge_open_ratio(door, door_angle, args):
-    if len(door.dof_lower) == 0 or len(door.dof_upper) == 0:
-        return 0.0
-    if args.door_motion_sign < 0.0:
-        closed_angle = float(door.dof_upper[0])
-        open_limit = float(door.dof_lower[0])
-    else:
-        closed_angle = float(door.dof_lower[0])
-        open_limit = float(door.dof_upper[0])
-    hinge_range = max(abs(open_limit - closed_angle), 1.0e-6)
-    return float(np.clip(abs(float(door_angle) - closed_angle) / hinge_range, 0.0, 1.0))
-
-
-def compute_door_efforts(door, dof_pos, dof_vel, args):
-    efforts = np.zeros(len(dof_pos), dtype=np.float32)
-    if len(dof_pos) < 2:
-        return efforts
-
-    door_angle = float(dof_pos[0])
-    handle_angle_from_lower = float(dof_pos[1] - door.dof_lower[1])
-    if handle_angle_from_lower >= door.handle_unlock_threshold:
-        door.open_stage = True
-
-    hinge_range = max(abs(float(door.dof_upper[0])), abs(float(door.dof_lower[0])), 1.0e-3)
-    if abs(door_angle) < args.door_auto_open_target_ratio * hinge_range:
-        auto_torque = args.door_auto_open_force * args.door_motion_sign * args.door_auto_open_sign
-    else:
-        auto_torque = 0.0
-
-    if door.open_stage:
-        efforts[0] = auto_torque - args.door_open_resistance * door_angle - args.door_open_damping * float(dof_vel[0])
-    elif args.door_lock_force > 0.0:
-        efforts[0] = -args.door_motion_sign * args.door_lock_force
-
-    efforts[1] = -args.handle_spring_stiffness * handle_angle_from_lower - args.handle_spring_damping * float(dof_vel[1])
-    return efforts
-
-
-def enforce_locked_door_hinge(gym, env, door_actor, door):
-    if door.open_stage:
-        return
-    states = gym.get_actor_dof_states(env, door_actor, gymapi.STATE_ALL)
-    if len(states) == 0:
-        return
-    states["pos"][0] = door.dof_upper[0]
-    states["vel"][0] = 0.0
-    gym.set_actor_dof_states(env, door_actor, states, gymapi.STATE_ALL)
-
-
-def set_ik_target(ik_state, pos, quat):
-    torch = ik_state.torch
-    device = ik_state.target_pos.device
-    ik_state.target_pos[:] = torch.as_tensor(pos, dtype=torch.float32, device=device)
-    ik_state.target_pos_np = np.asarray(pos, dtype=np.float32).copy()
-    if quat is None:
-        ik_state.target_quat = None
-        ik_state.target_quat_np = None
-        return
-    quat = base_ik.normalize_quat(quat)
-    if ik_state.target_quat is None:
-        ik_state.target_quat = torch.as_tensor(quat, dtype=torch.float32, device=device)
-    else:
-        ik_state.target_quat[:] = torch.as_tensor(quat, dtype=torch.float32, device=device)
-    ik_state.target_quat = ik_state.target_quat / torch.clamp(torch.linalg.norm(ik_state.target_quat), min=1.0e-8)
-    ik_state.target_quat_np = quat.copy()
-
-
-def update_arm_ik_targets(gym, sim, dof_positions, ik_state, args, num_arm_dofs):
-    torch = ik_state.torch
-    gym.refresh_rigid_body_state_tensor(sim)
-    gym.refresh_dof_state_tensor(sim)
-    gym.refresh_jacobian_tensors(sim)
-
-    eef_state = ik_state.rb_states[ik_state.eef_body_sim_index]
-    eef_pos = eef_state[:3]
-    eef_quat = eef_state[3:7]
-    pos_err = ik_state.target_pos - eef_pos
-    j_eef = ik_state.jacobian[0, ik_state.eef_jacobian_index, :, :]
-    j_control = j_eef[:, ik_state.control_indices]
-
-    if ik_state.target_quat is None:
-        task_j = j_control[:3, :]
-        task_err = args.ik_pos_gain * pos_err
-        rot_err_norm = None
-    else:
-        orn_err = base_ik.torch_orientation_error(torch, ik_state.target_quat, eef_quat)
-        dpose = torch.cat((args.ik_pos_gain * pos_err, args.ik_rot_gain * orn_err), dim=0)
-        weights = torch.tensor(
-            [1.0, 1.0, 1.0, args.ik_rot_weight, args.ik_rot_weight, args.ik_rot_weight],
-            dtype=torch.float32,
-            device=j_control.device,
-        )
-        task_j = j_control * weights.view(6, 1)
-        task_err = dpose * weights
-        rot_err_norm = float(torch.linalg.norm(orn_err).detach().cpu())
-
-    j_t = torch.transpose(task_j, 0, 1)
-    damping = max(1.0e-6, float(args.ik_damping))
-    lhs = task_j @ j_t + torch.eye(task_j.shape[0], dtype=torch.float32, device=task_j.device) * (damping * damping)
-    delta = j_t @ torch.linalg.solve(lhs, task_err.unsqueeze(-1)).squeeze(-1)
-    delta = torch.clamp(delta, -args.ik_max_step, args.ik_max_step)
-
-    current_q = ik_state.dof_state_tensor[:num_arm_dofs, 0].clone()
-    next_q = current_q.clone()
-    next_q[ik_state.control_indices] += delta
-    next_q = torch.max(torch.min(next_q, ik_state.upper), ik_state.lower)
-    dof_positions[:] = next_q.detach().cpu().numpy()
-
-    ik_state.last_pos_error = float(torch.linalg.norm(pos_err).detach().cpu())
-    ik_state.last_rot_error = rot_err_norm
-    ik_state.current_pos_np = eef_pos.detach().cpu().numpy().copy()
-    ik_state.current_quat_np = eef_quat.detach().cpu().numpy().copy()
-
-
-def refresh_current_ee_pose(gym, sim, ik_state):
-    gym.refresh_rigid_body_state_tensor(sim)
-    eef_state = ik_state.rb_states[ik_state.eef_body_sim_index]
-    ik_state.current_pos_np = eef_state[:3].detach().cpu().numpy().copy()
-    ik_state.current_quat_np = eef_state[3:7].detach().cpu().numpy().copy()
+door_hinge_open_ratio = dc.door_hinge_open_ratio
+compute_door_efforts = dc.compute_door_efforts
+set_ik_target = dc.set_ik_target
+update_arm_ik_targets = dc.update_arm_ik_targets
+refresh_current_ee_pose = dc.refresh_current_ee_pose
 
 
 def trajectory_targets(
@@ -2378,16 +1154,7 @@ def trajectory_targets(
     return phase, base_xy, yaw, target_pos, target_quat, gripper, handle_goal
 
 
-def setup_viewer(gym, sim, args):
-    viewer = base_ik.setup_viewer(gym, sim, args)
-    if viewer is not None:
-        gym.viewer_camera_look_at(
-            viewer,
-            None,
-            gymapi.Vec3(float(args.door_x + 1.9), float(args.door_y + 3.2), 1.8),
-            gymapi.Vec3(float(args.door_x + 0.3), float(args.door_y), 0.8),
-        )
-    return viewer
+setup_viewer = dc.setup_viewer
 
 
 def run_demo(
@@ -2413,14 +1180,7 @@ def run_demo(
     if gripper_idx is not None:
         dof_positions[gripper_idx] = args.gripper_open
 
-    yaw_start = float(args.robot_yaw)
-    heading = np.array([math.cos(yaw_start), math.sin(yaw_start)], dtype=np.float32)
-    base_start = np.asarray([args.robot_x, robot_y_for_door(args, door.handle_bounding)], dtype=np.float32)
-    robot_front = base_start + heading * args.robot_front_offset
-    door_xy = np.asarray([args.door_x, args.door_y], dtype=np.float32)
-    front_to_door = float(np.dot(door_xy - robot_front, heading))
-    walk_dist = max(0.0, front_to_door - args.stop_distance)
-    base_stop = base_start + heading * walk_dist
+    yaw_start, heading, base_start, base_stop = dc.compute_base_walk_targets(args, door)
     base_push = compute_base_push_target(args, base_stop, heading)
     yaw_push = yaw_start + args.push_base_yaw_delta
     traj = {"base_xy": base_start.copy()}
@@ -2524,7 +1284,7 @@ def run_demo(
                 dof_positions[gripper_idx] = np.clip(gripper, ik_state.lower[gripper_idx].item(), ik_state.upper[gripper_idx].item())
         gym.set_actor_dof_position_targets(env, arm_actor, dof_positions)
 
-        enforce_locked_door_hinge(gym, env, door_actor, door)
+        dc.enforce_locked_door_hinge(gym, env, door_actor, door, args)
         door_pos, door_vel = get_actor_dof_state(gym, env, door_actor)
         door_efforts = compute_door_efforts(door, door_pos, door_vel, args)
         if len(door_efforts) > 0:
@@ -2749,14 +1509,7 @@ def initialize_parallel_env_state(
             ik_state.upper[gripper_idx].item(),
         )
 
-    yaw_start = float(args.robot_yaw)
-    heading = np.array([math.cos(yaw_start), math.sin(yaw_start)], dtype=np.float32)
-    base_start = np.asarray([args.robot_x, robot_y_for_door(args, door.handle_bounding)], dtype=np.float32)
-    robot_front = base_start + heading * args.robot_front_offset
-    door_xy = np.asarray([args.door_x, args.door_y], dtype=np.float32)
-    front_to_door = float(np.dot(door_xy - robot_front, heading))
-    walk_dist = max(0.0, front_to_door - args.stop_distance)
-    base_stop = base_start + heading * walk_dist
+    yaw_start, heading, base_start, base_stop = dc.compute_base_walk_targets(args, door)
     base_push = compute_base_push_target(args, base_stop, heading)
     return ParallelEnvState(
         index=int(index),
@@ -3157,7 +1910,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                     )
             gym.set_actor_dof_position_targets(st.env, st.arm_actor, st.dof_positions)
 
-            enforce_locked_door_hinge(gym, st.env, st.door_actor, st.door)
+            dc.enforce_locked_door_hinge(gym, st.env, st.door_actor, st.door, st.args)
             door_pos, door_vel = get_actor_dof_state(gym, st.env, st.door_actor)
             st.last_door_pos = door_pos
             door_efforts = compute_door_efforts(st.door, door_pos, door_vel, st.args)

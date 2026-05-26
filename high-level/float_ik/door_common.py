@@ -394,6 +394,10 @@ def load_door_assets(gym, sim, args):
     return doors
 
 
+def load_door_asset(gym, sim, args):
+    return load_door_assets(gym, sim, args)[0]
+
+
 def clone_door_runtime(door):
     return replace(
         door,
@@ -438,6 +442,44 @@ def configure_door_actor_dofs(gym, env, door_actor, door, args):
     door.dof_upper = np.asarray(door_dof_props["upper"], dtype=np.float32).copy()
     handle_range = max(1.0e-6, float(door.dof_upper[1] - door.dof_lower[1]) if len(door.dof_upper) >= 2 else 1.0)
     door.handle_unlock_threshold = args.handle_unlock_ratio * handle_range
+
+
+def create_env_actors(gym, sim, base_asset, arm_asset, door, dof_props, dof_states, args):
+    env = gym.create_env(sim, gymapi.Vec3(-2.5, -2.5, 0.0), gymapi.Vec3(2.5, 2.5, 2.5), 1)
+    robot_y = robot_y_for_door(args, door.handle_bounding)
+
+    robot_pose = gymapi.Transform()
+    robot_pose.p = gymapi.Vec3(args.robot_x, robot_y, args.robot_z)
+    robot_pose.r = gymapi.Quat.from_euler_zyx(0.0, 0.0, args.robot_yaw)
+
+    collision_filter = 1 if args.disable_self_collisions else 0
+    actor_handles = []
+    if base_asset is not None:
+        base_actor = gym.create_actor(env, base_asset, robot_pose, "b1_base_visual", 0, collision_filter)
+        actor_handles.append(base_actor)
+    arm_actor = gym.create_actor(env, arm_asset, robot_pose, base_ik.ARM_ACTOR_NAME, 0, collision_filter)
+    actor_handles.append(arm_actor)
+    gym.set_actor_dof_properties(env, arm_actor, dof_props)
+    gym.set_actor_dof_states(env, arm_actor, dof_states, gymapi.STATE_ALL)
+    gym.set_actor_dof_position_targets(env, arm_actor, dof_states["pos"])
+
+    door_pose = gymapi.Transform()
+    door_pose.p = gymapi.Vec3(
+        float(args.door_x),
+        float(args.door_y),
+        float(-door.bounding["min"][2] * args.door_actor_scale + args.door_z_offset),
+    )
+    door_pose.r = gymapi.Quat(0.0, 0.0, 1.0, 0.0)
+    door_actor = gym.create_actor(env, door.asset, door_pose, "door", 0, 0, 1)
+    if abs(args.door_actor_scale - 1.0) > 1.0e-6:
+        gym.set_actor_scale(env, door_actor, args.door_actor_scale)
+    try:
+        gym.set_rigid_body_segmentation_id(env, door_actor, door.handle_body_index, int(args.handle_seg_id))
+    except AttributeError:
+        print("set_rigid_body_segmentation_id is not available; handle mask will use the door actor segmentation.")
+
+    configure_door_actor_dofs(gym, env, door_actor, door, args)
+    return env, arm_actor, actor_handles, door_actor, np.array([args.robot_x, robot_y], dtype=np.float32)
 
 
 def create_parallel_env_actors(
@@ -1301,7 +1343,7 @@ def create_low_level_cameras(gym, env, arm_actor, actor_handles, args):
             gym, env, arm_actor, "link06", DEFAULT_WRIST_CAMERA_CFG, wrist_rot
         )
         if wrist_camera is None:
-            print("[camera] Wrist camera sensor creation failed; image display is disabled.", flush=True)
+            print("⚠️📷 Wrist camera sensor creation failed; wrist camera image display is disabled.", flush=True)
         else:
             cameras["wrist"] = wrist_camera
             print(f"Wrist camera sensor enabled: handle={wrist_camera}")
@@ -1321,22 +1363,25 @@ def create_low_level_cameras(gym, env, arm_actor, actor_handles, args):
                 gym, env, base_actor, "base", DEFAULT_FRONT_CAMERA_CFG, front_rot
             )
         if front_camera is None:
-            print("[camera] Front camera sensor creation failed; image display is disabled.", flush=True)
+            print("⚠️📷 Front camera sensor creation failed; front camera image display is disabled.", flush=True)
         else:
             cameras["front"] = front_camera
             print(f"Front camera sensor enabled: handle={front_camera}")
     if args.show_camera_images:
         if cv2 is None:
-            print("[camera] cv2 is not available; camera image windows are disabled.", flush=True)
+            print("⚠️📷 cv2 is not available; camera image windows are disabled.", flush=True)
         elif not cameras:
-            print("[camera] No camera sensors were created; camera image windows are disabled.", flush=True)
+            print("⚠️📷 No camera sensors were created; camera image windows are disabled.", flush=True)
         else:
             pair_names = (
                 ", ".join(f"{name}_rgb/{name}_mask" for name in cameras.keys())
                 if args.rgb
                 else ", ".join(f"{name}_mask/{name}_full_depth" for name in cameras.keys())
             )
-            print("Camera image windows enabled:", pair_names)
+            print(
+                "Camera image windows enabled:",
+                pair_names,
+            )
     return cameras
 
 
@@ -1397,6 +1442,29 @@ def show_camera_handle_images(gym, sim, env, camera_handles, args):
             if rgb_raw is None:
                 continue
             rgb_image = camera_color_to_rgb(rgb_raw, height, width)
+            rgb_nonzero = int(np.count_nonzero(rgb_image))
+            printed = getattr(args, "_camera_image_stats_printed", set())
+            if prefix not in printed:
+                print(
+                    f"{prefix} camera image stats: "
+                    f"rgb_shape={tuple(rgb_image.shape)} "
+                    f"mask_pixels={int(handle_mask.sum())} "
+                    f"rgb_nonzero_pixels={rgb_nonzero}",
+                    flush=True,
+                )
+                printed.add(prefix)
+                args._camera_image_stats_printed = printed
+            if rgb_nonzero == 0:
+                blank_printed = getattr(args, "_camera_blank_warned", set())
+                if prefix not in blank_printed:
+                    print(
+                        "⚠️📷 Camera render is blank: RGB image has no nonzero pixels. "
+                        "Check graphics_device_id/GPU rendering if this persists.",
+                        flush=True,
+                    )
+                    blank_printed.add(prefix)
+                    args._camera_blank_warned = blank_printed
+
             if display_scale > 1:
                 mask_vis = cv2.resize(mask_vis, None, fx=display_scale, fy=display_scale, interpolation=cv2.INTER_NEAREST)
                 rgb_image = cv2.resize(rgb_image, None, fx=display_scale, fy=display_scale, interpolation=cv2.INTER_LINEAR)
@@ -1417,11 +1485,49 @@ def show_camera_handle_images(gym, sim, env, camera_handles, args):
         )
         depth_image[depth_image < float(args.camera_depth_clip_lower)] = 0.0
         depth_image = np.clip(depth_image, 0.0, float(args.camera_depth_clip_far))
-        depth_scaled = (depth_image - float(args.camera_depth_clip_lower)) / max(
-            float(args.camera_depth_clip_far) - float(args.camera_depth_clip_lower),
-            1.0e-4,
-        )
-        depth_vis = (255.0 * np.clip(depth_scaled, 0.0, 1.0)).astype(np.uint8)
+
+        depth_vis = np.zeros_like(depth_image, dtype=np.uint8)
+        valid_depth = depth_image[np.isfinite(depth_image) & (depth_image > 0.0)]
+        valid_depth = valid_depth[np.isfinite(valid_depth) & (valid_depth > 0.0)]
+        if valid_depth.size > 0:
+            depth_scaled = (depth_image - float(args.camera_depth_clip_lower)) / max(
+                float(args.camera_depth_clip_far) - float(args.camera_depth_clip_lower),
+                1.0e-4,
+            )
+            depth_vis = (255.0 * np.clip(depth_scaled, 0.0, 1.0)).astype(np.uint8)
+
+        printed = getattr(args, "_camera_image_stats_printed", set())
+        if prefix not in printed:
+            print(
+                f"{prefix} camera image stats: "
+                f"seg_shape={tuple(seg_image.shape)} "
+                f"mask_pixels={int(handle_mask.sum())} "
+                f"valid_depth_pixels={int(valid_depth.size)}",
+                flush=True,
+            )
+            printed.add(prefix)
+            args._camera_image_stats_printed = printed
+
+        visible_printed = getattr(args, "_camera_handle_visible_printed", set())
+        if prefix not in visible_printed and handle_mask.sum() > 0:
+            print(
+                f"{prefix} camera sees handle: "
+                f"mask_pixels={int(handle_mask.sum())} "
+                f"valid_depth_pixels={int(valid_depth.size)}",
+                flush=True,
+            )
+            visible_printed.add(prefix)
+            args._camera_handle_visible_printed = visible_printed
+        if valid_depth.size == 0:
+            blank_printed = getattr(args, "_camera_blank_warned", set())
+            if prefix not in blank_printed:
+                print(
+                    "⚠️📷 Camera render has no valid depth pixels. "
+                    "Check handle visibility, segmentation id, and graphics rendering if this persists.",
+                    flush=True,
+                )
+                blank_printed.add(prefix)
+                args._camera_blank_warned = blank_printed
 
         if display_scale > 1:
             mask_vis = cv2.resize(mask_vis, None, fx=display_scale, fy=display_scale, interpolation=cv2.INTER_NEAREST)
@@ -1448,6 +1554,13 @@ def depth_to_rgb(depth_image, depth_lower, depth_far):
     return np.repeat(depth_u8[..., None], 3, axis=-1), int(valid.size)
 
 
+def capture_dp_camera_images(gym, sim, env, camera_handles, args):
+    if not camera_handles:
+        return {}
+    gym.render_all_camera_sensors(sim)
+    return capture_dp_camera_images_from_rendered(gym, sim, env, camera_handles, args)
+
+
 def capture_dp_camera_images_from_rendered(gym, sim, env, camera_handles, args):
     if not camera_handles:
         return {}
@@ -1467,7 +1580,16 @@ def capture_dp_camera_images_from_rendered(gym, sim, env, camera_handles, args):
             rgb_raw = gym.get_camera_image(sim, env, camera_handle, gymapi.IMAGE_COLOR)
             if rgb_raw is None:
                 continue
-            images[f"{prefix}_rgb"] = camera_color_to_rgb(rgb_raw, height, width)
+            rgb_image = camera_color_to_rgb(rgb_raw, height, width)
+            images[f"{prefix}_rgb"] = rgb_image
+            if args.headless and not getattr(args, f"_{prefix}_headless_rgb_checked", False):
+                if int(np.count_nonzero(rgb_image)) == 0:
+                    print(
+                        "⚠️📷 Headless camera render is blank: RGB image has no nonzero pixels. "
+                        "Check graphics_device_id/GPU rendering if this persists.",
+                        flush=True,
+                    )
+                setattr(args, f"_{prefix}_headless_rgb_checked", True)
             continue
 
         depth_raw = gym.get_camera_image(sim, env, camera_handle, gymapi.IMAGE_DEPTH)
@@ -1489,6 +1611,14 @@ def capture_dp_camera_images_from_rendered(gym, sim, env, camera_handles, args):
             args.camera_depth_clip_far,
         )
         images[f"{prefix}_masked_depth"] = depth_rgb
+        if args.headless and not getattr(args, f"_{prefix}_headless_depth_checked", False):
+            if _valid_depth_count == 0:
+                print(
+                    "⚠️📷 Headless camera render has no valid depth pixels. "
+                    "Check graphics_device_id/GPU rendering if this persists.",
+                    flush=True,
+                )
+            setattr(args, f"_{prefix}_headless_depth_checked", True)
     return images
 
 
@@ -1517,6 +1647,17 @@ def wrap_to_pi(angle):
     return (float(angle) + math.pi) % (2.0 * math.pi) - math.pi
 
 
+def current_ee_pose(gym, sim, ik_state):
+    gym.refresh_rigid_body_state_tensor(sim)
+    eef_state = ik_state.rb_states[ik_state.eef_body_sim_index]
+    pos = eef_state[:3].detach().cpu().numpy().astype(np.float32).copy()
+    quat = eef_state[3:7].detach().cpu().numpy().astype(np.float32).copy()
+    quat = base_ik.normalize_quat(quat)
+    ik_state.current_pos_np = pos.copy()
+    ik_state.current_quat_np = quat.copy()
+    return pos, quat
+
+
 def current_ee_pose_from_refreshed_tensors(ik_state):
     eef_state = ik_state.rb_states[ik_state.eef_body_sim_index]
     pos = eef_state[:3].detach().cpu().numpy().astype(np.float32).copy()
@@ -1525,6 +1666,13 @@ def current_ee_pose_from_refreshed_tensors(ik_state):
     ik_state.current_pos_np = pos.copy()
     ik_state.current_quat_np = quat.copy()
     return pos, quat
+
+
+def refresh_current_ee_pose(gym, sim, ik_state):
+    gym.refresh_rigid_body_state_tensor(sim)
+    eef_state = ik_state.rb_states[ik_state.eef_body_sim_index]
+    ik_state.current_pos_np = eef_state[:3].detach().cpu().numpy().copy()
+    ik_state.current_quat_np = eef_state[3:7].detach().cpu().numpy().copy()
 
 
 def set_ik_target(ik_state, pos, quat):
@@ -1591,6 +1739,53 @@ def update_arm_ik_targets_for_env(gym, env, arm_actor, env_index, dof_positions,
     ik_state.current_quat_np = eef_quat.detach().cpu().numpy().copy()
 
 
+def update_arm_ik_targets(gym, sim, dof_positions, ik_state, args, num_arm_dofs):
+    torch = ik_state.torch
+    gym.refresh_rigid_body_state_tensor(sim)
+    gym.refresh_dof_state_tensor(sim)
+    gym.refresh_jacobian_tensors(sim)
+
+    eef_state = ik_state.rb_states[ik_state.eef_body_sim_index]
+    eef_pos = eef_state[:3]
+    eef_quat = eef_state[3:7]
+    pos_err = ik_state.target_pos - eef_pos
+    j_eef = ik_state.jacobian[0, ik_state.eef_jacobian_index, :, :]
+    j_control = j_eef[:, ik_state.control_indices]
+
+    if ik_state.target_quat is None:
+        task_j = j_control[:3, :]
+        task_err = args.ik_pos_gain * pos_err
+        rot_err_norm = None
+    else:
+        orn_err = base_ik.torch_orientation_error(torch, ik_state.target_quat, eef_quat)
+        dpose = torch.cat((args.ik_pos_gain * pos_err, args.ik_rot_gain * orn_err), dim=0)
+        weights = torch.tensor(
+            [1.0, 1.0, 1.0, args.ik_rot_weight, args.ik_rot_weight, args.ik_rot_weight],
+            dtype=torch.float32,
+            device=j_control.device,
+        )
+        task_j = j_control * weights.view(6, 1)
+        task_err = dpose * weights
+        rot_err_norm = float(torch.linalg.norm(orn_err).detach().cpu())
+
+    j_t = torch.transpose(task_j, 0, 1)
+    damping = max(1.0e-6, float(args.ik_damping))
+    lhs = task_j @ j_t + torch.eye(task_j.shape[0], dtype=torch.float32, device=task_j.device) * (damping * damping)
+    delta = j_t @ torch.linalg.solve(lhs, task_err.unsqueeze(-1)).squeeze(-1)
+    delta = torch.clamp(delta, -args.ik_max_step, args.ik_max_step)
+
+    current_q = ik_state.dof_state_tensor[:num_arm_dofs, 0].clone()
+    next_q = current_q.clone()
+    next_q[ik_state.control_indices] += delta
+    next_q = torch.max(torch.min(next_q, ik_state.upper), ik_state.lower)
+    dof_positions[:] = next_q.detach().cpu().numpy()
+
+    ik_state.last_pos_error = float(torch.linalg.norm(pos_err).detach().cpu())
+    ik_state.last_rot_error = rot_err_norm
+    ik_state.current_pos_np = eef_pos.detach().cpu().numpy().copy()
+    ik_state.current_quat_np = eef_quat.detach().cpu().numpy().copy()
+
+
 def base_position(base_xy, base_z):
     return np.asarray([base_xy[0], base_xy[1], base_z], dtype=np.float32)
 
@@ -1636,6 +1831,14 @@ def base_command_from_targets(base_xy, yaw, prev_base_xy, prev_yaw, dt):
     vx = float(np.dot(delta_xy, forward))
     yaw_rate = wrap_to_pi(float(yaw) - float(prev_yaw)) / float(dt)
     return vx, yaw_rate
+
+
+def target_quat_for_dp(target_quat, ik_state, ee_quat):
+    if target_quat is not None:
+        return base_ik.normalize_quat(target_quat)
+    if ik_state.target_quat_np is not None:
+        return base_ik.normalize_quat(ik_state.target_quat_np)
+    return base_ik.normalize_quat(ee_quat)
 
 
 def make_last_low_action_from_dp(last_dp_action):
