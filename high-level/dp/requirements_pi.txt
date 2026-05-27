@@ -1,0 +1,22 @@
+# Door DP / LeRobot pi0.5 environment.
+#
+# This extends requirements_dp.txt with the extra dependencies needed by
+# LeRobot's pi0/pi0.5 implementation.
+#
+# Recommended setup:
+#   conda create -n b1z1_lerobot python=3.10
+#   conda activate b1z1_lerobot
+#   python -m pip install --upgrade pip
+#   python -m pip install -r high-level/dp/requirements_pi.txt
+#
+# requirements_dp.txt already installs the local LeRobot source tree in editable
+# mode. The pins below are equivalent to the current LeRobot `pi` extra without
+# adding a second editable LeRobot requirement.
+-r requirements_dp.txt
+
+# LeRobot pi0/pi0.5 depends on Hugging Face's patched OpenPI transformers
+# branch. This commit is what `pip install -e "high-level/lerobot[pi]"` resolved
+# to in the verified b1z1_lerobot environment.
+transformers @ git+https://github.com/huggingface/transformers.git@dcddb970176382c0fcf4521b0c0e6fc15894dfe0
+tokenizers==0.21.4
+scipy==1.14.1

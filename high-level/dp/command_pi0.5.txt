@@ -1,0 +1,69 @@
+# Door pi0.5 training commands
+#
+# Run from anywhere. Paths are absolute to avoid cwd-related failures.
+# `conda run --no-capture-output` keeps loss/log output visible in the terminal.
+
+
+## 1. LeRobot pi0.5 baseline
+#
+# Environment:
+#   b1z1_lerobot
+# Policy:
+#   lerobot.policies.pi05.PI05Policy
+# GPU:
+#   cuda:0
+
+set -o pipefail
+cd /home/ps/workspace/txc/doorgym
+
+mkdir -p /home/ps/workspace/txc/doorgym/high-level/dp/logs/door-pi05/pi05_4door_ikpush
+
+conda run --no-capture-output -n b1z1_lerobot python /home/ps/workspace/txc/doorgym/high-level/dp/train/train_door_pi05.py \
+    --policy_type pi05 \
+    --root /home/ps/workspace/txc/doorgym/high-level/data/lerobot \
+    --repo_id local/4door_ikpush \
+    --run_name pi05_4door_ikpush \
+    --steps 200000 \
+    --batch_size 16 \
+    --num_workers 2 \
+    --device cuda:0 \
+    --pretrained_path /home/ps/workspace/txc/doorgym/high-level/dp/models/pi05_base \
+    --dtype bfloat16 \
+    --gradient_checkpointing \
+    --log_interval 1 \
+    2>&1 | tee -a /home/ps/workspace/txc/doorgym/high-level/dp/logs/door-pi05/pi05_4door_ikpush/terminal.log
+
+
+## 2. HWK LeRobot pi0.5 evo
+#
+# Environment:
+#   b1z1_hwk_lerobot
+# Policy:
+#   lerobot.policies.pi05_evo.PI05EvoPolicy
+# GPU:
+#   cuda:1
+# Logging:
+#   terminal + wandb
+
+set -o pipefail
+cd /home/ps/workspace/txc/doorgym
+
+mkdir -p /home/ps/workspace/txc/doorgym/high-level/dp/logs/door-pi05/pi05_evo_4door_ikpush_hwk
+
+conda run --no-capture-output -n b1z1_hwk_lerobot python /home/ps/workspace/txc/doorgym/high-level/dp/train/train_door_pi05.py \
+    --policy_type pi05_evo \
+    --root /home/ps/workspace/txc/doorgym/high-level/data/lerobot \
+    --repo_id local/4door_ikpush \
+    --run_name pi05_evo_4door_ikpush_hwk \
+    --steps 200000 \
+    --batch_size 16 \
+    --num_workers 2 \
+    --device cuda:1 \
+    --pretrained_path /home/ps/workspace/txc/doorgym/high-level/dp/models/pi05_base \
+    --dtype bfloat16 \
+    --gradient_checkpointing \
+    --wandb \
+    --wandb_project door-pi05 \
+    --wandb_group evo \
+    --log_interval 1 \
+    2>&1 | tee -a /home/ps/workspace/txc/doorgym/high-level/dp/logs/door-pi05/pi05_evo_4door_ikpush_hwk/terminal.log

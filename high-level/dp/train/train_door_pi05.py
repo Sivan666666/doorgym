@@ -1,5 +1,6 @@
 import argparse
 import json
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -16,6 +17,8 @@ from door_dp_common import ACTION_NAMES, normalize_vision_mode  # noqa: E402
 from door_policy_backend import (  # noqa: E402
     ACTION,
     BACKEND_LEROBOT_PI05,
+    BACKEND_LEROBOT_PI05_EVO,
+    CHECKPOINT_OPTIMIZER,
     OBS_STATE,
     DoorPolicyChunkDataset,
     LeRobotPI05DoorPolicyBackend,
@@ -34,12 +37,13 @@ def parse_args():
     parser.add_argument("--lr", type=float, default=2.5e-5)
     parser.add_argument("--weight_decay", type=float, default=0.01)
     parser.add_argument("--grad_clip_norm", type=float, default=1.0)
-    parser.add_argument("--num_workers", type=int, default=0)
+    parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument("--chunk_size", type=int, default=32)
     parser.add_argument("--action_horizon", type=int, default=16)
     parser.add_argument("--rgb", action="store_true", help="Train on RGB+mask image fields instead of depth+mask.")
     parser.add_argument("--pretrained_path", type=str, default=None, help="Optional LeRobot pi0.5/OpenPI checkpoint.")
+    parser.add_argument("--policy_type", choices=["pi05", "pi05_evo"], default="pi05")
 
     parser.add_argument("--task_prompt", type=str, default="open the door")
     parser.add_argument("--tokenizer_name", type=str, default="google/paligemma-3b-pt-224")
@@ -60,7 +64,18 @@ def parse_args():
     parser.add_argument("--state_normalization", choices=["QUANTILES", "QUANTILE10", "MEAN_STD", "MIN_MAX", "IDENTITY"], default="QUANTILES")
     parser.add_argument("--action_normalization", choices=["QUANTILES", "QUANTILE10", "MEAN_STD", "MIN_MAX", "IDENTITY"], default="QUANTILES")
 
-    parser.add_argument("--save_interval", type=int, default=5000)
+    parser.add_argument("--save_interval", type=int, default=1000)
+    parser.add_argument(
+        "--max_history_checkpoints",
+        type=int,
+        default=5,
+        help="Keep this many historical model_<step> checkpoints. Use 0 to keep all.",
+    )
+    parser.add_argument(
+        "--history_save_optimizer",
+        action="store_true",
+        help="Also save optimizer.pt in historical model_<step> checkpoints. model_latest always keeps optimizer.",
+    )
     parser.add_argument("--log_interval", type=int, default=10)
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--wandb_project", type=str, default="door-pi05")
@@ -84,17 +99,99 @@ def load_sidecar(dataset_root):
         return json.load(f), sidecar
 
 
-def save_latest(backend, optimizer, ckpt_dir, train_config, wandb_run=None, upload_to_wandb=False):
-    latest_dir = ckpt_dir / "model_latest"
-    manifest_path = ckpt_dir / "model_latest.pt"
-    backend.save_checkpoint(latest_dir, optimizer=optimizer, extra_config=train_config, manifest_path=manifest_path)
+def save_checkpoint_alias(
+    backend,
+    optimizer,
+    ckpt_dir,
+    name,
+    train_config,
+    wandb_run=None,
+    upload_to_wandb=False,
+    include_optimizer=True,
+):
+    checkpoint_dir = ckpt_dir / name
+    manifest_path = ckpt_dir / f"{name}.pt"
+    optimizer_to_save = optimizer if include_optimizer else None
+    backend.save_checkpoint(
+        checkpoint_dir,
+        optimizer=optimizer_to_save,
+        extra_config=train_config,
+        manifest_path=manifest_path,
+    )
+    if not include_optimizer:
+        optimizer_path = checkpoint_dir / CHECKPOINT_OPTIMIZER
+        if optimizer_path.exists():
+            optimizer_path.unlink()
     if wandb_run is not None and upload_to_wandb:
         wandb_run.save(str(manifest_path))
-        wandb_run.save(str(latest_dir / "door_policy_meta.json"))
-        wandb_run.save(str(latest_dir / "door_policy_stats.pt"))
-        wandb_run.save(str(latest_dir / "policy" / "config.json"))
-        wandb_run.save(str(latest_dir / "policy" / "model.safetensors"))
+        wandb_run.save(str(checkpoint_dir / "door_policy_meta.json"))
+        wandb_run.save(str(checkpoint_dir / "door_policy_stats.pt"))
+        wandb_run.save(str(checkpoint_dir / "policy" / "config.json"))
+        wandb_run.save(str(checkpoint_dir / "policy" / "model.safetensors"))
     return manifest_path
+
+
+def _history_checkpoint_step(path: Path) -> int | None:
+    stem = path.stem if path.is_file() else path.name
+    if not stem.startswith("model_"):
+        return None
+    suffix = stem.removeprefix("model_")
+    if not suffix.isdigit():
+        return None
+    return int(suffix)
+
+
+def prune_history_checkpoints(ckpt_dir: Path, keep: int) -> None:
+    if keep <= 0 or not ckpt_dir.exists():
+        return
+    steps = sorted({
+        step
+        for path in ckpt_dir.glob("model_*")
+        if (step := _history_checkpoint_step(path)) is not None
+    })
+    for step in steps[:-keep]:
+        manifest = ckpt_dir / f"model_{step}.pt"
+        checkpoint_dir = ckpt_dir / f"model_{step}"
+        if manifest.exists():
+            manifest.unlink()
+        if checkpoint_dir.exists():
+            shutil.rmtree(checkpoint_dir)
+        print(f"Pruned old checkpoint model_{step}", flush=True)
+
+
+def save_training_checkpoints(
+    backend,
+    optimizer,
+    ckpt_dir,
+    train_config,
+    wandb_run=None,
+    upload_to_wandb=False,
+    history_save_optimizer=False,
+    max_history_checkpoints=5,
+):
+    step = int(train_config["step"])
+    step_manifest = save_checkpoint_alias(
+        backend,
+        optimizer,
+        ckpt_dir,
+        f"model_{step}",
+        train_config,
+        wandb_run=None,
+        upload_to_wandb=False,
+        include_optimizer=history_save_optimizer,
+    )
+    prune_history_checkpoints(ckpt_dir, int(max_history_checkpoints))
+    latest_manifest = save_checkpoint_alias(
+        backend,
+        optimizer,
+        ckpt_dir,
+        "model_latest",
+        train_config,
+        wandb_run=wandb_run,
+        upload_to_wandb=upload_to_wandb,
+        include_optimizer=True,
+    )
+    return latest_manifest, step_manifest
 
 
 def main():
@@ -133,6 +230,7 @@ def main():
         state_dim=state_dim,
         action_dim=action_dim,
         pretrained_path=args.pretrained_path,
+        policy_type=args.policy_type,
         task_prompt=args.task_prompt,
         tokenizer_name=args.tokenizer_name,
         normalization_mapping=normalization_mapping,
@@ -167,9 +265,10 @@ def main():
     run_dir = DP_ROOT / "logs" / "door-pi05" / args.run_name
     ckpt_dir = run_dir / "checkpoints"
     train_config = vars(args).copy()
+    backend_name = getattr(backend, "backend_name", BACKEND_LEROBOT_PI05_EVO if args.policy_type == "pi05_evo" else BACKEND_LEROBOT_PI05)
     train_config.update(
         {
-            "backend": BACKEND_LEROBOT_PI05,
+            "backend": backend_name,
             "state_dim": state_dim,
             "action_dim": action_dim,
             "vision_mode": vision_mode,
@@ -180,7 +279,7 @@ def main():
         }
     )
     print(
-        f"Training backend={BACKEND_LEROBOT_PI05} state_dim={state_dim} action_dim={action_dim} "
+        f"Training backend={backend_name} policy_type={args.policy_type} state_dim={state_dim} action_dim={action_dim} "
         f"chunk_size={args.chunk_size} action_horizon={args.action_horizon} vision_mode={vision_mode}",
         flush=True,
     )
@@ -201,6 +300,8 @@ def main():
     step = 0
     t0 = time.time()
     latest_manifest = None
+    step_manifest = None
+    last_saved_step = None
     while step < args.steps:
         for batch in loader:
             loss = backend.compute_loss(batch)
@@ -217,14 +318,35 @@ def main():
                     wandb_run.log({"train/step": step, "train/loss": float(loss.item()), "train/elapsed_sec": elapsed})
             if step % args.save_interval == 0 or step == args.steps:
                 train_config["step"] = int(step)
-                latest_manifest = save_latest(backend, optimizer, ckpt_dir, train_config, wandb_run, args.wandb_save_checkpoints)
+                latest_manifest, step_manifest = save_training_checkpoints(
+                    backend,
+                    optimizer,
+                    ckpt_dir,
+                    train_config,
+                    wandb_run,
+                    args.wandb_save_checkpoints,
+                    args.history_save_optimizer,
+                    args.max_history_checkpoints,
+                )
+                last_saved_step = int(step)
+                print(f"Saved {step_manifest} and updated {latest_manifest}", flush=True)
             if step >= args.steps:
                 break
     train_config["step"] = int(step)
-    latest_manifest = save_latest(backend, optimizer, ckpt_dir, train_config, wandb_run, args.wandb_save_checkpoints)
+    if last_saved_step != int(step):
+        latest_manifest, step_manifest = save_training_checkpoints(
+            backend,
+            optimizer,
+            ckpt_dir,
+            train_config,
+            wandb_run,
+            args.wandb_save_checkpoints,
+            args.history_save_optimizer,
+            args.max_history_checkpoints,
+        )
     if wandb_run is not None:
         wandb_run.finish()
-    print(f"Saved {latest_manifest} and {ckpt_dir / 'model_latest'}", flush=True)
+    print(f"Saved {step_manifest} and updated {latest_manifest}", flush=True)
 
 
 if __name__ == "__main__":

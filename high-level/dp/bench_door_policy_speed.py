@@ -19,17 +19,21 @@ from door_policy_backend import DoorPolicyController  # noqa: E402
 
 DEFAULT_DP_CKPT = REPO / "high-level/dp/logs/door-dp/lerodp_4door_ikpush/checkpoints/model_latest.pt"
 DEFAULT_ACT_CKPT = REPO / "high-level/dp/logs/door-act/leroact_4door_ikpush/checkpoints/model_latest.pt"
+DEFAULT_PI05_CKPT = REPO / "high-level/dp/logs/door-pi05/pi05_4door_ikpush/checkpoints/model_latest.pt"
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Benchmark one Door DP/ACT policy inference call.")
+    parser.add_argument("--only", choices=["all", "dp", "act", "pi05"], default="all")
     parser.add_argument("--dp_checkpoint", type=Path, default=DEFAULT_DP_CKPT)
     parser.add_argument("--act_checkpoint", type=Path, default=DEFAULT_ACT_CKPT)
+    parser.add_argument("--pi05_checkpoint", type=Path, default=DEFAULT_PI05_CKPT)
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument("--warmup", type=int, default=3)
     parser.add_argument("--iters", type=int, default=10)
     parser.add_argument("--act_warmup", type=int, default=5)
     parser.add_argument("--act_iters", type=int, default=20)
+    parser.add_argument("--pi05_steps", type=int, nargs="+", default=[10])
     return parser.parse_args()
 
 
@@ -85,24 +89,36 @@ def main():
     if torch.cuda.is_available():
         print(f"gpu={torch.cuda.get_device_name(0)}", flush=True)
 
-    for steps in (100, 25, 10):
-        for scheduler in ("DDPM", "DDIM"):
+    if args.only in ("all", "dp"):
+        for steps in (100, 25, 10):
+            for scheduler in ("DDPM", "DDIM"):
+                measure(
+                    f"DP steps={steps} scheduler={scheduler}",
+                    args.dp_checkpoint,
+                    device=args.device,
+                    steps=steps,
+                    scheduler=scheduler,
+                    warmup=args.warmup,
+                    iters=args.iters,
+                )
+    if args.only in ("all", "pi05"):
+        for steps in args.pi05_steps:
             measure(
-                f"DP steps={steps} scheduler={scheduler}",
-                args.dp_checkpoint,
+                f"pi0.5 steps={steps}",
+                args.pi05_checkpoint,
                 device=args.device,
                 steps=steps,
-                scheduler=scheduler,
                 warmup=args.warmup,
                 iters=args.iters,
             )
-    measure(
-        "ACT",
-        args.act_checkpoint,
-        device=args.device,
-        warmup=args.act_warmup,
-        iters=args.act_iters,
-    )
+    if args.only in ("all", "act"):
+        measure(
+            "ACT",
+            args.act_checkpoint,
+            device=args.device,
+            warmup=args.act_warmup,
+            iters=args.act_iters,
+        )
 
 
 if __name__ == "__main__":

@@ -54,6 +54,7 @@ ACTION_IS_PAD = "action_is_pad"
 BACKEND_LEROBOT_DIFFUSION = "lerobot_diffusion"
 BACKEND_LEROBOT_ACT = "lerobot_act"
 BACKEND_LEROBOT_PI05 = "lerobot_pi05"
+BACKEND_LEROBOT_PI05_EVO = "lerobot_pi05_evo"
 CHECKPOINT_META = "door_policy_meta.json"
 CHECKPOINT_STATS = "door_policy_stats.pt"
 CHECKPOINT_POLICY_DIR = "policy"
@@ -125,14 +126,31 @@ def import_lerobot_act_modules():
     }
 
 
-def import_lerobot_pi05_modules():
+def _normalize_pi05_policy_type(policy_type: Optional[str] = None) -> str:
+    value = str(policy_type or "pi05").lower()
+    if value in {BACKEND_LEROBOT_PI05, "pi05", "pi0.5"}:
+        return "pi05"
+    if value in {BACKEND_LEROBOT_PI05_EVO, "pi05_evo", "pi0.5_evo"}:
+        return "pi05_evo"
+    raise ValueError(f"Unsupported pi0.5 policy_type={policy_type!r}; expected 'pi05' or 'pi05_evo'.")
+
+
+def _backend_from_pi05_policy_type(policy_type: Optional[str] = None) -> str:
+    return BACKEND_LEROBOT_PI05_EVO if _normalize_pi05_policy_type(policy_type) == "pi05_evo" else BACKEND_LEROBOT_PI05
+
+
+def import_lerobot_pi05_modules(policy_type: Optional[str] = None):
     _ensure_hf_cache_env()
     try:
         from lerobot.configs.types import FeatureType, NormalizationMode, PolicyFeature
         from lerobot.datasets.lerobot_dataset import LeRobotDataset
-        from lerobot.policies.pi05.configuration_pi05 import PI05Config
-        from lerobot.policies.pi05.modeling_pi05 import PI05Policy
         from lerobot.utils.constants import OBS_LANGUAGE_ATTENTION_MASK, OBS_LANGUAGE_TOKENS
+        if _normalize_pi05_policy_type(policy_type) == "pi05_evo":
+            from lerobot.policies.pi05_evo.configuration_pi05_evo import PI05EvoConfig as PI05Config
+            from lerobot.policies.pi05_evo.modeling_pi05_evo import PI05EvoPolicy as PI05Policy
+        else:
+            from lerobot.policies.pi05.configuration_pi05 import PI05Config
+            from lerobot.policies.pi05.modeling_pi05 import PI05Policy
     except Exception as exc:
         raise RuntimeError(
             "LeRobot PI05Policy is required for Door pi0.5. Use a Python>=3.10 environment "
@@ -164,10 +182,25 @@ def _load_lerobot_dataset(root: Union[str, Path], repo_id: str):
     modules = import_lerobot_policy_modules()
     dataset_root = _resolve_lerobot_root(root, repo_id)
     LeRobotDataset = modules["LeRobotDataset"]
+    video_backend = os.environ.get("DOOR_DP_VIDEO_BACKEND")
+    if video_backend is None:
+        info_path = dataset_root / "meta" / "info.json"
+        if info_path.is_file():
+            try:
+                info = json.loads(info_path.read_text(encoding="utf-8"))
+                features = info.get("features", {})
+                if any(isinstance(feature, Mapping) and feature.get("dtype") == "video" for feature in features.values()):
+                    video_backend = "pyav"
+            except Exception:
+                video_backend = None
+    kwargs = {"repo_id": repo_id, "root": str(dataset_root)}
+    if video_backend:
+        kwargs["video_backend"] = video_backend
     try:
-        return LeRobotDataset(repo_id=repo_id, root=str(dataset_root))
+        return LeRobotDataset(**kwargs)
     except TypeError:
-        return LeRobotDataset(repo_id, root=str(dataset_root))
+        kwargs.pop("repo_id", None)
+        return LeRobotDataset(repo_id, **kwargs)
 
 
 def _read_json(path: Union[str, Path]) -> Dict[str, Any]:
@@ -513,6 +546,15 @@ class DoorPolicySequenceDataset(Dataset):
     def _frame(self, idx: int) -> Mapping[str, Any]:
         return self.dataset[int(idx)]
 
+    def _tabular_frame(self, idx: int) -> Mapping[str, Any]:
+        ensure_loaded = getattr(self.dataset, "_ensure_hf_dataset_loaded", None)
+        if callable(ensure_loaded):
+            ensure_loaded()
+        hf_dataset = getattr(self.dataset, "hf_dataset", None)
+        if hf_dataset is not None:
+            return hf_dataset[int(idx)]
+        return self._frame(idx)
+
     def __len__(self) -> int:
         return len(self.indices)
 
@@ -533,7 +575,7 @@ class DoorPolicySequenceDataset(Dataset):
 
         actions: List[torch.Tensor] = []
         for idx in action_ids:
-            frame = self._frame(idx)
+            frame = self._tabular_frame(idx)
             actions.append(torch.as_tensor(_as_numpy(_field(frame, ACTION)), dtype=torch.float32))
 
         sample: Dict[str, torch.Tensor] = {
@@ -584,6 +626,15 @@ class DoorPolicyChunkDataset(Dataset):
     def _frame(self, idx: int) -> Mapping[str, Any]:
         return self.dataset[int(idx)]
 
+    def _tabular_frame(self, idx: int) -> Mapping[str, Any]:
+        ensure_loaded = getattr(self.dataset, "_ensure_hf_dataset_loaded", None)
+        if callable(ensure_loaded):
+            ensure_loaded()
+        hf_dataset = getattr(self.dataset, "hf_dataset", None)
+        if hf_dataset is not None:
+            return hf_dataset[int(idx)]
+        return self._frame(idx)
+
     def __len__(self) -> int:
         return len(self.indices)
 
@@ -599,7 +650,7 @@ class DoorPolicyChunkDataset(Dataset):
             sample[key] = _image_from_frame(frame, key, required=image_required)
         actions: List[torch.Tensor] = []
         for idx in range(center, center + self.chunk_size):
-            action_frame = self._frame(idx)
+            action_frame = self._tabular_frame(idx)
             actions.append(torch.as_tensor(_as_numpy(_field(action_frame, ACTION)), dtype=torch.float32))
         sample[ACTION] = torch.stack(actions, dim=0)
         return sample
@@ -656,7 +707,7 @@ class DoorPolicyNormalizer:
             max_val = self._stat(key, "max").to(device=tensor.device, dtype=tensor.dtype)
             denom = max_val - min_val
             denom = torch.where(
-                denom == 0,
+                denom.abs() < self.eps,
                 torch.as_tensor(self.eps, device=tensor.device, dtype=tensor.dtype),
                 denom,
             )
@@ -669,12 +720,13 @@ class DoorPolicyNormalizer:
             hi = self._stat(key, "q99").to(device=tensor.device, dtype=tensor.dtype)
             denom = hi - lo
             denom = torch.where(
-                denom == 0,
+                denom.abs() < self.eps,
                 torch.as_tensor(self.eps, device=tensor.device, dtype=tensor.dtype),
                 denom,
             )
             if inverse:
                 return (tensor + 1.0) * denom / 2.0 + lo
+            tensor = torch.minimum(torch.maximum(tensor, lo), hi)
             return 2.0 * (tensor - lo) / denom - 1.0
 
         if mode == "QUANTILE10":
@@ -682,12 +734,13 @@ class DoorPolicyNormalizer:
             hi = self._stat(key, "q90").to(device=tensor.device, dtype=tensor.dtype)
             denom = hi - lo
             denom = torch.where(
-                denom == 0,
+                denom.abs() < self.eps,
                 torch.as_tensor(self.eps, device=tensor.device, dtype=tensor.dtype),
                 denom,
             )
             if inverse:
                 return (tensor + 1.0) * denom / 2.0 + lo
+            tensor = torch.minimum(torch.maximum(tensor, lo), hi)
             return 2.0 * (tensor - lo) / denom - 1.0
 
         raise ValueError(f"Unsupported normalization mode for {key}: {mode}")
@@ -908,6 +961,7 @@ def make_lerobot_act_config(
 
 def make_lerobot_pi05_config(
     *,
+    policy_type: str = "pi05",
     state_dim: int,
     action_dim: int,
     chunk_size: int,
@@ -929,7 +983,8 @@ def make_lerobot_pi05_config(
     freeze_vision_encoder: bool = False,
     train_expert_only: bool = False,
 ):
-    modules = import_lerobot_pi05_modules()
+    policy_type = _normalize_pi05_policy_type(policy_type)
+    modules = import_lerobot_pi05_modules(policy_type)
     PI05Config = modules["PI05Config"]
     FeatureType = modules["FeatureType"]
     NormalizationMode = modules["NormalizationMode"]
@@ -960,29 +1015,33 @@ def make_lerobot_pi05_config(
     output_features = {
         ACTION: PolicyFeature(type=FeatureType.ACTION, shape=(int(action_dim),)),
     }
-    return PI05Config(
-        n_obs_steps=1,
-        input_features=input_features,
-        output_features=output_features,
-        device=str(device),
-        push_to_hub=False,
-        paligemma_variant=str(paligemma_variant),
-        action_expert_variant=str(action_expert_variant),
-        dtype=str(dtype),
-        chunk_size=int(chunk_size),
-        n_action_steps=int(action_horizon),
-        max_state_dim=int(max_state_dim),
-        max_action_dim=int(max_action_dim),
-        num_inference_steps=int(num_inference_steps),
-        image_resolution=image_resolution,
-        tokenizer_max_length=int(tokenizer_max_length),
-        normalization_mapping=norm_map,
-        gradient_checkpointing=bool(gradient_checkpointing),
-        compile_model=bool(compile_model),
-        compile_mode=str(compile_mode),
-        freeze_vision_encoder=bool(freeze_vision_encoder),
-        train_expert_only=bool(train_expert_only),
-    )
+    config_kwargs = {
+        "n_obs_steps": 1,
+        "input_features": input_features,
+        "output_features": output_features,
+        "device": str(device),
+        "push_to_hub": False,
+        "paligemma_variant": str(paligemma_variant),
+        "action_expert_variant": str(action_expert_variant),
+        "dtype": str(dtype),
+        "chunk_size": int(chunk_size),
+        "n_action_steps": int(action_horizon),
+        "max_state_dim": int(max_state_dim),
+        "max_action_dim": int(max_action_dim),
+        "num_inference_steps": int(num_inference_steps),
+        "image_resolution": image_resolution,
+        "tokenizer_max_length": int(tokenizer_max_length),
+        "normalization_mapping": norm_map,
+        "gradient_checkpointing": bool(gradient_checkpointing),
+        "compile_model": bool(compile_model),
+        "compile_mode": str(compile_mode),
+        "freeze_vision_encoder": bool(freeze_vision_encoder),
+        "train_expert_only": bool(train_expert_only),
+    }
+    supported_fields = set(getattr(PI05Config, "__dataclass_fields__", {}))
+    if supported_fields:
+        config_kwargs = {k: v for k, v in config_kwargs.items() if k in supported_fields}
+    return PI05Config(**config_kwargs)
 
 
 class LeRobotDiffusionDoorPolicyBackend:
@@ -1570,7 +1629,10 @@ class LeRobotPI05DoorPolicyBackend:
         device: Optional[Union[str, torch.device]] = None,
         task_prompt: str = "open the door",
         tokenizer_name: str = "google/paligemma-3b-pt-224",
+        policy_type: str = "pi05",
     ):
+        self.backend_name = _backend_from_pi05_policy_type(policy_type)
+        self.policy_type = _normalize_pi05_policy_type(policy_type)
         self.policy = policy
         self.policy.eval()
         self.config = config
@@ -1590,7 +1652,7 @@ class LeRobotPI05DoorPolicyBackend:
             self.image_keys,
             self.device,
         )
-        self._pi05_modules = import_lerobot_pi05_modules()
+        self._pi05_modules = import_lerobot_pi05_modules(self.policy_type)
 
     @property
     def obs_horizon(self) -> int:
@@ -1624,15 +1686,18 @@ class LeRobotPI05DoorPolicyBackend:
         pretrained_path: Optional[str] = None,
         task_prompt: str = "open the door",
         tokenizer_name: str = "google/paligemma-3b-pt-224",
+        policy_type: str = "pi05",
         **policy_kwargs: Any,
     ) -> "LeRobotPI05DoorPolicyBackend":
-        modules = import_lerobot_pi05_modules()
+        policy_type = _normalize_pi05_policy_type(policy_type)
+        modules = import_lerobot_pi05_modules(policy_type)
         PI05Policy = modules["PI05Policy"]
         vision_mode = normalize_vision_mode(vision_mode)
         image_keys = lerobot_image_keys_for_vision_mode(vision_mode)
         state_dim = int(state_dim or _feature_dim_from_stats(stats, OBS_STATE))
         action_dim = int(action_dim or _feature_dim_from_stats(stats, ACTION))
         config = make_lerobot_pi05_config(
+            policy_type=policy_type,
             state_dim=state_dim,
             action_dim=action_dim,
             chunk_size=chunk_size,
@@ -1646,7 +1711,18 @@ class LeRobotPI05DoorPolicyBackend:
         else:
             policy = PI05Policy(config)
         policy.to(str(device))
-        return cls(policy, config, stats, vision_mode, action_frame, sidecar_config, device, task_prompt, tokenizer_name)
+        return cls(
+            policy,
+            config,
+            stats,
+            vision_mode,
+            action_frame,
+            sidecar_config,
+            device,
+            task_prompt,
+            tokenizer_name,
+            policy_type=policy_type,
+        )
 
     @classmethod
     def load(
@@ -1656,11 +1732,12 @@ class LeRobotPI05DoorPolicyBackend:
         num_inference_steps: Optional[int] = None,
         action_horizon: Optional[int] = None,
     ) -> "LeRobotPI05DoorPolicyBackend":
-        modules = import_lerobot_pi05_modules()
-        PI05Policy = modules["PI05Policy"]
         ckpt_dir = resolve_checkpoint_dir(checkpoint)
         meta = _read_json(ckpt_dir / CHECKPOINT_META)
         cfg = dict(meta.get("policy_config", {}))
+        policy_type = _normalize_pi05_policy_type(cfg.get("policy_type", meta.get("backend", BACKEND_LEROBOT_PI05)))
+        modules = import_lerobot_pi05_modules(policy_type)
+        PI05Policy = modules["PI05Policy"]
         if device is not None:
             cfg["device"] = str(device)
         if action_horizon is not None:
@@ -1668,6 +1745,7 @@ class LeRobotPI05DoorPolicyBackend:
         if num_inference_steps is not None:
             cfg["num_inference_steps"] = int(num_inference_steps)
         config = make_lerobot_pi05_config(
+            policy_type=policy_type,
             state_dim=int(cfg["state_dim"]),
             action_dim=int(cfg["action_dim"]),
             chunk_size=int(cfg["chunk_size"]),
@@ -1706,6 +1784,7 @@ class LeRobotPI05DoorPolicyBackend:
             device=config.device,
             task_prompt=cfg.get("task_prompt", "open the door"),
             tokenizer_name=cfg.get("tokenizer_name", "google/paligemma-3b-pt-224"),
+            policy_type=policy_type,
         )
 
     def _get_tokenizer(self):
@@ -1793,16 +1872,17 @@ class LeRobotPI05DoorPolicyBackend:
             "tokenizer_name": self.tokenizer_name,
             "task_prompt": self.task_prompt,
             "gradient_checkpointing": bool(self.config.gradient_checkpointing),
-            "compile_model": bool(self.config.compile_model),
-            "compile_mode": self.config.compile_mode,
-            "freeze_vision_encoder": bool(self.config.freeze_vision_encoder),
-            "train_expert_only": bool(self.config.train_expert_only),
+            "compile_model": bool(getattr(self.config, "compile_model", False)),
+            "compile_mode": getattr(self.config, "compile_mode", "max-autotune"),
+            "freeze_vision_encoder": bool(getattr(self.config, "freeze_vision_encoder", False)),
+            "train_expert_only": bool(getattr(self.config, "train_expert_only", False)),
             "ikpush_state_version": str(self.sidecar_config.get("ikpush_state_version", "legacy")),
+            "policy_type": self.policy_type,
         }
         if extra_config:
             policy_config.update({k: _json_safe(v) for k, v in extra_config.items() if k not in policy_config})
         return {
-            "backend": BACKEND_LEROBOT_PI05,
+            "backend": self.backend_name,
             "format_version": 1,
             "policy_config": policy_config,
             "config": policy_config,
@@ -1835,7 +1915,7 @@ class LeRobotPI05DoorPolicyBackend:
             manifest_path.parent.mkdir(parents=True, exist_ok=True)
             torch.save(
                 {
-                    "backend": BACKEND_LEROBOT_PI05,
+                    "backend": self.backend_name,
                     "format_version": 1,
                     "checkpoint_dir": str(checkpoint_dir),
                     "checkpoint_dir_name": checkpoint_dir.name,
@@ -1859,6 +1939,7 @@ def resolve_checkpoint_dir(checkpoint: Union[str, Path]) -> Path:
         BACKEND_LEROBOT_DIFFUSION,
         BACKEND_LEROBOT_ACT,
         BACKEND_LEROBOT_PI05,
+        BACKEND_LEROBOT_PI05_EVO,
     ):
         raise ValueError(
             f"{path} is not a supported LeRobot Door policy checkpoint manifest. "
@@ -1882,7 +1963,7 @@ def checkpoint_backend_name(checkpoint: Union[str, Path]) -> str:
     ckpt_dir = resolve_checkpoint_dir(checkpoint)
     meta = _read_json(ckpt_dir / CHECKPOINT_META)
     backend = str(meta.get("backend", ""))
-    if backend not in (BACKEND_LEROBOT_DIFFUSION, BACKEND_LEROBOT_ACT, BACKEND_LEROBOT_PI05):
+    if backend not in (BACKEND_LEROBOT_DIFFUSION, BACKEND_LEROBOT_ACT, BACKEND_LEROBOT_PI05, BACKEND_LEROBOT_PI05_EVO):
         raise ValueError(f"Unsupported Door policy backend in {ckpt_dir}: {backend!r}")
     return backend
 
@@ -1910,7 +1991,7 @@ def load_door_policy_backend(
             num_inference_steps=num_inference_steps,
             action_horizon=action_horizon,
         )
-    if backend == BACKEND_LEROBOT_PI05:
+    if backend in (BACKEND_LEROBOT_PI05, BACKEND_LEROBOT_PI05_EVO):
         return LeRobotPI05DoorPolicyBackend.load(
             checkpoint,
             device=device,
