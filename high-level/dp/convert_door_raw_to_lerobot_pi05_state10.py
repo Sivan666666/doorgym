@@ -8,24 +8,48 @@ from pathlib import Path
 import numpy as np
 
 try:
+    from .convert_door_raw_to_lerobot import (
+        HIGH_LEVEL_ROOT,
+        detect_action_frame,
+        detect_controller_mode,
+        detect_ikpush_state_version,
+        detect_raw_vision_mode,
+        episode_files,
+        fit_action_preprocess_from_episodes,
+        load_sidecar,
+        require_fields,
+        scalar_str,
+        validate_episode_metadata,
+    )
     from .door_dp_common import (
         ACTION_NAMES,
         DoorDPLeRobotRecorder,
         apply_door_dp_action_preprocess,
         apply_door_dp_state_preprocess,
-        fit_door_dp_action_preprocess,
         fit_door_dp_state_preprocess,
         lerobot_image_keys_for_vision_mode,
         normalize_vision_mode,
         raw_image_keys_for_vision_mode,
     )
 except ImportError:
+    from convert_door_raw_to_lerobot import (
+        HIGH_LEVEL_ROOT,
+        detect_action_frame,
+        detect_controller_mode,
+        detect_ikpush_state_version,
+        detect_raw_vision_mode,
+        episode_files,
+        fit_action_preprocess_from_episodes,
+        load_sidecar,
+        require_fields,
+        scalar_str,
+        validate_episode_metadata,
+    )
     from door_dp_common import (
         ACTION_NAMES,
         DoorDPLeRobotRecorder,
         apply_door_dp_action_preprocess,
         apply_door_dp_state_preprocess,
-        fit_door_dp_action_preprocess,
         fit_door_dp_state_preprocess,
         lerobot_image_keys_for_vision_mode,
         normalize_vision_mode,
@@ -33,15 +57,31 @@ except ImportError:
     )
 
 
-DP_ROOT = Path(__file__).resolve().parent
-HIGH_LEVEL_ROOT = DP_ROOT.parent
+PI05_STATE_NAMES = [
+    "vx",
+    "yaw_rate",
+    "ee_x",
+    "ee_y",
+    "ee_z",
+    "ee_qx",
+    "ee_qy",
+    "ee_qz",
+    "ee_qw",
+    "gripper",
+]
+LAST_COMMAND_FEATURES = [f"last_low_action_{i}" for i in range(len(PI05_STATE_NAMES))]
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Convert raw Door DP .npz episodes into a local LeRobotDataset.")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Convert raw Door DP .npz episodes into a LeRobotDataset whose observation.state is "
+            "a 10D PI0.5-friendly command state aligned with the action semantics."
+        )
+    )
     parser.add_argument("--raw_root", type=str, default=str(HIGH_LEVEL_ROOT / "data" / "door_dp_raw" / "local_door_dp"))
     parser.add_argument("--root", type=str, default=str(HIGH_LEVEL_ROOT / "data" / "lerobot"))
-    parser.add_argument("--repo_id", type=str, default="local/door_dp")
+    parser.add_argument("--repo_id", type=str, default="local/door_pi05_state10")
     parser.add_argument("--fps", type=int, default=None)
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--rgb", action="store_true", help="Convert raw RGB+mask Door DP data. Required for RGB raw data.")
@@ -56,25 +96,22 @@ def parse_args():
         "--num_workers",
         type=int,
         default=1,
-        help=(
-            "Number of worker threads used to preload/validate raw npz episodes. "
-            "LeRobot writing stays ordered in the main process. Default 1 preserves the old serial path."
-        ),
+        help="Number of worker threads used to preload/validate raw npz episodes.",
     )
     parser.add_argument(
-        "--keep_phase_state",
-        action="store_true",
-        help="Keep legacy phase_* one-hot columns in observation.state. By default they are removed.",
+        "--pi05_state_source",
+        choices=["last_command", "current_action"],
+        default="last_command",
+        help=(
+            "last_command uses raw observation.state last_low_action_0..9 as the 10D state. "
+            "current_action copies the current raw action into state and is mainly useful for diagnostics."
+        ),
     )
     parser.add_argument(
         "--state_preprocess",
         choices=["robust_quantile", "none"],
         default="robust_quantile",
-        help=(
-            "Preprocess observation.state while converting raw npz to LeRobot. "
-            "robust_quantile sanitizes angles/quaternions/non-finite values, clips to dataset quantiles, "
-            "and stores normalized state in [-1, 1]."
-        ),
+        help="Preprocess the 10D observation.state while converting raw npz to LeRobot.",
     )
     parser.add_argument("--state_quantile_low", type=float, default=0.01)
     parser.add_argument("--state_quantile_high", type=float, default=0.99)
@@ -83,10 +120,7 @@ def parse_args():
         "--action_preprocess",
         choices=["robust_quantile", "none"],
         default="robust_quantile",
-        help=(
-            "Preprocess action while converting raw npz to LeRobot. robust_quantile stores normalized action in [-1, 1]; "
-            "DoorPolicyController inverts this before sending actions to Isaac Gym."
-        ),
+        help="Preprocess action while converting raw npz to LeRobot.",
     )
     parser.add_argument("--action_quantile_low", type=float, default=0.01)
     parser.add_argument("--action_quantile_high", type=float, default=0.99)
@@ -94,102 +128,42 @@ def parse_args():
     return parser.parse_args()
 
 
-def load_sidecar(raw_root):
-    sidecar = Path(raw_root) / "door_dp_feature_names.json"
-    if not sidecar.exists():
-        return None
-    with open(sidecar, "r", encoding="utf-8") as f:
-        return json.load(f)
+def raw_state_names(first, sidecar):
+    if sidecar and "state" in sidecar:
+        return [str(name) for name in sidecar["state"]]
+    if "state_feature_names" in first:
+        return [str(x) for x in first["state_feature_names"].tolist()]
+    return [f"state_{i}" for i in range(first["state"].shape[-1])]
 
 
-def episode_files(raw_root):
-    files = sorted(Path(raw_root).glob("episode_*.npz"))
-    if not files:
-        raise FileNotFoundError(f"No episode_*.npz files found under {raw_root}")
-    return files
-
-
-def scalar_str(value):
-    arr = np.asarray(value)
-    if arr.shape == ():
-        return str(arr.item())
-    return str(arr.reshape(-1)[0])
-
-
-def detect_action_frame(data, sidecar):
-    for source in (data, sidecar or {}):
-        for key in ("action_frame", "action_pose_frame", "target_pose_frame"):
-            if isinstance(source, dict):
-                if key in source:
-                    return str(source[key]).lower()
-            elif key in source.files:
-                return scalar_str(source[key]).lower()
-    return "world"
-
-
-def detect_ikpush_state_version(data, sidecar):
-    for source in (data, sidecar or {}):
-        if isinstance(source, dict):
-            if "ikpush_state_version" in source:
-                return str(source["ikpush_state_version"])
-        elif "ikpush_state_version" in source.files:
-            return scalar_str(source["ikpush_state_version"])
-    return "legacy"
-
-
-def detect_controller_mode(data, sidecar):
-    for source in (data, sidecar or {}):
-        for key in ("door_dp_mode", "controller_mode"):
-            if isinstance(source, dict):
-                if key in source:
-                    return str(source[key])
-            elif key in source.files:
-                return scalar_str(source[key])
-    return "legacy"
-
-
-def detect_raw_vision_mode(data, sidecar):
-    if sidecar and sidecar.get("vision_mode") is not None:
-        return normalize_vision_mode(sidecar["vision_mode"])
-    if "vision_mode" in data.files:
-        return normalize_vision_mode(scalar_str(data["vision_mode"]))
-    if "wrist_rgb" in data.files or "front_rgb" in data.files:
-        return "rgb"
-    return "depth"
-
-
-def require_fields(data, keys, path):
-    missing = [key for key in keys if key not in data.files]
+def last_command_state_indices(state_names):
+    name_to_index = {str(name): idx for idx, name in enumerate(state_names)}
+    missing = [name for name in LAST_COMMAND_FEATURES if name not in name_to_index]
     if missing:
-        raise KeyError(f"{path} is missing required fields for this vision mode: {missing}")
-
-
-def validate_episode_metadata(path, data, sidecar, action_frame, ikpush_state_version, controller_mode):
-    episode_action_frame = detect_action_frame(data, sidecar)
-    if episode_action_frame != action_frame:
         raise ValueError(
-            f"Episode {path} action_frame={episode_action_frame!r}, expected {action_frame!r}; "
-            "do not mix world-frame and base-frame action datasets."
+            "Cannot build PI0.5 10D state from raw observation.state; missing columns: "
+            f"{missing}. Use --pi05_state_source current_action if you intentionally want state=action."
         )
-    episode_state_version = detect_ikpush_state_version(data, sidecar)
-    if episode_state_version != ikpush_state_version:
-        raise ValueError(
-            f"Episode {path} ikpush_state_version={episode_state_version!r}, expected {ikpush_state_version!r}; "
-            "do not mix old and new ikpush state semantics."
-        )
-    episode_controller_mode = detect_controller_mode(data, sidecar)
-    if episode_controller_mode != controller_mode:
-        raise ValueError(
-            f"Episode {path} door_dp_mode={episode_controller_mode!r}, expected {controller_mode!r}; "
-            "do not mix ikpush and ikpull datasets."
-        )
+    return [name_to_index[name] for name in LAST_COMMAND_FEATURES]
 
 
-def fit_state_preprocess_from_episodes(
+def make_pi05_states(raw_states, actions, state_source, state_indices):
+    if state_source == "last_command":
+        if raw_states.shape[-1] <= max(state_indices):
+            raise ValueError(
+                f"Raw state_dim={raw_states.shape[-1]} cannot provide last-command indices {state_indices}."
+            )
+        return raw_states[:, state_indices].astype(np.float32)
+    if state_source == "current_action":
+        return actions.astype(np.float32).copy()
+    raise ValueError(f"Unsupported --pi05_state_source={state_source!r}")
+
+
+def fit_pi05_state_preprocess_from_episodes(
     files,
     sidecar,
-    keep_state_indices,
-    state_names,
+    raw_state_indices,
+    state_source,
     action_frame,
     ikpush_state_version,
     controller_mode,
@@ -202,79 +176,38 @@ def fit_state_preprocess_from_episodes(
     for path in files:
         with np.load(path, allow_pickle=True) as data:
             validate_episode_metadata(path, data, sidecar, action_frame, ikpush_state_version, controller_mode)
-            states = data["state"].astype(np.float32)
-            if keep_state_indices and states.shape[-1] <= max(keep_state_indices):
-                raise ValueError(f"Episode {path} has state_dim={states.shape[-1]}, cannot apply selected state columns.")
-            states = states[:, keep_state_indices]
+            raw_states = data["state"].astype(np.float32)
+            actions = data["action"].astype(np.float32)
+            states = make_pi05_states(raw_states, actions, state_source, raw_state_indices)
             chunks.append(states)
             total_frames += int(states.shape[0])
     if not chunks:
-        raise ValueError("Cannot fit state preprocessing without raw states.")
+        raise ValueError("Cannot fit PI0.5 state preprocessing without raw states.")
     config = fit_door_dp_state_preprocess(
         np.concatenate(chunks, axis=0),
-        state_names,
+        PI05_STATE_NAMES,
         lower_quantile=lower_quantile,
         upper_quantile=upper_quantile,
         eps=eps,
     )
     constant_count = int(np.asarray(config.get("constant_mask", []), dtype=bool).sum())
     print(
-        f"Fitted state_preprocess={config['version']} frames={total_frames} "
-        f"state_dim={len(state_names)} constant_dims={constant_count} "
-        f"quantiles=({lower_quantile}, {upper_quantile})",
+        f"Fitted PI0.5 state_preprocess={config['version']} frames={total_frames} "
+        f"state_dim={len(PI05_STATE_NAMES)} constant_dims={constant_count} "
+        f"source={state_source} quantiles=({lower_quantile}, {upper_quantile})",
         flush=True,
     )
-    if config.get("angle_wrapped_features"):
-        print(f"Angle-wrapped state features: {config['angle_wrapped_features']}", flush=True)
     if config.get("quaternion_groups"):
         print(f"Quaternion-normalized state groups: {config['quaternion_groups']}", flush=True)
     return config
 
 
-def fit_action_preprocess_from_episodes(
-    files,
-    sidecar,
-    action_frame,
-    ikpush_state_version,
-    controller_mode,
-    lower_quantile,
-    upper_quantile,
-    eps,
-):
-    chunks = []
-    total_frames = 0
-    for path in files:
-        with np.load(path, allow_pickle=True) as data:
-            validate_episode_metadata(path, data, sidecar, action_frame, ikpush_state_version, controller_mode)
-            actions = data["action"].astype(np.float32)
-            chunks.append(actions)
-            total_frames += int(actions.shape[0])
-    if not chunks:
-        raise ValueError("Cannot fit action preprocessing without raw actions.")
-    config = fit_door_dp_action_preprocess(
-        np.concatenate(chunks, axis=0),
-        ACTION_NAMES,
-        lower_quantile=lower_quantile,
-        upper_quantile=upper_quantile,
-        eps=eps,
-    )
-    constant_count = int(np.asarray(config.get("constant_mask", []), dtype=bool).sum())
-    print(
-        f"Fitted action_preprocess={config['version']} frames={total_frames} "
-        f"action_dim={len(ACTION_NAMES)} constant_dims={constant_count} "
-        f"quantiles=({lower_quantile}, {upper_quantile})",
-        flush=True,
-    )
-    if config.get("quaternion_groups"):
-        print(f"Quaternion-normalized action groups: {config['quaternion_groups']}", flush=True)
-    return config
-
-
-def load_episode_payload(
+def load_episode_payload_pi05_state10(
     path,
     sidecar,
     image_keys,
-    keep_state_indices,
+    raw_state_indices,
+    state_source,
     action_frame,
     ikpush_state_version,
     controller_mode,
@@ -284,11 +217,9 @@ def load_episode_payload(
     with np.load(path, allow_pickle=True) as data:
         validate_episode_metadata(path, data, sidecar, action_frame, ikpush_state_version, controller_mode)
         task = scalar_str(data["task"]) if "task" in data else initial_task
-        states = data["state"].astype(np.float32)
-        if keep_state_indices and states.shape[-1] <= max(keep_state_indices):
-            raise ValueError(f"Episode {path} has state_dim={states.shape[-1]}, cannot apply selected state columns.")
-        states = states[:, keep_state_indices]
+        raw_states = data["state"].astype(np.float32)
         actions = data["action"].astype(np.float32)
+        states = make_pi05_states(raw_states, actions, state_source, raw_state_indices)
         require_fields(data, image_keys[:2], path)
         wrist_first = data[image_keys[0]].astype(np.uint8)
         wrist_second = data[image_keys[1]].astype(np.uint8)
@@ -325,20 +256,18 @@ def load_episode_payload(
     }
 
 
-def iter_episode_payloads(files, num_workers, **kwargs):
+def iter_pi05_episode_payloads(files, num_workers, **kwargs):
     if num_workers <= 1:
         for ep_idx, path in enumerate(files):
-            yield ep_idx, load_episode_payload(path, **kwargs)
+            yield ep_idx, load_episode_payload_pi05_state10(path, **kwargs)
         return
 
-    # Keep output deterministic: at most num_workers episodes are prepared ahead,
-    # and payloads are yielded in sorted filename order for the single writer.
     def submit_next(executor, iterator, pending):
         try:
             ep_idx, path = next(iterator)
         except StopIteration:
             return False
-        pending.append((ep_idx, executor.submit(load_episode_payload, path, **kwargs)))
+        pending.append((ep_idx, executor.submit(load_episode_payload_pi05_state10, path, **kwargs)))
         return True
 
     iterator = iter(enumerate(files))
@@ -353,31 +282,33 @@ def iter_episode_payloads(files, num_workers, **kwargs):
             submit_next(executor, iterator, pending)
 
 
+def existing_pi05_state_metadata_matches(existing_sidecar, state_source, raw_state_indices):
+    existing_source = existing_sidecar.get("pi05_state_source")
+    if existing_source is not None and existing_source != state_source:
+        return False
+    existing_indices = existing_sidecar.get("pi05_state_source_raw_indices")
+    if existing_indices is not None and list(existing_indices) != list(raw_state_indices):
+        return False
+    return True
+
+
 def main():
     args = parse_args()
     if args.num_workers < 1:
         raise ValueError("--num_workers must be >= 1")
+
     raw_root = Path(args.raw_root)
     files = episode_files(raw_root)
     sidecar = load_sidecar(raw_root)
     first = np.load(files[0], allow_pickle=True)
-    if sidecar and "state" in sidecar:
-        state_names = list(sidecar["state"])
-    elif "state_feature_names" in first:
-        state_names = [str(x) for x in first["state_feature_names"].tolist()]
+    source_state_names = raw_state_names(first, sidecar)
+    if args.pi05_state_source == "last_command":
+        raw_state_indices = last_command_state_indices(source_state_names)
+        raw_state_features = LAST_COMMAND_FEATURES
     else:
-        state_names = [f"state_{i}" for i in range(first["state"].shape[-1])]
-    keep_state_indices = list(range(len(state_names)))
-    dropped_state_names = []
-    if not args.keep_phase_state:
-        keep_state_indices = [i for i, name in enumerate(state_names) if not str(name).startswith("phase_")]
-        dropped_state_names = [name for i, name in enumerate(state_names) if i not in keep_state_indices]
-        state_names = [state_names[i] for i in keep_state_indices]
-        if dropped_state_names:
-            print(
-                f"Dropping {len(dropped_state_names)} legacy phase state columns: {dropped_state_names}",
-                flush=True,
-            )
+        raw_state_indices = []
+        raw_state_features = ["action"]
+
     raw_fps = int(first["fps"]) if "fps" in first else 50
     fps = int(args.fps or (sidecar.get("fps") if sidecar else raw_fps))
     vision_mode = "rgb" if args.rgb else "depth"
@@ -392,6 +323,7 @@ def main():
             f"Raw data vision_mode={raw_vision_mode!r}, but converter was run with "
             f"{'--rgb' if args.rgb else 'depth mode'}. Use --rgb only for RGB raw data."
         )
+
     image_keys = raw_image_keys_for_vision_mode(vision_mode)
     out_dir = Path(args.root) / args.repo_id
     existing_sidecar = load_sidecar(out_dir) if out_dir.exists() else None
@@ -425,9 +357,14 @@ def main():
                 f"but raw data has {controller_mode!r}; use a different --repo_id or pass --overwrite."
             )
         existing_state_names = list(existing_sidecar.get("state", []))
-        if existing_state_names and existing_state_names != state_names:
+        if existing_state_names and existing_state_names != PI05_STATE_NAMES:
             raise ValueError(
                 f"Existing LeRobot dataset at {out_dir} has different state feature names; "
+                "use --overwrite or a new --repo_id."
+            )
+        if not existing_pi05_state_metadata_matches(existing_sidecar, args.pi05_state_source, raw_state_indices):
+            raise ValueError(
+                f"Existing LeRobot dataset at {out_dir} has different PI0.5 state-source metadata; "
                 "use --overwrite or a new --repo_id."
             )
         existing_state_preprocess = existing_sidecar.get("state_preprocess")
@@ -471,11 +408,11 @@ def main():
 
     if state_preprocess_config is None:
         if args.state_preprocess == "robust_quantile":
-            state_preprocess_config = fit_state_preprocess_from_episodes(
+            state_preprocess_config = fit_pi05_state_preprocess_from_episodes(
                 files,
                 sidecar,
-                keep_state_indices,
-                state_names,
+                raw_state_indices,
+                args.pi05_state_source,
                 action_frame,
                 ikpush_state_version,
                 controller_mode,
@@ -505,7 +442,7 @@ def main():
         root=args.root,
         repo_id=args.repo_id,
         fps=fps,
-        state_feature_names=state_names,
+        state_feature_names=PI05_STATE_NAMES,
         task=initial_task,
         resume=not args.overwrite,
         vision_mode=vision_mode,
@@ -524,12 +461,13 @@ def main():
             "action_preprocess": action_preprocess_config,
         },
     )
-    payloads = iter_episode_payloads(
+    payloads = iter_pi05_episode_payloads(
         files,
         args.num_workers,
         sidecar=sidecar,
         image_keys=image_keys,
-        keep_state_indices=keep_state_indices,
+        raw_state_indices=raw_state_indices,
+        state_source=args.pi05_state_source,
         action_frame=action_frame,
         ikpush_state_version=ikpush_state_version,
         controller_mode=controller_mode,
@@ -540,7 +478,7 @@ def main():
         task = payload["task"]
         recorder.task = task
         states = payload["states"]
-        states = apply_door_dp_state_preprocess(states, state_names=state_names, config=state_preprocess_config)
+        states = apply_door_dp_state_preprocess(states, state_names=PI05_STATE_NAMES, config=state_preprocess_config)
         actions = payload["actions"]
         actions = apply_door_dp_action_preprocess(actions, action_names=ACTION_NAMES, config=action_preprocess_config)
         wrist_first = payload["wrist_first"]
@@ -566,10 +504,16 @@ def main():
     feature_sidecar.parent.mkdir(parents=True, exist_ok=True)
     sidecar_payload = {
         "fps": fps,
-        "state": state_names,
+        "state": PI05_STATE_NAMES,
         "action": ACTION_NAMES,
         "image_features": lerobot_image_keys_for_vision_mode(vision_mode),
         "source_raw_root": str(raw_root),
+        "pi05_state_dim": len(PI05_STATE_NAMES),
+        "pi05_state_source": args.pi05_state_source,
+        "pi05_state_source_raw_features": raw_state_features,
+        "pi05_state_source_raw_indices": raw_state_indices,
+        "pi05_state_action_aligned": True,
+        "pi05_state_action_names": ACTION_NAMES,
         "action_frame": action_frame,
         "action_pose_frame": action_frame,
         "target_pose_frame": action_frame,
@@ -585,7 +529,11 @@ def main():
         sidecar_payload["vision_mode"] = vision_mode
     with open(feature_sidecar, "w", encoding="utf-8") as f:
         json.dump(sidecar_payload, f, indent=2)
-    print(f"Done. LeRobotDataset written to {Path(args.root) / args.repo_id}")
+    print(
+        f"Done. PI0.5 10D-state LeRobotDataset written to {Path(args.root) / args.repo_id} "
+        f"state_source={args.pi05_state_source}",
+        flush=True,
+    )
 
 
 if __name__ == "__main__":

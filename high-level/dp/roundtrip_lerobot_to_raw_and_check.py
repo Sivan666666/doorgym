@@ -11,7 +11,11 @@ try:
         ACTION_NAMES,
         IMAGE_HEIGHT,
         IMAGE_WIDTH,
+        apply_door_dp_action_preprocess,
+        apply_door_dp_state_preprocess,
         import_lerobot_or_raise,
+        invert_door_dp_action_preprocess,
+        invert_door_dp_state_preprocess,
         normalize_vision_mode,
         raw_image_keys_for_vision_mode,
     )
@@ -20,7 +24,11 @@ except ImportError:
         ACTION_NAMES,
         IMAGE_HEIGHT,
         IMAGE_WIDTH,
+        apply_door_dp_action_preprocess,
+        apply_door_dp_state_preprocess,
         import_lerobot_or_raise,
+        invert_door_dp_action_preprocess,
+        invert_door_dp_state_preprocess,
         normalize_vision_mode,
         raw_image_keys_for_vision_mode,
     )
@@ -316,7 +324,14 @@ def group_lerobot_indices(dataset, raw_files):
     return groups
 
 
-def decode_episode_from_lerobot(dataset, indices, image_keys):
+def decode_episode_from_lerobot(
+    dataset,
+    indices,
+    image_keys,
+    state_names=None,
+    state_preprocess=None,
+    action_preprocess=None,
+):
     states = []
     actions = []
     images = {key: [] for key in image_keys}
@@ -331,9 +346,13 @@ def decode_episode_from_lerobot(dataset, indices, image_keys):
             subtasks.append(as_subtask(field(frame, "subtask_index")))
         except Exception:
             subtasks.append(np.asarray([0], dtype=np.int64))
+    states = np.stack(states, axis=0).astype(np.float32)
+    actions = np.stack(actions, axis=0).astype(np.float32)
+    states = invert_door_dp_state_preprocess(states, state_names=state_names, config=state_preprocess)
+    actions = invert_door_dp_action_preprocess(actions, action_names=ACTION_NAMES, config=action_preprocess)
     payload = {
-        "state": np.stack(states, axis=0).astype(np.float32),
-        "action": np.stack(actions, axis=0).astype(np.float32),
+        "state": states.astype(np.float32),
+        "action": actions.astype(np.float32),
         "subtask_index": np.stack(subtasks, axis=0).astype(np.int64),
     }
     for key, values in images.items():
@@ -419,6 +438,20 @@ def compare_images(name, converted, reference, image_atol):
     return result
 
 
+def lossy_state_reference(raw_state, state_names, state_preprocess):
+    if not state_preprocess or not bool(state_preprocess.get("applied", False)):
+        return np.asarray(raw_state, dtype=np.float32)
+    normalized = apply_door_dp_state_preprocess(raw_state, state_names=state_names, config=state_preprocess)
+    return invert_door_dp_state_preprocess(normalized, state_names=state_names, config=state_preprocess)
+
+
+def lossy_action_reference(raw_action, action_preprocess):
+    if not action_preprocess or not bool(action_preprocess.get("applied", False)):
+        return np.asarray(raw_action, dtype=np.float32)
+    normalized = apply_door_dp_action_preprocess(raw_action, action_names=ACTION_NAMES, config=action_preprocess)
+    return invert_door_dp_action_preprocess(normalized, action_names=ACTION_NAMES, config=action_preprocess)
+
+
 def summarize_episode(ep_name, checks):
     ok = all(item.get("ok", False) for item in checks)
     print(f"{'PASS' if ok else 'FAIL'} {ep_name}", flush=True)
@@ -453,6 +486,9 @@ def main():
     out_root.mkdir(parents=True, exist_ok=True)
 
     raw_sidecar = load_json(raw_root / "door_dp_feature_names.json")
+    lerobot_sidecar = load_json(dataset_root / "door_dp_feature_names.json") or {}
+    state_preprocess = lerobot_sidecar.get("state_preprocess")
+    action_preprocess = lerobot_sidecar.get("action_preprocess")
     first_raw = np.load(raw_files[0], allow_pickle=True)
     requested_vision_mode = "rgb" if args.rgb else "depth"
     raw_vision_mode = detect_raw_vision_mode(first_raw, raw_sidecar)
@@ -500,7 +536,14 @@ def main():
     all_ok = True
 
     for ep_idx, (raw_path, frame_indices) in enumerate(zip(raw_files, groups)):
-        converted = decode_episode_from_lerobot(dataset, frame_indices, image_keys)
+        converted = decode_episode_from_lerobot(
+            dataset,
+            frame_indices,
+            image_keys,
+            state_names=converted_names,
+            state_preprocess=state_preprocess,
+            action_preprocess=action_preprocess,
+        )
         with np.load(raw_path, allow_pickle=True) as raw_data:
             episode_vision_mode = detect_raw_vision_mode(raw_data, raw_sidecar)
             if episode_vision_mode != requested_vision_mode:
@@ -518,6 +561,8 @@ def main():
                     "do not mix old and new ikpush state semantics."
                 )
             raw_state_ref = state_reference(raw_data["state"].astype(np.float32), raw_names, converted_names)
+            raw_state_ref = lossy_state_reference(raw_state_ref, converted_names, state_preprocess)
+            raw_action_ref = lossy_action_reference(raw_data["action"].astype(np.float32), action_preprocess)
             payload = {
                 **converted,
                 "task": np.asarray(raw_data["task"]) if "task" in raw_data.files else np.asarray("door open"),
@@ -537,7 +582,7 @@ def main():
 
             checks = [
                 compare_numeric("state", converted["state"], raw_state_ref, args.state_atol),
-                compare_numeric("action", converted["action"], raw_data["action"].astype(np.float32), args.action_atol),
+                compare_numeric("action", converted["action"], raw_action_ref, args.action_atol),
                 compare_exact("subtask_index", converted["subtask_index"], raw_data["subtask_index"].astype(np.int64)),
             ]
             for key in image_keys:

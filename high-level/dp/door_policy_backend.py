@@ -34,6 +34,8 @@ try:
         ACTION_NAMES,
         IMAGE_HEIGHT,
         IMAGE_WIDTH,
+        apply_door_dp_state_preprocess,
+        invert_door_dp_action_preprocess,
         lerobot_image_keys_for_vision_mode,
         normalize_vision_mode,
     )
@@ -42,6 +44,8 @@ except ImportError:
         ACTION_NAMES,
         IMAGE_HEIGHT,
         IMAGE_WIDTH,
+        apply_door_dp_state_preprocess,
+        invert_door_dp_action_preprocess,
         lerobot_image_keys_for_vision_mode,
         normalize_vision_mode,
     )
@@ -1314,6 +1318,14 @@ class LeRobotDiffusionDoorPolicyBackend:
                 policy_config[mode_key] = str(self.sidecar_config[mode_key])
             elif extra_config and mode_key in extra_config:
                 policy_config[mode_key] = str(extra_config[mode_key])
+        if "state_preprocess" in self.sidecar_config:
+            policy_config["state_preprocess"] = _json_safe(self.sidecar_config["state_preprocess"])
+        if "state" in self.sidecar_config:
+            policy_config["state_feature_names"] = _json_safe(self.sidecar_config["state"])
+        if "action_preprocess" in self.sidecar_config:
+            policy_config["action_preprocess"] = _json_safe(self.sidecar_config["action_preprocess"])
+        if "action" in self.sidecar_config:
+            policy_config["action_names"] = _json_safe(self.sidecar_config["action"])
         if extra_config:
             for key, value in extra_config.items():
                 if key not in policy_config:
@@ -1569,6 +1581,10 @@ class LeRobotActDoorPolicyBackend:
             "ikpush_state_version": str(self.sidecar_config.get("ikpush_state_version", "legacy")),
             "door_dp_mode": str(self.sidecar_config.get("door_dp_mode", self.sidecar_config.get("controller_mode", "legacy"))),
             "controller_mode": str(self.sidecar_config.get("door_dp_mode", self.sidecar_config.get("controller_mode", "legacy"))),
+            "state_preprocess": _json_safe(self.sidecar_config.get("state_preprocess")),
+            "state_feature_names": _json_safe(self.sidecar_config.get("state", [])),
+            "action_preprocess": _json_safe(self.sidecar_config.get("action_preprocess")),
+            "action_names": _json_safe(self.sidecar_config.get("action", ACTION_NAMES)),
         }
         if extra_config:
             policy_config.update({k: _json_safe(v) for k, v in extra_config.items() if k not in policy_config})
@@ -1887,6 +1903,10 @@ class LeRobotPI05DoorPolicyBackend:
             "policy_type": self.policy_type,
             "door_dp_mode": str(self.sidecar_config.get("door_dp_mode", self.sidecar_config.get("controller_mode", "legacy"))),
             "controller_mode": str(self.sidecar_config.get("door_dp_mode", self.sidecar_config.get("controller_mode", "legacy"))),
+            "state_preprocess": _json_safe(self.sidecar_config.get("state_preprocess")),
+            "state_feature_names": _json_safe(self.sidecar_config.get("state", [])),
+            "action_preprocess": _json_safe(self.sidecar_config.get("action_preprocess")),
+            "action_names": _json_safe(self.sidecar_config.get("action", ACTION_NAMES)),
         }
         if extra_config:
             policy_config.update({k: _json_safe(v) for k, v in extra_config.items() if k not in policy_config})
@@ -2041,6 +2061,11 @@ class DoorPolicyController:
         self.action_queue: deque = deque()
         self.multi_obs_buffers: Dict[int, deque] = {}
         self.multi_action_queues: Dict[int, deque] = {}
+        self.sidecar_config = dict(getattr(self.backend, "sidecar_config", {}) or {})
+        self.state_feature_names = list(self.sidecar_config.get("state") or self.config.get("state_feature_names", []))
+        self.state_preprocess = self.sidecar_config.get("state_preprocess") or self.config.get("state_preprocess")
+        self.action_names = list(self.sidecar_config.get("action") or self.config.get("action_names", ACTION_NAMES))
+        self.action_preprocess = self.sidecar_config.get("action_preprocess") or self.config.get("action_preprocess")
 
     def reset(self) -> None:
         self.obs_buffer.clear()
@@ -2076,6 +2101,24 @@ class DoorPolicyController:
     def _denormalize_action(self, action: torch.Tensor) -> torch.Tensor:
         return self.backend.normalizer.denormalize_action(action)
 
+    def _preprocess_state_for_policy(self, state: Any) -> np.ndarray:
+        return apply_door_dp_state_preprocess(
+            state,
+            state_names=self.state_feature_names or None,
+            config=self.state_preprocess,
+        )
+
+    def _postprocess_action_for_control(self, actions: torch.Tensor) -> torch.Tensor:
+        if not self.action_preprocess or not bool(self.action_preprocess.get("applied", False)):
+            return actions
+        actions_np = actions.detach().cpu().numpy().astype(np.float32)
+        physical = invert_door_dp_action_preprocess(
+            actions_np,
+            action_names=self.action_names or ACTION_NAMES,
+            config=self.action_preprocess,
+        )
+        return torch.as_tensor(physical, device=actions.device, dtype=actions.dtype)
+
     def _make_item(
         self,
         state: Any,
@@ -2088,6 +2131,7 @@ class DoorPolicyController:
             front_mask_rgb = np.zeros_like(mask_rgb)
         if front_second_rgb is None:
             front_second_rgb = np.zeros_like(second_rgb)
+        state = self._preprocess_state_for_policy(state)
         return {
             OBS_STATE: _tensor_to_device(state, self.device, torch.float32),
             self.image_keys[0]: _image_to_chw_float(mask_rgb, required=True).to(self.device),
@@ -2157,7 +2201,8 @@ class DoorPolicyController:
         batch: Mapping[str, Any],
         noise: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        return self.backend.predict_action_chunks_from_batch(batch, noise=noise)
+        actions = self.backend.predict_action_chunks_from_batch(batch, noise=noise)
+        return self._postprocess_action_for_control(actions)
 
     @torch.no_grad()
     def predict_action_chunks_from_windows(
@@ -2192,7 +2237,7 @@ class DoorPolicyController:
 
     @torch.no_grad()
     def sample_action_chunk(self, noise: Optional[torch.Tensor] = None) -> None:
-        actions = self.backend.predict_action_chunks_from_batch(self._current_batch(), noise=noise)
+        actions = self.predict_action_chunks_from_batch(self._current_batch(), noise=noise)
         actions_np = actions[0].detach().cpu().numpy().astype(np.float32)
         self.action_queue.clear()
         for row in actions_np[: self.action_horizon]:

@@ -32,7 +32,11 @@ DATASET_METADATA_KEYS = (
     "ikpush_state_version",
     "door_dp_mode",
     "controller_mode",
+    "state_preprocess",
+    "action_preprocess",
 )
+STATE_PREPROCESS_VERSION = "door_dp_state_robust_quantile_v1"
+ACTION_PREPROCESS_VERSION = "door_dp_action_robust_quantile_v1"
 ACTION_NAMES = [
     "vx",
     "yaw",
@@ -85,6 +89,323 @@ def _to_numpy(x):
 def _to_list(x, precision=5):
     arr = _to_numpy(x).astype(np.float64)
     return np.round(arr, precision).tolist()
+
+
+def _state_to_2d(states):
+    arr = np.asarray(states, dtype=np.float32)
+    original_shape = arr.shape
+    if arr.ndim == 1:
+        return arr.reshape(1, -1), original_shape
+    if arr.ndim < 1:
+        raise ValueError(f"Expected state with at least 1 dimension, got shape {arr.shape}")
+    return arr.reshape(-1, arr.shape[-1]), original_shape
+
+
+def _restore_state_shape(states_2d, original_shape):
+    arr = np.asarray(states_2d, dtype=np.float32)
+    return arr.reshape(original_shape).astype(np.float32)
+
+
+def _wrap_to_pi_array(values):
+    return (values + np.float32(np.pi)) % np.float32(2.0 * np.pi) - np.float32(np.pi)
+
+
+def _state_angle_feature_indices(state_names):
+    indices = []
+    for idx, name in enumerate(state_names):
+        lowered = str(name).lower()
+        if any(skip in lowered for skip in ("vel", "rate", "ang_vel", "last_low_action")):
+            continue
+        if any(token in lowered for token in ("roll", "pitch", "yaw")):
+            indices.append(idx)
+    return indices
+
+
+def _state_quaternion_groups(state_names):
+    name_to_idx = {str(name): idx for idx, name in enumerate(state_names)}
+    groups = []
+    seen = set()
+    for name in state_names:
+        name = str(name)
+        if not name.endswith("_qx"):
+            continue
+        prefix = name[:-3]
+        group = [f"{prefix}_{suffix}" for suffix in ("qx", "qy", "qz", "qw")]
+        if all(part in name_to_idx for part in group):
+            indices = tuple(name_to_idx[part] for part in group)
+            if indices not in seen:
+                groups.append(indices)
+                seen.add(indices)
+    return groups
+
+
+def sanitize_door_dp_state(states, state_names, eps=1.0e-6):
+    """Clean raw Door DP state before dataset-level state preprocessing.
+
+    This keeps angular features continuous, canonicalizes quaternions, and removes
+    non-finite values before fitting/applying the robust quantile transform.
+    """
+
+    state_names = list(state_names)
+    states_2d, original_shape = _state_to_2d(states)
+    if states_2d.shape[-1] != len(state_names):
+        raise ValueError(f"State dim {states_2d.shape[-1]} does not match {len(state_names)} state feature names.")
+    out = np.nan_to_num(states_2d, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32, copy=True)
+    for idx in _state_angle_feature_indices(state_names):
+        out[:, idx] = _wrap_to_pi_array(out[:, idx])
+    for group in _state_quaternion_groups(state_names):
+        quat = out[:, group].astype(np.float32, copy=True)
+        norm = np.linalg.norm(quat, axis=-1, keepdims=True)
+        valid = norm[:, 0] >= float(eps)
+        quat[valid] = quat[valid] / norm[valid]
+        quat[~valid] = np.asarray([0.0, 0.0, 0.0, 1.0], dtype=np.float32)
+        sign = np.where(quat[:, 3:4] < 0.0, -1.0, 1.0).astype(np.float32)
+        out[:, group] = quat * sign
+    return _restore_state_shape(out, original_shape)
+
+
+def fit_door_dp_state_preprocess(
+    states,
+    state_names,
+    lower_quantile=0.01,
+    upper_quantile=0.99,
+    eps=1.0e-6,
+):
+    state_names = list(state_names)
+    lower_quantile = float(lower_quantile)
+    upper_quantile = float(upper_quantile)
+    if not 0.0 <= lower_quantile < upper_quantile <= 1.0:
+        raise ValueError("--state_quantile_low/high must satisfy 0 <= low < high <= 1.")
+    clean = sanitize_door_dp_state(states, state_names, eps=eps)
+    clean_2d, _ = _state_to_2d(clean)
+    q_low = np.quantile(clean_2d, lower_quantile, axis=0).astype(np.float32)
+    q_high = np.quantile(clean_2d, upper_quantile, axis=0).astype(np.float32)
+    denom = q_high - q_low
+    constant_mask = np.abs(denom) < float(eps)
+    return {
+        "applied": True,
+        "version": STATE_PREPROCESS_VERSION,
+        "mode": "robust_quantile",
+        "feature_names": list(state_names),
+        "lower_quantile": lower_quantile,
+        "upper_quantile": upper_quantile,
+        "eps": float(eps),
+        "q_low": q_low.tolist(),
+        "q_high": q_high.tolist(),
+        "constant_mask": constant_mask.astype(bool).tolist(),
+        "angle_wrapped_features": [state_names[i] for i in _state_angle_feature_indices(state_names)],
+        "quaternion_groups": [[state_names[i] for i in group] for group in _state_quaternion_groups(state_names)],
+    }
+
+
+def apply_door_dp_state_preprocess(states, state_names=None, config=None):
+    if not config or not bool(config.get("applied", False)):
+        return np.asarray(states, dtype=np.float32)
+    if str(config.get("version", "")) != STATE_PREPROCESS_VERSION:
+        raise ValueError(f"Unsupported Door DP state_preprocess version: {config.get('version')!r}")
+    if str(config.get("mode", "")) != "robust_quantile":
+        raise ValueError(f"Unsupported Door DP state_preprocess mode: {config.get('mode')!r}")
+
+    feature_names = list(config.get("feature_names") or state_names or [])
+    if not feature_names:
+        raise ValueError("Door DP state_preprocess metadata is missing feature_names.")
+    if state_names is not None:
+        state_names = list(state_names)
+        if len(state_names) != len(feature_names):
+            raise ValueError(
+                f"Runtime state_names has {len(state_names)} features, but state_preprocess expects {len(feature_names)}."
+            )
+        if state_names != feature_names:
+            raise ValueError("Runtime state feature names do not match state_preprocess feature_names.")
+
+    clean = sanitize_door_dp_state(states, feature_names, eps=float(config.get("eps", 1.0e-6)))
+    clean_2d, original_shape = _state_to_2d(clean)
+    q_low = np.asarray(config["q_low"], dtype=np.float32)
+    q_high = np.asarray(config["q_high"], dtype=np.float32)
+    if q_low.shape != (clean_2d.shape[-1],) or q_high.shape != (clean_2d.shape[-1],):
+        raise ValueError(
+            f"state_preprocess q_low/q_high shape mismatch: state_dim={clean_2d.shape[-1]} "
+            f"q_low={q_low.shape} q_high={q_high.shape}"
+        )
+    eps = float(config.get("eps", 1.0e-6))
+    denom = q_high - q_low
+    valid = np.abs(denom) >= eps
+    out = np.zeros_like(clean_2d, dtype=np.float32)
+    if np.any(valid):
+        clipped = np.minimum(np.maximum(clean_2d[:, valid], q_low[valid]), q_high[valid])
+        out[:, valid] = 2.0 * (clipped - q_low[valid]) / denom[valid] - 1.0
+    out = np.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
+    out = np.clip(out, -1.0, 1.0).astype(np.float32)
+    return _restore_state_shape(out, original_shape)
+
+
+def invert_door_dp_state_preprocess(states, state_names=None, config=None):
+    if not config or not bool(config.get("applied", False)):
+        return np.asarray(states, dtype=np.float32)
+    if str(config.get("version", "")) != STATE_PREPROCESS_VERSION:
+        raise ValueError(f"Unsupported Door DP state_preprocess version: {config.get('version')!r}")
+    if str(config.get("mode", "")) != "robust_quantile":
+        raise ValueError(f"Unsupported Door DP state_preprocess mode: {config.get('mode')!r}")
+
+    feature_names = list(config.get("feature_names") or state_names or [])
+    if not feature_names:
+        raise ValueError("Door DP state_preprocess metadata is missing feature_names.")
+    if state_names is not None:
+        state_names = list(state_names)
+        if len(state_names) != len(feature_names):
+            raise ValueError(
+                f"Runtime state_names has {len(state_names)} features, but state_preprocess expects {len(feature_names)}."
+            )
+        if state_names != feature_names:
+            raise ValueError("Runtime state feature names do not match state_preprocess feature_names.")
+
+    states_2d, original_shape = _state_to_2d(states)
+    q_low = np.asarray(config["q_low"], dtype=np.float32)
+    q_high = np.asarray(config["q_high"], dtype=np.float32)
+    if q_low.shape != (states_2d.shape[-1],) or q_high.shape != (states_2d.shape[-1],):
+        raise ValueError(
+            f"state_preprocess q_low/q_high shape mismatch: state_dim={states_2d.shape[-1]} "
+            f"q_low={q_low.shape} q_high={q_high.shape}"
+        )
+    eps = float(config.get("eps", 1.0e-6))
+    clipped = np.clip(np.nan_to_num(states_2d, nan=0.0, posinf=1.0, neginf=-1.0), -1.0, 1.0).astype(np.float32)
+    denom = q_high - q_low
+    valid = np.abs(denom) >= eps
+    out = np.zeros_like(clipped, dtype=np.float32)
+    if np.any(valid):
+        out[:, valid] = (clipped[:, valid] + 1.0) * denom[valid] / 2.0 + q_low[valid]
+    if np.any(~valid):
+        out[:, ~valid] = 0.5 * (q_low[~valid] + q_high[~valid])
+    out = sanitize_door_dp_state(out, feature_names, eps=eps)
+    return _restore_state_shape(out, original_shape)
+
+
+def sanitize_door_dp_action(actions, action_names=None, eps=1.0e-6):
+    action_names = list(action_names or ACTION_NAMES)
+    actions_2d, original_shape = _state_to_2d(actions)
+    if actions_2d.shape[-1] != len(action_names):
+        raise ValueError(f"Action dim {actions_2d.shape[-1]} does not match {len(action_names)} action names.")
+    out = np.nan_to_num(actions_2d, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32, copy=True)
+    for group in _state_quaternion_groups(action_names):
+        quat = out[:, group].astype(np.float32, copy=True)
+        norm = np.linalg.norm(quat, axis=-1, keepdims=True)
+        valid = norm[:, 0] >= float(eps)
+        quat[valid] = quat[valid] / norm[valid]
+        quat[~valid] = np.asarray([0.0, 0.0, 0.0, 1.0], dtype=np.float32)
+        sign = np.where(quat[:, 3:4] < 0.0, -1.0, 1.0).astype(np.float32)
+        out[:, group] = quat * sign
+    return _restore_state_shape(out, original_shape)
+
+
+def fit_door_dp_action_preprocess(
+    actions,
+    action_names=None,
+    lower_quantile=0.01,
+    upper_quantile=0.99,
+    eps=1.0e-6,
+):
+    action_names = list(action_names or ACTION_NAMES)
+    lower_quantile = float(lower_quantile)
+    upper_quantile = float(upper_quantile)
+    if not 0.0 <= lower_quantile < upper_quantile <= 1.0:
+        raise ValueError("--action_quantile_low/high must satisfy 0 <= low < high <= 1.")
+    clean = sanitize_door_dp_action(actions, action_names, eps=eps)
+    clean_2d, _ = _state_to_2d(clean)
+    q_low = np.quantile(clean_2d, lower_quantile, axis=0).astype(np.float32)
+    q_high = np.quantile(clean_2d, upper_quantile, axis=0).astype(np.float32)
+    denom = q_high - q_low
+    constant_mask = np.abs(denom) < float(eps)
+    return {
+        "applied": True,
+        "version": ACTION_PREPROCESS_VERSION,
+        "mode": "robust_quantile",
+        "feature_names": list(action_names),
+        "lower_quantile": lower_quantile,
+        "upper_quantile": upper_quantile,
+        "eps": float(eps),
+        "q_low": q_low.tolist(),
+        "q_high": q_high.tolist(),
+        "constant_mask": constant_mask.astype(bool).tolist(),
+        "quaternion_groups": [[action_names[i] for i in group] for group in _state_quaternion_groups(action_names)],
+    }
+
+
+def apply_door_dp_action_preprocess(actions, action_names=None, config=None):
+    if not config or not bool(config.get("applied", False)):
+        return np.asarray(actions, dtype=np.float32)
+    if str(config.get("version", "")) != ACTION_PREPROCESS_VERSION:
+        raise ValueError(f"Unsupported Door DP action_preprocess version: {config.get('version')!r}")
+    if str(config.get("mode", "")) != "robust_quantile":
+        raise ValueError(f"Unsupported Door DP action_preprocess mode: {config.get('mode')!r}")
+
+    feature_names = list(config.get("feature_names") or action_names or ACTION_NAMES)
+    if action_names is not None:
+        action_names = list(action_names)
+        if len(action_names) != len(feature_names):
+            raise ValueError(
+                f"Runtime action_names has {len(action_names)} features, but action_preprocess expects {len(feature_names)}."
+            )
+        if action_names != feature_names:
+            raise ValueError("Runtime action names do not match action_preprocess feature_names.")
+
+    clean = sanitize_door_dp_action(actions, feature_names, eps=float(config.get("eps", 1.0e-6)))
+    clean_2d, original_shape = _state_to_2d(clean)
+    q_low = np.asarray(config["q_low"], dtype=np.float32)
+    q_high = np.asarray(config["q_high"], dtype=np.float32)
+    if q_low.shape != (clean_2d.shape[-1],) or q_high.shape != (clean_2d.shape[-1],):
+        raise ValueError(
+            f"action_preprocess q_low/q_high shape mismatch: action_dim={clean_2d.shape[-1]} "
+            f"q_low={q_low.shape} q_high={q_high.shape}"
+        )
+    eps = float(config.get("eps", 1.0e-6))
+    denom = q_high - q_low
+    valid = np.abs(denom) >= eps
+    out = np.zeros_like(clean_2d, dtype=np.float32)
+    if np.any(valid):
+        clipped = np.minimum(np.maximum(clean_2d[:, valid], q_low[valid]), q_high[valid])
+        out[:, valid] = 2.0 * (clipped - q_low[valid]) / denom[valid] - 1.0
+    out = np.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
+    out = np.clip(out, -1.0, 1.0).astype(np.float32)
+    return _restore_state_shape(out, original_shape)
+
+
+def invert_door_dp_action_preprocess(actions, action_names=None, config=None):
+    if not config or not bool(config.get("applied", False)):
+        return np.asarray(actions, dtype=np.float32)
+    if str(config.get("version", "")) != ACTION_PREPROCESS_VERSION:
+        raise ValueError(f"Unsupported Door DP action_preprocess version: {config.get('version')!r}")
+    if str(config.get("mode", "")) != "robust_quantile":
+        raise ValueError(f"Unsupported Door DP action_preprocess mode: {config.get('mode')!r}")
+
+    feature_names = list(config.get("feature_names") or action_names or ACTION_NAMES)
+    if action_names is not None:
+        action_names = list(action_names)
+        if len(action_names) != len(feature_names):
+            raise ValueError(
+                f"Runtime action_names has {len(action_names)} features, but action_preprocess expects {len(feature_names)}."
+            )
+        if action_names != feature_names:
+            raise ValueError("Runtime action names do not match action_preprocess feature_names.")
+
+    actions_2d, original_shape = _state_to_2d(actions)
+    q_low = np.asarray(config["q_low"], dtype=np.float32)
+    q_high = np.asarray(config["q_high"], dtype=np.float32)
+    if q_low.shape != (actions_2d.shape[-1],) or q_high.shape != (actions_2d.shape[-1],):
+        raise ValueError(
+            f"action_preprocess q_low/q_high shape mismatch: action_dim={actions_2d.shape[-1]} "
+            f"q_low={q_low.shape} q_high={q_high.shape}"
+        )
+    eps = float(config.get("eps", 1.0e-6))
+    clipped = np.clip(np.nan_to_num(actions_2d, nan=0.0, posinf=1.0, neginf=-1.0), -1.0, 1.0).astype(np.float32)
+    denom = q_high - q_low
+    valid = np.abs(denom) >= eps
+    out = np.zeros_like(clipped, dtype=np.float32)
+    if np.any(valid):
+        out[:, valid] = (clipped[:, valid] + 1.0) * denom[valid] / 2.0 + q_low[valid]
+    if np.any(~valid):
+        out[:, ~valid] = 0.5 * (q_low[~valid] + q_high[~valid])
+    out = sanitize_door_dp_action(out, feature_names, eps=eps)
+    return _restore_state_shape(out, original_shape)
 
 
 def make_state_feature_names(num_dofs, num_actions, phase_names):
