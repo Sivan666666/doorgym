@@ -2412,6 +2412,8 @@ class DoorPolicySubprocessController:
         self.action_horizon = int(meta["action_horizon"])
         self.action_dim = int(meta["action_dim"])
         self.device = torch.device(str(meta.get("device", "cpu")))
+        self.state_feature_names = list(self.config.get("state_feature_names", []))
+        self.action_names = list(self.config.get("action_names", ACTION_NAMES))
 
     def _request(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
         if self._proc.stdin is None or self._proc.stdout is None:

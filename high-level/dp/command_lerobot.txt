@@ -166,3 +166,30 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
     --wandb.enable=true \
     --wandb.project=door-pi05 \
     --wandb.disable_artifact=true
+
+
+## 5. Play official LeRobot ACT checkpoint in Isaac Gym
+#
+# Required runtime:
+#   shell can be in b1z1; the auto-wrapper uses b1z1_lerobot through conda.
+#
+# This command accepts the official LeRobot checkpoint directory directly.
+# If it finds pretrained_model/config.json + train_config.json, it reads
+# dataset.root / dataset.repo_id from train_config.json, finds the dataset
+# door_dp_feature_names.json sidecar, and caches a Door-compatible checkpoint
+# under high-level/dp/logs/door-auto-wrapped/.
+
+export DOOR_DP_LEROBOT_CONDA_ENV=b1z1_lerobot
+
+python "$PROJECT_ROOT/high-level/dp/play/play_door_policy.py" \
+    --mode ikpush \
+    --checkpoint "$OUTPUT_ROOT/act_pi05_state10_test/checkpoints/last" \
+    --num_envs 4 \
+    --steps 2500 \
+    --rl_device cuda:0 \
+    --sim_device cuda:0 \
+    --dp_action_horizon 16 \
+    --dp_inference_steps 10 \
+    --dp_noise_scheduler_type DDIM \
+    -- \
+    --door_cfg "$PROJECT_ROOT/high-level/experiments/isaacgym/b1z1_opendoor.yaml"

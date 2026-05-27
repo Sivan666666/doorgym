@@ -1,4 +1,7 @@
 import argparse
+import json
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -7,6 +10,119 @@ from datetime import datetime
 
 DP_ROOT = Path(__file__).resolve().parents[1]
 HIGH_LEVEL_ROOT = DP_ROOT.parent
+PROJECT_ROOT = HIGH_LEVEL_ROOT.parent
+
+
+def load_json(path):
+    with Path(path).open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def official_lerobot_policy_dir(checkpoint_path):
+    path = Path(checkpoint_path).expanduser().resolve()
+    if path.is_file() and path.parent.name == "pretrained_model":
+        policy_dir = path.parent
+        step_dir = policy_dir.parent
+    elif path.name == "pretrained_model":
+        policy_dir = path
+        step_dir = path.parent
+    else:
+        step_dir = path
+        policy_dir = path / "pretrained_model"
+    if (policy_dir / "config.json").is_file() and (policy_dir / "train_config.json").is_file():
+        return step_dir, policy_dir
+    return None, None
+
+
+def lerobot_python_command():
+    explicit = os.environ.get("DOOR_DP_LEROBOT_PYTHON")
+    if explicit:
+        return explicit.split()
+    env_name = os.environ.get("DOOR_DP_LEROBOT_CONDA_ENV", "b1z1_lerobot")
+    conda_exe = shutil.which("conda")
+    if conda_exe:
+        return [conda_exe, "run", "--no-capture-output", "-n", env_name, "python"]
+    return [sys.executable]
+
+
+def resolve_train_dataset_root(train_config):
+    dataset = train_config.get("dataset") or {}
+    repo_id = dataset.get("repo_id")
+    root = dataset.get("root")
+    if not repo_id or not root:
+        raise ValueError(
+            "Official LeRobot checkpoint is missing dataset.root or dataset.repo_id in "
+            "pretrained_model/train_config.json, so Door metadata cannot be located automatically."
+        )
+    root = Path(root).expanduser()
+    if not root.is_absolute():
+        root = (PROJECT_ROOT / root).resolve()
+    else:
+        root = root.resolve()
+    return root, str(repo_id)
+
+
+def auto_wrap_official_lerobot_checkpoint(checkpoint_path, args):
+    step_dir, policy_dir = official_lerobot_policy_dir(checkpoint_path)
+    if policy_dir is None:
+        return checkpoint_path
+
+    policy_config = load_json(policy_dir / "config.json")
+    policy_type = str(policy_config.get("type", ""))
+    if policy_type != "act":
+        raise ValueError(
+            f"Direct play of official LeRobot policy type={policy_type!r} is not wired yet. "
+            "Currently auto-wrapping supports official ACT checkpoints."
+        )
+
+    train_config = load_json(policy_dir / "train_config.json")
+    dataset_root, repo_id = resolve_train_dataset_root(train_config)
+    sidecar = dataset_root / "door_dp_feature_names.json"
+    if not sidecar.is_file():
+        raise FileNotFoundError(
+            f"Could not find Door dataset sidecar for official LeRobot checkpoint: {sidecar}\n"
+            "This file stores action_frame, state/action preprocess, and image mode for Door play."
+        )
+
+    run_name = str(train_config.get("job_name") or step_dir.parent.parent.name or "official_lerobot")
+    step_name = step_dir.name
+    cache_root = DP_ROOT / "logs" / "door-auto-wrapped" / run_name / step_name
+    out_dir = cache_root / "model_latest"
+    manifest_path = cache_root / "model_latest.pt"
+    if (out_dir / "door_policy_meta.json").is_file() and manifest_path.is_file():
+        print(f"Using cached Door-wrapped checkpoint: {manifest_path}", flush=True)
+        return manifest_path.resolve()
+
+    export_script = DP_ROOT / "export_official_lerobot_act_to_door_checkpoint.py"
+    cmd = lerobot_python_command() + [
+        str(export_script),
+        "--official_checkpoint",
+        str(step_dir),
+        "--root",
+        str(dataset_root),
+        "--repo_id",
+        repo_id,
+        "--out_dir",
+        str(out_dir),
+        "--manifest_name",
+        "model_latest.pt",
+        "--device",
+        args.rl_device,
+    ]
+    if args.rgb:
+        cmd.append("--rgb")
+    env = os.environ.copy()
+    py_paths = [str(HIGH_LEVEL_ROOT / "lerobot" / "src"), str(DP_ROOT)]
+    env["PYTHONPATH"] = os.pathsep.join(py_paths + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
+    print(
+        "Detected official LeRobot ACT checkpoint; wrapping it for Door play:\n"
+        f"  official: {step_dir}\n"
+        f"  dataset:  {dataset_root}\n"
+        f"  output:   {manifest_path}",
+        flush=True,
+    )
+    subprocess.run(cmd, cwd=str(PROJECT_ROOT), env=env, check=True)
+    return manifest_path.resolve()
 
 
 def parse_args():
@@ -66,6 +182,7 @@ def main():
     checkpoint_path = Path(args.checkpoint).expanduser()
     if not checkpoint_path.is_absolute():
         checkpoint_path = (Path.cwd() / checkpoint_path).resolve()
+    checkpoint_path = auto_wrap_official_lerobot_checkpoint(checkpoint_path, args)
     if args.steps is None:
         args.steps = 4300 if args.mode == "ikpull" else 2500
     if args.rgb and args.mode not in ("push", "ikpush", "ikpull"):
