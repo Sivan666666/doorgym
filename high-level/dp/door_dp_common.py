@@ -25,7 +25,14 @@ RGB_LEROBOT_IMAGE_KEYS = [
     "observation.images.front_handle_mask",
     "observation.images.front_rgb",
 ]
-DATASET_METADATA_KEYS = ("action_frame", "action_pose_frame", "target_pose_frame", "ikpush_state_version")
+DATASET_METADATA_KEYS = (
+    "action_frame",
+    "action_pose_frame",
+    "target_pose_frame",
+    "ikpush_state_version",
+    "door_dp_mode",
+    "controller_mode",
+)
 ACTION_NAMES = [
     "vx",
     "yaw",
@@ -351,7 +358,19 @@ def _zero_image_like(image):
 
 
 class DoorDPLeRobotRecorder:
-    def __init__(self, root, repo_id, fps, state_feature_names, task, resume=True, vision_mode="depth", metadata=None):
+    def __init__(
+        self,
+        root,
+        repo_id,
+        fps,
+        state_feature_names,
+        task,
+        resume=True,
+        vision_mode="depth",
+        metadata=None,
+        image_storage="video",
+        video_codec="h264",
+    ):
         from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
         self.root = Path(root)
@@ -359,6 +378,10 @@ class DoorDPLeRobotRecorder:
         self.fps = int(fps)
         self.task = task
         self.vision_mode = normalize_vision_mode(vision_mode)
+        self.image_storage = str(image_storage).lower()
+        if self.image_storage not in ("video", "image"):
+            raise ValueError(f"Unsupported image_storage={image_storage!r}; expected 'video' or 'image'.")
+        self.video_codec = str(video_codec)
         self.state_feature_names = list(state_feature_names)
         self.action_names = list(ACTION_NAMES)
         self.metadata = dict(metadata or {})
@@ -379,9 +402,9 @@ class DoorDPLeRobotRecorder:
         }
         for key in lerobot_image_keys_for_vision_mode(self.vision_mode):
             features[key] = {
-                "dtype": "image",
+                "dtype": self.image_storage,
                 "shape": (IMAGE_HEIGHT, IMAGE_WIDTH, 3),
-                "names": ["height", "width", "channel"],
+                "names": ["height", "width", "channels"],
             }
         if resume and self.dataset_root.exists():
             try:
@@ -395,7 +418,8 @@ class DoorDPLeRobotRecorder:
                     root=str(self.dataset_root),
                     fps=self.fps,
                     features=features,
-                    use_videos=True,
+                    use_videos=self.image_storage == "video",
+                    vcodec=self.video_codec,
                 )
             except TypeError:
                 self.dataset = LeRobotDataset.create(repo_id, fps=self.fps, root=str(self.dataset_root), features=features)
@@ -408,6 +432,8 @@ class DoorDPLeRobotRecorder:
             "state": self.state_feature_names,
             "action": self.action_names,
             "image_features": lerobot_image_keys_for_vision_mode(self.vision_mode),
+            "image_storage": self.image_storage,
+            "video_codec": self.video_codec,
         }
         if self.vision_mode == "rgb":
             sidecar["vision_mode"] = self.vision_mode

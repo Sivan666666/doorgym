@@ -167,6 +167,13 @@ def ikpush_state_version(data) -> str:
     return "legacy"
 
 
+def controller_mode(data) -> str:
+    for key in ("door_dp_mode", "controller_mode"):
+        if key in data.files:
+            return scalar_str(data[key])
+    return "legacy"
+
+
 def quat_angle_deg(q1, q2) -> float:
     q1 = np.asarray(q1, dtype=np.float64)
     q2 = np.asarray(q2, dtype=np.float64)
@@ -215,6 +222,12 @@ def validate_inputs(data, controller: DoorDPPolicyController, expected_vision_mo
         raise ValueError(
             f"Checkpoint ikpush_state_version={ckpt_state_version!r}, "
             f"raw episode ikpush_state_version={raw_state_version!r}."
+        )
+    raw_controller_mode = controller_mode(data)
+    ckpt_controller_mode = str(controller.config.get("door_dp_mode", controller.config.get("controller_mode", "legacy")))
+    if raw_controller_mode != ckpt_controller_mode:
+        raise ValueError(
+            f"Checkpoint door_dp_mode={ckpt_controller_mode!r}, raw episode door_dp_mode={raw_controller_mode!r}."
         )
     image_keys = raw_image_keys_for_vision_mode(expected_vision_mode)
     missing = [key for key in image_keys if key not in data.files]

@@ -1309,6 +1309,11 @@ class LeRobotDiffusionDoorPolicyBackend:
             policy_config["ikpush_state_version"] = str(extra_config["ikpush_state_version"])
         else:
             policy_config["ikpush_state_version"] = "legacy"
+        for mode_key in ("door_dp_mode", "controller_mode"):
+            if mode_key in self.sidecar_config:
+                policy_config[mode_key] = str(self.sidecar_config[mode_key])
+            elif extra_config and mode_key in extra_config:
+                policy_config[mode_key] = str(extra_config[mode_key])
         if extra_config:
             for key, value in extra_config.items():
                 if key not in policy_config:
@@ -1562,6 +1567,8 @@ class LeRobotActDoorPolicyBackend:
             "dropout": float(self.config.dropout),
             "kl_weight": float(self.config.kl_weight),
             "ikpush_state_version": str(self.sidecar_config.get("ikpush_state_version", "legacy")),
+            "door_dp_mode": str(self.sidecar_config.get("door_dp_mode", self.sidecar_config.get("controller_mode", "legacy"))),
+            "controller_mode": str(self.sidecar_config.get("door_dp_mode", self.sidecar_config.get("controller_mode", "legacy"))),
         }
         if extra_config:
             policy_config.update({k: _json_safe(v) for k, v in extra_config.items() if k not in policy_config})
@@ -1878,6 +1885,8 @@ class LeRobotPI05DoorPolicyBackend:
             "train_expert_only": bool(getattr(self.config, "train_expert_only", False)),
             "ikpush_state_version": str(self.sidecar_config.get("ikpush_state_version", "legacy")),
             "policy_type": self.policy_type,
+            "door_dp_mode": str(self.sidecar_config.get("door_dp_mode", self.sidecar_config.get("controller_mode", "legacy"))),
+            "controller_mode": str(self.sidecar_config.get("door_dp_mode", self.sidecar_config.get("controller_mode", "legacy"))),
         }
         if extra_config:
             policy_config.update({k: _json_safe(v) for k, v in extra_config.items() if k not in policy_config})

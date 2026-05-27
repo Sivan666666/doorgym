@@ -12,14 +12,14 @@ HIGH_LEVEL_ROOT = DP_ROOT.parent
 def parse_args():
     parser = argparse.ArgumentParser(description="Play a trained Door LeRobot policy in the door asset scene.")
     parser.add_argument("--checkpoint", type=str, required=True)
-    parser.add_argument("--mode", choices=["ikpush", "pull", "push"], default="ikpush")
+    parser.add_argument("--mode", choices=["ikpush", "ikpull", "pull", "push"], default="ikpush")
     parser.add_argument("--num_envs", type=int, default=1)
-    parser.add_argument("--steps", type=int, default=2500)
+    parser.add_argument("--steps", type=int, default=None)
     parser.add_argument("--rl_device", type=str, default="cuda:0")
     parser.add_argument("--sim_device", type=str, default="cuda:0")
     parser.add_argument("--graphics_device_id", type=int, default=None)
     parser.add_argument("--headless", action="store_true")
-    parser.add_argument("--rgb", action="store_true", help="Run a RGB+mask Door policy checkpoint. Push/ikpush modes only.")
+    parser.add_argument("--rgb", action="store_true", help="Run a RGB+mask Door policy checkpoint. Push/ikpush/ikpull modes only.")
     parser.add_argument("--show_seg", dest="show_seg", action="store_true", default=True)
     parser.add_argument("--no_show_seg", dest="show_seg", action="store_false")
     parser.add_argument("--camera_display_scale", type=int, default=5)
@@ -66,8 +66,10 @@ def main():
     checkpoint_path = Path(args.checkpoint).expanduser()
     if not checkpoint_path.is_absolute():
         checkpoint_path = (Path.cwd() / checkpoint_path).resolve()
-    if args.rgb and args.mode not in ("push", "ikpush"):
-        raise ValueError("--rgb Door policy play is only wired for push/ikpush mode.")
+    if args.steps is None:
+        args.steps = 4300 if args.mode == "ikpull" else 2500
+    if args.rgb and args.mode not in ("push", "ikpush", "ikpull"):
+        raise ValueError("--rgb Door policy play is only wired for push/ikpush/ikpull mode.")
     warmstart_params = [
         args.dp_warmstart_raw_episode is not None,
         args.dp_warmstart_step is not None,
@@ -93,6 +95,8 @@ def main():
         warmstart_raw_path = None
     if args.mode == "ikpush":
         script = HIGH_LEVEL_ROOT / "float_ik" / "isaacgym_float_ik_b1z1_basearn_push_door_parallel.py"
+    elif args.mode == "ikpull":
+        script = HIGH_LEVEL_ROOT / "float_ik" / "isaacgym_float_ik_b1z1_basearn_pull_door_parallel.py"
     elif args.mode == "pull":
         script = HIGH_LEVEL_ROOT / "play_b1z1_walk_with_door_asset_camera.py"
     else:
@@ -131,7 +135,7 @@ def main():
         str(args.dp_log_interval),
         "--no_preview_trajectory_at_spawn",
     ]
-    if args.mode == "ikpush":
+    if args.mode in ("ikpush", "ikpull"):
         cmd.append("--enable_front_camera")
         if not args.debug_visuals:
             cmd += ["--no_draw_ik_target", "--no_draw_camera_axes"]
