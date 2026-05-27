@@ -1,0 +1,168 @@
+# Official LeRobot training commands for Door DP / ACT / pi0.5.
+#
+# Run from anywhere. Change DATASET_ROOT / DATASET_REPO_ID / RUN_NAME if needed.
+# Official LeRobot train.py refuses to reuse an existing output_dir, so use a new
+# RUN_NAME for each fresh training run.
+#
+# Notes:
+# - push_to_hub is disabled for all policies.
+# - wandb is enabled, but artifact upload is disabled.
+# - pyav is used because torchcodec can fail on local v3 video files in this env.
+
+set -o pipefail
+
+PROJECT_ROOT=/home/sivan/whole_body/visual_whole_body
+DATASET_REPO_ID=local/pi05_state10_test
+DATASET_ROOT=$PROJECT_ROOT/high-level/data/lerobot/local/pi05_state10_test
+OUTPUT_ROOT=$PROJECT_ROOT/high-level/dp/logs/lerobot-train
+
+cd "$PROJECT_ROOT"
+
+
+## 1. Diffusion Policy, official LeRobot train.py
+
+export PYTHONPATH="$PROJECT_ROOT/high-level/lerobot/src:${PYTHONPATH:-}"
+
+DP_RUN_NAME=lerodp_official_pi05_state10
+
+CUDA_VISIBLE_DEVICES=0 accelerate launch \
+    --num-processes=1 \
+    --mixed_precision=no \
+    "$(which lerobot-train)" \
+    --dataset.root="$DATASET_ROOT" \
+    --dataset.repo_id="$DATASET_REPO_ID" \
+    --dataset.video_backend=pyav \
+    --policy.type=diffusion \
+    --policy.device=cuda \
+    --policy.push_to_hub=false \
+    --policy.n_obs_steps=16 \
+    --policy.horizon=48 \
+    --policy.n_action_steps=16 \
+    --policy.drop_n_last_frames=17 \
+    --policy.noise_scheduler_type=DDPM \
+    --policy.num_train_timesteps=100 \
+    --policy.num_inference_steps=10 \
+    --policy.clip_sample_range=7.0 \
+    --batch_size=32 \
+    --steps=100000 \
+    --num_workers=2 \
+    --save_freq=1000 \
+    --log_freq=10 \
+    --job_name="$DP_RUN_NAME" \
+    --output_dir="$OUTPUT_ROOT/$DP_RUN_NAME" \
+    --wandb.enable=true \
+    --wandb.project=door-dp \
+    --wandb.disable_artifact=true
+
+
+## 2. ACT, official LeRobot train.py
+
+export PYTHONPATH="$PROJECT_ROOT/high-level/lerobot/src:${PYTHONPATH:-}"
+
+ACT_RUN_NAME=leroact_official_pi05_state10
+
+CUDA_VISIBLE_DEVICES=0 accelerate launch \
+    --num-processes=1 \
+    --mixed_precision=no \
+    "$(which lerobot-train)" \
+    --dataset.root="$DATASET_ROOT" \
+    --dataset.repo_id="$DATASET_REPO_ID" \
+    --dataset.video_backend=pyav \
+    --policy.type=act \
+    --policy.device=cuda \
+    --policy.push_to_hub=false \
+    --policy.chunk_size=100 \
+    --policy.n_action_steps=16 \
+    --policy.vision_backbone=resnet18 \
+    --policy.pretrained_backbone_weights=ResNet18_Weights.IMAGENET1K_V1 \
+    --batch_size=32 \
+    --steps=100000 \
+    --num_workers=2 \
+    --save_freq=1000 \
+    --log_freq=10 \
+    --job_name="$ACT_RUN_NAME" \
+    --output_dir="$OUTPUT_ROOT/$ACT_RUN_NAME" \
+    --wandb.enable=true \
+    --wandb.project=door-act \
+    --wandb.disable_artifact=true
+
+
+## 3. pi0.5, official LeRobot train.py
+#
+# Required environment:
+#   conda activate b1z1_lerobot
+# Source tree:
+#   high-level/lerobot
+
+export PYTHONPATH="$PROJECT_ROOT/high-level/lerobot/src:${PYTHONPATH:-}"
+
+PI05_RUN_NAME=pi05_official_pi05_state10
+
+CUDA_VISIBLE_DEVICES=0 accelerate launch \
+    --num-processes=1 \
+    --mixed_precision=bf16 \
+    "$(which lerobot-train)" \
+    --dataset.root="$DATASET_ROOT" \
+    --dataset.repo_id="$DATASET_REPO_ID" \
+    --dataset.video_backend=pyav \
+    --policy.type=pi05 \
+    --policy.device=cuda \
+    --policy.pretrained_path=lerobot/pi05_base \
+    --policy.dtype=bfloat16 \
+    --policy.push_to_hub=false \
+    --policy.gradient_checkpointing=true \
+    --policy.chunk_size=50 \
+    --policy.n_action_steps=50 \
+    --policy.num_inference_steps=10 \
+    --batch_size=16 \
+    --steps=30000 \
+    --num_workers=2 \
+    --save_freq=5000 \
+    --log_freq=50 \
+    --job_name="$PI05_RUN_NAME" \
+    --output_dir="$OUTPUT_ROOT/$PI05_RUN_NAME" \
+    --wandb.enable=true \
+    --wandb.project=door-pi05 \
+    --wandb.disable_artifact=true
+
+
+## 4. pi0.5 evo, official LeRobot train.py
+#
+# Required environment:
+#   conda activate b1z1_hwk_lerobot
+# Source tree:
+#   high-level/hwk/lerobot
+#
+# pi05_evo is provided by high-level/hwk/lerobot, not high-level/lerobot.
+# Keep the HWK source first in PYTHONPATH for this command.
+
+export PYTHONPATH="$PROJECT_ROOT/high-level/hwk/lerobot/src:$PROJECT_ROOT/high-level/lerobot/src:${PYTHONPATH:-}"
+
+PI05_EVO_RUN_NAME=pi05_evo_official_pi05_state10
+
+CUDA_VISIBLE_DEVICES=0 accelerate launch \
+    --num-processes=1 \
+    --mixed_precision=bf16 \
+    "$(which lerobot-train)" \
+    --dataset.root="$DATASET_ROOT" \
+    --dataset.repo_id="$DATASET_REPO_ID" \
+    --dataset.video_backend=pyav \
+    --policy.type=pi05_evo \
+    --policy.device=cuda \
+    --policy.pretrained_path=lerobot/pi05_base \
+    --policy.dtype=bfloat16 \
+    --policy.push_to_hub=false \
+    --policy.gradient_checkpointing=true \
+    --policy.chunk_size=50 \
+    --policy.n_action_steps=50 \
+    --policy.num_inference_steps=10 \
+    --batch_size=16 \
+    --steps=30000 \
+    --num_workers=2 \
+    --save_freq=5000 \
+    --log_freq=50 \
+    --job_name="$PI05_EVO_RUN_NAME" \
+    --output_dir="$OUTPUT_ROOT/$PI05_EVO_RUN_NAME" \
+    --wandb.enable=true \
+    --wandb.project=door-pi05 \
+    --wandb.disable_artifact=true

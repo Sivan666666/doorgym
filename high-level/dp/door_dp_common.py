@@ -38,6 +38,9 @@ DATASET_METADATA_KEYS = (
     "pi05_state_action_aligned",
     "state_preprocess",
     "action_preprocess",
+    "camera_fps",
+    "camera_sample_stride",
+    "camera_hold_last_frame",
 )
 STATE_PREPROCESS_VERSION = "door_dp_state_robust_quantile_v1"
 ACTION_PREPROCESS_VERSION = "door_dp_action_robust_quantile_v1"

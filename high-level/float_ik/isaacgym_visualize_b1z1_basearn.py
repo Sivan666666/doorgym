@@ -343,7 +343,7 @@ def parse_args():
 
 def create_sim(gym, args):
     sim_params = gymapi.SimParams()
-    sim_params.dt = 1.0 / 60.0
+    sim_params.dt = float(getattr(args, "sim_dt", 1.0 / 50.0))
     sim_params.up_axis = gymapi.UP_AXIS_Z
     sim_params.gravity = gymapi.Vec3(0.0, 0.0, -9.81)
 

@@ -85,6 +85,14 @@ python high-level/dp/record/record_single_door_push_sweep.py \
     --sim_device cuda:0 \
     --headless
 
+# teleop 手动录制，viewer 里按 C 开始，再按 C 结束并保存。默认录 wrist/front 的 mask+masked depth。
+python high-level/dp/record/record_teleop_door_dp_dataset.py \
+    --dp_raw_root high-level/data/door_dp_raw/teleop_ikpush \
+    --dp_task "push lever door open" \
+    --door_cfg high-level/experiments/isaacgym/b1z1_opendoor_single_99650089960001.yaml \
+    --rl_device cuda:0 \
+    --sim_device cuda:0
+
 
 ## 3. Replay raw episode
 

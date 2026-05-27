@@ -2130,6 +2130,58 @@ def require_float_dp_recording_deps(args, raw_recorder_cls, make_state_feature_n
         raise RuntimeError("DP raw recording requires high-level/dp/door_dp_common.py.")
 
 
+def float_dp_camera_sample_stride(args):
+    dp_fps = float(getattr(args, "dp_fps", 50))
+    camera_fps = float(getattr(args, "camera_fps", 25.0))
+    if dp_fps <= 0.0:
+        raise ValueError("--dp_fps must be positive")
+    if camera_fps <= 0.0:
+        raise ValueError("--camera_fps must be positive")
+    return max(1, int(round(dp_fps / camera_fps)))
+
+
+def float_dp_camera_effective_fps(args):
+    return float(getattr(args, "dp_fps", 50)) / float(float_dp_camera_sample_stride(args))
+
+
+def float_dp_camera_images_for_record_frame(gym, sim, st):
+    stride = float_dp_camera_sample_stride(st.args)
+    should_capture = (
+        getattr(st, "last_wrist_mask_rgb", None) is None
+        or getattr(st, "last_wrist_second_rgb", None) is None
+        or (int(st.dp_recorder.frame_count) % stride) == 0
+    )
+    if should_capture:
+        camera_images = capture_dp_camera_images_from_rendered(gym, sim, st.env, st.camera_handles, st.args)
+        wrist_mask_rgb, wrist_second_rgb, front_mask_rgb, front_second_rgb = dp_image_inputs_from_cpu_cameras(
+            camera_images, st.args
+        )
+        missing_required_camera = wrist_mask_rgb is None or wrist_second_rgb is None or (
+            st.args.rgb and (front_mask_rgb is None or front_second_rgb is None)
+        )
+        if missing_required_camera:
+            if getattr(st, "last_wrist_mask_rgb", None) is None or getattr(st, "last_wrist_second_rgb", None) is None:
+                return None, None, None, None
+            return (
+                st.last_wrist_mask_rgb,
+                st.last_wrist_second_rgb,
+                getattr(st, "last_front_mask_rgb", None),
+                getattr(st, "last_front_second_rgb", None),
+            )
+        st.last_wrist_mask_rgb = np.asarray(wrist_mask_rgb, dtype=np.uint8).copy()
+        st.last_wrist_second_rgb = np.asarray(wrist_second_rgb, dtype=np.uint8).copy()
+        st.last_front_mask_rgb = None if front_mask_rgb is None else np.asarray(front_mask_rgb, dtype=np.uint8).copy()
+        st.last_front_second_rgb = (
+            None if front_second_rgb is None else np.asarray(front_second_rgb, dtype=np.uint8).copy()
+        )
+    return (
+        st.last_wrist_mask_rgb,
+        st.last_wrist_second_rgb,
+        getattr(st, "last_front_mask_rgb", None),
+        getattr(st, "last_front_second_rgb", None),
+    )
+
+
 def make_float_dp_recorder(
     args,
     door,
@@ -2168,6 +2220,9 @@ def make_float_dp_recorder(
         ),
         "state_normalized": False,
         "pi05_state_action_aligned": state_mode == FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10,
+        "camera_fps": float_dp_camera_effective_fps(args),
+        "camera_sample_stride": int(float_dp_camera_sample_stride(args)),
+        "camera_hold_last_frame": True,
     }
     for name in (
         "robot_x",
@@ -2213,7 +2268,8 @@ def print_float_dp_recording_start(args, record_env_ids, vision_mode):
         f"Recording raw Door DP dataset to {args.dp_raw_root} task={args.dp_task!r} "
         f"env_ids={sorted(record_env_ids)} success_angle_deg={args.pass_open_angle_deg} "
         f"vision_mode={vision_mode} "
-        f"state_mode={normalize_float_dp_state_mode(getattr(args, 'dp_record_state_mode', FLOAT_DP_STATE_MODE_FULL))}",
+        f"state_mode={normalize_float_dp_state_mode(getattr(args, 'dp_record_state_mode', FLOAT_DP_STATE_MODE_FULL))} "
+        f"camera_fps={float_dp_camera_effective_fps(args):.2f}",
         flush=True,
     )
 
@@ -2392,9 +2448,8 @@ def record_float_dp_frame(gym, sim, st, dof_names, gripper_idx, dt, phase_id, do
     yaw = float(st.traj.get("yaw", st.yaw_start))
     vx_cmd, yaw_rate_cmd = base_command_from_targets(base_xy, yaw, st.prev_base_xy, st.prev_yaw, dt)
     target_quat = target_quat_for_dp(st.last_target_quat, st.ik_state, ee_quat)
-    camera_images = capture_dp_camera_images_from_rendered(gym, sim, st.env, st.camera_handles, st.args)
-    wrist_mask_rgb, wrist_second_rgb, front_mask_rgb, front_second_rgb = dp_image_inputs_from_cpu_cameras(
-        camera_images, st.args
+    wrist_mask_rgb, wrist_second_rgb, front_mask_rgb, front_second_rgb = float_dp_camera_images_for_record_frame(
+        gym, sim, st
     )
     missing_required_camera = wrist_mask_rgb is None or wrist_second_rgb is None or (
         st.args.rgb and (front_mask_rgb is None or front_second_rgb is None)

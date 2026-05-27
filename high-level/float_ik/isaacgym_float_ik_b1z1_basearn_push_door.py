@@ -342,6 +342,7 @@ def parse_args():
             {"name": "--dp_record_all_envs", "action": "store_true"},
             {"name": "--no_dp_record_all_envs", "action": "store_true"},
             {"name": "--dp_fps", "type": int, "default": 50},
+            {"name": "--camera_fps", "type": float, "default": 25.0},
             {"name": "--pass_open_angle_deg", "type": float, "default": 80.0},
             {"name": "--no_preview_trajectory_at_spawn", "action": "store_true"},
         ],
@@ -1084,6 +1085,46 @@ def dp_image_inputs_from_cpu_cameras(camera_images, args):
     )
 
 
+def camera_sample_stride(args):
+    dp_fps = float(getattr(args, "dp_fps", 50))
+    camera_fps = float(getattr(args, "camera_fps", 25.0))
+    if dp_fps <= 0.0:
+        raise ValueError("--dp_fps must be positive")
+    if camera_fps <= 0.0:
+        raise ValueError("--camera_fps must be positive")
+    return max(1, int(round(dp_fps / camera_fps)))
+
+
+def camera_effective_fps(args):
+    return float(getattr(args, "dp_fps", 50)) / float(camera_sample_stride(args))
+
+
+def camera_images_for_record_frame(gym, sim, env, camera_handles, args, cache, frame_count):
+    stride = camera_sample_stride(args)
+    should_capture = (
+        cache.get("wrist_mask") is None
+        or cache.get("wrist_second") is None
+        or (int(frame_count) % stride) == 0
+    )
+    if should_capture:
+        camera_images = capture_dp_camera_images(gym, sim, env, camera_handles, args)
+        wrist_mask_rgb, wrist_second_rgb, front_mask_rgb, front_second_rgb = dp_image_inputs_from_cpu_cameras(
+            camera_images, args
+        )
+        missing_required_camera = wrist_mask_rgb is None or wrist_second_rgb is None or (
+            args.rgb and (front_mask_rgb is None or front_second_rgb is None)
+        )
+        if missing_required_camera:
+            if cache.get("wrist_mask") is None or cache.get("wrist_second") is None:
+                return None, None, None, None
+            return cache["wrist_mask"], cache["wrist_second"], cache.get("front_mask"), cache.get("front_second")
+        cache["wrist_mask"] = np.asarray(wrist_mask_rgb, dtype=np.uint8).copy()
+        cache["wrist_second"] = np.asarray(wrist_second_rgb, dtype=np.uint8).copy()
+        cache["front_mask"] = None if front_mask_rgb is None else np.asarray(front_mask_rgb, dtype=np.uint8).copy()
+        cache["front_second"] = None if front_second_rgb is None else np.asarray(front_second_rgb, dtype=np.uint8).copy()
+    return cache["wrist_mask"], cache["wrist_second"], cache.get("front_mask"), cache.get("front_second")
+
+
 def get_actor_dof_state(gym, env, actor):
     states = gym.get_actor_dof_states(env, actor, gymapi.STATE_ALL)
     return np.asarray(states["pos"], dtype=np.float32), np.asarray(states["vel"], dtype=np.float32)
@@ -1756,16 +1797,21 @@ def run_demo(
                 "action_pose_frame": "base",
                 "target_pose_frame": "base",
                 "ikpush_state_version": IKPUSH_STATE_VERSION,
+                "camera_fps": camera_effective_fps(args),
+                "camera_sample_stride": int(camera_sample_stride(args)),
+                "camera_hold_last_frame": True,
             },
         )
         print(
             f"Recording raw Door DP dataset to {args.dp_raw_root} task={args.dp_task!r} "
-            f"env_ids=[0] success_angle_deg={args.pass_open_angle_deg} vision_mode={vision_mode}",
+            f"env_ids=[0] success_angle_deg={args.pass_open_angle_deg} vision_mode={vision_mode} "
+            f"camera_fps={camera_effective_fps(args):.2f}",
             flush=True,
         )
     prev_base_xy = None
     prev_yaw = None
     prev_dp_action = np.zeros(10, dtype=np.float32)
+    dp_camera_cache = {}
     while step < max_steps:
         if viewer is not None and gym.query_viewer_has_closed(viewer):
             break
@@ -1828,8 +1874,15 @@ def run_demo(
             gripper_actual = float(dof_pos_actual[gripper_idx]) if gripper_idx is not None and gripper_idx < len(dof_pos_actual) else float(gripper)
             vx_cmd, yaw_rate_cmd = base_command_from_targets(base_xy, yaw, prev_base_xy, prev_yaw, dt)
             dp_target_quat = target_quat_for_dp(target_quat, ik_state, ee_quat)
-            camera_images = capture_dp_camera_images(gym, sim, env, camera_handles, args)
-            wrist_mask_rgb, wrist_second_rgb, front_mask_rgb, front_second_rgb = dp_image_inputs_from_cpu_cameras(camera_images, args)
+            wrist_mask_rgb, wrist_second_rgb, front_mask_rgb, front_second_rgb = camera_images_for_record_frame(
+                gym,
+                sim,
+                env,
+                camera_handles,
+                args,
+                dp_camera_cache,
+                dp_recorder.frame_count,
+            )
             missing_required_camera = wrist_mask_rgb is None or wrist_second_rgb is None or (
                 args.rgb and (front_mask_rgb is None or front_second_rgb is None)
             )

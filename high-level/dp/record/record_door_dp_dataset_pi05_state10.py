@@ -40,6 +40,7 @@ def parse_args():
     )
     parser.add_argument("--raw_root", type=str, default=str(HIGH_LEVEL_ROOT / "data" / "door_dp_raw" / "local_door_dp"))
     parser.add_argument("--fps", type=int, default=50)
+    parser.add_argument("--camera_fps", type=float, default=25.0)
     parser.add_argument(
         "--steps",
         type=int,
@@ -110,6 +111,8 @@ def run_one(mode, rollout_idx, args):
             str(args.record_env_id),
             "--dp_fps",
             str(args.fps),
+            "--camera_fps",
+            str(args.camera_fps),
             "--dp_record_state_mode",
             "pi05_current_state10",
         ]

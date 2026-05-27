@@ -393,6 +393,7 @@ def parse_args():
             {"name": "--dp_record_all_envs", "action": "store_true"},
             {"name": "--no_dp_record_all_envs", "action": "store_true"},
             {"name": "--dp_fps", "type": int, "default": 50},
+            {"name": "--camera_fps", "type": float, "default": 25.0},
             {"name": "--dp_record_state_mode", "type": str, "default": "full"},
             {"name": "--dp_policy_checkpoint", "type": str, "default": ""},
             {"name": "--dp_control_env_id", "type": int, "default": 0},

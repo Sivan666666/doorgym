@@ -78,6 +78,7 @@ def parse_args():
         custom_parameters=[
             {"name": "--asset_root", "type": str, "default": str(base_ik.DEFAULT_ASSET_ROOT)},
             {"name": "--asset_file", "type": str, "default": base_ik.DEFAULT_ASSET_FILE},
+            {"name": "--rl_device", "type": str, "default": "cuda:0"},
             {"name": "--steps", "type": int, "default": 0, "help": "0 means run until the viewer is closed."},
             {"name": "--door_cfg", "type": str, "default": str(push_door.DEFAULT_DOOR_CFG)},
             {"name": "--door_name", "type": str, "default": ""},
@@ -95,11 +96,11 @@ def parse_args():
             {"name": "--handle_spring_stiffness", "type": float, "default": 0.5},
             {"name": "--handle_spring_damping", "type": float, "default": 0.1},
             {"name": "--handle_unlock_ratio", "type": float, "default": 40.0 / 45.0},
-            {"name": "--door_open_resistance", "type": float, "default": 0.2},
-            {"name": "--door_open_damping", "type": float, "default": 0.05},
+            {"name": "--door_open_resistance", "type": float, "default": 0.0},
+            {"name": "--door_open_damping", "type": float, "default": 0.0},
             {"name": "--door_lock_force", "type": float, "default": 0.0},
-            {"name": "--door_joint_friction", "type": float, "default": 0.5},
-            {"name": "--door_joint_damping", "type": float, "default": 0.2},
+            {"name": "--door_joint_friction", "type": float, "default": 0.0},
+            {"name": "--door_joint_damping", "type": float, "default": 0.0},
             {"name": "--handle_joint_friction", "type": float, "default": 0.05},
             {"name": "--handle_joint_damping", "type": float, "default": 0.05},
             {"name": "--door_auto_open_force", "type": float, "default": 0.0},
@@ -201,6 +202,7 @@ def parse_args():
     args.base_motion_period = 1.0
     args.door_motion_sign = -1.0
     args.ee_follow_base = not bool(args.ee_fixed_world)
+    args.rgb = False
 
     return args
 
