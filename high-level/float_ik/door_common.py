@@ -46,6 +46,20 @@ DEFAULT_FRONT_CAMERA_CFG = {
 
 DP_NUM_DOFS = 19
 DP_NUM_ACTIONS = 18
+FLOAT_DP_STATE_MODE_FULL = "full"
+FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10 = "pi05_current_state10"
+PI05_CURRENT_STATE10_NAMES = [
+    "vx",
+    "yaw_rate",
+    "ee_x",
+    "ee_y",
+    "ee_z",
+    "ee_qx",
+    "ee_qy",
+    "ee_qz",
+    "ee_qw",
+    "gripper",
+]
 B1Z1_DEFAULT_DOF_POS = np.asarray(
     [
         -0.2,
@@ -1901,6 +1915,84 @@ def make_float_dp_state(
     ).astype(np.float32)
 
 
+def normalize_float_dp_state_mode(mode):
+    mode = str(mode or FLOAT_DP_STATE_MODE_FULL).lower()
+    aliases = {
+        "legacy": FLOAT_DP_STATE_MODE_FULL,
+        "full_state": FLOAT_DP_STATE_MODE_FULL,
+        "pi0.5_current_state10": FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10,
+        "pi05_current_10": FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10,
+        "current_state10": FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10,
+    }
+    mode = aliases.get(mode, mode)
+    if mode not in (FLOAT_DP_STATE_MODE_FULL, FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10):
+        raise ValueError(
+            f"Unsupported --dp_record_state_mode={mode!r}; expected "
+            f"{FLOAT_DP_STATE_MODE_FULL!r} or {FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10!r}."
+        )
+    return mode
+
+
+def float_dp_state_feature_names(args, phase_names, make_state_feature_names_fn):
+    state_mode = normalize_float_dp_state_mode(getattr(args, "dp_record_state_mode", FLOAT_DP_STATE_MODE_FULL))
+    if state_mode == FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10:
+        return list(PI05_CURRENT_STATE10_NAMES)
+    return make_state_feature_names_fn(DP_NUM_DOFS, DP_NUM_ACTIONS, phase_names)
+
+
+def float_dp_state_mode_from_feature_names(state_feature_names):
+    if list(state_feature_names or []) == PI05_CURRENT_STATE10_NAMES:
+        return FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10
+    return FLOAT_DP_STATE_MODE_FULL
+
+
+def make_pi05_current_state10(vx, yaw_rate, ee_pos, ee_quat, base_xy, base_z, yaw, gripper):
+    ee_pos_base = world_pos_to_base(ee_pos, base_xy, base_z, yaw)
+    ee_quat_base = world_quat_to_base(base_ik.normalize_quat(ee_quat), yaw)
+    return np.concatenate(
+        [
+            np.asarray([vx, yaw_rate], dtype=np.float32),
+            ee_pos_base.reshape(3),
+            ee_quat_base.reshape(4),
+            np.asarray([gripper], dtype=np.float32),
+        ],
+        axis=0,
+    ).astype(np.float32)
+
+
+def make_float_dp_observation_state(
+    dof_names,
+    dof_pos,
+    dof_vel,
+    ee_pos,
+    ee_quat,
+    base_xy,
+    base_z,
+    yaw,
+    yaw_rate,
+    gripper,
+    last_dp_action=None,
+    vx=0.0,
+    state_mode=FLOAT_DP_STATE_MODE_FULL,
+):
+    state_mode = normalize_float_dp_state_mode(state_mode)
+    if state_mode == FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10:
+        return make_pi05_current_state10(vx, yaw_rate, ee_pos, ee_quat, base_xy, base_z, yaw, gripper)
+    return make_float_dp_state(
+        dof_names,
+        dof_pos,
+        dof_vel,
+        ee_pos,
+        ee_quat,
+        base_xy,
+        base_z,
+        yaw,
+        yaw_rate,
+        gripper,
+        last_dp_action,
+    )
+
+
 def make_float_dp_action(vx, yaw_rate, target_pos, target_quat, gripper, base_xy, base_z, yaw):
     target_pos_base = world_pos_to_base(target_pos, base_xy, base_z, yaw)
     target_quat_base = world_quat_to_base(base_ik.normalize_quat(target_quat), yaw)
@@ -2051,6 +2143,7 @@ def make_float_dp_recorder(
     randomization_metadata_key=None,
     extra_metadata=None,
 ):
+    state_mode = normalize_float_dp_state_mode(getattr(args, "dp_record_state_mode", FLOAT_DP_STATE_MODE_FULL))
     metadata = {
         "door_asset_index": int(getattr(door, "asset_index", 0)),
         "door_asset_name": door.spec.get("name", ""),
@@ -2067,6 +2160,14 @@ def make_float_dp_recorder(
         "parallel_num_envs": int(args.num_envs),
         "seed": int(getattr(args, "seed", -1)),
         "env_seed": int(getattr(args, "env_seed", -1)),
+        "state_format": state_mode,
+        "state_source": (
+            "current_vx_yaw_rate_ee_base_gripper"
+            if state_mode == FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10
+            else "full_float_ik_state_with_previous_action"
+        ),
+        "state_normalized": False,
+        "pi05_state_action_aligned": state_mode == FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10,
     }
     for name in (
         "robot_x",
@@ -2094,7 +2195,7 @@ def make_float_dp_recorder(
     return raw_recorder_cls(
         raw_root=args.dp_raw_root,
         fps=args.dp_fps,
-        state_feature_names=make_state_feature_names_fn(DP_NUM_DOFS, DP_NUM_ACTIONS, phase_names),
+        state_feature_names=float_dp_state_feature_names(args, phase_names, make_state_feature_names_fn),
         task=args.dp_task,
         vision_mode=vision_mode,
         metadata=metadata,
@@ -2111,7 +2212,8 @@ def print_float_dp_recording_start(args, record_env_ids, vision_mode):
     print(
         f"Recording raw Door DP dataset to {args.dp_raw_root} task={args.dp_task!r} "
         f"env_ids={sorted(record_env_ids)} success_angle_deg={args.pass_open_angle_deg} "
-        f"vision_mode={vision_mode}",
+        f"vision_mode={vision_mode} "
+        f"state_mode={normalize_float_dp_state_mode(getattr(args, 'dp_record_state_mode', FLOAT_DP_STATE_MODE_FULL))}",
         flush=True,
     )
 
@@ -2201,6 +2303,7 @@ def collect_float_dp_policy_actions(gym, sim, env_states, dof_names, gripper_idx
     batch_wrist_seconds = []
     batch_front_masks = []
     batch_front_seconds = []
+    state_mode = float_dp_state_mode_from_feature_names(getattr(dp_controller, "state_feature_names", []))
     for st in env_states:
         if st.index not in dp_control_env_id_set:
             continue
@@ -2215,14 +2318,14 @@ def collect_float_dp_policy_actions(gym, sim, env_states, dof_names, gripper_idx
             if gripper_idx is not None and gripper_idx < len(dof_pos_actual)
             else float(st.args.gripper_open)
         )
-        _vx_state, yaw_rate_state = base_command_from_targets(
+        vx_state, yaw_rate_state = base_command_from_targets(
             base_xy_current,
             yaw_current,
             st.prev_base_xy,
             st.prev_yaw,
             dt,
         )
-        dp_state = make_float_dp_state(
+        dp_state = make_float_dp_observation_state(
             dof_names,
             dof_pos_actual,
             dof_vel_actual,
@@ -2234,6 +2337,8 @@ def collect_float_dp_policy_actions(gym, sim, env_states, dof_names, gripper_idx
             yaw_rate_state,
             gripper_actual,
             st.last_dp_action,
+            vx=vx_state,
+            state_mode=state_mode,
         )
         camera_images = capture_dp_camera_images_from_rendered(gym, sim, st.env, st.camera_handles, st.args)
         wrist_mask_rgb, wrist_second_rgb, front_mask_rgb, front_second_rgb = dp_image_inputs_from_cpu_cameras(
@@ -2305,7 +2410,8 @@ def record_float_dp_frame(gym, sim, st, dof_names, gripper_idx, dt, phase_id, do
             st.dp_record_warned_no_camera = True
         return False
 
-    dp_state = make_float_dp_state(
+    state_mode = normalize_float_dp_state_mode(getattr(st.args, "dp_record_state_mode", FLOAT_DP_STATE_MODE_FULL))
+    dp_state = make_float_dp_observation_state(
         dof_names,
         dof_pos_actual,
         dof_vel_actual,
@@ -2317,6 +2423,8 @@ def record_float_dp_frame(gym, sim, st, dof_names, gripper_idx, dt, phase_id, do
         yaw_rate_cmd,
         gripper_actual,
         st.last_dp_action,
+        vx=vx_cmd,
+        state_mode=state_mode,
     )
     dp_action = make_float_dp_action(
         vx_cmd,

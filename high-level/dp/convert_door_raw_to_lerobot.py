@@ -10,6 +10,7 @@ import numpy as np
 try:
     from .door_dp_common import (
         ACTION_NAMES,
+        DATASET_METADATA_KEYS,
         DoorDPLeRobotRecorder,
         apply_door_dp_action_preprocess,
         apply_door_dp_state_preprocess,
@@ -22,6 +23,7 @@ try:
 except ImportError:
     from door_dp_common import (
         ACTION_NAMES,
+        DATASET_METADATA_KEYS,
         DoorDPLeRobotRecorder,
         apply_door_dp_action_preprocess,
         apply_door_dp_state_preprocess,
@@ -469,6 +471,12 @@ def main():
     if args.overwrite and out_dir.exists():
         shutil.rmtree(out_dir)
 
+    inherited_metadata = {}
+    if sidecar:
+        for key in DATASET_METADATA_KEYS:
+            if key in sidecar:
+                inherited_metadata[key] = sidecar[key]
+
     if state_preprocess_config is None:
         if args.state_preprocess == "robust_quantile":
             state_preprocess_config = fit_state_preprocess_from_episodes(
@@ -501,6 +509,7 @@ def main():
             action_preprocess_config = {"applied": False, "version": "none", "mode": "identity"}
 
     initial_task = scalar_str(first["task"]) if "task" in first else "door open"
+    converted_state_normalized = bool(state_preprocess_config.get("applied", False))
     recorder = DoorDPLeRobotRecorder(
         root=args.root,
         repo_id=args.repo_id,
@@ -512,6 +521,7 @@ def main():
         image_storage=args.image_storage,
         video_codec=args.video_codec,
         metadata={
+            **inherited_metadata,
             "action_frame": action_frame,
             "action_pose_frame": action_frame,
             "target_pose_frame": action_frame,
@@ -522,6 +532,7 @@ def main():
             "video_codec": args.video_codec,
             "state_preprocess": state_preprocess_config,
             "action_preprocess": action_preprocess_config,
+            "state_normalized": converted_state_normalized,
         },
     )
     payloads = iter_episode_payloads(
@@ -580,7 +591,12 @@ def main():
         "video_codec": args.video_codec,
         "state_preprocess": state_preprocess_config,
         "action_preprocess": action_preprocess_config,
+        "state_normalized": converted_state_normalized,
     }
+    if sidecar:
+        for key in DATASET_METADATA_KEYS:
+            if key in sidecar and key not in sidecar_payload:
+                sidecar_payload[key] = sidecar[key]
     if vision_mode == "rgb":
         sidecar_payload["vision_mode"] = vision_mode
     with open(feature_sidecar, "w", encoding="utf-8") as f:

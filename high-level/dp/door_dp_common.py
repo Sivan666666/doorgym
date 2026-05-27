@@ -32,6 +32,10 @@ DATASET_METADATA_KEYS = (
     "ikpush_state_version",
     "door_dp_mode",
     "controller_mode",
+    "state_format",
+    "state_source",
+    "state_normalized",
+    "pi05_state_action_aligned",
     "state_preprocess",
     "action_preprocess",
 )

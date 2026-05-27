@@ -38,6 +38,25 @@ python high-level/dp/record/record_door_dp_dataset.py \
     --door_cfg high-level/experiments/isaacgym/b1z1_opendoor.yaml \
     --no_show_seg
 
+# PI0.5 专用 raw 录制：state 是 10 维当前状态
+# [vx, yaw_rate, ee_x, ee_y, ee_z, ee_qx, ee_qy, ee_qz, ee_qw, gripper]。
+# raw 里保持物理值不归一化，后续转 LeRobot 时只归一化一次。
+conda activate txc_vbc
+export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
+python high-level/dp/record/record_door_dp_dataset_pi05_state10.py \
+    --mode ikpush \
+    --num_envs 16 \
+    --num_rollouts 1 \
+    --steps 2850 \
+    --seed 123456 \
+    --raw_root high-level/data/door_dp_raw/4door_ikpush_pi05_state10 \
+    --rl_device cuda:0 \
+    --sim_device cuda:0 \
+    --headless \
+    -- \
+    --door_cfg high-level/experiments/isaacgym/b1z1_opendoor.yaml \
+    --no_show_seg
+
 # 单次 ikpush 录制，RGB+mask。训练 RGB checkpoint 时使用。
 python high-level/dp/record/record_door_dp_dataset.py \
     --mode ikpush \
@@ -89,6 +108,17 @@ conda run -n door_dp python high-level/dp/convert_door_raw_to_lerobot.py \
     --raw_root high-level/data/door_dp_raw/4door_ikpush \
     --root high-level/data/lerobot \
     --repo_id local/4door_ikpush \
+    --overwrite \
+    --num_workers 4 \
+    --image_storage video \
+    --video_codec h264
+
+# PI0.5 10D current-state raw 转 LeRobotDataset。不要再用 *_pi05_state10 转换脚本，
+# 因为这个 raw 已经是 10 维当前状态；这里会对 state/action 各做一次 robust_quantile 归一化。
+conda run -n b1z1_lerobot python high-level/dp/convert_door_raw_to_lerobot.py \
+    --raw_root high-level/data/door_dp_raw/4door_ikpush_pi05_state10 \
+    --root high-level/data/lerobot \
+    --repo_id local/4door_ikpush_pi05_state10 \
     --overwrite \
     --num_workers 4 \
     --image_storage video \
