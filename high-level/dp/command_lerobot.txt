@@ -87,6 +87,40 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
     --wandb.disable_artifact=true
 
 
+## 2b. ACT + frozen DINOv2-base, official LeRobot train.py
+
+export PYTHONPATH="$PROJECT_ROOT/high-level/lerobot/src:${PYTHONPATH:-}"
+
+ACT_DINOV2_RUN_NAME=leroact_dinov2_base_pi05_state10
+
+CUDA_VISIBLE_DEVICES=0 accelerate launch \
+    --num-processes=1 \
+    --mixed_precision=no \
+    "$(which lerobot-train)" \
+    --dataset.root="$DATASET_ROOT" \
+    --dataset.repo_id="$DATASET_REPO_ID" \
+    --dataset.video_backend=pyav \
+    --policy.type=act \
+    --policy.device=cuda \
+    --policy.push_to_hub=false \
+    --policy.chunk_size=100 \
+    --policy.n_action_steps=16 \
+    --policy.vision_backbone=dinov2-base \
+    --policy.freeze_vision_backbone=true \
+    --policy.dinov2_image_size=224 \
+    --policy.dinov2_feature_grid_size=6 \
+    --batch_size=32 \
+    --steps=100000 \
+    --num_workers=2 \
+    --save_freq=1000 \
+    --log_freq=10 \
+    --job_name="$ACT_DINOV2_RUN_NAME" \
+    --output_dir="$OUTPUT_ROOT/$ACT_DINOV2_RUN_NAME" \
+    --wandb.enable=true \
+    --wandb.project=door-act \
+    --wandb.disable_artifact=true
+
+
 ## 3. pi0.5, official LeRobot train.py
 #
 # Required environment:

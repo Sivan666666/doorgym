@@ -46,6 +46,10 @@ def parse_args():
     parser.add_argument("--pretrained_backbone_weights", type=str, default="ResNet18_Weights.IMAGENET1K_V1")
     parser.add_argument("--no_pretrained_backbone", dest="pretrained_backbone_weights", action="store_const", const=None)
     parser.add_argument("--replace_final_stride_with_dilation", action="store_true")
+    parser.add_argument("--freeze_vision_backbone", action="store_true")
+    parser.add_argument("--dinov2_image_size", type=int, default=224)
+    parser.add_argument("--dinov2_feature_grid_size", type=int, default=6)
+    parser.add_argument("--no_dinov2_normalize_inputs", dest="dinov2_normalize_inputs", action="store_false", default=True)
     parser.add_argument("--pre_norm", action="store_true")
     parser.add_argument("--dim_model", type=int, default=512)
     parser.add_argument("--n_heads", type=int, default=8)
@@ -141,6 +145,10 @@ def main():
         vision_backbone=args.vision_backbone,
         pretrained_backbone_weights=args.pretrained_backbone_weights,
         replace_final_stride_with_dilation=args.replace_final_stride_with_dilation,
+        freeze_vision_backbone=args.freeze_vision_backbone,
+        dinov2_image_size=args.dinov2_image_size,
+        dinov2_feature_grid_size=args.dinov2_feature_grid_size,
+        dinov2_normalize_inputs=args.dinov2_normalize_inputs,
         pre_norm=args.pre_norm,
         dim_model=args.dim_model,
         n_heads=args.n_heads,

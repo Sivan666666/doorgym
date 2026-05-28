@@ -99,6 +99,10 @@ class ACTConfig(PreTrainedConfig):
     vision_backbone: str = "resnet18"
     pretrained_backbone_weights: str | None = "ResNet18_Weights.IMAGENET1K_V1"
     replace_final_stride_with_dilation: int = False
+    freeze_vision_backbone: bool = False
+    dinov2_image_size: int = 224
+    dinov2_feature_grid_size: int = 6
+    dinov2_normalize_inputs: bool = True
     # Transformer layers.
     pre_norm: bool = False
     dim_model: int = 512
@@ -132,10 +136,29 @@ class ACTConfig(PreTrainedConfig):
         super().__post_init__()
 
         """Input validation (not exhaustive)."""
-        if not self.vision_backbone.startswith("resnet"):
+        vision_backbone = str(self.vision_backbone).lower()
+        is_resnet = vision_backbone.startswith("resnet")
+        is_dinov2 = vision_backbone.startswith("dinov2") or vision_backbone.startswith("facebook/dinov2")
+        if not (is_resnet or is_dinov2):
             raise ValueError(
-                f"`vision_backbone` must be one of the ResNet variants. Got {self.vision_backbone}."
+                "`vision_backbone` must be one of the ResNet variants or DINOv2 variants "
+                f"('dinov2-small', 'dinov2-base', 'dinov2-large', or 'facebook/dinov2-*'). "
+                f"Got {self.vision_backbone}."
             )
+        if is_dinov2:
+            found_visual_norm = False
+            for key in list(self.normalization_mapping):
+                if key == "VISUAL" or getattr(key, "value", None) == "VISUAL" or str(key).endswith(".VISUAL"):
+                    self.normalization_mapping[key] = NormalizationMode.IDENTITY
+                    found_visual_norm = True
+            if not found_visual_norm:
+                self.normalization_mapping["VISUAL"] = NormalizationMode.IDENTITY
+            if self.dinov2_image_size <= 0:
+                raise ValueError(f"`dinov2_image_size` must be positive. Got {self.dinov2_image_size}.")
+            if self.dinov2_feature_grid_size <= 0:
+                raise ValueError(
+                    f"`dinov2_feature_grid_size` must be positive. Got {self.dinov2_feature_grid_size}."
+                )
         if self.temporal_ensemble_coeff is not None and self.n_action_steps > 1:
             raise NotImplementedError(
                 "`n_action_steps` must be 1 when using temporal ensembling. This is "

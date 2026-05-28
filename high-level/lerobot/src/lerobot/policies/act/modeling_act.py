@@ -23,6 +23,7 @@ import math
 from collections import deque
 from collections.abc import Callable
 from itertools import chain
+from typing import Any
 
 import einops
 import numpy as np
@@ -36,6 +37,98 @@ from torchvision.ops.misc import FrozenBatchNorm2d
 from lerobot.policies.act.configuration_act import ACTConfig
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.utils.constants import ACTION, OBS_ENV_STATE, OBS_IMAGES, OBS_STATE
+from lerobot.utils.import_utils import _transformers_available
+
+
+DINOV2_MODEL_ALIASES = {
+    "dinov2-small": "facebook/dinov2-small",
+    "dinov2-base": "facebook/dinov2-base",
+    "dinov2-large": "facebook/dinov2-large",
+}
+
+
+def is_dinov2_backbone(vision_backbone: str) -> bool:
+    name = str(vision_backbone).lower()
+    return name.startswith("dinov2") or name.startswith("facebook/dinov2")
+
+
+def resolve_dinov2_model_name(vision_backbone: str) -> str:
+    name = str(vision_backbone)
+    return DINOV2_MODEL_ALIASES.get(name.lower(), name)
+
+
+class ACTDINOv2Backbone(nn.Module):
+    """DINOv2 wrapper that exposes a ResNet-like {"feature_map": tensor} interface for ACT."""
+
+    def __init__(
+        self,
+        vision_backbone: str,
+        image_size: int,
+        feature_grid_size: int,
+        normalize_inputs: bool = True,
+        freeze: bool = False,
+    ) -> None:
+        super().__init__()
+        if not _transformers_available:
+            raise ImportError(
+                "DINOv2 ACT backbone requires the `transformers` package. "
+                "Install the Door DP requirements or run in the b1z1_lerobot environment."
+            )
+        from transformers import AutoModel
+
+        self.model_name = resolve_dinov2_model_name(vision_backbone)
+        self.image_size = int(image_size)
+        self.feature_grid_size = int(feature_grid_size)
+        self.normalize_inputs = bool(normalize_inputs)
+        self.freeze = bool(freeze)
+        self.model = AutoModel.from_pretrained(self.model_name)
+        self.out_channels = int(getattr(self.model.config, "hidden_size"))
+        self.register_buffer(
+            "image_mean",
+            torch.tensor([0.485, 0.456, 0.406], dtype=torch.float32).view(1, 3, 1, 1),
+            persistent=False,
+        )
+        self.register_buffer(
+            "image_std",
+            torch.tensor([0.229, 0.224, 0.225], dtype=torch.float32).view(1, 3, 1, 1),
+            persistent=False,
+        )
+        if self.freeze:
+            for parameter in self.model.parameters():
+                parameter.requires_grad_(False)
+            self.model.eval()
+
+    def train(self, mode: bool = True) -> "ACTDINOv2Backbone":
+        super().train(mode)
+        if self.freeze:
+            self.model.eval()
+        return self
+
+    def forward(self, x: Tensor) -> dict[str, Tensor]:
+        if x.shape[-2:] != (self.image_size, self.image_size):
+            x = F.interpolate(
+                x,
+                size=(self.image_size, self.image_size),
+                mode="bilinear",
+                align_corners=False,
+            )
+        if self.normalize_inputs:
+            x = (x - self.image_mean.to(dtype=x.dtype)) / self.image_std.to(dtype=x.dtype)
+        context: Any
+        context = torch.no_grad() if self.freeze else torch.enable_grad()
+        with context:
+            outputs = self.model(pixel_values=x)
+        patch_tokens = outputs.last_hidden_state[:, 1:, :]
+        batch_size, num_tokens, channels = patch_tokens.shape
+        grid_size = int(math.sqrt(num_tokens))
+        if grid_size * grid_size != num_tokens:
+            raise ValueError(
+                f"DINOv2 patch token count must be square to form a feature map; got {num_tokens} tokens."
+            )
+        feature_map = patch_tokens.transpose(1, 2).reshape(batch_size, channels, grid_size, grid_size)
+        if self.feature_grid_size != grid_size:
+            feature_map = F.adaptive_avg_pool2d(feature_map, (self.feature_grid_size, self.feature_grid_size))
+        return {"feature_map": feature_map}
 
 
 class ACTPolicy(PreTrainedPolicy):
@@ -321,15 +414,29 @@ class ACT(nn.Module):
 
         # Backbone for image feature extraction.
         if self.config.image_features:
-            backbone_model = getattr(torchvision.models, config.vision_backbone)(
-                replace_stride_with_dilation=[False, False, config.replace_final_stride_with_dilation],
-                weights=config.pretrained_backbone_weights,
-                norm_layer=FrozenBatchNorm2d,
-            )
-            # Note: The assumption here is that we are using a ResNet model (and hence layer4 is the final
-            # feature map).
-            # Note: The forward method of this returns a dict: {"feature_map": output}.
-            self.backbone = IntermediateLayerGetter(backbone_model, return_layers={"layer4": "feature_map"})
+            if is_dinov2_backbone(config.vision_backbone):
+                self.backbone = ACTDINOv2Backbone(
+                    config.vision_backbone,
+                    image_size=config.dinov2_image_size,
+                    feature_grid_size=config.dinov2_feature_grid_size,
+                    normalize_inputs=config.dinov2_normalize_inputs,
+                    freeze=config.freeze_vision_backbone,
+                )
+                backbone_out_channels = self.backbone.out_channels
+            else:
+                backbone_model = getattr(torchvision.models, config.vision_backbone)(
+                    replace_stride_with_dilation=[False, False, config.replace_final_stride_with_dilation],
+                    weights=config.pretrained_backbone_weights,
+                    norm_layer=FrozenBatchNorm2d,
+                )
+                # Note: The assumption here is that we are using a ResNet model (and hence layer4 is the final
+                # feature map).
+                # Note: The forward method of this returns a dict: {"feature_map": output}.
+                self.backbone = IntermediateLayerGetter(backbone_model, return_layers={"layer4": "feature_map"})
+                backbone_out_channels = backbone_model.fc.in_features
+                if config.freeze_vision_backbone:
+                    for parameter in self.backbone.parameters():
+                        parameter.requires_grad_(False)
 
         # Transformer (acts as VAE decoder when training with the variational objective).
         self.encoder = ACTEncoder(config)
@@ -348,7 +455,7 @@ class ACT(nn.Module):
         self.encoder_latent_input_proj = nn.Linear(config.latent_dim, config.dim_model)
         if self.config.image_features:
             self.encoder_img_feat_input_proj = nn.Conv2d(
-                backbone_model.fc.in_features, config.dim_model, kernel_size=1
+                backbone_out_channels, config.dim_model, kernel_size=1
             )
         # Transformer encoder positional embeddings.
         n_1d_tokens = 1  # for the latent

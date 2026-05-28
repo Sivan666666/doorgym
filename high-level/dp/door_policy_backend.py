@@ -68,6 +68,11 @@ DEFAULT_DP_INFERENCE_SCHEDULER = "DDIM"
 _VALID_DP_NOISE_SCHEDULERS = {"DDPM", "DDIM"}
 
 
+def is_dinov2_vision_backbone(vision_backbone: Any) -> bool:
+    value = str(vision_backbone).lower()
+    return value.startswith("dinov2") or value.startswith("facebook/dinov2")
+
+
 def normalize_dp_noise_scheduler_type(noise_scheduler_type: Optional[str]) -> Optional[str]:
     if noise_scheduler_type is None:
         return None
@@ -890,7 +895,7 @@ def make_lerobot_diffusion_config(
             "ACTION": "MIN_MAX",
         }
     norm_map = {
-        str(k): v if hasattr(v, "value") else NormalizationMode(str(v))
+        getattr(k, "value", str(k)): v if hasattr(v, "value") else NormalizationMode(str(v))
         for k, v in normalization_mapping.items()
     }
 
@@ -955,6 +960,10 @@ def make_lerobot_act_config(
     vision_backbone: str = "resnet18",
     pretrained_backbone_weights: Optional[str] = "ResNet18_Weights.IMAGENET1K_V1",
     replace_final_stride_with_dilation: bool = False,
+    freeze_vision_backbone: bool = False,
+    dinov2_image_size: int = 224,
+    dinov2_feature_grid_size: int = 6,
+    dinov2_normalize_inputs: bool = True,
     pre_norm: bool = False,
     dim_model: int = 512,
     n_heads: int = 8,
@@ -983,8 +992,11 @@ def make_lerobot_act_config(
             "STATE": "MEAN_STD",
             "ACTION": "MEAN_STD",
         }
+    if is_dinov2_vision_backbone(vision_backbone):
+        normalization_mapping = dict(normalization_mapping)
+        normalization_mapping["VISUAL"] = "IDENTITY"
     norm_map = {
-        str(k): v if hasattr(v, "value") else NormalizationMode(str(v))
+        getattr(k, "value", str(k)): v if hasattr(v, "value") else NormalizationMode(str(v))
         for k, v in normalization_mapping.items()
     }
     input_features = {
@@ -1007,6 +1019,10 @@ def make_lerobot_act_config(
         vision_backbone=str(vision_backbone),
         pretrained_backbone_weights=pretrained_backbone_weights,
         replace_final_stride_with_dilation=bool(replace_final_stride_with_dilation),
+        freeze_vision_backbone=bool(freeze_vision_backbone),
+        dinov2_image_size=int(dinov2_image_size),
+        dinov2_feature_grid_size=int(dinov2_feature_grid_size),
+        dinov2_normalize_inputs=bool(dinov2_normalize_inputs),
         pre_norm=bool(pre_norm),
         dim_model=int(dim_model),
         n_heads=int(n_heads),
@@ -1553,6 +1569,10 @@ class LeRobotActDoorPolicyBackend:
             vision_backbone=cfg.get("vision_backbone", "resnet18"),
             pretrained_backbone_weights=cfg.get("pretrained_backbone_weights"),
             replace_final_stride_with_dilation=bool(cfg.get("replace_final_stride_with_dilation", False)),
+            freeze_vision_backbone=bool(cfg.get("freeze_vision_backbone", False)),
+            dinov2_image_size=int(cfg.get("dinov2_image_size", 224)),
+            dinov2_feature_grid_size=int(cfg.get("dinov2_feature_grid_size", 6)),
+            dinov2_normalize_inputs=bool(cfg.get("dinov2_normalize_inputs", True)),
             pre_norm=bool(cfg.get("pre_norm", False)),
             dim_model=int(cfg.get("dim_model", 512)),
             n_heads=int(cfg.get("n_heads", 8)),
@@ -1629,6 +1649,10 @@ class LeRobotActDoorPolicyBackend:
             "vision_backbone": self.config.vision_backbone,
             "pretrained_backbone_weights": self.config.pretrained_backbone_weights,
             "replace_final_stride_with_dilation": bool(self.config.replace_final_stride_with_dilation),
+            "freeze_vision_backbone": bool(self.config.freeze_vision_backbone),
+            "dinov2_image_size": int(self.config.dinov2_image_size),
+            "dinov2_feature_grid_size": int(self.config.dinov2_feature_grid_size),
+            "dinov2_normalize_inputs": bool(self.config.dinov2_normalize_inputs),
             "pre_norm": bool(self.config.pre_norm),
             "dim_model": int(self.config.dim_model),
             "n_heads": int(self.config.n_heads),
