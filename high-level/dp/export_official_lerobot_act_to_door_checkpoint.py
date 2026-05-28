@@ -20,6 +20,8 @@ from door_policy_backend import (  # noqa: E402
     LeRobotActDoorPolicyBackend,
     _feature_dim_from_stats,
     _resolve_lerobot_root,
+    load_lerobot_policy_normalizer_stats,
+    merge_lerobot_processor_stats,
 )
 
 
@@ -100,7 +102,8 @@ def main():
     action_horizon = int(args.action_horizon if args.action_horizon is not None else policy_config["n_action_steps"])
 
     dataset = DoorPolicyChunkDataset(dataset_root, args.repo_id, chunk_size, vision_mode=vision_mode)
-    stats = dataset.stats
+    processor_stats = load_lerobot_policy_normalizer_stats(policy_dir)
+    stats = merge_lerobot_processor_stats(dataset.stats, processor_stats)
     state_dim = _feature_dim_from_stats(stats, OBS_STATE)
     action_dim = _feature_dim_from_stats(stats, ACTION)
     if action_dim != len(ACTION_NAMES):
@@ -151,6 +154,7 @@ def main():
         "ikpush_state_version": str(sidecar_data.get("ikpush_state_version", "legacy")),
         "door_dp_mode": controller_mode,
         "controller_mode": controller_mode,
+        "stats_source": "official_lerobot_preprocessor" if processor_stats else "dataset",
     }
     backend.save_checkpoint(out_dir, optimizer=None, extra_config=train_config, manifest_path=manifest_path)
     print(f"Wrapped official ACT checkpoint:\n  source: {policy_dir}\n  door checkpoint: {out_dir}\n  manifest: {manifest_path}")

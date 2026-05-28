@@ -463,6 +463,66 @@ def _stats_to_cpu(stats: Mapping[str, Mapping[str, Any]]) -> Dict[str, Dict[str,
     return out
 
 
+def _load_flat_safetensor_stats(path: Union[str, Path]) -> Dict[str, Dict[str, torch.Tensor]]:
+    try:
+        from safetensors.torch import load_file
+    except Exception as exc:
+        raise RuntimeError("safetensors is required to load official LeRobot processor stats.") from exc
+
+    flat = load_file(str(path))
+    stats: Dict[str, Dict[str, torch.Tensor]] = {}
+    for flat_key, tensor in flat.items():
+        if "." not in flat_key:
+            continue
+        key, stat_name = str(flat_key).rsplit(".", 1)
+        stats.setdefault(key, {})[stat_name] = tensor.detach().cpu().to(dtype=torch.float32)
+    return stats
+
+
+def load_lerobot_policy_normalizer_stats(policy_dir: Union[str, Path]) -> Optional[Dict[str, Dict[str, torch.Tensor]]]:
+    """Load the exact normalizer stats saved with an official LeRobot policy."""
+
+    policy_dir = Path(policy_dir).expanduser()
+    if not policy_dir.is_dir():
+        return None
+
+    candidates: List[Path] = []
+    preprocessor_json = policy_dir / "policy_preprocessor.json"
+    if preprocessor_json.is_file():
+        try:
+            preprocessor = _read_json(preprocessor_json)
+            for step in preprocessor.get("steps", []):
+                if step.get("registry_name") == "normalizer_processor" and step.get("state_file"):
+                    candidates.append(policy_dir / str(step["state_file"]))
+        except Exception:
+            pass
+    candidates.append(policy_dir / "policy_preprocessor_step_3_normalizer_processor.safetensors")
+
+    for candidate in candidates:
+        if candidate.is_file():
+            stats = _load_flat_safetensor_stats(candidate)
+            if stats:
+                return stats
+    return None
+
+
+def merge_lerobot_processor_stats(
+    base_stats: Mapping[str, Mapping[str, Any]],
+    processor_stats: Optional[Mapping[str, Mapping[str, Any]]],
+) -> Dict[str, Dict[str, torch.Tensor]]:
+    stats = _stats_to_cpu(base_stats)
+    if not processor_stats:
+        return stats
+    for key, value in processor_stats.items():
+        stats[str(key)] = {}
+        for stat_name, stat_value in value.items():
+            if isinstance(stat_value, torch.Tensor):
+                stats[str(key)][str(stat_name)] = stat_value.detach().cpu().to(dtype=torch.float32)
+            else:
+                stats[str(key)][str(stat_name)] = torch.as_tensor(stat_value, dtype=torch.float32).cpu()
+    return stats
+
+
 def _feature_dim_from_stats(stats: Mapping[str, Mapping[str, Any]], key: str) -> int:
     if key not in stats:
         raise KeyError(f"Dataset stats are missing {key!r}")
@@ -1514,6 +1574,10 @@ class LeRobotActDoorPolicyBackend:
             strict=True,
         )
         stats = torch.load(ckpt_dir / CHECKPOINT_STATS, map_location="cpu")
+        source_policy_dir = cfg.get("source_official_policy_dir")
+        processor_stats = load_lerobot_policy_normalizer_stats(source_policy_dir) if source_policy_dir else None
+        if processor_stats:
+            stats = merge_lerobot_processor_stats(stats, processor_stats)
         return cls(
             policy,
             config,
