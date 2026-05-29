@@ -1158,9 +1158,13 @@ def monitor_command_jumps(gym, step, st, base_xy, yaw, target_pos, phase):
 
 def monitor_base_door_collision(gym, step, st):
     args = st.args
-    if not bool(getattr(args, "enable_base_door_collision_check", False)):
+    legacy_check = bool(getattr(args, "enable_base_door_collision_check", False))
+    physx_check = legacy_check or bool(getattr(args, "enable_collision_physx_check", False))
+    geom_check = legacy_check or bool(getattr(args, "enable_collision_geom_check", False))
+    if not physx_check and not geom_check:
         return False
-    if not hasattr(st, "base_body_handles"):
+
+    if physx_check and not hasattr(st, "base_body_handles"):
         base_actor = st.actor_handles[0] if len(st.actor_handles) > 1 else st.arm_actor
         st.base_body_names_by_handle = actor_body_handle_name_map(gym, st.env, base_actor)
         st.door_body_names_by_handle = actor_body_handle_name_map(gym, st.env, st.door_actor)
@@ -1172,38 +1176,39 @@ def monitor_base_door_collision(gym, step, st):
     rigid_contact = False
     frame_contact = False
     contact_pair = None
-    try:
-        contacts = gym.get_env_rigid_contacts(st.env)
-    except Exception:
-        contacts = []
-    for contact in contacts:
-        body0 = contact_field(contact, "body0")
-        body1 = contact_field(contact, "body1")
-        if body0 is None or body1 is None:
-            continue
-        body0 = int(body0)
-        body1 = int(body1)
-        if (
-            body0 in st.base_body_handles
-            and body1 in st.door_body_handles
-            or body1 in st.base_body_handles
-            and body0 in st.door_body_handles
-        ):
-            rigid_contact = True
-            if body0 in st.base_body_handles:
-                base_body = st.base_body_names_by_handle.get(body0, str(body0))
-                door_body = st.door_body_names_by_handle.get(body1, str(body1))
-            else:
-                base_body = st.base_body_names_by_handle.get(body1, str(body1))
-                door_body = st.door_body_names_by_handle.get(body0, str(body0))
-            frame_contact = str(door_body) == "base"
-            contact_pair = {
-                "base_body": str(base_body),
-                "door_body": str(door_body),
-                "min_dist": contact_field(contact, "min_dist"),
-                "initial_overlap": contact_field(contact, "initial_overlap"),
-            }
-            break
+    if physx_check:
+        try:
+            contacts = gym.get_env_rigid_contacts(st.env)
+        except Exception:
+            contacts = []
+        for contact in contacts:
+            body0 = contact_field(contact, "body0")
+            body1 = contact_field(contact, "body1")
+            if body0 is None or body1 is None:
+                continue
+            body0 = int(body0)
+            body1 = int(body1)
+            if (
+                body0 in st.base_body_handles
+                and body1 in st.door_body_handles
+                or body1 in st.base_body_handles
+                and body0 in st.door_body_handles
+            ):
+                rigid_contact = True
+                if body0 in st.base_body_handles:
+                    base_body = st.base_body_names_by_handle.get(body0, str(body0))
+                    door_body = st.door_body_names_by_handle.get(body1, str(body1))
+                else:
+                    base_body = st.base_body_names_by_handle.get(body1, str(body1))
+                    door_body = st.door_body_names_by_handle.get(body0, str(body0))
+                frame_contact = str(door_body) == "base"
+                contact_pair = {
+                    "base_body": str(base_body),
+                    "door_body": str(door_body),
+                    "min_dist": contact_field(contact, "min_dist"),
+                    "initial_overlap": contact_field(contact, "initial_overlap"),
+                }
+                break
 
     base_xy = np.asarray(st.traj.get("base_xy", st.base_start), dtype=np.float32)
     yaw = float(st.traj.get("yaw", st.yaw_start))
@@ -1221,9 +1226,10 @@ def monitor_base_door_collision(gym, step, st):
         float(getattr(args, "base_collision_half_width", 0.24)),
     )
     threshold = float(getattr(args, "base_door_collision_distance", 0.04))
-    geom_collision = geom_distance <= threshold
+    geom_collision = bool(geom_check and geom_distance <= threshold)
     rigid_gate = float(getattr(args, "rigid_contact_geom_gate", max(0.15, threshold)))
-    gated_rigid_contact = bool(rigid_contact and geom_distance <= rigid_gate)
+    gated_rigid_contact = bool(physx_check and rigid_contact and geom_distance <= rigid_gate)
+    frame_contact = bool(physx_check and frame_contact)
     collision = bool(frame_contact or gated_rigid_contact or geom_collision)
     if collision:
         st.base_door_collision_detected = True
@@ -1237,15 +1243,17 @@ def monitor_base_door_collision(gym, step, st):
             print(
                 "[BaseDoorCollision]"
                 f" step={int(step)} env={int(st.index)} phase={getattr(st, 'last_phase', 'unknown')}"
-                f" rigid_contact={bool(rigid_contact)} geom_distance={geom_distance:.4f}"
-                f" threshold={threshold:.4f}"
+                f" physx_check={bool(physx_check)} geom_check={bool(geom_check)}"
+                f" rigid_contact={bool(rigid_contact)} frame_contact={bool(frame_contact)}"
+                f" gated_rigid_contact={bool(gated_rigid_contact)} geom_collision={bool(geom_collision)}"
+                f" geom_distance={geom_distance:.4f} threshold={threshold:.4f} gate={rigid_gate:.4f}"
                 f" contact_pair={contact_pair}"
                 f" base_xy={np.round(base_xy, 4).tolist()}"
                 f" door_local=({np.round(hinge_local, 4).tolist()}, {np.round(handle_local, 4).tolist()})"
                 f" open_deg={door_open_degrees(getattr(st, 'last_door_pos', None), args):.1f}",
                 flush=True,
             )
-    elif rigid_contact:
+    elif physx_check and rigid_contact:
         interval = max(1, int(getattr(args, "collision_log_interval", 30)))
         if int(step) - int(getattr(st, "base_door_contact_filtered_log_step", -10**9)) >= interval:
             st.base_door_contact_filtered_log_step = int(step)
