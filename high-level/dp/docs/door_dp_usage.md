@@ -231,6 +231,10 @@ Converted dataset path:
 data/lerobot/local/door_dp/
 ```
 
+By default, conversion keeps physical state/action values instead of applying Door robust-quantile
+normalization. It still sanitizes tiny yaw/yaw-rate/angular-velocity noise to zero before writing the
+LeRobot dataset.
+
 ## 5. View With Rerun
 
 Directly open the local LeRobotDataset in Rerun:

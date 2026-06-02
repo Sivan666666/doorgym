@@ -40,7 +40,8 @@ python high-level/dp/record/record_door_dp_dataset.py \
 
 # PI0.5 专用 raw 录制：state 是 10 维当前状态
 # [vx, yaw_rate, ee_x, ee_y, ee_z, ee_qx, ee_qy, ee_qz, ee_qw, gripper]。
-# raw 里保持物理值不归一化，后续转 LeRobot 时只归一化一次。
+# raw 里保持物理值不归一化。转 LeRobot 时不做 Door robust_quantile 归一化；
+# 训练时由 LeRobot/Policy 自己根据 dataset stats 做 state/action normalization。
 conda activate txc_vbc
 export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
 python high-level/dp/record/record_door_dp_dataset_pi05_state10.py \
@@ -119,10 +120,13 @@ conda run -n door_dp python high-level/dp/convert_door_raw_to_lerobot.py \
     --overwrite \
     --num_workers 4 \
     --image_storage video \
-    --video_codec h264
+    --video_codec h264 \
+    --state_preprocess none \
+    --action_preprocess none \
+    --near_zero_rate_eps 1e-5
 
 # PI0.5 10D current-state raw 转 LeRobotDataset。不要再用 *_pi05_state10 转换脚本，
-# 因为这个 raw 已经是 10 维当前状态；这里会对 state/action 各做一次 robust_quantile 归一化。
+# 因为这个 raw 已经是 10 维当前状态；默认不做 Door robust_quantile 归一化，只会把近零 yaw/yaw_rate 抖动清零。
 conda run -n b1z1_lerobot python high-level/dp/convert_door_raw_to_lerobot.py \
     --raw_root high-level/data/door_dp_raw/4door_ikpush_pi05_state10 \
     --root high-level/data/lerobot \
@@ -130,7 +134,10 @@ conda run -n b1z1_lerobot python high-level/dp/convert_door_raw_to_lerobot.py \
     --overwrite \
     --num_workers 4 \
     --image_storage video \
-    --video_codec h264
+    --video_codec h264 \
+    --state_preprocess none \
+    --action_preprocess none \
+    --near_zero_rate_eps 1e-5
 
 # RGB+mask 数据转换，额外加 --rgb。
 conda run -n door_dp python high-level/dp/convert_door_raw_to_lerobot.py \
@@ -141,7 +148,10 @@ conda run -n door_dp python high-level/dp/convert_door_raw_to_lerobot.py \
     --num_workers 4 \
     --rgb \
     --image_storage video \
-    --video_codec h264
+    --video_codec h264 \
+    --state_preprocess none \
+    --action_preprocess none \
+    --near_zero_rate_eps 1e-5
 
 # 可视化检查 LeRobotDataset。
 conda run -n door_dp python -m lerobot.scripts.visualize_dataset \
@@ -161,36 +171,38 @@ conda run -n door_dp python high-level/dp/roundtrip_lerobot_to_raw_and_check.py 
 
 ## 5. 训练 policy
 
-# DP 训练。训练侧仍是 DDPM 100 train timesteps；play/eval 推理默认是 DDIM 10 steps。
+# DP 训练。预测 40 步，执行 20 步；play/eval 推理使用 DDPM 10 denoising steps。
 conda run -n door_dp python high-level/dp/train/train_door_dp.py \
     --root high-level/data/lerobot \
     --repo_id local/4door_ikpush \
-    --run_name lerodp_4door_ikpush \
+    --run_name lerodp_4door_ikpush_h40_exec20 \
     --steps 100000 \
-    --batch_size 32 \
-    --num_workers 2 \
+    --batch_size 16 \
+    --num_workers 4 \
     --device cuda:0 \
     --obs_horizon 16 \
-    --pred_horizon 48 \
-    --action_horizon 16 \
+    --pred_horizon 40 \
+    --action_horizon 20 \
     --num_diffusion_iters 100 \
+    --num_inference_steps 10 \
+    --noise_scheduler_type DDPM \
     --clip_sample_range 7.0 \
     --wandb
 
-# ACT 训练。chunk_size 是训练/模型输出 chunk 长度，action_horizon 是推理执行多少步后重算。
+# ACT 训练。预测 100 步，执行 50 步。
 conda run -n door_dp python high-level/dp/train/train_door_act.py \
     --root high-level/data/lerobot \
     --repo_id local/4door_ikpush \
-    --run_name leroact_4door_ikpush \
+    --run_name act_4door_ikpush_chunk100_exec50_bs16 \
     --steps 100000 \
-    --batch_size 32 \
-    --num_workers 2 \
+    --batch_size 16 \
+    --num_workers 4 \
     --device cuda:0 \
     --chunk_size 100 \
-    --action_horizon 16 \
+    --action_horizon 50 \
     --wandb
 
-# pi0.5 训练，需要先准备 pretrained_path。
+# pi0.5 训练，需要先准备 pretrained_path。预测 50 步，执行 50 步。
 conda run -n door_dp python high-level/dp/train/train_door_pi05.py \
     --root high-level/data/lerobot \
     --repo_id local/4door_ikpush \
@@ -199,6 +211,9 @@ conda run -n door_dp python high-level/dp/train/train_door_pi05.py \
     --batch_size 1 \
     --num_workers 0 \
     --device cuda:0 \
+    --chunk_size 50 \
+    --action_horizon 50 \
+    --num_inference_steps 10 \
     --pretrained_path <pi05_checkpoint_or_repo>
 
 
@@ -207,43 +222,44 @@ conda run -n door_dp python high-level/dp/train/train_door_pi05.py \
 # DP / ACT / pi0.5 统一入口，会自动根据 checkpoint metadata 识别 policy 类型。
 python high-level/dp/play/play_door_policy.py \
     --mode ikpush \
-    --checkpoint high-level/dp/logs/door-dp/lerodp_4door_ikpush/checkpoints/model_latest.pt \
+    --checkpoint high-level/dp/logs/door-auto-wrapped/lerodp_4door_ikpush_h40_exec20_bs16_no_imagenet/100000/model_latest.pt \
     --num_envs 4 \
     --steps 2500 \
     --rl_device cuda:0 \
     --sim_device cuda:0 \
     --dp_inference_steps 10 \
-    --dp_noise_scheduler_type DDIM \
-    --dp_action_horizon 16 \
+    --dp_noise_scheduler_type DDPM \
+    --dp_action_horizon 20 \
     -- \
     --door_cfg high-level/experiments/isaacgym/b1z1_opendoor.yaml
 
-# ACT checkpoint 示例。dp_inference_steps 对 ACT 没作用，保留在命令里方便切回 DP。
+# ACT checkpoint 示例。ACT 预测 100 步，执行 50 步。
+# dp_inference_steps 对 ACT 没作用，保留在命令里方便切回 DP。
 python high-level/dp/play/play_door_policy.py \
     --mode ikpush \
-    --checkpoint high-level/dp/logs/door-act/leroact_4door_ikpush/checkpoints/model_latest.pt \
+    --checkpoint high-level/dp/logs/door-act/act_4door_ikpush_chunk100_exec50_bs16/checkpoints/model_latest.pt \
     --num_envs 4 \
     --steps 2500 \
     --rl_device cuda:0 \
     --sim_device cuda:0 \
     --dp_inference_steps 10 \
-    --dp_noise_scheduler_type DDIM \
-    --dp_action_horizon 16 \
+    --dp_noise_scheduler_type DDPM \
+    --dp_action_horizon 50 \
     -- \
     --door_cfg high-level/experiments/isaacgym/b1z1_opendoor.yaml
 
 # 从 raw expert 某一帧 warmstart，再闭环 play policy。
 python high-level/dp/play/play_door_policy.py \
     --mode ikpush \
-    --checkpoint high-level/dp/logs/door-dp/lerodp_4door_ikpush/checkpoints/model_latest.pt \
+    --checkpoint high-level/dp/logs/door-auto-wrapped/lerodp_4door_ikpush_h40_exec20_bs16_no_imagenet/100000/model_latest.pt \
     --num_envs 1 \
     --steps 1200 \
     --dp_warmstart \
     --dp_warmstart_raw_episode high-level/data/door_dp_raw/4door_ikpush/episode_000000.npz \
     --dp_warmstart_step 300 \
     --dp_inference_steps 10 \
-    --dp_noise_scheduler_type DDIM \
-    --dp_action_horizon 16 \
+    --dp_noise_scheduler_type DDPM \
+    --dp_action_horizon 20 \
     -- \
     --door_cfg high-level/experiments/isaacgym/b1z1_opendoor_single_99650089960001.yaml
 
@@ -253,30 +269,34 @@ python high-level/dp/play/play_door_policy.py \
 # 按区间扫一条 expert episode，比较 policy action 和 expert action。
 python high-level/dp/eval/eval_door_dp_on_expert_obs.py \
     --raw_episode high-level/data/door_dp_raw/4door_ikpush/episode_000000.npz \
-    --checkpoint high-level/dp/logs/door-dp/lerodp_4door_ikpush/checkpoints/model_latest.pt \
+    --checkpoint high-level/dp/logs/door-auto-wrapped/lerodp_4door_ikpush_h40_exec20_bs16_no_imagenet/100000/model_latest.pt \
     --device cuda:0 \
+    --action_horizon 20 \
+    --compare_horizon 20 \
     --start 15 \
     --end 2160 \
     --stride 25 \
     --report_every 300 \
     --dp_inference_steps 10 \
-    --dp_noise_scheduler_type DDIM
+    --dp_noise_scheduler_type DDPM
 
 # 看几个关键帧。
 python high-level/dp/eval/eval_door_dp_on_expert_obs.py \
     --raw_episode high-level/data/door_dp_raw/4door_ikpush/episode_000000.npz \
-    --checkpoint high-level/dp/logs/door-act/leroact_4door_ikpush/checkpoints/model_latest.pt \
+    --checkpoint high-level/dp/logs/door-act/act_4door_ikpush_chunk100_exec50_bs16/checkpoints/model_latest.pt \
     --device cuda:0 \
+    --action_horizon 50 \
+    --compare_horizon 50 \
     --steps 300 600 900 \
     --dp_inference_steps 10 \
-    --dp_noise_scheduler_type DDIM
+    --dp_noise_scheduler_type DDPM
 
 
 ## 8. Eval: success rate
 
 # 并行评估 policy 成功率。base_seed 固定时，total_trials/num_envs 不变则随机化可复现。
 python high-level/dp/eval/eval_door_policy_success.py \
-    --checkpoint high-level/dp/logs/door-act/leroact_4door_ikpush/checkpoints/model_latest.pt \
+    --checkpoint high-level/dp/logs/door-act/act_4door_ikpush_chunk100_exec50_bs16/checkpoints/model_latest.pt \
     --yaml high-level/experiments/isaacgym/b1z1_opendoor_single_door2.yaml \
     --mode ikpush \
     --num_envs 16 \
@@ -287,12 +307,13 @@ python high-level/dp/eval/eval_door_policy_success.py \
     --base_seed 123456 \
     --headless \
     --graphics_device_id 0 \
+    --dp_action_horizon 50 \
     --dp_inference_steps 10 \
-    --dp_noise_scheduler_type DDIM
+    --dp_noise_scheduler_type DDPM
 
 # 只评估 yaml 里的某个门，底层 play 参数放在最后的 -- 后。
 python high-level/dp/eval/eval_door_policy_success.py \
-    --checkpoint high-level/dp/logs/door-dp/lerodp_4door_ikpush/checkpoints/model_latest.pt \
+    --checkpoint high-level/dp/logs/door-auto-wrapped/lerodp_4door_ikpush_h40_exec20_bs16_no_imagenet/100000/model_latest.pt \
     --yaml high-level/experiments/isaacgym/b1z1_opendoor.yaml \
     --mode ikpush \
     --num_envs 16 \
@@ -302,8 +323,9 @@ python high-level/dp/eval/eval_door_policy_success.py \
     --base_seed 123456 \
     --headless \
     --graphics_device_id 0 \
+    --dp_action_horizon 20 \
     --dp_inference_steps 10 \
-    --dp_noise_scheduler_type DDIM \
+    --dp_noise_scheduler_type DDPM \
     -- \
     --door_name 99650089960001
 
@@ -311,8 +333,8 @@ python high-level/dp/eval/eval_door_policy_success.py \
 ## 9. 推理测速
 
 conda run -n door_dp python high-level/dp/bench_door_policy_speed.py \
-    --dp_checkpoint high-level/dp/logs/door-dp/lerodp_4door_ikpush/checkpoints/model_latest.pt \
-    --act_checkpoint high-level/dp/logs/door-act/leroact_4door_ikpush/checkpoints/model_latest.pt \
+    --dp_checkpoint high-level/dp/logs/door-auto-wrapped/lerodp_4door_ikpush_h40_exec20_bs16_no_imagenet/100000/model_latest.pt \
+    --act_checkpoint high-level/dp/logs/door-act/act_4door_ikpush_chunk100_exec50_bs16/checkpoints/model_latest.pt \
     --device cuda:0 \
     --warmup 3 \
     --iters 10
@@ -320,5 +342,5 @@ conda run -n door_dp python high-level/dp/bench_door_policy_speed.py \
 
 ## 10. 打包推理 checkpoint，排除 optimizer
 
-cd high-level/dp/logs/door-act/leroact_4door_ikpush/checkpoints
+cd high-level/dp/logs/door-act/act_4door_ikpush_chunk100_exec50_bs16/checkpoints
 zip -r door_policy_infer.zip model_latest.pt model_latest -x "model_latest/optimizer.pt"

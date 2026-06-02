@@ -38,12 +38,16 @@ DATASET_METADATA_KEYS = (
     "pi05_state_action_aligned",
     "state_preprocess",
     "action_preprocess",
+    "state_sanitize",
+    "action_sanitize",
     "camera_fps",
     "camera_sample_stride",
     "camera_hold_last_frame",
 )
 STATE_PREPROCESS_VERSION = "door_dp_state_robust_quantile_v1"
 ACTION_PREPROCESS_VERSION = "door_dp_action_robust_quantile_v1"
+SANITIZE_VERSION = "door_dp_sanitize_near_zero_rate_v1"
+DEFAULT_NEAR_ZERO_RATE_EPS = 1.0e-5
 ACTION_NAMES = [
     "vx",
     "yaw",
@@ -128,6 +132,18 @@ def _state_angle_feature_indices(state_names):
     return indices
 
 
+def _near_zero_rate_feature_indices(feature_names):
+    indices = []
+    for idx, name in enumerate(feature_names):
+        lowered = str(name).lower()
+        if lowered in ("yaw", "yaw_rate", "base_yaw_rate"):
+            indices.append(idx)
+            continue
+        if any(token in lowered for token in ("yaw_rate", "ang_vel", "angular_vel")):
+            indices.append(idx)
+    return indices
+
+
 def _state_quaternion_groups(state_names):
     name_to_idx = {str(name): idx for idx, name in enumerate(state_names)}
     groups = []
@@ -160,6 +176,9 @@ def sanitize_door_dp_state(states, state_names, eps=1.0e-6):
     out = np.nan_to_num(states_2d, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32, copy=True)
     for idx in _state_angle_feature_indices(state_names):
         out[:, idx] = _wrap_to_pi_array(out[:, idx])
+    for idx in _near_zero_rate_feature_indices(state_names):
+        values = out[:, idx]
+        out[:, idx] = np.where(np.abs(values) <= float(eps), 0.0, values).astype(np.float32)
     for group in _state_quaternion_groups(state_names):
         quat = out[:, group].astype(np.float32, copy=True)
         norm = np.linalg.norm(quat, axis=-1, keepdims=True)
@@ -293,6 +312,9 @@ def sanitize_door_dp_action(actions, action_names=None, eps=1.0e-6):
     if actions_2d.shape[-1] != len(action_names):
         raise ValueError(f"Action dim {actions_2d.shape[-1]} does not match {len(action_names)} action names.")
     out = np.nan_to_num(actions_2d, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32, copy=True)
+    for idx in _near_zero_rate_feature_indices(action_names):
+        values = out[:, idx]
+        out[:, idx] = np.where(np.abs(values) <= float(eps), 0.0, values).astype(np.float32)
     for group in _state_quaternion_groups(action_names):
         quat = out[:, group].astype(np.float32, copy=True)
         norm = np.linalg.norm(quat, axis=-1, keepdims=True)
@@ -302,6 +324,18 @@ def sanitize_door_dp_action(actions, action_names=None, eps=1.0e-6):
         sign = np.where(quat[:, 3:4] < 0.0, -1.0, 1.0).astype(np.float32)
         out[:, group] = quat * sign
     return _restore_state_shape(out, original_shape)
+
+
+def make_door_dp_sanitize_config(feature_names, eps=DEFAULT_NEAR_ZERO_RATE_EPS):
+    feature_names = list(feature_names)
+    rate_indices = _near_zero_rate_feature_indices(feature_names)
+    return {
+        "applied": True,
+        "version": SANITIZE_VERSION,
+        "eps": float(eps),
+        "near_zero_rate_features": [feature_names[i] for i in rate_indices],
+        "quaternion_groups": [[feature_names[i] for i in group] for group in _state_quaternion_groups(feature_names)],
+    }
 
 
 def fit_door_dp_action_preprocess(

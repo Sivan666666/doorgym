@@ -69,10 +69,10 @@ def auto_wrap_official_lerobot_checkpoint(checkpoint_path, args):
 
     policy_config = load_json(policy_dir / "config.json")
     policy_type = str(policy_config.get("type", ""))
-    if policy_type != "act":
+    if policy_type not in ("act", "diffusion"):
         raise ValueError(
             f"Direct play of official LeRobot policy type={policy_type!r} is not wired yet. "
-            "Currently auto-wrapping supports official ACT checkpoints."
+            "Currently auto-wrapping supports official ACT and Diffusion checkpoints."
         )
 
     train_config = load_json(policy_dir / "train_config.json")
@@ -93,7 +93,10 @@ def auto_wrap_official_lerobot_checkpoint(checkpoint_path, args):
         print(f"Using cached Door-wrapped checkpoint: {manifest_path}", flush=True)
         return manifest_path.resolve()
 
-    export_script = DP_ROOT / "export_official_lerobot_act_to_door_checkpoint.py"
+    if policy_type == "act":
+        export_script = DP_ROOT / "export_official_lerobot_act_to_door_checkpoint.py"
+    else:
+        export_script = DP_ROOT / "export_official_lerobot_diffusion_to_door_checkpoint.py"
     cmd = lerobot_python_command() + [
         str(export_script),
         "--official_checkpoint",
@@ -109,13 +112,20 @@ def auto_wrap_official_lerobot_checkpoint(checkpoint_path, args):
         "--device",
         args.rl_device,
     ]
+    if policy_type == "diffusion":
+        cmd += [
+            "--num_inference_steps",
+            str(args.dp_inference_steps),
+            "--noise_scheduler_type",
+            args.dp_noise_scheduler_type,
+        ]
     if args.rgb:
         cmd.append("--rgb")
     env = os.environ.copy()
     py_paths = [str(HIGH_LEVEL_ROOT / "lerobot" / "src"), str(DP_ROOT)]
     env["PYTHONPATH"] = os.pathsep.join(py_paths + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
     print(
-        "Detected official LeRobot ACT checkpoint; wrapping it for Door play:\n"
+        f"Detected official LeRobot {policy_type} checkpoint; wrapping it for Door play:\n"
         f"  official: {step_dir}\n"
         f"  dataset:  {dataset_root}\n"
         f"  output:   {manifest_path}",

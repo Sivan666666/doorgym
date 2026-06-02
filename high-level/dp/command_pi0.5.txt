@@ -12,6 +12,8 @@
 #   lerobot.policies.pi05.PI05Policy
 # GPU:
 #   cuda:0
+# Horizon:
+#   predict 50 control steps, execute 50 control steps, 10 inference/denoising steps
 
 set -o pipefail
 cd /home/ps/workspace/txc/doorgym
@@ -27,6 +29,9 @@ conda run --no-capture-output -n b1z1_lerobot python /home/ps/workspace/txc/door
     --batch_size 16 \
     --num_workers 2 \
     --device cuda:0 \
+    --chunk_size 50 \
+    --action_horizon 50 \
+    --num_inference_steps 10 \
     --pretrained_path /home/ps/workspace/txc/doorgym/high-level/dp/models/pi05_base \
     --dtype bfloat16 \
     --gradient_checkpointing \
@@ -44,6 +49,8 @@ conda run --no-capture-output -n b1z1_lerobot python /home/ps/workspace/txc/door
 #   cuda:1
 # Logging:
 #   terminal + wandb
+# Horizon:
+#   predict 50 control steps, execute 50 control steps, 10 inference/denoising steps
 
 set -o pipefail
 cd /home/ps/workspace/txc/doorgym
@@ -59,6 +66,9 @@ conda run --no-capture-output -n b1z1_hwk_lerobot python /home/ps/workspace/txc/
     --batch_size 16 \
     --num_workers 2 \
     --device cuda:1 \
+    --chunk_size 50 \
+    --action_horizon 50 \
+    --num_inference_steps 10 \
     --pretrained_path /home/ps/workspace/txc/doorgym/high-level/dp/models/pi05_base \
     --dtype bfloat16 \
     --gradient_checkpointing \

@@ -11,27 +11,35 @@ try:
     from .door_dp_common import (
         ACTION_NAMES,
         DATASET_METADATA_KEYS,
+        DEFAULT_NEAR_ZERO_RATE_EPS,
         DoorDPLeRobotRecorder,
         apply_door_dp_action_preprocess,
         apply_door_dp_state_preprocess,
         fit_door_dp_action_preprocess,
         fit_door_dp_state_preprocess,
         lerobot_image_keys_for_vision_mode,
+        make_door_dp_sanitize_config,
         normalize_vision_mode,
         raw_image_keys_for_vision_mode,
+        sanitize_door_dp_action,
+        sanitize_door_dp_state,
     )
 except ImportError:
     from door_dp_common import (
         ACTION_NAMES,
         DATASET_METADATA_KEYS,
+        DEFAULT_NEAR_ZERO_RATE_EPS,
         DoorDPLeRobotRecorder,
         apply_door_dp_action_preprocess,
         apply_door_dp_state_preprocess,
         fit_door_dp_action_preprocess,
         fit_door_dp_state_preprocess,
         lerobot_image_keys_for_vision_mode,
+        make_door_dp_sanitize_config,
         normalize_vision_mode,
         raw_image_keys_for_vision_mode,
+        sanitize_door_dp_action,
+        sanitize_door_dp_state,
     )
 
 
@@ -71,23 +79,29 @@ def parse_args():
     parser.add_argument(
         "--state_preprocess",
         choices=["robust_quantile", "none"],
-        default="robust_quantile",
+        default="none",
         help=(
             "Preprocess observation.state while converting raw npz to LeRobot. "
-            "robust_quantile sanitizes angles/quaternions/non-finite values, clips to dataset quantiles, "
-            "and stores normalized state in [-1, 1]."
+            "Default none keeps physical values; robust_quantile clips to dataset quantiles and stores "
+            "normalized state in [-1, 1]."
         ),
     )
     parser.add_argument("--state_quantile_low", type=float, default=0.01)
     parser.add_argument("--state_quantile_high", type=float, default=0.99)
     parser.add_argument("--state_preprocess_eps", type=float, default=1.0e-6)
     parser.add_argument(
+        "--near_zero_rate_eps",
+        type=float,
+        default=DEFAULT_NEAR_ZERO_RATE_EPS,
+        help="Set tiny yaw/yaw_rate/angular velocity values with abs(value) <= eps to 0 before writing LeRobot.",
+    )
+    parser.add_argument(
         "--action_preprocess",
         choices=["robust_quantile", "none"],
-        default="robust_quantile",
+        default="none",
         help=(
-            "Preprocess action while converting raw npz to LeRobot. robust_quantile stores normalized action in [-1, 1]; "
-            "DoorPolicyController inverts this before sending actions to Isaac Gym."
+            "Preprocess action while converting raw npz to LeRobot. Default none keeps physical commands; "
+            "robust_quantile stores normalized action in [-1, 1]."
         ),
     )
     parser.add_argument("--action_quantile_low", type=float, default=0.01)
@@ -510,6 +524,8 @@ def main():
 
     initial_task = scalar_str(first["task"]) if "task" in first else "door open"
     converted_state_normalized = bool(state_preprocess_config.get("applied", False))
+    state_sanitize_config = make_door_dp_sanitize_config(state_names, eps=args.near_zero_rate_eps)
+    action_sanitize_config = make_door_dp_sanitize_config(ACTION_NAMES, eps=args.near_zero_rate_eps)
     recorder = DoorDPLeRobotRecorder(
         root=args.root,
         repo_id=args.repo_id,
@@ -530,6 +546,8 @@ def main():
             "controller_mode": controller_mode,
             "image_storage": args.image_storage,
             "video_codec": args.video_codec,
+            "state_sanitize": state_sanitize_config,
+            "action_sanitize": action_sanitize_config,
             "state_preprocess": state_preprocess_config,
             "action_preprocess": action_preprocess_config,
             "state_normalized": converted_state_normalized,
@@ -551,8 +569,10 @@ def main():
         task = payload["task"]
         recorder.task = task
         states = payload["states"]
+        states = sanitize_door_dp_state(states, state_names=state_names, eps=args.near_zero_rate_eps)
         states = apply_door_dp_state_preprocess(states, state_names=state_names, config=state_preprocess_config)
         actions = payload["actions"]
+        actions = sanitize_door_dp_action(actions, action_names=ACTION_NAMES, eps=args.near_zero_rate_eps)
         actions = apply_door_dp_action_preprocess(actions, action_names=ACTION_NAMES, config=action_preprocess_config)
         wrist_first = payload["wrist_first"]
         wrist_second = payload["wrist_second"]
@@ -589,6 +609,8 @@ def main():
         "controller_mode": controller_mode,
         "image_storage": args.image_storage,
         "video_codec": args.video_codec,
+        "state_sanitize": state_sanitize_config,
+        "action_sanitize": action_sanitize_config,
         "state_preprocess": state_preprocess_config,
         "action_preprocess": action_preprocess_config,
         "state_normalized": converted_state_normalized,

@@ -38,6 +38,8 @@ try:
         invert_door_dp_action_preprocess,
         lerobot_image_keys_for_vision_mode,
         normalize_vision_mode,
+        sanitize_door_dp_action,
+        sanitize_door_dp_state,
     )
 except ImportError:
     from door_dp_common import (
@@ -48,6 +50,8 @@ except ImportError:
         invert_door_dp_action_preprocess,
         lerobot_image_keys_for_vision_mode,
         normalize_vision_mode,
+        sanitize_door_dp_action,
+        sanitize_door_dp_state,
     )
 
 
@@ -2151,8 +2155,10 @@ class DoorPolicyController:
         self.multi_action_queues: Dict[int, deque] = {}
         self.sidecar_config = dict(getattr(self.backend, "sidecar_config", {}) or {})
         self.state_feature_names = list(self.sidecar_config.get("state") or self.config.get("state_feature_names", []))
+        self.state_sanitize = self.sidecar_config.get("state_sanitize") or self.config.get("state_sanitize")
         self.state_preprocess = self.sidecar_config.get("state_preprocess") or self.config.get("state_preprocess")
         self.action_names = list(self.sidecar_config.get("action") or self.config.get("action_names", ACTION_NAMES))
+        self.action_sanitize = self.sidecar_config.get("action_sanitize") or self.config.get("action_sanitize")
         self.action_preprocess = self.sidecar_config.get("action_preprocess") or self.config.get("action_preprocess")
 
     def reset(self) -> None:
@@ -2190,6 +2196,12 @@ class DoorPolicyController:
         return self.backend.normalizer.denormalize_action(action)
 
     def _preprocess_state_for_policy(self, state: Any) -> np.ndarray:
+        if self.state_feature_names:
+            state = sanitize_door_dp_state(
+                state,
+                state_names=self.state_feature_names,
+                eps=float((self.state_sanitize or {}).get("eps", 1.0e-6)),
+            )
         return apply_door_dp_state_preprocess(
             state,
             state_names=self.state_feature_names or None,
@@ -2197,15 +2209,23 @@ class DoorPolicyController:
         )
 
     def _postprocess_action_for_control(self, actions: torch.Tensor) -> torch.Tensor:
+        output_device = actions.device
+        output_dtype = actions.dtype
         if not self.action_preprocess or not bool(self.action_preprocess.get("applied", False)):
-            return actions
-        actions_np = actions.detach().cpu().numpy().astype(np.float32)
-        physical = invert_door_dp_action_preprocess(
-            actions_np,
+            physical = actions.detach().cpu().numpy().astype(np.float32)
+        else:
+            actions_np = actions.detach().cpu().numpy().astype(np.float32)
+            physical = invert_door_dp_action_preprocess(
+                actions_np,
+                action_names=self.action_names or ACTION_NAMES,
+                config=self.action_preprocess,
+            )
+        physical = sanitize_door_dp_action(
+            physical,
             action_names=self.action_names or ACTION_NAMES,
-            config=self.action_preprocess,
+            eps=float((self.action_sanitize or {}).get("eps", 1.0e-6)),
         )
-        return torch.as_tensor(physical, device=actions.device, dtype=actions.dtype)
+        return torch.as_tensor(physical, device=output_device, dtype=output_dtype)
 
     def _make_item(
         self,

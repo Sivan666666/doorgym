@@ -1,29 +1,40 @@
-# Official LeRobot training commands for Door DP / ACT / pi0.5.
+# Official LeRobot training / play commands for Door DP / ACT / pi0.5.
 #
-# Run from anywhere. Change DATASET_ROOT / DATASET_REPO_ID / RUN_NAME if needed.
-# Official LeRobot train.py refuses to reuse an existing output_dir, so use a new
-# RUN_NAME for each fresh training run.
+# Run from anywhere. Change RUN_NAME if you start a fresh training run.
+# Official LeRobot train.py refuses to reuse an existing output_dir.
 #
-# Notes:
+# Current horizon convention:
+# - Diffusion Policy: predict 40 control steps, execute 20 control steps.
+#   At 50 Hz this is predict 0.8s, execute 0.4s.
+# - ACT: predict 100 control steps, execute 50 control steps.
+#   At 50 Hz this is predict 2.0s, execute 1.0s.
+# - pi0.5 / pi0.5 evo: predict 50 control steps, execute 50 control steps.
+#   num_inference_steps is diffusion/flow denoising steps, not robot execution steps.
+#
+# Important:
+# - All official LeRobot train commands use --dataset.use_imagenet_stats=false.
+#   Door images are depth/mask, not RGB ImageNet images.
 # - push_to_hub is disabled for all policies.
-# - wandb is enabled, but artifact upload is disabled.
-# - pyav is used because torchcodec can fail on local v3 video files in this env.
+# - wandb is enabled, artifact upload is disabled.
 
 set -o pipefail
 
 PROJECT_ROOT=/home/sivan/whole_body/visual_whole_body
-DATASET_REPO_ID=local/pi05_state10_test
-DATASET_ROOT=$PROJECT_ROOT/high-level/data/lerobot/local/pi05_state10_test
+DATASET_REPO_ID=local/4door_ikpush
+DATASET_ROOT=$PROJECT_ROOT/high-level/data/lerobot/local/4door_ikpush
 OUTPUT_ROOT=$PROJECT_ROOT/high-level/dp/logs/lerobot-train
 
 cd "$PROJECT_ROOT"
 
 
 ## 1. Diffusion Policy, official LeRobot train.py
+#
+# Predict 40 steps, execute 20 steps.
+# drop_n_last_frames = horizon - n_action_steps - n_obs_steps + 1 = 40 - 20 - 16 + 1 = 5.
 
 export PYTHONPATH="$PROJECT_ROOT/high-level/lerobot/src:${PYTHONPATH:-}"
 
-DP_RUN_NAME=lerodp_official_pi05_state10
+DP_RUN_NAME=lerodp_4door_ikpush_h40_exec20_bs16_no_imagenet
 
 CUDA_VISIBLE_DEVICES=0 accelerate launch \
     --num-processes=1 \
@@ -31,21 +42,22 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
     "$(which lerobot-train)" \
     --dataset.root="$DATASET_ROOT" \
     --dataset.repo_id="$DATASET_REPO_ID" \
-    --dataset.video_backend=pyav \
+    --dataset.video_backend=torchcodec \
+    --dataset.use_imagenet_stats=false \
     --policy.type=diffusion \
     --policy.device=cuda \
     --policy.push_to_hub=false \
     --policy.n_obs_steps=16 \
-    --policy.horizon=48 \
-    --policy.n_action_steps=16 \
-    --policy.drop_n_last_frames=17 \
+    --policy.horizon=40 \
+    --policy.n_action_steps=20 \
+    --policy.drop_n_last_frames=5 \
     --policy.noise_scheduler_type=DDPM \
     --policy.num_train_timesteps=100 \
     --policy.num_inference_steps=10 \
     --policy.clip_sample_range=7.0 \
-    --batch_size=32 \
+    --batch_size=16 \
     --steps=100000 \
-    --num_workers=2 \
+    --num_workers=4 \
     --save_freq=1000 \
     --log_freq=10 \
     --job_name="$DP_RUN_NAME" \
@@ -55,11 +67,13 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
     --wandb.disable_artifact=true
 
 
-## 2. ACT, official LeRobot train.py
+## 2. ACT ResNet18, official LeRobot train.py
+#
+# Predict 100 steps, execute 50 steps.
 
 export PYTHONPATH="$PROJECT_ROOT/high-level/lerobot/src:${PYTHONPATH:-}"
 
-ACT_RUN_NAME=leroact_official_pi05_state10
+ACT_RUN_NAME=leroact_4door_ikpush_chunk100_exec50_bs16_no_imagenet
 
 CUDA_VISIBLE_DEVICES=0 accelerate launch \
     --num-processes=1 \
@@ -67,17 +81,18 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
     "$(which lerobot-train)" \
     --dataset.root="$DATASET_ROOT" \
     --dataset.repo_id="$DATASET_REPO_ID" \
-    --dataset.video_backend=pyav \
+    --dataset.video_backend=torchcodec \
+    --dataset.use_imagenet_stats=false \
     --policy.type=act \
     --policy.device=cuda \
     --policy.push_to_hub=false \
     --policy.chunk_size=100 \
-    --policy.n_action_steps=16 \
+    --policy.n_action_steps=50 \
     --policy.vision_backbone=resnet18 \
     --policy.pretrained_backbone_weights=ResNet18_Weights.IMAGENET1K_V1 \
-    --batch_size=32 \
+    --batch_size=16 \
     --steps=100000 \
-    --num_workers=2 \
+    --num_workers=4 \
     --save_freq=1000 \
     --log_freq=10 \
     --job_name="$ACT_RUN_NAME" \
@@ -88,10 +103,12 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
 
 
 ## 2b. ACT + frozen DINOv2-base, official LeRobot train.py
+#
+# Predict 100 steps, execute 50 steps.
 
 export PYTHONPATH="$PROJECT_ROOT/high-level/lerobot/src:${PYTHONPATH:-}"
 
-ACT_DINOV2_RUN_NAME=leroact_dinov2_base_pi05_state10
+ACT_DINOV2_RUN_NAME=leroact_dinov2_base_4door_ikpush_chunk100_exec50_bs16_no_imagenet
 
 CUDA_VISIBLE_DEVICES=0 accelerate launch \
     --num-processes=1 \
@@ -99,19 +116,20 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
     "$(which lerobot-train)" \
     --dataset.root="$DATASET_ROOT" \
     --dataset.repo_id="$DATASET_REPO_ID" \
-    --dataset.video_backend=pyav \
+    --dataset.video_backend=torchcodec \
+    --dataset.use_imagenet_stats=false \
     --policy.type=act \
     --policy.device=cuda \
     --policy.push_to_hub=false \
     --policy.chunk_size=100 \
-    --policy.n_action_steps=16 \
+    --policy.n_action_steps=50 \
     --policy.vision_backbone=dinov2-base \
     --policy.freeze_vision_backbone=true \
     --policy.dinov2_image_size=224 \
     --policy.dinov2_feature_grid_size=6 \
-    --batch_size=32 \
+    --batch_size=16 \
     --steps=100000 \
-    --num_workers=2 \
+    --num_workers=4 \
     --save_freq=1000 \
     --log_freq=10 \
     --job_name="$ACT_DINOV2_RUN_NAME" \
@@ -127,10 +145,11 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
 #   conda activate b1z1_lerobot
 # Source tree:
 #   high-level/lerobot
+# Predict 50 steps, execute 50 steps.
 
 export PYTHONPATH="$PROJECT_ROOT/high-level/lerobot/src:${PYTHONPATH:-}"
 
-PI05_RUN_NAME=pi05_official_pi05_state10
+PI05_RUN_NAME=pi05_4door_ikpush_chunk50_exec50_no_imagenet
 
 CUDA_VISIBLE_DEVICES=0 accelerate launch \
     --num-processes=1 \
@@ -138,7 +157,8 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
     "$(which lerobot-train)" \
     --dataset.root="$DATASET_ROOT" \
     --dataset.repo_id="$DATASET_REPO_ID" \
-    --dataset.video_backend=pyav \
+    --dataset.video_backend=torchcodec \
+    --dataset.use_imagenet_stats=false \
     --policy.type=pi05 \
     --policy.device=cuda \
     --policy.pretrained_path=lerobot/pi05_base \
@@ -150,7 +170,7 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
     --policy.num_inference_steps=10 \
     --batch_size=16 \
     --steps=30000 \
-    --num_workers=2 \
+    --num_workers=4 \
     --save_freq=5000 \
     --log_freq=50 \
     --job_name="$PI05_RUN_NAME" \
@@ -169,10 +189,11 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
 #
 # pi05_evo is provided by high-level/hwk/lerobot, not high-level/lerobot.
 # Keep the HWK source first in PYTHONPATH for this command.
+# Predict 50 steps, execute 50 steps.
 
 export PYTHONPATH="$PROJECT_ROOT/high-level/hwk/lerobot/src:$PROJECT_ROOT/high-level/lerobot/src:${PYTHONPATH:-}"
 
-PI05_EVO_RUN_NAME=pi05_evo_official_pi05_state10
+PI05_EVO_RUN_NAME=pi05_evo_4door_ikpush_chunk50_exec50_no_imagenet
 
 CUDA_VISIBLE_DEVICES=0 accelerate launch \
     --num-processes=1 \
@@ -180,7 +201,8 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
     "$(which lerobot-train)" \
     --dataset.root="$DATASET_ROOT" \
     --dataset.repo_id="$DATASET_REPO_ID" \
-    --dataset.video_backend=pyav \
+    --dataset.video_backend=torchcodec \
+    --dataset.use_imagenet_stats=false \
     --policy.type=pi05_evo \
     --policy.device=cuda \
     --policy.pretrained_path=lerobot/pi05_base \
@@ -192,7 +214,7 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
     --policy.num_inference_steps=10 \
     --batch_size=16 \
     --steps=30000 \
-    --num_workers=2 \
+    --num_workers=4 \
     --save_freq=5000 \
     --log_freq=50 \
     --job_name="$PI05_EVO_RUN_NAME" \
@@ -202,28 +224,53 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
     --wandb.disable_artifact=true
 
 
-## 5. Play official LeRobot ACT checkpoint in Isaac Gym
+## 5. Play official LeRobot Diffusion checkpoint in Isaac Gym
 #
-# Required runtime:
-#   shell can be in b1z1; the auto-wrapper uses b1z1_lerobot through conda.
+# Runtime environment:
+#   conda activate b1z1
 #
-# This command accepts the official LeRobot checkpoint directory directly.
-# If it finds pretrained_model/config.json + train_config.json, it reads
-# dataset.root / dataset.repo_id from train_config.json, finds the dataset
-# door_dp_feature_names.json sidecar, and caches a Door-compatible checkpoint
-# under high-level/dp/logs/door-auto-wrapped/.
+# The first run auto-wraps the official LeRobot checkpoint to Door format under
+# high-level/dp/logs/door-auto-wrapped/.
+# DP inference uses DDPM with 10 denoising steps. Robot executes 20 control steps per policy query.
 
 export DOOR_DP_LEROBOT_CONDA_ENV=b1z1_lerobot
 
 python "$PROJECT_ROOT/high-level/dp/play/play_door_policy.py" \
     --mode ikpush \
-    --checkpoint "$OUTPUT_ROOT/act_pi05_state10_test/checkpoints/last" \
-    --num_envs 4 \
+    --checkpoint "$OUTPUT_ROOT/$DP_RUN_NAME/checkpoints/last" \
+    --num_envs 16 \
     --steps 2500 \
     --rl_device cuda:0 \
     --sim_device cuda:0 \
-    --dp_action_horizon 16 \
+    --dp_action_horizon 20 \
     --dp_inference_steps 10 \
-    --dp_noise_scheduler_type DDIM \
+    --dp_noise_scheduler_type DDPM \
+    --camera_display_scale 5 \
     -- \
-    --door_cfg "$PROJECT_ROOT/high-level/experiments/isaacgym/b1z1_opendoor.yaml"
+    --door_cfg "$PROJECT_ROOT/high-level/experiments/isaacgym/b1z1_opendoor.yaml" \
+    --pass_open_angle_deg 80 \
+    --seed 123456
+
+
+## 6. Play official LeRobot ACT checkpoint in Isaac Gym
+#
+# ACT predicts 100 steps from its checkpoint and executes 50 steps via --dp_action_horizon 50.
+# dp_inference_steps / dp_noise_scheduler_type are ignored by ACT, but kept harmlessly for CLI symmetry.
+
+export DOOR_DP_LEROBOT_CONDA_ENV=b1z1_lerobot
+
+python "$PROJECT_ROOT/high-level/dp/play/play_door_policy.py" \
+    --mode ikpush \
+    --checkpoint "$OUTPUT_ROOT/$ACT_RUN_NAME/checkpoints/last" \
+    --num_envs 16 \
+    --steps 2500 \
+    --rl_device cuda:0 \
+    --sim_device cuda:0 \
+    --dp_action_horizon 50 \
+    --dp_inference_steps 10 \
+    --dp_noise_scheduler_type DDPM \
+    --camera_display_scale 5 \
+    -- \
+    --door_cfg "$PROJECT_ROOT/high-level/experiments/isaacgym/b1z1_opendoor.yaml" \
+    --pass_open_angle_deg 80 \
+    --seed 123456
