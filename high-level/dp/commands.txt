@@ -1,199 +1,158 @@
 # Door DP 常用命令
-# 默认从 doorgym 根目录运行。现在 ikpush 是主调试路径。
+#
+# 默认从仓库根目录运行：
+#   cd /home/sivan/whole_body/visual_whole_body
+#
+# 当前主线数据格式：
+# - 仿真/control 仍是 50Hz，也就是 dt=0.02s。
+# - raw 数据按 25Hz 保存：state/action/camera 都是 25Hz。
+# - vision 使用 depth_only：只保存两张图
+#     observation.images.wrist_masked_depth
+#     observation.images.front_masked_depth
+#   不保存/不训练 handle mask。
+# - state 是 10D 物理当前状态：
+#     [vx, yaw_rate, ee_x, ee_y, ee_z, ee_qx, ee_qy, ee_qz, ee_qw, gripper]
+# - raw 转 LeRobot 时 state/action 不做 Door 自定义归一化；LeRobot train 自己根据 dataset stats 做 normalization。
+# - scripted ikpush 默认已缩短：initial_hold=150, initial_hold_move=100, grasp_hold=5, gripper_close=100。
+# - 门两侧墙体默认开启；如需关闭，在底层 float_ik 参数里加 --no_door_side_walls。
 
 
-## 0. 数据流程备忘
+PROJECT_ROOT=/home/sivan/whole_body/visual_whole_body
+RAW_ROOT=$PROJECT_ROOT/high-level/data/door_dp_raw/4door_ikpush_pi05_state10_depthonly_wall_40each
+LEROBOT_ROOT=$PROJECT_ROOT/high-level/data/lerobot
+REPO_ID=local/door_pi05_state10_depthonly_wall_40each
+DATASET_ROOT=$LEROBOT_ROOT/$REPO_ID
+ACT_RUN=leroact_door_pi05_state10_depthonly_wall_chunk100_exec50_bs16_no_imagenet_0604_2117
+ACT_CKPT=$PROJECT_ROOT/high-level/dp/logs/lerobot-train/$ACT_RUN/checkpoints/100000
 
-Phase A: scripted / float-IK expert 生成 raw .npz
-Phase B: raw .npz 转 LeRobotDataset
-Phase C: 训练 DP / ACT / pi0.5 policy
-Phase D: play / eval success / expert obs 对比
 
+## 1. scripted ikpush 可视化检查
 
-## 1. ikpush scripted play，只看环境不录数据
-
+# 只看环境、墙体、相机，不录数据。
 python high-level/float_ik/isaacgym_float_ik_b1z1_basearn_push_door_parallel.py \
-    --door_cfg high-level/experiments/isaacgym/b1z1_opendoor_single_99650089960001.yaml \
+    --door_cfg high-level/experiments/isaacgym/b1z1_opendoor.yaml \
     --num_envs 4 \
-    --steps 2850 \
+    --steps 2405 \
     --rl_device cuda:0 \
     --sim_device cuda:0 \
+    --depth_only \
+    --camera_depth \
     --no_show_seg
 
 
-## 2. 录 raw Door DP 数据
+## 2. 录制 raw 数据
 
-# 单次 ikpush 录制，保存成功 env。depth+mask。
-python high-level/dp/record/record_door_dp_dataset.py \
+# 主线录制：4 道门，每道门保存 40 条成功数据，总计约 160 条。
+# 只保存成功 env rollout；失败 rollout 会丢弃。
+# 注意：--success_per_door quota 模式会反复启动 simulator，直到每个 door_asset_name 达标。
+python high-level/dp/record/record_door_dp_dataset_pi05_state10.py \
     --mode ikpush \
     --num_envs 16 \
-    --num_rollouts 1 \
-    --steps 2850 \
+    --success_per_door 40 \
+    --max_quota_rollouts 100 \
     --seed 123456 \
-    --raw_root high-level/data/door_dp_raw/4door_ikpush \
+    --raw_root "$RAW_ROOT" \
     --rl_device cuda:0 \
     --sim_device cuda:0 \
     --headless \
+    --depth_only \
     -- \
     --door_cfg high-level/experiments/isaacgym/b1z1_opendoor.yaml \
     --no_show_seg
 
-# PI0.5 专用 raw 录制：state 是 10 维当前状态
-# [vx, yaw_rate, ee_x, ee_y, ee_z, ee_qx, ee_qy, ee_qz, ee_qw, gripper]。
-# raw 里保持物理值不归一化。转 LeRobot 时不做 Door robust_quantile 归一化；
-# 训练时由 LeRobot/Policy 自己根据 dataset stats 做 state/action normalization。
-conda activate txc_vbc
-export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
+# 单次录制调试：只跑一次 16 env。
 python high-level/dp/record/record_door_dp_dataset_pi05_state10.py \
     --mode ikpush \
     --num_envs 16 \
     --num_rollouts 1 \
-    --steps 2850 \
     --seed 123456 \
-    --raw_root high-level/data/door_dp_raw/4door_ikpush_pi05_state10 \
+    --raw_root "$RAW_ROOT"_debug \
     --rl_device cuda:0 \
     --sim_device cuda:0 \
     --headless \
+    --depth_only \
     -- \
     --door_cfg high-level/experiments/isaacgym/b1z1_opendoor.yaml \
     --no_show_seg
 
-# 单次 ikpush 录制，RGB+mask。训练 RGB checkpoint 时使用。
-python high-level/dp/record/record_door_dp_dataset.py \
-    --mode ikpush \
-    --num_envs 16 \
-    --num_rollouts 1 \
-    --steps 2850 \
-    --seed 123456 \
-    --raw_root high-level/data/door_dp_raw/4door_ikpush_rgb \
-    --rl_device cuda:0 \
-    --sim_device cuda:0 \
-    --headless \
-    --rgb \
-    -- \
-    --door_cfg high-level/experiments/isaacgym/b1z1_opendoor.yaml \
-    --no_show_seg
-
-# 单门批量 sweep，反复启动 recorder，直到达到 target_episodes 或 max_runs。
-python high-level/dp/record/record_single_door_push_sweep.py \
-    --target_episodes 160 \
-    --max_runs 30 \
-    --num_envs 16 \
-    --steps 2850 \
-    --raw_root high-level/data/door_dp_raw/sgikpush_new \
-    --door_cfg high-level/experiments/isaacgym/b1z1_opendoor_single_99650089960001.yaml \
-    --rl_device cuda:0 \
-    --sim_device cuda:0 \
-    --headless
-
-# teleop 手动录制，viewer 里按 C 开始，再按 C 结束并保存。默认录 wrist/front 的 mask+masked depth。
+# teleop 手动录制：viewer 里按 C 开始，再按 C 结束并保存。
+# teleop 也按 50Hz 仿真、25Hz raw 数据保存。
 python high-level/dp/record/record_teleop_door_dp_dataset.py \
-    --dp_raw_root high-level/data/door_dp_raw/teleop_ikpush \
+    --dp_raw_root high-level/data/door_dp_raw/teleop_ikpush_depthonly \
     --dp_task "push lever door open" \
-    --door_cfg high-level/experiments/isaacgym/b1z1_opendoor_single_99650089960001.yaml \
+    --dp_fps 25 \
+    --sim_fps 50 \
+    --camera_fps 25 \
+    --depth_only \
+    --door_cfg high-level/experiments/isaacgym/b1z1_opendoor_single_door0.yaml \
     --rl_device cuda:0 \
     --sim_device cuda:0
 
 
 ## 3. Replay raw episode
 
-# 用 raw 里的 replay state 重放一条 ikpush 数据。
+# 按 raw metadata 重放一条 episode。raw 是 25Hz，所以 replay 会按 25Hz 逐帧播放；
+# 底层仿真仍是 50Hz。--replay_mode state 用记录状态回放，适合检查数据是否正常。
 python high-level/dp/record/replay_door_dp_raw_in_isaacgym.py \
-    --raw_episode high-level/data/door_dp_raw/4door_ikpush/episode_000000.npz \
+    --raw_episode "$RAW_ROOT"/episode_000000.npz \
     --replay_mode state \
     --mode ikpush \
-    --door_cfg high-level/experiments/isaacgym/b1z1_opendoor_single_99650089960001.yaml \
+    --door_cfg high-level/experiments/isaacgym/b1z1_opendoor.yaml \
     --num_envs 1 \
     --rl_device cuda:0 \
     --sim_device cuda:0
 
-# 如果 raw 是 RGB，额外加 --rgb。
+# 如果想强制实时播放：
+python high-level/dp/record/replay_door_dp_raw_in_isaacgym.py \
+    --raw_episode "$RAW_ROOT"/episode_000000.npz \
+    --replay_mode state \
+    --mode ikpush \
+    --door_cfg high-level/experiments/isaacgym/b1z1_opendoor.yaml \
+    --num_envs 1 \
+    --real_time \
+    --rl_device cuda:0 \
+    --sim_device cuda:0
 
 
 ## 4. raw 转 LeRobotDataset
 
-# depth+mask 数据转换。
-conda run -n door_dp python high-level/dp/convert_door_raw_to_lerobot.py \
-    --raw_root high-level/data/door_dp_raw/4door_ikpush \
-    --root high-level/data/lerobot \
-    --repo_id local/4door_ikpush \
-    --overwrite \
-    --num_workers 4 \
-    --image_storage video \
-    --video_codec h264 \
-    --state_preprocess none \
-    --action_preprocess none \
-    --near_zero_rate_eps 1e-5
-
-# PI0.5 10D current-state raw 转 LeRobotDataset。不要再用 *_pi05_state10 转换脚本，
-# 因为这个 raw 已经是 10 维当前状态；默认不做 Door robust_quantile 归一化，只会把近零 yaw/yaw_rate 抖动清零。
+# 转成 LeRobot v3 video 格式。这里显式指定 --fps 25 和 --depth_only。
+# near_zero_rate_eps 只清理 yaw/yaw_rate 一类接近 0 的数值抖动，不做归一化。
 conda run -n b1z1_lerobot python high-level/dp/convert_door_raw_to_lerobot.py \
-    --raw_root high-level/data/door_dp_raw/4door_ikpush_pi05_state10 \
-    --root high-level/data/lerobot \
-    --repo_id local/4door_ikpush_pi05_state10 \
+    --raw_root "$RAW_ROOT" \
+    --root "$LEROBOT_ROOT" \
+    --repo_id "$REPO_ID" \
     --overwrite \
-    --num_workers 4 \
+    --fps 25 \
+    --depth_only \
     --image_storage video \
     --video_codec h264 \
-    --state_preprocess none \
-    --action_preprocess none \
-    --near_zero_rate_eps 1e-5
-
-# RGB+mask 数据转换，额外加 --rgb。
-conda run -n door_dp python high-level/dp/convert_door_raw_to_lerobot.py \
-    --raw_root high-level/data/door_dp_raw/4door_ikpush_rgb \
-    --root high-level/data/lerobot \
-    --repo_id local/4door_ikpush_rgb \
-    --overwrite \
     --num_workers 4 \
-    --rgb \
-    --image_storage video \
-    --video_codec h264 \
     --state_preprocess none \
     --action_preprocess none \
     --near_zero_rate_eps 1e-5
 
 # 可视化检查 LeRobotDataset。
-conda run -n door_dp python -m lerobot.scripts.visualize_dataset \
-    --repo-id local/4door_ikpush \
-    --root high-level/data/lerobot/local/4door_ikpush \
+conda run -n b1z1_lerobot python -m lerobot.scripts.visualize_dataset \
+    --repo-id "$REPO_ID" \
+    --root "$DATASET_ROOT" \
     --episode-index 0 \
     --mode local
-
-# 转换 roundtrip 检查。
-conda run -n door_dp python high-level/dp/roundtrip_lerobot_to_raw_and_check.py \
-    --raw_root high-level/data/door_dp_raw/4door_ikpush \
-    --root high-level/data/lerobot \
-    --repo_id local/4door_ikpush \
-    --out_raw_root high-level/data/door_dp_raw/4door_ikpush_lerobot_roundtrip \
-    --overwrite
 
 
 ## 5. 训练 policy
 
-# DP 训练。预测 40 步，执行 20 步；play/eval 推理使用 DDPM 10 denoising steps。
-conda run -n door_dp python high-level/dp/train/train_door_dp.py \
-    --root high-level/data/lerobot \
-    --repo_id local/4door_ikpush \
-    --run_name lerodp_4door_ikpush_h40_exec20 \
-    --steps 100000 \
-    --batch_size 16 \
-    --num_workers 4 \
-    --device cuda:0 \
-    --obs_horizon 16 \
-    --pred_horizon 40 \
-    --action_horizon 20 \
-    --num_diffusion_iters 100 \
-    --num_inference_steps 10 \
-    --noise_scheduler_type DDPM \
-    --clip_sample_range 7.0 \
-    --wandb
+# 推荐用官方 LeRobot train.py，完整命令见 high-level/dp/command_lerobot.txt。
+# 关键训练约定：
+# - ACT: chunk_size=100, n_action_steps=50。25Hz 下预测 4s，执行 2s。
+# - DP: horizon=40, n_action_steps=20。25Hz 下预测 1.6s，执行 0.8s。
+# - 所有 LeRobot train 命令都加 --dataset.use_imagenet_stats=false。
 
-# ACT 训练。预测 100 步，执行 50 步。
-conda run -n door_dp python high-level/dp/train/train_door_act.py \
-    --root high-level/data/lerobot \
-    --repo_id local/4door_ikpush \
-    --run_name act_4door_ikpush_chunk100_exec50_bs16 \
+# 自己 train 文件夹里的 ACT 训练脚本，使用同一份 LeRobot 数据集。
+conda run -n b1z1_lerobot python high-level/dp/train/train_door_act.py \
+    --root "$LEROBOT_ROOT" \
+    --repo_id "$REPO_ID" \
+    --run_name act_depthonly_wall_chunk100_exec50_bs16 \
     --steps 100000 \
     --batch_size 16 \
     --num_workers 4 \
@@ -202,145 +161,119 @@ conda run -n door_dp python high-level/dp/train/train_door_act.py \
     --action_horizon 50 \
     --wandb
 
-# pi0.5 训练，需要先准备 pretrained_path。预测 50 步，执行 50 步。
-conda run -n door_dp python high-level/dp/train/train_door_pi05.py \
-    --root high-level/data/lerobot \
-    --repo_id local/4door_ikpush \
-    --run_name pi05_4door_ikpush \
-    --steps 100000 \
-    --batch_size 1 \
-    --num_workers 0 \
-    --device cuda:0 \
-    --chunk_size 50 \
-    --action_horizon 50 \
-    --num_inference_steps 10 \
-    --pretrained_path <pi05_checkpoint_or_repo>
-
 
 ## 6. Play trained policy
 
-# DP / ACT / pi0.5 统一入口，会自动根据 checkpoint metadata 识别 policy 类型。
+# official LeRobot ACT checkpoint 可以直接给 play_door_policy.py；
+# 第一次运行会自动 wrap 到 high-level/dp/logs/door-auto-wrapped/。
+# --depth_only 表示只给策略两张 depth。
+# --dp_fps 25 放在最后 -- 后面，会透传到底层 float_ik，表示 25Hz command 节奏。
 python high-level/dp/play/play_door_policy.py \
     --mode ikpush \
-    --checkpoint high-level/dp/logs/door-auto-wrapped/lerodp_4door_ikpush_h40_exec20_bs16_no_imagenet/100000/model_latest.pt \
-    --num_envs 4 \
+    --checkpoint "$ACT_CKPT" \
+    --num_envs 16 \
     --steps 2500 \
     --rl_device cuda:0 \
     --sim_device cuda:0 \
-    --dp_inference_steps 10 \
-    --dp_noise_scheduler_type DDPM \
-    --dp_action_horizon 20 \
-    -- \
-    --door_cfg high-level/experiments/isaacgym/b1z1_opendoor.yaml
-
-# ACT checkpoint 示例。ACT 预测 100 步，执行 50 步。
-# dp_inference_steps 对 ACT 没作用，保留在命令里方便切回 DP。
-python high-level/dp/play/play_door_policy.py \
-    --mode ikpush \
-    --checkpoint high-level/dp/logs/door-act/act_4door_ikpush_chunk100_exec50_bs16/checkpoints/model_latest.pt \
-    --num_envs 4 \
-    --steps 2500 \
-    --rl_device cuda:0 \
-    --sim_device cuda:0 \
-    --dp_inference_steps 10 \
-    --dp_noise_scheduler_type DDPM \
+    --depth_only \
     --dp_action_horizon 50 \
+    --camera_display_scale 5 \
     -- \
-    --door_cfg high-level/experiments/isaacgym/b1z1_opendoor.yaml
+    --door_cfg high-level/experiments/isaacgym/b1z1_opendoor.yaml \
+    --pass_open_angle_deg 80 \
+    --dp_fps 25 \
+    --seed 123456
 
-# 从 raw expert 某一帧 warmstart，再闭环 play policy。
+# 只看单门 door0。
 python high-level/dp/play/play_door_policy.py \
     --mode ikpush \
-    --checkpoint high-level/dp/logs/door-auto-wrapped/lerodp_4door_ikpush_h40_exec20_bs16_no_imagenet/100000/model_latest.pt \
-    --num_envs 1 \
-    --steps 1200 \
-    --dp_warmstart \
-    --dp_warmstart_raw_episode high-level/data/door_dp_raw/4door_ikpush/episode_000000.npz \
-    --dp_warmstart_step 300 \
-    --dp_inference_steps 10 \
-    --dp_noise_scheduler_type DDPM \
-    --dp_action_horizon 20 \
+    --checkpoint "$ACT_CKPT" \
+    --num_envs 16 \
+    --steps 2500 \
+    --rl_device cuda:0 \
+    --sim_device cuda:0 \
+    --depth_only \
+    --dp_action_horizon 50 \
+    --camera_display_scale 5 \
     -- \
-    --door_cfg high-level/experiments/isaacgym/b1z1_opendoor_single_99650089960001.yaml
+    --door_cfg high-level/experiments/isaacgym/b1z1_opendoor_single_door0.yaml \
+    --pass_open_angle_deg 80 \
+    --dp_fps 25 \
+    --seed 123456
 
 
 ## 7. Eval: expert obs 对比
 
-# 按区间扫一条 expert episode，比较 policy action 和 expert action。
-python high-level/dp/eval/eval_door_dp_on_expert_obs.py \
-    --raw_episode high-level/data/door_dp_raw/4door_ikpush/episode_000000.npz \
-    --checkpoint high-level/dp/logs/door-auto-wrapped/lerodp_4door_ikpush_h40_exec20_bs16_no_imagenet/100000/model_latest.pt \
+# 在 expert raw observation 上跑策略，比较预测 action 和 expert action。
+# 用 b1z1_lerobot 环境可以避免 policy controller 走 subprocess。
+conda run -n b1z1_lerobot python high-level/dp/eval/eval_door_dp_on_expert_obs.py \
+    --raw_episode "$RAW_ROOT"/episode_000000.npz \
+    --checkpoint "$ACT_CKPT" \
     --device cuda:0 \
-    --action_horizon 20 \
-    --compare_horizon 20 \
-    --start 15 \
-    --end 2160 \
-    --stride 25 \
-    --report_every 300 \
-    --dp_inference_steps 10 \
-    --dp_noise_scheduler_type DDPM
+    --depth_only \
+    --action_horizon 50 \
+    --compare_horizon 50 \
+    --start 0 \
+    --end 1200 \
+    --stride 50 \
+    --eval_batch_size 16
 
 # 看几个关键帧。
-python high-level/dp/eval/eval_door_dp_on_expert_obs.py \
-    --raw_episode high-level/data/door_dp_raw/4door_ikpush/episode_000000.npz \
-    --checkpoint high-level/dp/logs/door-act/act_4door_ikpush_chunk100_exec50_bs16/checkpoints/model_latest.pt \
+conda run -n b1z1_lerobot python high-level/dp/eval/eval_door_dp_on_expert_obs.py \
+    --raw_episode "$RAW_ROOT"/episode_000000.npz \
+    --checkpoint "$ACT_CKPT" \
     --device cuda:0 \
+    --depth_only \
     --action_horizon 50 \
     --compare_horizon 50 \
     --steps 300 600 900 \
-    --dp_inference_steps 10 \
-    --dp_noise_scheduler_type DDPM
+    --eval_batch_size 8
 
 
 ## 8. Eval: success rate
 
-# 并行评估 policy 成功率。base_seed 固定时，total_trials/num_envs 不变则随机化可复现。
+# 批量评估成功率。这里同样显式传 --depth_only 和 --dp_fps 25。
 python high-level/dp/eval/eval_door_policy_success.py \
-    --checkpoint high-level/dp/logs/door-act/act_4door_ikpush_chunk100_exec50_bs16/checkpoints/model_latest.pt \
-    --yaml high-level/experiments/isaacgym/b1z1_opendoor_single_door2.yaml \
-    --mode ikpush \
-    --num_envs 16 \
-    --parallel_batches 2 \
-    --total_trials 64 \
-    --steps 2500 \
-    --pass_open_angle_deg 80 \
-    --base_seed 123456 \
-    --headless \
-    --graphics_device_id 0 \
-    --dp_action_horizon 50 \
-    --dp_inference_steps 10 \
-    --dp_noise_scheduler_type DDPM
-
-# 只评估 yaml 里的某个门，底层 play 参数放在最后的 -- 后。
-python high-level/dp/eval/eval_door_policy_success.py \
-    --checkpoint high-level/dp/logs/door-auto-wrapped/lerodp_4door_ikpush_h40_exec20_bs16_no_imagenet/100000/model_latest.pt \
+    --checkpoint "$ACT_CKPT" \
     --yaml high-level/experiments/isaacgym/b1z1_opendoor.yaml \
     --mode ikpush \
     --num_envs 16 \
-    --parallel_batches 2 \
     --total_trials 64 \
     --steps 2500 \
+    --pass_open_angle_deg 80 \
+    --success_metric signed \
+    --door_motion_sign -1 \
     --base_seed 123456 \
     --headless \
-    --graphics_device_id 0 \
-    --dp_action_horizon 20 \
-    --dp_inference_steps 10 \
-    --dp_noise_scheduler_type DDPM \
-    -- \
-    --door_name 99650089960001
+    --rl_device cuda:0 \
+    --sim_device cuda:0 \
+    --depth_only \
+    --dp_action_horizon 50 \
+    --dp_fps 25
+
+# 单门 door0 success eval。
+python high-level/dp/eval/eval_door_policy_success.py \
+    --checkpoint "$ACT_CKPT" \
+    --yaml high-level/experiments/isaacgym/b1z1_opendoor_single_door0.yaml \
+    --mode ikpush \
+    --num_envs 16 \
+    --total_trials 64 \
+    --steps 2500 \
+    --pass_open_angle_deg 80 \
+    --success_metric signed \
+    --door_motion_sign -1 \
+    --base_seed 123456 \
+    --headless \
+    --rl_device cuda:0 \
+    --sim_device cuda:0 \
+    --depth_only \
+    --dp_action_horizon 50 \
+    --dp_fps 25
 
 
-## 9. 推理测速
+## 9. 常见旧格式提示
 
-conda run -n door_dp python high-level/dp/bench_door_policy_speed.py \
-    --dp_checkpoint high-level/dp/logs/door-auto-wrapped/lerodp_4door_ikpush_h40_exec20_bs16_no_imagenet/100000/model_latest.pt \
-    --act_checkpoint high-level/dp/logs/door-act/act_4door_ikpush_chunk100_exec50_bs16/checkpoints/model_latest.pt \
-    --device cuda:0 \
-    --warmup 3 \
-    --iters 10
-
-
-## 10. 打包推理 checkpoint，排除 optimizer
-
-cd high-level/dp/logs/door-act/act_4door_ikpush_chunk100_exec50_bs16/checkpoints
-zip -r door_policy_infer.zip model_latest.pt model_latest -x "model_latest/optimizer.pt"
+# depth+mask 旧格式：不要加 --depth_only。
+# RGB+mask 旧格式：录制/转换/play/eval 都要加 --rgb。
+# 如果用 50Hz 旧数据训练出来的 checkpoint，play/eval 也应该把 --dp_fps 设回 50，
+# 否则 action chunk 的时间尺度会变慢一倍。

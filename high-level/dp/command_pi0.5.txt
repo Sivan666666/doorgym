@@ -1,79 +1,127 @@
-# Door pi0.5 training commands
+# Door pi0.5 / pi0.5 evo commands
 #
-# Run from anywhere. Paths are absolute to avoid cwd-related failures.
-# `conda run --no-capture-output` keeps loss/log output visible in the terminal.
+# This file is only for pi0.5-family policies. General ACT/DP commands live in:
+#   high-level/dp/command_lerobot.txt
+#
+# Current dataset:
+# - LeRobot repo_id: local/door_pi05_state10_depthonly_wall_40each
+# - 25Hz depth_only data over 50Hz Isaac Gym simulation.
+# - policy.chunk_size=100 predicts 4.0s of actions.
+# - policy.n_action_steps=50 executes 2.0s before the next chunk is requested.
+
+set -o pipefail
+
+PROJECT_ROOT=/home/sivan/whole_body/visual_whole_body
+DATASET_REPO_ID=local/door_pi05_state10_depthonly_wall_40each
+DATASET_ROOT=$PROJECT_ROOT/high-level/data/lerobot/local/door_pi05_state10_depthonly_wall_40each
+OUTPUT_ROOT=$PROJECT_ROOT/high-level/dp/logs/lerobot-train
+
+cd "$PROJECT_ROOT"
 
 
 ## 1. LeRobot pi0.5 baseline
 #
 # Environment:
-#   b1z1_lerobot
-# Policy:
-#   lerobot.policies.pi05.PI05Policy
-# GPU:
-#   cuda:0
-# Horizon:
-#   predict 50 control steps, execute 50 control steps, 10 inference/denoising steps
+#   conda activate b1z1_lerobot
+# Source:
+#   high-level/lerobot
 
-set -o pipefail
-cd /home/ps/workspace/txc/doorgym
+export PYTHONPATH="$PROJECT_ROOT/high-level/lerobot/src:${PYTHONPATH:-}"
 
-mkdir -p /home/ps/workspace/txc/doorgym/high-level/dp/logs/door-pi05/pi05_4door_ikpush
+PI05_RUN_NAME=pi05_door_pi05_state10_depthonly_wall_chunk100_exec50_no_imagenet_$(date +%m%d_%H%M)
 
-conda run --no-capture-output -n b1z1_lerobot python /home/ps/workspace/txc/doorgym/high-level/dp/train/train_door_pi05.py \
-    --policy_type pi05 \
-    --root /home/ps/workspace/txc/doorgym/high-level/data/lerobot \
-    --repo_id local/4door_ikpush \
-    --run_name pi05_4door_ikpush \
-    --steps 200000 \
-    --batch_size 16 \
-    --num_workers 2 \
-    --device cuda:0 \
-    --chunk_size 50 \
-    --action_horizon 50 \
-    --num_inference_steps 10 \
-    --pretrained_path /home/ps/workspace/txc/doorgym/high-level/dp/models/pi05_base \
-    --dtype bfloat16 \
-    --gradient_checkpointing \
-    --log_interval 1 \
-    2>&1 | tee -a /home/ps/workspace/txc/doorgym/high-level/dp/logs/door-pi05/pi05_4door_ikpush/terminal.log
+CUDA_VISIBLE_DEVICES=0 accelerate launch \
+    --num-processes=1 \
+    --mixed_precision=bf16 \
+    "$(which lerobot-train)" \
+    --dataset.root="$DATASET_ROOT" \
+    --dataset.repo_id="$DATASET_REPO_ID" \
+    --dataset.video_backend=torchcodec \
+    --dataset.use_imagenet_stats=false \
+    --policy.type=pi05 \
+    --policy.device=cuda \
+    --policy.pretrained_path=lerobot/pi05_base \
+    --policy.dtype=bfloat16 \
+    --policy.push_to_hub=false \
+    --policy.gradient_checkpointing=true \
+    --policy.chunk_size=100 \
+    --policy.n_action_steps=50 \
+    --policy.num_inference_steps=10 \
+    --batch_size=16 \
+    --steps=30000 \
+    --num_workers=4 \
+    --save_freq=5000 \
+    --log_freq=50 \
+    --job_name="$PI05_RUN_NAME" \
+    --output_dir="$OUTPUT_ROOT/$PI05_RUN_NAME" \
+    --wandb.enable=true \
+    --wandb.project=door-pi05 \
+    --wandb.disable_artifact=true
 
 
 ## 2. HWK LeRobot pi0.5 evo
 #
 # Environment:
-#   b1z1_hwk_lerobot
-# Policy:
-#   lerobot.policies.pi05_evo.PI05EvoPolicy
-# GPU:
-#   cuda:1
-# Logging:
-#   terminal + wandb
-# Horizon:
-#   predict 50 control steps, execute 50 control steps, 10 inference/denoising steps
+#   conda activate b1z1_hwk_lerobot
+# Source:
+#   high-level/hwk/lerobot
+# Note:
+#   pi05_evo is provided by the HWK source tree, so HWK must be first in PYTHONPATH.
 
-set -o pipefail
-cd /home/ps/workspace/txc/doorgym
+export PYTHONPATH="$PROJECT_ROOT/high-level/hwk/lerobot/src:$PROJECT_ROOT/high-level/lerobot/src:${PYTHONPATH:-}"
 
-mkdir -p /home/ps/workspace/txc/doorgym/high-level/dp/logs/door-pi05/pi05_evo_4door_ikpush_hwk
+PI05_EVO_RUN_NAME=pi05_evo_door_pi05_state10_depthonly_wall_chunk100_exec50_no_imagenet_$(date +%m%d_%H%M)
 
-conda run --no-capture-output -n b1z1_hwk_lerobot python /home/ps/workspace/txc/doorgym/high-level/dp/train/train_door_pi05.py \
-    --policy_type pi05_evo \
-    --root /home/ps/workspace/txc/doorgym/high-level/data/lerobot \
-    --repo_id local/4door_ikpush \
-    --run_name pi05_evo_4door_ikpush_hwk \
-    --steps 200000 \
-    --batch_size 16 \
-    --num_workers 2 \
-    --device cuda:1 \
-    --chunk_size 50 \
-    --action_horizon 50 \
-    --num_inference_steps 10 \
-    --pretrained_path /home/ps/workspace/txc/doorgym/high-level/dp/models/pi05_base \
-    --dtype bfloat16 \
-    --gradient_checkpointing \
-    --wandb \
-    --wandb_project door-pi05 \
-    --wandb_group evo \
-    --log_interval 1 \
-    2>&1 | tee -a /home/ps/workspace/txc/doorgym/high-level/dp/logs/door-pi05/pi05_evo_4door_ikpush_hwk/terminal.log
+CUDA_VISIBLE_DEVICES=0 accelerate launch \
+    --num-processes=1 \
+    --mixed_precision=bf16 \
+    "$(which lerobot-train)" \
+    --dataset.root="$DATASET_ROOT" \
+    --dataset.repo_id="$DATASET_REPO_ID" \
+    --dataset.video_backend=torchcodec \
+    --dataset.use_imagenet_stats=false \
+    --policy.type=pi05_evo \
+    --policy.device=cuda \
+    --policy.pretrained_path=lerobot/pi05_base \
+    --policy.dtype=bfloat16 \
+    --policy.push_to_hub=false \
+    --policy.gradient_checkpointing=true \
+    --policy.chunk_size=100 \
+    --policy.n_action_steps=50 \
+    --policy.num_inference_steps=10 \
+    --batch_size=16 \
+    --steps=30000 \
+    --num_workers=4 \
+    --save_freq=5000 \
+    --log_freq=50 \
+    --job_name="$PI05_EVO_RUN_NAME" \
+    --output_dir="$OUTPUT_ROOT/$PI05_EVO_RUN_NAME" \
+    --wandb.enable=true \
+    --wandb.project=door-pi05 \
+    --wandb.disable_artifact=true
+
+
+## 3. Play pi0.5-family checkpoint
+#
+# Runtime environment:
+#   conda activate b1z1
+# The checkpoint can be an official LeRobot checkpoint directory. play_door_policy.py
+# will auto-wrap it for Door runtime.
+
+PI05_CKPT="$OUTPUT_ROOT/$PI05_RUN_NAME/checkpoints/30000"
+
+python "$PROJECT_ROOT/high-level/dp/play/play_door_policy.py" \
+    --mode ikpush \
+    --checkpoint "$PI05_CKPT" \
+    --num_envs 16 \
+    --steps 2500 \
+    --rl_device cuda:0 \
+    --sim_device cuda:0 \
+    --depth_only \
+    --dp_action_horizon 50 \
+    --camera_display_scale 5 \
+    -- \
+    --door_cfg "$PROJECT_ROOT/high-level/experiments/isaacgym/b1z1_opendoor.yaml" \
+    --pass_open_angle_deg 80 \
+    --dp_fps 25 \
+    --seed 123456

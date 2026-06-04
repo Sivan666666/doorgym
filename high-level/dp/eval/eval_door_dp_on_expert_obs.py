@@ -29,6 +29,7 @@ from door_dp_common import (  # noqa: E402
     normalize_vision_mode,
     raw_image_keys_for_vision_mode,
 )
+from play.play_door_policy import auto_wrap_official_lerobot_checkpoint  # noqa: E402
 
 
 @dataclass
@@ -124,6 +125,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--compare_horizon", type=int, default=None, help="Actions per queried step to compare.")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--rgb", action="store_true", help="Require RGB+mask raw data/checkpoint.")
+    parser.add_argument("--depth_only", action="store_true", help="Require wrist/front depth-only raw data/checkpoint.")
     parser.add_argument("--steps", type=int, nargs="*", default=None, help="Specific expert steps to evaluate.")
     parser.add_argument("--start", type=int, default=None, help="First expert step when --steps is omitted.")
     parser.add_argument("--end", type=int, default=None, help="Exclusive final expert step when --steps is omitted.")
@@ -245,19 +247,26 @@ def episode_memory_mb(episode: dict[str, np.ndarray]) -> float:
     return sum(float(value.nbytes) for value in episode.values()) / (1024.0 * 1024.0)
 
 
+def make_controller_item(controller: DoorDPPolicyController, state: np.ndarray, episode, image_keys: list[str], idx: int):
+    if controller.vision_mode == "depth_only":
+        wrist_depth = episode[image_keys[0]][idx].astype(np.uint8)
+        front_depth = episode[image_keys[1]][idx].astype(np.uint8)
+        dummy_mask = np.zeros_like(wrist_depth)
+        return controller._make_item(state.astype(np.float32), dummy_mask, wrist_depth, None, front_depth)
+    return controller._make_item(
+        state.astype(np.float32),
+        episode[image_keys[0]][idx].astype(np.uint8),
+        episode[image_keys[1]][idx].astype(np.uint8),
+        episode[image_keys[2]][idx].astype(np.uint8),
+        episode[image_keys[3]][idx].astype(np.uint8),
+    )
+
+
 def build_obs_cache(controller: DoorDPPolicyController, episode: dict[str, np.ndarray], image_keys: list[str]):
     cache = []
     total = int(episode["state"].shape[0])
     for idx in range(total):
-        cache.append(
-            controller._make_item(
-                episode["state"][idx].astype(np.float32),
-                episode[image_keys[0]][idx].astype(np.uint8),
-                episode[image_keys[1]][idx].astype(np.uint8),
-                episode[image_keys[2]][idx].astype(np.uint8),
-                episode[image_keys[3]][idx].astype(np.uint8),
-            )
-        )
+        cache.append(make_controller_item(controller, episode["state"][idx], episode, image_keys, idx))
     return cache
 
 
@@ -307,13 +316,24 @@ def reset_controller_on_expert_window(controller: DoorDPPolicyController, data, 
     controller.action_queue.clear()
     first = max(0, int(step) - controller.obs_horizon + 1)
     for idx in range(first, int(step) + 1):
-        controller.append_observation(
-            data["state"][idx].astype(np.float32),
-            data[image_keys[0]][idx].astype(np.uint8),
-            data[image_keys[1]][idx].astype(np.uint8),
-            data[image_keys[2]][idx].astype(np.uint8),
-            data[image_keys[3]][idx].astype(np.uint8),
-        )
+        if controller.vision_mode == "depth_only":
+            wrist_depth = data[image_keys[0]][idx].astype(np.uint8)
+            front_depth = data[image_keys[1]][idx].astype(np.uint8)
+            controller.append_observation(
+                data["state"][idx].astype(np.float32),
+                np.zeros_like(wrist_depth),
+                wrist_depth,
+                None,
+                front_depth,
+            )
+        else:
+            controller.append_observation(
+                data["state"][idx].astype(np.float32),
+                data[image_keys[0]][idx].astype(np.uint8),
+                data[image_keys[1]][idx].astype(np.uint8),
+                data[image_keys[2]][idx].astype(np.uint8),
+                data[image_keys[3]][idx].astype(np.uint8),
+            )
 
 
 def predict_action_chunk(
@@ -348,8 +368,14 @@ def main() -> None:
     args = parse_args()
     raw_path = Path(args.raw_episode).expanduser().resolve()
     ckpt_path = Path(args.checkpoint).expanduser().resolve()
-    expected_vision_mode = "rgb" if args.rgb else "depth"
+    if args.rgb and args.depth_only:
+        raise ValueError("--rgb and --depth_only are mutually exclusive.")
+    expected_vision_mode = "rgb" if args.rgb else ("depth_only" if args.depth_only else "depth")
     data = np.load(raw_path, allow_pickle=True)
+    args.rl_device = args.device
+    args.dp_inference_steps = args.num_inference_steps
+    args.dp_noise_scheduler_type = args.noise_scheduler_type
+    ckpt_path = Path(auto_wrap_official_lerobot_checkpoint(ckpt_path, args)).expanduser().resolve()
     controller = DoorDPPolicyController(
         ckpt_path,
         device=args.device,

@@ -45,6 +45,7 @@ def parse_args():
     parser.add_argument("--manifest_name", type=str, default="model_latest.pt")
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument("--rgb", action="store_true")
+    parser.add_argument("--depth_only", action="store_true")
     parser.add_argument("--action_horizon", type=int, default=None)
     parser.add_argument("--num_inference_steps", type=int, default=None)
     parser.add_argument("--noise_scheduler_type", choices=["DDPM", "DDIM"], default=None)
@@ -99,7 +100,9 @@ def main():
 
     dataset_root = _resolve_lerobot_root(args.root, args.repo_id)
     sidecar_data, sidecar_path = load_sidecar(dataset_root)
-    vision_mode = "rgb" if args.rgb else "depth"
+    if args.rgb and args.depth_only:
+        raise ValueError("--rgb and --depth_only are mutually exclusive.")
+    vision_mode = "rgb" if args.rgb else ("depth_only" if args.depth_only else "depth")
     dataset_vision_mode = normalize_vision_mode(sidecar_data.get("vision_mode", "depth"))
     if dataset_vision_mode != vision_mode:
         raise ValueError(f"Dataset vision_mode={dataset_vision_mode!r}, export expected {vision_mode!r}.")

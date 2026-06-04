@@ -8,6 +8,7 @@ import json
 import math
 import os
 import sys
+import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -43,6 +44,7 @@ DEFAULT_FRONT_CAMERA_CFG = {
     "position": [0.425, 0.04, 0.12],
     "rotation": [0.0, 0.0, 0.0],
 }
+_DOOR_SIDE_WALL_ASSET_CACHE = {}
 
 DP_NUM_DOFS = 19
 DP_NUM_ACTIONS = 18
@@ -198,6 +200,9 @@ class ParallelDoorEnvState:
     dp_recorder: object = None
     dp_record_success: bool = False
     dp_record_warned_no_camera: bool = False
+    dp_record_sim_steps: int = 0
+    dp_record_prev_base_xy: object = None
+    dp_record_prev_yaw: object = None
     last_dp_action: object = None
     dp_action_frame: str = "base"
 
@@ -465,6 +470,107 @@ def configure_door_actor_dofs(gym, env, door_actor, door, args):
     door.handle_unlock_threshold = args.handle_unlock_ratio * handle_range
 
 
+def door_side_walls_enabled(args):
+    return not bool(getattr(args, "no_door_side_walls", False))
+
+
+def create_door_side_wall_asset(gym, sim, args):
+    dims = (
+        max(1.0e-3, float(getattr(args, "door_wall_thickness", 0.08))),
+        max(1.0e-3, float(getattr(args, "door_wall_side_width", 1.0))),
+        max(1.0e-3, float(getattr(args, "door_wall_height", 2.2))),
+    )
+    cache_key = (id(sim), tuple(round(v, 5) for v in dims))
+    if cache_key in _DOOR_SIDE_WALL_ASSET_CACHE:
+        return _DOOR_SIDE_WALL_ASSET_CACHE[cache_key]
+
+    asset_root = Path(tempfile.gettempdir()) / "b1z1_float_ik_wall_assets"
+    asset_root.mkdir(parents=True, exist_ok=True)
+    dim_label = "_".join(f"{value:.3f}".replace(".", "p") for value in dims)
+    file_name = f"door_side_wall_{dim_label}.urdf"
+    asset_path = asset_root / file_name
+    if not asset_path.exists():
+        asset_path.write_text(
+            f"""<?xml version="1.0"?>
+<robot name="door_side_wall">
+  <link name="wall">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="{dims[0]:.6f} {dims[1]:.6f} {dims[2]:.6f}"/>
+      </geometry>
+      <material name="wall_gray">
+        <color rgba="0.58 0.58 0.56 1"/>
+      </material>
+    </visual>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="1.0"/>
+      <inertia ixx="1.0" ixy="0.0" ixz="0.0" iyy="1.0" iyz="0.0" izz="1.0"/>
+    </inertial>
+  </link>
+</robot>
+""",
+            encoding="utf-8",
+        )
+    opts = gymapi.AssetOptions()
+    opts.fix_base_link = True
+    opts.disable_gravity = True
+    asset = gym.load_asset(sim, str(asset_root), file_name, opts)
+    _DOOR_SIDE_WALL_ASSET_CACHE[cache_key] = asset
+    return asset
+
+
+def create_door_side_walls(gym, sim, env, door, args, env_index=0):
+    if not door_side_walls_enabled(args):
+        return []
+
+    wall_asset = create_door_side_wall_asset(gym, sim, args)
+    side_width = max(1.0e-3, float(getattr(args, "door_wall_side_width", 1.0)))
+    height = max(1.0e-3, float(getattr(args, "door_wall_height", 2.2)))
+    opening_width = float(getattr(args, "door_wall_opening_width", 0.0))
+    if opening_width <= 0.0:
+        opening_width = float(args.door_actor_scale) * (
+            float(door.bounding["max"][0]) - float(door.bounding["min"][0])
+        )
+    opening_width = max(1.0e-3, opening_width)
+    gap = max(0.0, float(getattr(args, "door_wall_gap", 0.0)))
+
+    x = float(args.door_x) + float(getattr(args, "door_wall_x_offset", 0.0))
+    y_center = float(args.door_y) + float(getattr(args, "door_wall_y_offset", 0.0))
+    z = float(getattr(args, "door_z_offset", 0.0)) + 0.5 * height
+    y_offsets = (
+        -0.5 * opening_width - gap - 0.5 * side_width,
+        0.5 * opening_width + gap + 0.5 * side_width,
+    )
+    color = gymapi.Vec3(
+        float(getattr(args, "door_wall_color_r", 0.58)),
+        float(getattr(args, "door_wall_color_g", 0.58)),
+        float(getattr(args, "door_wall_color_b", 0.56)),
+    )
+
+    actors = []
+    for side_name, y_offset in (("left", y_offsets[0]), ("right", y_offsets[1])):
+        pose = gymapi.Transform()
+        pose.p = gymapi.Vec3(x, y_center + y_offset, z)
+        pose.r = gymapi.Quat(0.0, 0.0, 0.0, 1.0)
+        actor = gym.create_actor(
+            env,
+            wall_asset,
+            pose,
+            f"door_side_wall_{env_index}_{side_name}",
+            int(env_index),
+            int(getattr(args, "door_wall_collision_filter", 0)),
+            0,
+        )
+        try:
+            gym.set_rigid_body_color(env, actor, 0, gymapi.MESH_VISUAL, color)
+        except Exception:
+            pass
+        actors.append(actor)
+    return actors
+
+
 def create_env_actors(gym, sim, base_asset, arm_asset, door, dof_props, dof_states, args):
     env = gym.create_env(sim, gymapi.Vec3(-2.5, -2.5, 0.0), gymapi.Vec3(2.5, 2.5, 2.5), 1)
     robot_y = robot_y_for_door(args, door.handle_bounding)
@@ -500,6 +606,7 @@ def create_env_actors(gym, sim, base_asset, arm_asset, door, dof_props, dof_stat
         print("set_rigid_body_segmentation_id is not available; handle mask will use the door actor segmentation.")
 
     configure_door_actor_dofs(gym, env, door_actor, door, args)
+    create_door_side_walls(gym, sim, env, door, args, env_index=0)
     return env, arm_actor, actor_handles, door_actor, np.array([args.robot_x, robot_y], dtype=np.float32)
 
 
@@ -556,6 +663,7 @@ def create_parallel_env_actors(
             print("set_rigid_body_segmentation_id is not available; handle mask will use the door actor segmentation.")
 
     configure_door_actor_dofs(gym, env, door_actor, door, args)
+    create_door_side_walls(gym, sim, env, door, args, env_index=env_index)
     return env, arm_actor, actor_handles, door_actor, np.array([args.robot_x, robot_y], dtype=np.float32)
 
 
@@ -1458,17 +1566,20 @@ def show_camera_handle_images(gym, sim, env, camera_handles, args):
         return
     gym.render_all_camera_sensors(sim)
     display_scale = max(1, int(args.camera_display_scale))
+    depth_only_display = bool(getattr(args, "depth_only", False)) and not bool(getattr(args, "rgb", False))
     for prefix, camera_handle in camera_handles.items():
-        seg_raw = gym.get_camera_image(sim, env, camera_handle, gymapi.IMAGE_SEGMENTATION)
-        if seg_raw is None:
-            continue
-
         camera_cfg = DEFAULT_WRIST_CAMERA_CFG if prefix == "wrist" else DEFAULT_FRONT_CAMERA_CFG
         width = int(camera_cfg.get("resolution", [96, 54])[0])
         height = int(camera_cfg.get("resolution", [96, 54])[1])
-        seg_image = camera_image_to_array(seg_raw, height, width).astype(np.int32)
-        handle_mask = (seg_image == int(args.handle_seg_id)).astype(np.float32)
-        mask_vis = (255.0 * handle_mask).astype(np.uint8)
+        handle_mask = None
+        mask_vis = None
+        if not depth_only_display:
+            seg_raw = gym.get_camera_image(sim, env, camera_handle, gymapi.IMAGE_SEGMENTATION)
+            if seg_raw is None:
+                continue
+            seg_image = camera_image_to_array(seg_raw, height, width).astype(np.int32)
+            handle_mask = (seg_image == int(args.handle_seg_id)).astype(np.float32)
+            mask_vis = (255.0 * handle_mask).astype(np.uint8)
 
         if args.rgb:
             rgb_raw = gym.get_camera_image(sim, env, camera_handle, gymapi.IMAGE_COLOR)
@@ -1531,18 +1642,26 @@ def show_camera_handle_images(gym, sim, env, camera_handles, args):
 
         printed = getattr(args, "_camera_image_stats_printed", set())
         if prefix not in printed:
-            print(
-                f"{prefix} camera image stats: "
-                f"seg_shape={tuple(seg_image.shape)} "
-                f"mask_pixels={int(handle_mask.sum())} "
-                f"valid_depth_pixels={int(valid_depth.size)}",
-                flush=True,
-            )
+            if depth_only_display:
+                print(
+                    f"{prefix} camera image stats: "
+                    f"depth_shape={tuple(depth_image.shape)} "
+                    f"valid_depth_pixels={int(valid_depth.size)}",
+                    flush=True,
+                )
+            else:
+                print(
+                    f"{prefix} camera image stats: "
+                    f"seg_shape={tuple(seg_image.shape)} "
+                    f"mask_pixels={int(handle_mask.sum())} "
+                    f"valid_depth_pixels={int(valid_depth.size)}",
+                    flush=True,
+                )
             printed.add(prefix)
             args._camera_image_stats_printed = printed
 
         visible_printed = getattr(args, "_camera_handle_visible_printed", set())
-        if prefix not in visible_printed and handle_mask.sum() > 0:
+        if not depth_only_display and prefix not in visible_printed and handle_mask.sum() > 0:
             print(
                 f"{prefix} camera sees handle: "
                 f"mask_pixels={int(handle_mask.sum())} "
@@ -1563,11 +1682,13 @@ def show_camera_handle_images(gym, sim, env, camera_handles, args):
                 args._camera_blank_warned = blank_printed
 
         if display_scale > 1:
-            mask_vis = cv2.resize(mask_vis, None, fx=display_scale, fy=display_scale, interpolation=cv2.INTER_NEAREST)
+            if mask_vis is not None:
+                mask_vis = cv2.resize(mask_vis, None, fx=display_scale, fy=display_scale, interpolation=cv2.INTER_NEAREST)
             depth_vis = cv2.resize(
                 depth_vis, None, fx=display_scale, fy=display_scale, interpolation=cv2.INTER_NEAREST
             )
-        cv2.imshow(f"{prefix.capitalize()} Handle Mask", mask_vis)
+        if not depth_only_display:
+            cv2.imshow(f"{prefix.capitalize()} Handle Mask", mask_vis)
         cv2.imshow(f"{prefix.capitalize()} Full Depth", depth_vis)
     cv2.waitKey(1)
 
@@ -1663,6 +1784,12 @@ def dp_image_inputs_from_cpu_cameras(camera_images, args):
             camera_images.get("front_handle_mask"),
             camera_images.get("front_rgb"),
         )
+    if bool(getattr(args, "depth_only", False)):
+        wrist_depth = camera_images.get("wrist_masked_depth")
+        front_depth = camera_images.get("front_masked_depth")
+        wrist_empty = None if wrist_depth is None else np.zeros_like(wrist_depth, dtype=np.uint8)
+        front_empty = None if front_depth is None else np.zeros_like(front_depth, dtype=np.uint8)
+        return wrist_empty, wrist_depth, front_empty, front_depth
     return (
         camera_images.get("wrist_handle_mask"),
         camera_images.get("wrist_masked_depth"),
@@ -2123,7 +2250,12 @@ def make_float_replay_snapshot(args, door, dof_names, dof_pos, dof_vel, door_pos
 
 
 def float_dp_vision_mode(args, normalize_vision_mode_fn=None):
-    vision_mode = "rgb" if bool(getattr(args, "rgb", False)) else "depth"
+    if bool(getattr(args, "rgb", False)):
+        vision_mode = "rgb"
+    elif bool(getattr(args, "depth_only", False)):
+        vision_mode = "depth_only"
+    else:
+        vision_mode = "depth"
     if normalize_vision_mode_fn is not None:
         vision_mode = normalize_vision_mode_fn(vision_mode)
     return vision_mode
@@ -2139,7 +2271,7 @@ def require_float_dp_recording_deps(args, raw_recorder_cls, make_state_feature_n
 
 
 def float_dp_camera_sample_stride(args):
-    dp_fps = float(getattr(args, "dp_fps", 50))
+    dp_fps = float(getattr(args, "dp_fps", 25))
     camera_fps = float(getattr(args, "camera_fps", 25.0))
     if dp_fps <= 0.0:
         raise ValueError("--dp_fps must be positive")
@@ -2149,11 +2281,52 @@ def float_dp_camera_sample_stride(args):
 
 
 def float_dp_camera_effective_fps(args):
-    return float(getattr(args, "dp_fps", 50)) / float(float_dp_camera_sample_stride(args))
+    return float(getattr(args, "dp_fps", 25)) / float(float_dp_camera_sample_stride(args))
+
+
+def float_dp_record_sample_stride(args, dt):
+    dp_fps = float(getattr(args, "dp_fps", 25))
+    if dp_fps <= 0.0:
+        raise ValueError("--dp_fps must be positive")
+    if dt <= 0.0:
+        return 1
+    sim_fps = 1.0 / float(dt)
+    return max(1, int(round(sim_fps / dp_fps)))
+
+
+def float_dp_record_effective_fps(args, dt):
+    if dt <= 0.0:
+        return float(getattr(args, "dp_fps", 25))
+    return (1.0 / float(dt)) / float(float_dp_record_sample_stride(args, dt))
+
+
+def float_dp_record_dt(args, dt):
+    return float(dt) * float(float_dp_record_sample_stride(args, dt))
+
+
+def float_dp_policy_sample_stride(args, dt):
+    return float_dp_record_sample_stride(args, dt)
+
+
+def float_dp_policy_effective_fps(args, dt):
+    return float_dp_record_effective_fps(args, dt)
+
+
+def float_dp_policy_update_due(step, args, dt):
+    stride = float_dp_policy_sample_stride(args, dt)
+    return int(step) % int(stride) == 0
+
+
+def float_dp_record_frame_due(st, dt):
+    if getattr(st, "dp_recorder", None) is None:
+        return False
+    stride = float_dp_record_sample_stride(st.args, dt)
+    return int(getattr(st, "dp_record_sim_steps", 0)) % int(stride) == 0
 
 
 def float_dp_camera_images_for_record_frame(gym, sim, st):
     stride = float_dp_camera_sample_stride(st.args)
+    vision_mode = float_dp_vision_mode(st.args)
     should_capture = (
         getattr(st, "last_wrist_mask_rgb", None) is None
         or getattr(st, "last_wrist_second_rgb", None) is None
@@ -2164,9 +2337,17 @@ def float_dp_camera_images_for_record_frame(gym, sim, st):
         wrist_mask_rgb, wrist_second_rgb, front_mask_rgb, front_second_rgb = dp_image_inputs_from_cpu_cameras(
             camera_images, st.args
         )
-        missing_required_camera = wrist_mask_rgb is None or wrist_second_rgb is None or (
-            st.args.rgb and (front_mask_rgb is None or front_second_rgb is None)
-        )
+        if vision_mode == "rgb":
+            missing_required_camera = (
+                wrist_mask_rgb is None
+                or wrist_second_rgb is None
+                or front_mask_rgb is None
+                or front_second_rgb is None
+            )
+        elif vision_mode == "depth_only":
+            missing_required_camera = wrist_second_rgb is None or front_second_rgb is None
+        else:
+            missing_required_camera = wrist_mask_rgb is None or wrist_second_rgb is None
         if missing_required_camera:
             if getattr(st, "last_wrist_mask_rgb", None) is None or getattr(st, "last_wrist_second_rgb", None) is None:
                 return None, None, None, None
@@ -2231,8 +2412,30 @@ def make_float_dp_recorder(
         "camera_fps": float_dp_camera_effective_fps(args),
         "camera_sample_stride": int(float_dp_camera_sample_stride(args)),
         "camera_hold_last_frame": True,
+        "door_side_walls": bool(door_side_walls_enabled(args)),
     }
+    sim_dt = getattr(args, "sim_dt", None)
+    if sim_dt is not None:
+        sim_dt = float(sim_dt)
+        metadata.update(
+            {
+                "sim_dt": sim_dt,
+                "sim_fps": 1.0 / sim_dt if sim_dt > 0.0 else 0.0,
+                "record_sample_stride": int(float_dp_record_sample_stride(args, sim_dt)),
+                "record_effective_fps": float_dp_record_effective_fps(args, sim_dt),
+            }
+        )
     for name in (
+        "door_x",
+        "door_y",
+        "door_z_offset",
+        "door_wall_height",
+        "door_wall_opening_width",
+        "door_wall_side_width",
+        "door_wall_thickness",
+        "door_wall_gap",
+        "door_wall_x_offset",
+        "door_wall_y_offset",
         "robot_x",
         "robot_y",
         "robot_yaw",
@@ -2277,6 +2480,7 @@ def print_float_dp_recording_start(args, record_env_ids, vision_mode):
         f"env_ids={sorted(record_env_ids)} success_angle_deg={args.pass_open_angle_deg} "
         f"vision_mode={vision_mode} "
         f"state_mode={normalize_float_dp_state_mode(getattr(args, 'dp_record_state_mode', FLOAT_DP_STATE_MODE_FULL))} "
+        f"record_fps={float(getattr(args, 'dp_fps', 25)):.2f} "
         f"camera_fps={float_dp_camera_effective_fps(args):.2f}",
         flush=True,
     )
@@ -2304,6 +2508,8 @@ def setup_float_dp_policy_controller(
         noise_scheduler_type=args.dp_noise_scheduler_type,
     )
     expected_vision_mode = "rgb" if args.rgb else "depth"
+    if bool(getattr(args, "depth_only", False)) and not args.rgb:
+        expected_vision_mode = "depth_only"
     if getattr(dp_controller, "vision_mode", "depth") != expected_vision_mode:
         raise ValueError(
             f"DP checkpoint vision_mode={getattr(dp_controller, 'vision_mode', 'depth')!r}, "
@@ -2361,6 +2567,8 @@ def collect_float_dp_policy_actions(gym, sim, env_states, dof_names, gripper_idx
     dp_actions_by_env = {}
     if dp_controller is None:
         return dp_policy_inputs_by_env, dp_actions_by_env
+    sample_dt = float(getattr(env_states[0].args, "dp_policy_dt", dt)) if env_states else float(dt)
+    sample_dt = max(1.0e-6, sample_dt)
     batch_env_ids = []
     batch_states = []
     batch_wrist_masks = []
@@ -2385,10 +2593,12 @@ def collect_float_dp_policy_actions(gym, sim, env_states, dof_names, gripper_idx
         vx_state, yaw_rate_state = base_command_from_targets(
             base_xy_current,
             yaw_current,
-            st.prev_base_xy,
-            st.prev_yaw,
-            dt,
+            getattr(st, "dp_policy_prev_base_xy", None),
+            getattr(st, "dp_policy_prev_yaw", None),
+            sample_dt,
         )
+        st.dp_policy_prev_base_xy = np.asarray(base_xy_current, dtype=np.float32).copy()
+        st.dp_policy_prev_yaw = float(yaw_current)
         dp_state = make_float_dp_observation_state(
             dof_names,
             dof_pos_actual,
@@ -2408,9 +2618,17 @@ def collect_float_dp_policy_actions(gym, sim, env_states, dof_names, gripper_idx
         wrist_mask_rgb, wrist_second_rgb, front_mask_rgb, front_second_rgb = dp_image_inputs_from_cpu_cameras(
             camera_images, st.args
         )
-        missing_required_camera = wrist_mask_rgb is None or wrist_second_rgb is None or (
-            st.args.rgb and (front_mask_rgb is None or front_second_rgb is None)
-        )
+        if getattr(dp_controller, "vision_mode", "depth") == "rgb":
+            missing_required_camera = (
+                wrist_mask_rgb is None
+                or wrist_second_rgb is None
+                or front_mask_rgb is None
+                or front_second_rgb is None
+            )
+        elif getattr(dp_controller, "vision_mode", "depth") == "depth_only":
+            missing_required_camera = wrist_second_rgb is None or front_second_rgb is None
+        else:
+            missing_required_camera = wrist_mask_rgb is None or wrist_second_rgb is None
         if missing_required_camera:
             missing_desc = "wrist/front camera RGB or mask images" if st.args.rgb else "wrist camera mask/depth images"
             raise RuntimeError(f"{mode_name} DP policy execution cannot run because {missing_desc} are missing.")
@@ -2445,6 +2663,12 @@ def collect_float_dp_policy_actions(gym, sim, env_states, dof_names, gripper_idx
 def record_float_dp_frame(gym, sim, st, dof_names, gripper_idx, dt, phase_id, door_pos_record, door_vel_record):
     if st.dp_recorder is None:
         return False
+    record_stride = float_dp_record_sample_stride(st.args, dt)
+    sim_step = int(getattr(st, "dp_record_sim_steps", 0))
+    st.dp_record_sim_steps = sim_step + 1
+    if sim_step % record_stride != 0:
+        return False
+
     ee_pos, ee_quat = current_ee_pose_from_refreshed_tensors(st.ik_state)
     dof_pos_actual, dof_vel_actual = get_actor_dof_state(gym, st.env, st.arm_actor)
     gripper_actual = (
@@ -2454,14 +2678,30 @@ def record_float_dp_frame(gym, sim, st, dof_names, gripper_idx, dt, phase_id, do
     )
     base_xy = st.traj.get("base_xy", st.base_start)
     yaw = float(st.traj.get("yaw", st.yaw_start))
-    vx_cmd, yaw_rate_cmd = base_command_from_targets(base_xy, yaw, st.prev_base_xy, st.prev_yaw, dt)
+    record_dt = float(dt) * float(record_stride)
+    vx_cmd, yaw_rate_cmd = base_command_from_targets(
+        base_xy,
+        yaw,
+        getattr(st, "dp_record_prev_base_xy", None),
+        getattr(st, "dp_record_prev_yaw", None),
+        record_dt,
+    )
     target_quat = target_quat_for_dp(st.last_target_quat, st.ik_state, ee_quat)
     wrist_mask_rgb, wrist_second_rgb, front_mask_rgb, front_second_rgb = float_dp_camera_images_for_record_frame(
         gym, sim, st
     )
-    missing_required_camera = wrist_mask_rgb is None or wrist_second_rgb is None or (
-        st.args.rgb and (front_mask_rgb is None or front_second_rgb is None)
-    )
+    vision_mode = float_dp_vision_mode(st.args)
+    if vision_mode == "rgb":
+        missing_required_camera = (
+            wrist_mask_rgb is None
+            or wrist_second_rgb is None
+            or front_mask_rgb is None
+            or front_second_rgb is None
+        )
+    elif vision_mode == "depth_only":
+        missing_required_camera = wrist_second_rgb is None or front_second_rgb is None
+    else:
+        missing_required_camera = wrist_mask_rgb is None or wrist_second_rgb is None
     if missing_required_camera:
         if not st.dp_record_warned_no_camera:
             missing_desc = "wrist/front camera RGB or mask images" if st.args.rgb else "wrist camera mask/depth images"
@@ -2524,6 +2764,8 @@ def record_float_dp_frame(gym, sim, st, dof_names, gripper_idx, dt, phase_id, do
         ),
     )
     st.last_dp_action = dp_action.copy()
+    st.dp_record_prev_base_xy = np.asarray(base_xy, dtype=np.float32).copy()
+    st.dp_record_prev_yaw = float(yaw)
     if bool(getattr(st, "base_door_collision_detected", False)):
         st.dp_record_success = False
     elif door_success(door_pos_record, st.args):
@@ -2670,6 +2912,8 @@ def finalize_float_ik_args(args, argv):
     args.camera_rgb = bool(args.camera_rgb or args.rgb)
     args.camera_depth = bool((args.camera_depth or not args.no_camera_depth) and not args.rgb)
     args.camera_seg = bool(args.camera_seg or not args.no_camera_seg)
+    if bool(getattr(args, "rgb", False)) and bool(getattr(args, "depth_only", False)):
+        raise ValueError("--rgb and --depth_only are mutually exclusive.")
     args._explicit_cli_flags = set(argv)
 
     if args.num_envs <= 0:

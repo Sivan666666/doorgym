@@ -93,6 +93,7 @@ def parse_args():
     parser.add_argument("--fps", type=int, default=None)
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--rgb", action="store_true", help="Convert raw RGB+mask Door DP data. Required for RGB raw data.")
+    parser.add_argument("--depth_only", action="store_true", help="Convert raw depth-only Door DP data with no mask image fields.")
     parser.add_argument(
         "--image_storage",
         choices=["video", "image"],
@@ -234,14 +235,21 @@ def load_episode_payload_pi05_state10(
         raw_states = data["state"].astype(np.float32)
         actions = data["action"].astype(np.float32)
         states = make_pi05_states(raw_states, actions, state_source, raw_state_indices)
-        require_fields(data, image_keys[:2], path)
-        wrist_first = data[image_keys[0]].astype(np.uint8)
-        wrist_second = data[image_keys[1]].astype(np.uint8)
+        if vision_mode == "depth_only":
+            require_fields(data, image_keys, path)
+            wrist_second = data[image_keys[0]].astype(np.uint8)
+            front_second = data[image_keys[1]].astype(np.uint8)
+            wrist_first = np.zeros_like(wrist_second)
+            front_first = np.zeros_like(front_second)
+        else:
+            require_fields(data, image_keys[:2], path)
+            wrist_first = data[image_keys[0]].astype(np.uint8)
+            wrist_second = data[image_keys[1]].astype(np.uint8)
         if vision_mode == "rgb":
             require_fields(data, image_keys[2:], path)
             front_first = data[image_keys[2]].astype(np.uint8)
             front_second = data[image_keys[3]].astype(np.uint8)
-        else:
+        elif vision_mode == "depth":
             front_first = data[image_keys[2]].astype(np.uint8) if image_keys[2] in data else np.zeros_like(wrist_first)
             front_second = data[image_keys[3]].astype(np.uint8) if image_keys[3] in data else np.zeros_like(wrist_second)
         subtasks = data["subtask_index"].astype(np.int64).reshape(-1)
@@ -325,7 +333,9 @@ def main():
 
     raw_fps = int(first["fps"]) if "fps" in first else 50
     fps = int(args.fps or (sidecar.get("fps") if sidecar else raw_fps))
-    vision_mode = "rgb" if args.rgb else "depth"
+    if args.rgb and args.depth_only:
+        raise ValueError("--rgb and --depth_only are mutually exclusive.")
+    vision_mode = "rgb" if args.rgb else ("depth_only" if args.depth_only else "depth")
     raw_vision_mode = detect_raw_vision_mode(first, sidecar)
     action_frame = detect_action_frame(first, sidecar)
     ikpush_state_version = detect_ikpush_state_version(first, sidecar)
@@ -335,7 +345,8 @@ def main():
     if raw_vision_mode != vision_mode:
         raise ValueError(
             f"Raw data vision_mode={raw_vision_mode!r}, but converter was run with "
-            f"{'--rgb' if args.rgb else 'depth mode'}. Use --rgb only for RGB raw data."
+            f"{'--rgb' if args.rgb else ('--depth_only' if args.depth_only else 'depth mode')}. "
+            "Use the matching vision flag for the raw data."
         )
 
     image_keys = raw_image_keys_for_vision_mode(vision_mode)
@@ -550,7 +561,7 @@ def main():
         "action_preprocess": action_preprocess_config,
         "state_normalized": converted_state_normalized,
     }
-    if vision_mode == "rgb":
+    if vision_mode != "depth":
         sidecar_payload["vision_mode"] = vision_mode
     with open(feature_sidecar, "w", encoding="utf-8") as f:
         json.dump(sidecar_payload, f, indent=2)

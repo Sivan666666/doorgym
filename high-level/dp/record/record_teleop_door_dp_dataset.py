@@ -51,6 +51,7 @@ class RecordingControl:
     last_front_mask_rgb: np.ndarray | None = None
     last_front_second_rgb: np.ndarray | None = None
     record_steps: int = 0
+    record_sim_steps: int = 0
     success: bool = False
     warned_no_camera: bool = False
     stop_requested: bool = False
@@ -71,17 +72,28 @@ def parse_args():
         help="Output directory for raw Door DP .npz episodes.",
     )
     parser.add_argument("--dp_task", type=str, default="push lever door open")
-    parser.add_argument("--dp_fps", type=int, default=50)
+    parser.add_argument("--dp_fps", type=int, default=25)
+    parser.add_argument(
+        "--sim_fps",
+        type=float,
+        default=50.0,
+        help="Isaac Gym simulation/control rate. Recording samples are downsampled from this rate.",
+    )
     parser.add_argument(
         "--camera_fps",
         type=float,
         default=25.0,
-        help="Actual camera capture rate. State/action stay at --dp_fps; intermediate frames hold the last image.",
+        help="Actual camera capture rate. Default matches --dp_fps so every recorded frame has a fresh camera frame.",
     )
     parser.add_argument(
         "--rgb",
         action="store_true",
         help="Record RGB+mask instead of depth+mask. Default is depth+mask.",
+    )
+    parser.add_argument(
+        "--depth_only",
+        action="store_true",
+        help="Record only wrist/front depth images, without mask images.",
     )
     parser.add_argument(
         "--record_key",
@@ -126,8 +138,14 @@ def parse_args():
     finally:
         sys.argv = old_argv
 
+    if record_args.rgb and record_args.depth_only:
+        raise ValueError("--rgb and --depth_only are mutually exclusive.")
     teleop_args.rgb = bool(record_args.rgb)
-    teleop_args.sim_dt = 1.0 / float(record_args.dp_fps)
+    teleop_args.depth_only = bool(record_args.depth_only)
+    if float(record_args.sim_fps) <= 0.0:
+        raise ValueError("--sim_fps must be positive")
+    teleop_args.sim_dt = 1.0 / float(record_args.sim_fps)
+    record_args._sim_dt = float(teleop_args.sim_dt)
     return record_args, teleop_args
 
 
@@ -153,9 +171,12 @@ def print_recording_controls(record_args):
     print("Recording controls:")
     print(f"  {record_args.record_key.replace('KEY_', '')}: start/stop raw Door DP recording")
     print("  Output root:", str(Path(record_args.dp_raw_root).expanduser().resolve()))
-    print("  Vision:", "rgb+mask" if record_args.rgb else "depth+mask")
+    print("  Vision:", "rgb+mask" if record_args.rgb else ("depth-only" if record_args.depth_only else "depth+mask"))
     stride = camera_sample_stride(record_args)
+    record_stride = record_sample_stride(record_args, getattr(record_args, "_sim_dt", 1.0 / float(record_args.sim_fps)))
+    print(f"  Simulation/control rate: {float(record_args.sim_fps):.2f} Hz")
     print(f"  State/action rate: {int(record_args.dp_fps)} Hz")
+    print(f"  State/action sample stride: every {record_stride} sim step(s)")
     print(f"  Camera capture rate: {float(record_args.dp_fps) / float(stride):.2f} Hz")
 
 
@@ -182,7 +203,7 @@ def poll_viewer_events(gym, viewer, state, recording):
 
 
 def make_recorder(record_args, teleop_args, door):
-    vision_mode = normalize_vision_mode("rgb" if record_args.rgb else "depth")
+    vision_mode = normalize_vision_mode("rgb" if record_args.rgb else ("depth_only" if record_args.depth_only else "depth"))
     camera_stride = camera_sample_stride(record_args)
     return RawDoorDPRecorder(
         raw_root=record_args.dp_raw_root,
@@ -206,6 +227,14 @@ def make_recorder(record_args, teleop_args, door):
             "state_source": "current_vx_yaw_rate_ee_base_gripper",
             "state_normalized": False,
             "pi05_state_action_aligned": True,
+            "sim_dt": float(getattr(teleop_args, "sim_dt", 1.0 / float(record_args.sim_fps))),
+            "sim_fps": 1.0 / float(getattr(teleop_args, "sim_dt", 1.0 / float(record_args.sim_fps))),
+            "record_sample_stride": int(
+                record_sample_stride(record_args, float(getattr(teleop_args, "sim_dt", 1.0 / float(record_args.sim_fps))))
+            ),
+            "record_effective_fps": record_effective_fps(
+                record_args, float(getattr(teleop_args, "sim_dt", 1.0 / float(record_args.sim_fps)))
+            ),
             "camera_fps": float(record_args.dp_fps) / float(camera_stride),
             "camera_sample_stride": int(camera_stride),
             "camera_hold_last_frame": True,
@@ -223,6 +252,7 @@ def start_recording(recording, record_args, teleop_args, door, base_xy, yaw):
     recording.last_front_mask_rgb = None
     recording.last_front_second_rgb = None
     recording.record_steps = 0
+    recording.record_sim_steps = 0
     recording.success = False
     recording.warned_no_camera = False
     recording.stop_requested = False
@@ -270,6 +300,7 @@ def finish_recording(recording, record_args, reason):
     recording.last_front_mask_rgb = None
     recording.last_front_second_rgb = None
     recording.record_steps = 0
+    recording.record_sim_steps = 0
     recording.success = False
     recording.warned_no_camera = False
     recording.stop_requested = False
@@ -281,6 +312,21 @@ def camera_sample_stride(record_args):
     if float(record_args.camera_fps) <= 0.0:
         raise ValueError("--camera_fps must be positive")
     return max(1, int(round(float(record_args.dp_fps) / float(record_args.camera_fps))))
+
+
+def record_sample_stride(record_args, dt):
+    if int(record_args.dp_fps) <= 0:
+        raise ValueError("--dp_fps must be positive")
+    if float(dt) <= 0.0:
+        return 1
+    sim_fps = 1.0 / float(dt)
+    return max(1, int(round(sim_fps / float(record_args.dp_fps))))
+
+
+def record_effective_fps(record_args, dt):
+    if float(dt) <= 0.0:
+        return float(record_args.dp_fps)
+    return (1.0 / float(dt)) / float(record_sample_stride(record_args, dt))
 
 
 def camera_images_for_record_frame(gym, sim, env, camera_handles, recording, record_args, teleop_args):
@@ -297,7 +343,9 @@ def camera_images_for_record_frame(gym, sim, env, camera_handles, recording, rec
             teleop_args,
         )
         missing_camera = wrist_mask_rgb is None or wrist_second_rgb is None
-        if not record_args.allow_missing_front_camera:
+        if record_args.depth_only:
+            missing_camera = wrist_second_rgb is None or front_second_rgb is None
+        elif not record_args.allow_missing_front_camera:
             missing_camera = missing_camera or front_mask_rgb is None or front_second_rgb is None
         if missing_camera:
             return None, None, None, None
@@ -335,6 +383,11 @@ def record_one_frame(
 ):
     if recording.recorder is None:
         return
+    stride = record_sample_stride(record_args, dt)
+    sim_step = int(recording.record_sim_steps)
+    recording.record_sim_steps += 1
+    if sim_step % stride != 0:
+        return
 
     ee_pos, ee_quat = push_door.current_ee_pose(gym, sim, ik_state)
     dof_pos_actual, dof_vel_actual = push_door.get_actor_dof_state(gym, env, arm_actor)
@@ -344,12 +397,13 @@ def record_one_frame(
         if gripper_idx is not None and gripper_idx < len(dof_pos_actual)
         else float(state.gripper)
     )
+    record_dt = float(dt) * float(stride)
     vx_cmd, yaw_rate_cmd = push_door.base_command_from_targets(
         state.base_xy,
         state.base_yaw,
         recording.prev_base_xy,
         recording.prev_yaw,
-        dt,
+        record_dt,
     )
     target_quat = push_door.target_quat_for_dp(state.ee_target_quat, ik_state, ee_quat)
     wrist_mask_rgb, wrist_second_rgb, front_mask_rgb, front_second_rgb = camera_images_for_record_frame(
@@ -362,7 +416,9 @@ def record_one_frame(
         teleop_args,
     )
     missing_camera = wrist_mask_rgb is None or wrist_second_rgb is None
-    if not record_args.allow_missing_front_camera:
+    if record_args.depth_only:
+        missing_camera = wrist_second_rgb is None or front_second_rgb is None
+    elif not record_args.allow_missing_front_camera:
         missing_camera = missing_camera or front_mask_rgb is None or front_second_rgb is None
     if missing_camera:
         if not recording.warned_no_camera:
@@ -556,7 +612,13 @@ def run_recording_teleop(
         else:
             door_pos, _door_vel = push_door.get_actor_dof_state(gym, env, door_actor)
 
-        need_camera_render = bool(camera_handles and (teleop_args.show_camera_images or recording.active))
+        record_frame_due = bool(
+            recording.active
+            and not state.paused
+            and recording.recorder is not None
+            and (int(recording.record_sim_steps) % int(record_sample_stride(record_args, dt))) == 0
+        )
+        need_camera_render = bool(camera_handles and (teleop_args.show_camera_images or record_frame_due))
         if viewer is not None and need_camera_render and (teleop_args.draw_ik_target or teleop_args.draw_camera_axes):
             gym.clear_lines(viewer)
         if viewer is not None or need_camera_render:

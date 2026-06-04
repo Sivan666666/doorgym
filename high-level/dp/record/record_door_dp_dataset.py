@@ -38,7 +38,7 @@ def parse_args():
         help="How many simulator launches to run per mode. Keep this at 1 for fastest parallel recording.",
     )
     parser.add_argument("--raw_root", type=str, default=str(HIGH_LEVEL_ROOT / "data" / "door_dp_raw" / "local_door_dp"))
-    parser.add_argument("--fps", type=int, default=50)
+    parser.add_argument("--fps", type=int, default=25)
     parser.add_argument("--camera_fps", type=float, default=25.0)
     parser.add_argument(
         "--steps",
@@ -57,6 +57,7 @@ def parse_args():
     parser.add_argument("--graphics_device_id", type=int, default=None)
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--rgb", action="store_true", help="Record RGB+mask vision for push/ikpush/ikpull data instead of full depth+mask.")
+    parser.add_argument("--depth_only", action="store_true", help="Record only wrist/front depth images, without mask images.")
     parser.add_argument("--record_env_id", type=int, default=0)
     parser.add_argument("--record_all_envs", dest="record_all_envs", action="store_true", default=True)
     parser.add_argument("--no_record_all_envs", dest="record_all_envs", action="store_false")
@@ -113,10 +114,14 @@ def run_one(mode, rollout_idx, args):
             "--camera_fps",
             str(args.camera_fps),
         ]
+        if args.rgb and args.depth_only:
+            raise ValueError("--rgb and --depth_only are mutually exclusive.")
         if args.rgb:
             cmd += ["--rgb", "--camera_rgb", "--no_camera_depth"]
         else:
             cmd.append("--camera_depth")
+            if args.depth_only:
+                cmd.append("--depth_only")
         if args.graphics_device_id is not None:
             cmd += ["--graphics_device_id", str(args.graphics_device_id)]
         if args.headless:
@@ -161,10 +166,16 @@ def run_one(mode, rollout_idx, args):
         "--dp_fps",
         str(args.fps),
     ]
+    if args.depth_only:
+        raise ValueError("--depth_only recording is wired for float_ik ikpush/ikpull modes only.")
+    if args.rgb and args.depth_only:
+        raise ValueError("--rgb and --depth_only are mutually exclusive.")
     if args.rgb:
         cmd += ["--rgb", "--camera_rgb", "--no_camera_depth"]
     else:
         cmd.append("--camera_depth")
+        if args.depth_only:
+            cmd.append("--depth_only")
     if args.graphics_device_id is not None:
         cmd += ["--graphics_device_id", str(args.graphics_device_id)]
     if args.headless:

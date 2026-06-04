@@ -83,6 +83,12 @@ def auto_wrap_official_lerobot_checkpoint(checkpoint_path, args):
             f"Could not find Door dataset sidecar for official LeRobot checkpoint: {sidecar}\n"
             "This file stores action_frame, state/action preprocess, and image mode for Door play."
         )
+    sidecar_data = load_json(sidecar)
+    dataset_vision_mode = str(sidecar_data.get("vision_mode", "depth")).lower().replace("-", "_")
+    if dataset_vision_mode == "depth_only":
+        args.depth_only = True
+    elif dataset_vision_mode == "rgb":
+        args.rgb = True
 
     run_name = str(train_config.get("job_name") or step_dir.parent.parent.name or "official_lerobot")
     step_name = step_dir.name
@@ -121,6 +127,8 @@ def auto_wrap_official_lerobot_checkpoint(checkpoint_path, args):
         ]
     if args.rgb:
         cmd.append("--rgb")
+    elif getattr(args, "depth_only", False):
+        cmd.append("--depth_only")
     env = os.environ.copy()
     py_paths = [str(HIGH_LEVEL_ROOT / "lerobot" / "src"), str(DP_ROOT)]
     env["PYTHONPATH"] = os.pathsep.join(py_paths + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
@@ -146,6 +154,7 @@ def parse_args():
     parser.add_argument("--graphics_device_id", type=int, default=None)
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--rgb", action="store_true", help="Run a RGB+mask Door policy checkpoint. Push/ikpush/ikpull modes only.")
+    parser.add_argument("--depth_only", action="store_true", help="Run a Door policy checkpoint trained with wrist/front depth only.")
     parser.add_argument("--show_seg", dest="show_seg", action="store_true", default=True)
     parser.add_argument("--no_show_seg", dest="show_seg", action="store_false")
     parser.add_argument("--camera_display_scale", type=int, default=5)
@@ -195,6 +204,8 @@ def main():
     checkpoint_path = auto_wrap_official_lerobot_checkpoint(checkpoint_path, args)
     if args.steps is None:
         args.steps = 4300 if args.mode == "ikpull" else 2500
+    if args.rgb and args.depth_only:
+        raise ValueError("--rgb and --depth_only are mutually exclusive.")
     if args.rgb and args.mode not in ("push", "ikpush", "ikpull"):
         raise ValueError("--rgb Door policy play is only wired for push/ikpush/ikpull mode.")
     warmstart_params = [
@@ -272,6 +283,8 @@ def main():
         cmd += ["--rgb", "--camera_rgb", "--no_camera_depth"]
     else:
         cmd.append("--camera_depth")
+        if args.depth_only:
+            cmd.append("--depth_only")
     if not args.dp_print:
         cmd.append("--no_dp_print")
     if args.dp_control_all_envs:

@@ -101,6 +101,14 @@ def parse_args():
             {"name": "--door_x", "type": float, "default": 2.5},
             {"name": "--door_y", "type": float, "default": 0.0},
             {"name": "--door_z_offset", "type": float, "default": 0.01},
+            {"name": "--no_door_side_walls", "action": "store_true", "help": "Disable the static side-wall actors beside each door."},
+            {"name": "--door_wall_height", "type": float, "default": 2.2},
+            {"name": "--door_wall_opening_width", "type": float, "default": 0.0, "help": "Wall opening width; <=0 uses the scaled door bounding-box width."},
+            {"name": "--door_wall_side_width", "type": float, "default": 1.0},
+            {"name": "--door_wall_thickness", "type": float, "default": 0.08},
+            {"name": "--door_wall_gap", "type": float, "default": 0.0},
+            {"name": "--door_wall_x_offset", "type": float, "default": 0.0},
+            {"name": "--door_wall_y_offset", "type": float, "default": 0.0},
             {"name": "--robot_x", "type": float, "default": 4.1},
             {"name": "--robot_y", "type": float, "default": -0.06},
             {"name": "--robot_z", "type": float, "default": 0.60},
@@ -119,10 +127,11 @@ def parse_args():
             },
             {"name": "--push_base_yaw_delta", "type": float, "default": 0.0},
             {"name": "--walk_steps", "type": int, "default": 260},
-            {"name": "--initial_hold_steps", "type": int, "default": 200},
+            {"name": "--initial_hold_steps", "type": int, "default": 150},
+            {"name": "--initial_hold_move_steps", "type": int, "default": 100},
             {"name": "--grasp_steps", "type": int, "default": 150},
-            {"name": "--grasp_hold_steps", "type": int, "default": 100},
-            {"name": "--gripper_close_steps", "type": int, "default": 120},
+            {"name": "--grasp_hold_steps", "type": int, "default": 5},
+            {"name": "--gripper_close_steps", "type": int, "default": 100},
             {"name": "--handle_rotate_steps", "type": int, "default": 300},
             {"name": "--door_push_steps", "type": int, "default": 1080},
             {"name": "--return_home_steps", "type": int, "default": 360},
@@ -137,6 +146,8 @@ def parse_args():
             {"name": "--handle_rotate_angle", "type": float, "default": 1.05},
             {"name": "--door_push_distance", "type": float, "default": 1.10},
             {"name": "--no_ikpush_env_randomization", "action": "store_true"},
+            {"name": "--ikpush_door_x_rand", "type": float, "default": 0.03},
+            {"name": "--ikpush_door_y_rand", "type": float, "default": 0.03},
             {"name": "--ikpush_robot_x_rand", "type": float, "default": 0.03},
             {"name": "--ikpush_robot_y_rand", "type": float, "default": 0.04},
             {"name": "--ikpush_robot_yaw_rand", "type": float, "default": 0.03},
@@ -236,6 +247,7 @@ def parse_args():
             {"name": "--show_seg", "action": "store_true"},
             {"name": "--no_show_seg", "action": "store_true"},
             {"name": "--rgb", "action": "store_true", "help": "Show RGB+mask camera previews instead of full depth+mask."},
+            {"name": "--depth_only", "action": "store_true", "help": "Record only wrist/front depth images, without handle mask images."},
             {"name": "--camera_rgb", "action": "store_true"},
             {"name": "--camera_depth", "action": "store_true"},
             {"name": "--no_camera_depth", "action": "store_true"},
@@ -258,7 +270,7 @@ def parse_args():
             {"name": "--dp_record_env_id", "type": int, "default": 0},
             {"name": "--dp_record_all_envs", "action": "store_true"},
             {"name": "--no_dp_record_all_envs", "action": "store_true"},
-            {"name": "--dp_fps", "type": int, "default": 50},
+            {"name": "--dp_fps", "type": int, "default": 25},
             {"name": "--camera_fps", "type": float, "default": 25.0},
             {"name": "--dp_record_state_mode", "type": str, "default": "full"},
             {"name": "--dp_policy_checkpoint", "type": str, "default": ""},
@@ -402,6 +414,9 @@ class ParallelEnvState:
     dp_recorder: object = None
     dp_record_success: bool = False
     dp_record_warned_no_camera: bool = False
+    dp_record_sim_steps: int = 0
+    dp_record_prev_base_xy: object = None
+    dp_record_prev_yaw: object = None
     prev_base_xy: object = None
     prev_yaw: object = None
     last_dp_action: object = None
@@ -422,13 +437,6 @@ sample_with_half_range = dc.sample_with_half_range
 
 
 IKPUSH_DEFAULT_ENV_RANGES = {
-    "robot_y": (-0.07, 0.07),
-    "robot_yaw": (3.10, 3.18),
-    "pregrasp_offset": (0.12, 0.20),
-    "grasp_x_offset": (-0.055, -0.010),
-    "grasp_z_offset": (-0.055, -0.005),
-    "door_push_distance": (0.95, 1.20),
-    "handle_rotate_angle": (0.95, 1.15),
     "door_joint_friction": (0.05, 0.30),
     "door_joint_damping": (0.05, 0.30),
     "handle_joint_friction": (0.045, 0.055),
@@ -495,14 +503,21 @@ def make_env_args(args, env_index):
         setattr(env_args, attr, value)
         sampled[attr] = value
 
+    def set_fixed(attr):
+        value = float(getattr(args, attr))
+        setattr(env_args, attr, value)
+        sampled[attr] = value
+
+    set_sampled("door_x", "ikpush_door_x_rand")
+    set_sampled("door_y", "ikpush_door_y_rand")
     set_sampled("robot_x", "ikpush_robot_x_rand")
     set_sampled("robot_y", "ikpush_robot_y_rand")
     set_sampled("robot_yaw", "ikpush_robot_yaw_rand")
-    set_sampled("pregrasp_offset", "ikpush_pregrasp_offset_rand", lower=0.05)
-    set_sampled("grasp_x_offset", "ikpush_grasp_x_offset_rand")
-    set_sampled("grasp_z_offset", "ikpush_grasp_z_offset_rand")
-    set_sampled("handle_rotate_angle", "ikpush_handle_rotate_angle_rand", lower=0.75, upper=1.30)
-    set_sampled("door_push_distance", "ikpush_door_push_distance_rand", lower=0.70, upper=1.40)
+    set_fixed("pregrasp_offset")
+    set_fixed("grasp_x_offset")
+    set_fixed("grasp_z_offset")
+    set_fixed("handle_rotate_angle")
+    set_fixed("door_push_distance")
     set_sampled("door_joint_friction", "ikpush_door_joint_friction_rand", lower=0.0)
     set_sampled("door_joint_damping", "ikpush_door_joint_damping_rand", lower=0.0)
     set_sampled("handle_joint_friction", "ikpush_handle_joint_friction_rand", lower=0.0)
@@ -924,7 +939,7 @@ def trajectory_targets(
 
         if step < initial_end:
             initial_step = step - walk_end
-            move_steps = max(1, int(round(max(1, args.initial_hold_steps) * 0.5)))
+            move_steps = min(max(1, int(args.initial_hold_move_steps)), max(1, int(args.initial_hold_steps)))
             if initial_step < move_steps:
                 t = smoothstep((initial_step + 1) / move_steps)
                 target_pos = lerp(traj["initial_hold_start_pos"], traj["pregrasp"], t)
@@ -1506,6 +1521,16 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
     )
     if dp_controller is not None:
         apply_dp_warmstart_if_requested(gym, sim, args, dp_controller, dp_control_state, dof_names)
+        dp_policy_stride = dc.float_dp_policy_sample_stride(args, dt)
+        dp_policy_dt = float(dt) * float(dp_policy_stride)
+        for st in env_states:
+            st.args.dp_policy_dt = dp_policy_dt
+        print(
+            f"Door DP policy rate: requested={float(getattr(args, 'dp_fps', 25)):.2f}Hz "
+            f"effective={dc.float_dp_policy_effective_fps(args, dt):.2f}Hz "
+            f"sim_dt={dt:.4f}s stride={dp_policy_stride} policy_dt={dp_policy_dt:.4f}s",
+            flush=True,
+        )
 
     while step < max_steps:
         if viewer is not None and gym.query_viewer_has_closed(viewer):
@@ -1515,7 +1540,10 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
         for st in env_states:
             current_ee_pose_from_refreshed_tensors(st.ik_state)
 
-        if dp_controller is not None:
+        dp_policy_update_due = bool(
+            dp_controller is not None and dc.float_dp_policy_update_due(step, args, dt)
+        )
+        if dp_policy_update_due:
             if viewer is not None and (args.draw_ik_target or args.draw_camera_axes):
                 # Clear viewer-only debug lines before camera rendering so policy observations stay clean.
                 gym.clear_lines(viewer)
@@ -1525,30 +1553,46 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
             gym.refresh_dof_state_tensor(sim)
             gym.refresh_jacobian_tensors(sim)
 
-        dp_policy_inputs_by_env, dp_actions_by_env = dc.collect_float_dp_policy_actions(
-            gym,
-            sim,
-            env_states,
-            dof_names,
-            gripper_idx,
-            dt,
-            dp_controller,
-            dp_control_env_id_set,
-            "ikpush",
-        )
+        if dp_policy_update_due:
+            dp_policy_inputs_by_env, dp_actions_by_env = dc.collect_float_dp_policy_actions(
+                gym,
+                sim,
+                env_states,
+                dof_names,
+                gripper_idx,
+                dt,
+                dp_controller,
+                dp_control_env_id_set,
+                "ikpush",
+            )
+        else:
+            dp_policy_inputs_by_env, dp_actions_by_env = {}, {}
 
         for st in env_states:
-            if dp_controller is not None and st.index in dp_actions_by_env:
+            if dp_controller is not None and (st.index in dp_actions_by_env or st.last_dp_action is not None):
                 phase = "dp_policy"
-                dp_policy_input = dp_policy_inputs_by_env[st.index]
-                base_xy_current = dp_policy_input["base_xy_current"]
-                yaw_current = dp_policy_input["yaw_current"]
-                handle_goal = dp_policy_input["handle_goal"]
-                ee_pos = dp_policy_input["ee_pos"]
-                ee_quat = dp_policy_input["ee_quat"]
-                dp_state = dp_policy_input["dp_state"]
-                dp_action = dp_actions_by_env[st.index]
-                st.last_dp_action = np.asarray(dp_action, dtype=np.float32).copy()
+                if st.index in dp_actions_by_env:
+                    dp_policy_input = dp_policy_inputs_by_env[st.index]
+                    base_xy_current = dp_policy_input["base_xy_current"]
+                    yaw_current = dp_policy_input["yaw_current"]
+                    handle_goal = dp_policy_input["handle_goal"]
+                    ee_pos = dp_policy_input["ee_pos"]
+                    ee_quat = dp_policy_input["ee_quat"]
+                    dp_state = dp_policy_input["dp_state"]
+                    dp_action = dp_actions_by_env[st.index]
+                    st.last_dp_action = np.asarray(dp_action, dtype=np.float32).copy()
+                    st.last_dp_state = None if dp_state is None else np.asarray(dp_state, dtype=np.float32).copy()
+                    st.last_dp_ee_pos = None if ee_pos is None else np.asarray(ee_pos, dtype=np.float32).copy()
+                    st.last_dp_ee_quat = None if ee_quat is None else np.asarray(ee_quat, dtype=np.float32).copy()
+                    st.last_dp_handle_goal = None if handle_goal is None else np.asarray(handle_goal, dtype=np.float32).copy()
+                else:
+                    base_xy_current = np.asarray(st.traj.get("base_xy", st.base_start), dtype=np.float32)
+                    yaw_current = float(st.traj.get("yaw", st.yaw_start))
+                    handle_goal = getattr(st, "last_dp_handle_goal", st.last_handle_goal)
+                    ee_pos = getattr(st, "last_dp_ee_pos", None)
+                    ee_quat = getattr(st, "last_dp_ee_quat", None)
+                    dp_state = getattr(st, "last_dp_state", None)
+                    dp_action = np.asarray(st.last_dp_action, dtype=np.float32).copy()
                 base_xy, yaw, target_pos, target_quat, gripper = apply_float_dp_action(
                     dp_action,
                     base_xy_current,
@@ -1649,9 +1693,11 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
         gym.simulate(sim)
         gym.fetch_results(sim, True)
 
-        need_camera_render = bool(
-            any(st.camera_handles for st in env_states) and (args.show_camera_images or args.record_dp_dataset)
+        record_camera_due = bool(
+            args.record_dp_dataset
+            and any(st.camera_handles and dc.float_dp_record_frame_due(st, dt) for st in env_states)
         )
+        need_camera_render = bool(any(st.camera_handles for st in env_states) and (args.show_camera_images or record_camera_due))
         if viewer is not None and need_camera_render and (args.draw_ik_target or args.draw_camera_axes):
             # Clear viewer-only debug lines before camera rendering so depth/RGB tensors stay clean.
             gym.clear_lines(viewer)
@@ -1749,6 +1795,7 @@ def main():
     print(f"ikpush seed={seed}", flush=True)
     gym = gymapi.acquire_gym()
     sim, dt = base_ik.create_sim(gym, args)
+    args.sim_dt = float(dt)
 
     plane_params = gymapi.PlaneParams()
     plane_params.normal = gymapi.Vec3(0.0, 0.0, 1.0)

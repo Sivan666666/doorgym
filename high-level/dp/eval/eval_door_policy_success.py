@@ -129,7 +129,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dp_inference_steps", type=int, default=10)
     parser.add_argument("--dp_noise_scheduler_type", type=str.upper, choices=["DDIM", "DDPM"], default="DDIM")
     parser.add_argument("--dp_action_horizon", type=int, default=None)
+    parser.add_argument(
+        "--dp_fps",
+        type=int,
+        default=25,
+        help="Policy observation/action update rate forwarded to the float_ik play script.",
+    )
     parser.add_argument("--rgb", action="store_true")
+    parser.add_argument("--depth_only", action="store_true", help="Use wrist/front depth only, no mask image inputs.")
     parser.add_argument("--camera_display_scale", type=int, default=5)
     parser.add_argument("--run_root", type=str, default=None, help="Directory for logs and summary JSON.")
     parser.add_argument("--stream_output", action="store_true", help="Stream each play subprocess output to this terminal.")
@@ -349,6 +356,8 @@ def build_play_command(args: argparse.Namespace, batch_envs: int, batch_idx: int
         cmd += ["--dp_action_horizon", str(args.dp_action_horizon)]
     if args.rgb:
         cmd.append("--rgb")
+    elif args.depth_only:
+        cmd.append("--depth_only")
     if args.headless:
         cmd.append("--headless")
     if args.graphics_device_id is not None:
@@ -362,6 +371,8 @@ def build_play_command(args: argparse.Namespace, batch_envs: int, batch_idx: int
         str(door_cfg),
         "--pass_open_angle_deg",
         str(args.pass_open_angle_deg),
+        "--dp_fps",
+        str(int(args.dp_fps)),
     ]
     if args.base_seed is not None:
         cmd += ["--seed", str(int(args.base_seed) + int(batch_idx))]
@@ -446,6 +457,10 @@ def main() -> None:
         raise ValueError("--parallel_batches must be positive.")
     if args.progress_interval <= 0:
         raise ValueError("--progress_interval must be positive.")
+    if args.rgb and args.depth_only:
+        raise ValueError("--rgb and --depth_only are mutually exclusive.")
+    if args.dp_fps <= 0:
+        raise ValueError("--dp_fps must be positive.")
     if args.steps is None:
         args.steps = 4300 if args.mode == "ikpull" else 2500
     PROGRESS_RENDERER = InlineProgress(enabled=not args.no_progress)
@@ -477,6 +492,8 @@ def main() -> None:
         f"Door policy success eval: checkpoint={resolve_path(args.checkpoint)} door_cfg={resolve_path(args.door_cfg)}\n"
         f"mode={args.mode} num_envs={args.num_envs} total_trials={args.total_trials} "
         f"steps={args.steps} threshold={args.pass_open_angle_deg}deg metric={metric} "
+        f"vision_mode={'rgb' if args.rgb else ('depth_only' if args.depth_only else 'depth')} "
+        f"dp_action_horizon={args.dp_action_horizon} dp_fps={args.dp_fps:g} "
         f"parallel_batches={args.parallel_batches} headless={args.headless} run_root={run_root}"
     )
     if args.parallel_batches > 1:
@@ -557,6 +574,10 @@ def main() -> None:
         "graphics_device_id": args.graphics_device_id,
         "dp_inference_steps": int(args.dp_inference_steps),
         "dp_noise_scheduler_type": args.dp_noise_scheduler_type,
+        "dp_action_horizon": None if args.dp_action_horizon is None else int(args.dp_action_horizon),
+        "dp_fps": int(args.dp_fps),
+        "rgb": bool(args.rgb),
+        "depth_only": bool(args.depth_only),
         "successes": total_successes,
         "trials": total,
         "success_rate": success_rate,

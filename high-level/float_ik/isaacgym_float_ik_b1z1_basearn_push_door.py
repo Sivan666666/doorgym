@@ -50,6 +50,7 @@ DEFAULT_FRONT_CAMERA_CFG = {
     "position": [0.425, 0.04, 0.12],
     "rotation": [0.0, 0.0, 0.0],
 }
+_DOOR_SIDE_WALL_ASSET_CACHE = {}
 
 
 def load_base_float_ik_module():
@@ -209,6 +210,14 @@ def parse_args():
             {"name": "--door_x", "type": float, "default": 2.5},
             {"name": "--door_y", "type": float, "default": 0.0},
             {"name": "--door_z_offset", "type": float, "default": 0.01},
+            {"name": "--no_door_side_walls", "action": "store_true", "help": "Disable the static side-wall actors beside the door."},
+            {"name": "--door_wall_height", "type": float, "default": 2.2},
+            {"name": "--door_wall_opening_width", "type": float, "default": 0.0, "help": "Wall opening width; <=0 uses the scaled door bounding-box width."},
+            {"name": "--door_wall_side_width", "type": float, "default": 1.0},
+            {"name": "--door_wall_thickness", "type": float, "default": 0.08},
+            {"name": "--door_wall_gap", "type": float, "default": 0.0},
+            {"name": "--door_wall_x_offset", "type": float, "default": 0.0},
+            {"name": "--door_wall_y_offset", "type": float, "default": 0.0},
             {"name": "--robot_x", "type": float, "default": 4.1},
             {"name": "--robot_y", "type": float, "default": -0.06},
             {"name": "--robot_z", "type": float, "default": 0.60},
@@ -227,10 +236,11 @@ def parse_args():
             },
             {"name": "--push_base_yaw_delta", "type": float, "default": 0.0},
             {"name": "--walk_steps", "type": int, "default": 260},
-            {"name": "--initial_hold_steps", "type": int, "default": 200},
+            {"name": "--initial_hold_steps", "type": int, "default": 150},
+            {"name": "--initial_hold_move_steps", "type": int, "default": 100},
             {"name": "--grasp_steps", "type": int, "default": 150},
-            {"name": "--grasp_hold_steps", "type": int, "default": 100},
-            {"name": "--gripper_close_steps", "type": int, "default": 120},
+            {"name": "--grasp_hold_steps", "type": int, "default": 5},
+            {"name": "--gripper_close_steps", "type": int, "default": 100},
             {"name": "--handle_rotate_steps", "type": int, "default": 300},
             {"name": "--door_push_steps", "type": int, "default": 1080},
             {"name": "--return_home_steps", "type": int, "default": 360},
@@ -319,6 +329,7 @@ def parse_args():
             {"name": "--show_seg", "action": "store_true"},
             {"name": "--no_show_seg", "action": "store_true"},
             {"name": "--rgb", "action": "store_true", "help": "Show RGB+mask camera previews instead of full depth+mask."},
+            {"name": "--depth_only", "action": "store_true", "help": "Record only wrist/front depth images, without handle mask images."},
             {"name": "--camera_rgb", "action": "store_true"},
             {"name": "--camera_depth", "action": "store_true"},
             {"name": "--no_camera_depth", "action": "store_true"},
@@ -341,7 +352,7 @@ def parse_args():
             {"name": "--dp_record_env_id", "type": int, "default": 0},
             {"name": "--dp_record_all_envs", "action": "store_true"},
             {"name": "--no_dp_record_all_envs", "action": "store_true"},
-            {"name": "--dp_fps", "type": int, "default": 50},
+            {"name": "--dp_fps", "type": int, "default": 25},
             {"name": "--camera_fps", "type": float, "default": 25.0},
             {"name": "--pass_open_angle_deg", "type": float, "default": 80.0},
             {"name": "--no_preview_trajectory_at_spawn", "action": "store_true"},
@@ -373,6 +384,8 @@ def parse_args():
     args.camera_rgb = bool(args.camera_rgb or args.rgb)
     args.camera_depth = bool((args.camera_depth or not args.no_camera_depth) and not args.rgb)
     args.camera_seg = bool(args.camera_seg or not args.no_camera_seg)
+    if bool(getattr(args, "rgb", False)) and bool(getattr(args, "depth_only", False)):
+        raise ValueError("--rgb and --depth_only are mutually exclusive.")
     args.dp_record_all_envs = not bool(args.no_dp_record_all_envs)
     if args.num_envs != 1:
         raise ValueError("isaacgym_float_ik_b1z1_basearn_push_door.py supports only --num_envs 1.")
@@ -590,6 +603,99 @@ def robot_y_for_door(args, handle_bounding):
     return args.robot_y + handle_center_world_y
 
 
+def create_door_side_wall_asset(gym, sim, args):
+    dims = (
+        max(1.0e-3, float(getattr(args, "door_wall_thickness", 0.08))),
+        max(1.0e-3, float(getattr(args, "door_wall_side_width", 1.0))),
+        max(1.0e-3, float(getattr(args, "door_wall_height", 2.2))),
+    )
+    cache_key = (id(sim), tuple(round(v, 5) for v in dims))
+    if cache_key in _DOOR_SIDE_WALL_ASSET_CACHE:
+        return _DOOR_SIDE_WALL_ASSET_CACHE[cache_key]
+
+    asset_root = Path(tempfile.gettempdir()) / "b1z1_float_ik_wall_assets"
+    asset_root.mkdir(parents=True, exist_ok=True)
+    dim_label = "_".join(f"{value:.3f}".replace(".", "p") for value in dims)
+    file_name = f"door_side_wall_{dim_label}.urdf"
+    asset_path = asset_root / file_name
+    if not asset_path.exists():
+        asset_path.write_text(
+            f"""<?xml version="1.0"?>
+<robot name="door_side_wall">
+  <link name="wall">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="{dims[0]:.6f} {dims[1]:.6f} {dims[2]:.6f}"/>
+      </geometry>
+      <material name="wall_gray">
+        <color rgba="0.58 0.58 0.56 1"/>
+      </material>
+    </visual>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="1.0"/>
+      <inertia ixx="1.0" ixy="0.0" ixz="0.0" iyy="1.0" iyz="0.0" izz="1.0"/>
+    </inertial>
+  </link>
+</robot>
+""",
+            encoding="utf-8",
+        )
+    opts = gymapi.AssetOptions()
+    opts.fix_base_link = True
+    opts.disable_gravity = True
+    asset = gym.load_asset(sim, str(asset_root), file_name, opts)
+    _DOOR_SIDE_WALL_ASSET_CACHE[cache_key] = asset
+    return asset
+
+
+def create_door_side_walls(gym, sim, env, door, args):
+    if bool(getattr(args, "no_door_side_walls", False)):
+        return []
+
+    wall_asset = create_door_side_wall_asset(gym, sim, args)
+    side_width = max(1.0e-3, float(getattr(args, "door_wall_side_width", 1.0)))
+    height = max(1.0e-3, float(getattr(args, "door_wall_height", 2.2)))
+    opening_width = float(getattr(args, "door_wall_opening_width", 0.0))
+    if opening_width <= 0.0:
+        opening_width = float(args.door_actor_scale) * (
+            float(door.bounding["max"][0]) - float(door.bounding["min"][0])
+        )
+    opening_width = max(1.0e-3, opening_width)
+    gap = max(0.0, float(getattr(args, "door_wall_gap", 0.0)))
+
+    x = float(args.door_x) + float(getattr(args, "door_wall_x_offset", 0.0))
+    y_center = float(args.door_y) + float(getattr(args, "door_wall_y_offset", 0.0))
+    z = float(getattr(args, "door_z_offset", 0.0)) + 0.5 * height
+    y_offsets = (
+        -0.5 * opening_width - gap - 0.5 * side_width,
+        0.5 * opening_width + gap + 0.5 * side_width,
+    )
+    color = gymapi.Vec3(0.58, 0.58, 0.56)
+
+    actors = []
+    for side_name, y_offset in (("left", y_offsets[0]), ("right", y_offsets[1])):
+        pose = gymapi.Transform()
+        pose.p = gymapi.Vec3(x, y_center + y_offset, z)
+        pose.r = gymapi.Quat(0.0, 0.0, 0.0, 1.0)
+        actor = gym.create_actor(
+            env,
+            wall_asset,
+            pose,
+            f"door_side_wall_{side_name}",
+            0,
+            int(getattr(args, "door_wall_collision_filter", 0)),
+            0,
+        )
+        try:
+            gym.set_rigid_body_color(env, actor, 0, gymapi.MESH_VISUAL, color)
+        except Exception:
+            pass
+        actors.append(actor)
+    return actors
+
+
 def create_env_actors(gym, sim, base_asset, arm_asset, door, dof_props, dof_states, args):
     env = gym.create_env(sim, gymapi.Vec3(-2.5, -2.5, 0.0), gymapi.Vec3(2.5, 2.5, 2.5), 1)
     robot_y = robot_y_for_door(args, door.handle_bounding)
@@ -643,6 +749,7 @@ def create_env_actors(gym, sim, base_asset, arm_asset, door, dof_props, dof_stat
         handle_range = max(1.0e-6, float(door.dof_upper[1] - door.dof_lower[1]) if len(door.dof_upper) >= 2 else 1.0)
         door.handle_unlock_threshold = args.handle_unlock_ratio * handle_range
 
+    create_door_side_walls(gym, sim, env, door, args)
     return env, arm_actor, actor_handles, door_actor, np.array([args.robot_x, robot_y], dtype=np.float32)
 
 
@@ -878,17 +985,20 @@ def show_camera_handle_images(gym, sim, env, camera_handles, args):
         return
     gym.render_all_camera_sensors(sim)
     display_scale = max(1, int(args.camera_display_scale))
+    depth_only_display = bool(getattr(args, "depth_only", False)) and not bool(getattr(args, "rgb", False))
     for prefix, camera_handle in camera_handles.items():
-        seg_raw = gym.get_camera_image(sim, env, camera_handle, gymapi.IMAGE_SEGMENTATION)
-        if seg_raw is None:
-            continue
-
         camera_cfg = DEFAULT_WRIST_CAMERA_CFG if prefix == "wrist" else DEFAULT_FRONT_CAMERA_CFG
         width = int(camera_cfg.get("resolution", [96, 54])[0])
         height = int(camera_cfg.get("resolution", [96, 54])[1])
-        seg_image = camera_image_to_array(seg_raw, height, width).astype(np.int32)
-        handle_mask = (seg_image == int(args.handle_seg_id)).astype(np.float32)
-        mask_vis = (255.0 * handle_mask).astype(np.uint8)
+        handle_mask = None
+        mask_vis = None
+        if not depth_only_display:
+            seg_raw = gym.get_camera_image(sim, env, camera_handle, gymapi.IMAGE_SEGMENTATION)
+            if seg_raw is None:
+                continue
+            seg_image = camera_image_to_array(seg_raw, height, width).astype(np.int32)
+            handle_mask = (seg_image == int(args.handle_seg_id)).astype(np.float32)
+            mask_vis = (255.0 * handle_mask).astype(np.uint8)
 
         if args.rgb:
             rgb_raw = gym.get_camera_image(sim, env, camera_handle, gymapi.IMAGE_COLOR)
@@ -951,18 +1061,26 @@ def show_camera_handle_images(gym, sim, env, camera_handles, args):
 
         printed = getattr(args, "_camera_image_stats_printed", set())
         if prefix not in printed:
-            print(
-                f"{prefix} camera image stats: "
-                f"seg_shape={tuple(seg_image.shape)} "
-                f"mask_pixels={int(handle_mask.sum())} "
-                f"valid_depth_pixels={int(valid_depth.size)}",
-                flush=True,
-            )
+            if depth_only_display:
+                print(
+                    f"{prefix} camera image stats: "
+                    f"depth_shape={tuple(depth_image.shape)} "
+                    f"valid_depth_pixels={int(valid_depth.size)}",
+                    flush=True,
+                )
+            else:
+                print(
+                    f"{prefix} camera image stats: "
+                    f"seg_shape={tuple(seg_image.shape)} "
+                    f"mask_pixels={int(handle_mask.sum())} "
+                    f"valid_depth_pixels={int(valid_depth.size)}",
+                    flush=True,
+                )
             printed.add(prefix)
             args._camera_image_stats_printed = printed
 
         visible_printed = getattr(args, "_camera_handle_visible_printed", set())
-        if prefix not in visible_printed and handle_mask.sum() > 0:
+        if not depth_only_display and prefix not in visible_printed and handle_mask.sum() > 0:
             print(
                 f"{prefix} camera sees handle: "
                 f"mask_pixels={int(handle_mask.sum())} "
@@ -983,11 +1101,13 @@ def show_camera_handle_images(gym, sim, env, camera_handles, args):
                 args._camera_blank_warned = blank_printed
 
         if display_scale > 1:
-            mask_vis = cv2.resize(mask_vis, None, fx=display_scale, fy=display_scale, interpolation=cv2.INTER_NEAREST)
+            if mask_vis is not None:
+                mask_vis = cv2.resize(mask_vis, None, fx=display_scale, fy=display_scale, interpolation=cv2.INTER_NEAREST)
             depth_vis = cv2.resize(
                 depth_vis, None, fx=display_scale, fy=display_scale, interpolation=cv2.INTER_NEAREST
             )
-        cv2.imshow(f"{prefix.capitalize()} Handle Mask", mask_vis)
+        if not depth_only_display:
+            cv2.imshow(f"{prefix.capitalize()} Handle Mask", mask_vis)
         cv2.imshow(f"{prefix.capitalize()} Full Depth", depth_vis)
     cv2.waitKey(1)
 
@@ -1077,6 +1197,12 @@ def dp_image_inputs_from_cpu_cameras(camera_images, args):
             camera_images.get("front_handle_mask"),
             camera_images.get("front_rgb"),
         )
+    if bool(getattr(args, "depth_only", False)):
+        wrist_depth = camera_images.get("wrist_masked_depth")
+        front_depth = camera_images.get("front_masked_depth")
+        wrist_empty = None if wrist_depth is None else np.zeros_like(wrist_depth, dtype=np.uint8)
+        front_empty = None if front_depth is None else np.zeros_like(front_depth, dtype=np.uint8)
+        return wrist_empty, wrist_depth, front_empty, front_depth
     return (
         camera_images.get("wrist_handle_mask"),
         camera_images.get("wrist_masked_depth"),
@@ -1086,7 +1212,7 @@ def dp_image_inputs_from_cpu_cameras(camera_images, args):
 
 
 def camera_sample_stride(args):
-    dp_fps = float(getattr(args, "dp_fps", 50))
+    dp_fps = float(getattr(args, "dp_fps", 25))
     camera_fps = float(getattr(args, "camera_fps", 25.0))
     if dp_fps <= 0.0:
         raise ValueError("--dp_fps must be positive")
@@ -1096,7 +1222,22 @@ def camera_sample_stride(args):
 
 
 def camera_effective_fps(args):
-    return float(getattr(args, "dp_fps", 50)) / float(camera_sample_stride(args))
+    return float(getattr(args, "dp_fps", 25)) / float(camera_sample_stride(args))
+
+
+def record_sample_stride(args, dt):
+    dp_fps = float(getattr(args, "dp_fps", 25))
+    if dp_fps <= 0.0:
+        raise ValueError("--dp_fps must be positive")
+    if dt <= 0.0:
+        return 1
+    return max(1, int(round((1.0 / float(dt)) / dp_fps)))
+
+
+def record_effective_fps(args, dt):
+    if dt <= 0.0:
+        return float(getattr(args, "dp_fps", 25))
+    return (1.0 / float(dt)) / float(record_sample_stride(args, dt))
 
 
 def camera_images_for_record_frame(gym, sim, env, camera_handles, args, cache, frame_count):
@@ -1111,9 +1252,17 @@ def camera_images_for_record_frame(gym, sim, env, camera_handles, args, cache, f
         wrist_mask_rgb, wrist_second_rgb, front_mask_rgb, front_second_rgb = dp_image_inputs_from_cpu_cameras(
             camera_images, args
         )
-        missing_required_camera = wrist_mask_rgb is None or wrist_second_rgb is None or (
-            args.rgb and (front_mask_rgb is None or front_second_rgb is None)
-        )
+        if args.rgb:
+            missing_required_camera = (
+                wrist_mask_rgb is None
+                or wrist_second_rgb is None
+                or front_mask_rgb is None
+                or front_second_rgb is None
+            )
+        elif bool(getattr(args, "depth_only", False)):
+            missing_required_camera = wrist_second_rgb is None or front_second_rgb is None
+        else:
+            missing_required_camera = wrist_mask_rgb is None or wrist_second_rgb is None
         if missing_required_camera:
             if cache.get("wrist_mask") is None or cache.get("wrist_second") is None:
                 return None, None, None, None
@@ -1522,7 +1671,7 @@ def trajectory_targets(
 
         if step < initial_end:
             initial_step = step - walk_end
-            move_steps = max(1, int(round(max(1, args.initial_hold_steps) * 0.5)))
+            move_steps = min(max(1, int(args.initial_hold_move_steps)), max(1, int(args.initial_hold_steps)))
             if initial_step < move_steps:
                 t = smoothstep((initial_step + 1) / move_steps)
                 target_pos = lerp(traj["initial_hold_start_pos"], traj["pregrasp"], t)
@@ -1778,7 +1927,7 @@ def run_demo(
                 "raw frames will be skipped with a camera-unavailable warning.",
                 flush=True,
             )
-        vision_mode = "rgb" if args.rgb else "depth"
+        vision_mode = "rgb" if args.rgb else ("depth_only" if bool(getattr(args, "depth_only", False)) else "depth")
         if normalize_vision_mode is not None:
             vision_mode = normalize_vision_mode(vision_mode)
         dp_recorder = RawDoorDPRecorder(
@@ -1797,6 +1946,10 @@ def run_demo(
                 "action_pose_frame": "base",
                 "target_pose_frame": "base",
                 "ikpush_state_version": IKPUSH_STATE_VERSION,
+                "sim_dt": float(getattr(args, "sim_dt", dt)),
+                "sim_fps": 1.0 / float(getattr(args, "sim_dt", dt)) if float(getattr(args, "sim_dt", dt)) > 0.0 else 0.0,
+                "record_sample_stride": int(record_sample_stride(args, dt)),
+                "record_effective_fps": record_effective_fps(args, dt),
                 "camera_fps": camera_effective_fps(args),
                 "camera_sample_stride": int(camera_sample_stride(args)),
                 "camera_hold_last_frame": True,
@@ -1808,8 +1961,9 @@ def run_demo(
             f"camera_fps={camera_effective_fps(args):.2f}",
             flush=True,
         )
-    prev_base_xy = None
-    prev_yaw = None
+    dp_record_prev_base_xy = None
+    dp_record_prev_yaw = None
+    dp_record_sim_steps = 0
     prev_dp_action = np.zeros(10, dtype=np.float32)
     dp_camera_cache = {}
     while step < max_steps:
@@ -1858,7 +2012,14 @@ def run_demo(
         gym.simulate(sim)
         gym.fetch_results(sim, True)
 
-        need_camera_render = bool(camera_handles and (args.show_camera_images or args.record_dp_dataset))
+        if dp_recorder is not None:
+            dp_record_stride = record_sample_stride(args, dt)
+            should_record_dp_frame = (int(dp_record_sim_steps) % int(dp_record_stride)) == 0
+        else:
+            dp_record_stride = 1
+            should_record_dp_frame = False
+
+        need_camera_render = bool(camera_handles and (args.show_camera_images or should_record_dp_frame))
         if viewer is not None and need_camera_render and (args.draw_ik_target or args.draw_camera_axes):
             # Clear viewer-only debug lines before camera rendering so depth/RGB tensors stay clean.
             gym.clear_lines(viewer)
@@ -1868,11 +2029,18 @@ def run_demo(
             show_camera_handle_images(gym, sim, env, camera_handles, args)
         door_pos_record, door_vel_record = get_actor_dof_state(gym, env, door_actor)
 
-        if dp_recorder is not None:
+        if dp_recorder is not None and should_record_dp_frame:
             ee_pos, ee_quat = current_ee_pose(gym, sim, ik_state)
             dof_pos_actual, dof_vel_actual = get_actor_dof_state(gym, env, arm_actor)
             gripper_actual = float(dof_pos_actual[gripper_idx]) if gripper_idx is not None and gripper_idx < len(dof_pos_actual) else float(gripper)
-            vx_cmd, yaw_rate_cmd = base_command_from_targets(base_xy, yaw, prev_base_xy, prev_yaw, dt)
+            record_dt = float(dt) * float(dp_record_stride)
+            vx_cmd, yaw_rate_cmd = base_command_from_targets(
+                base_xy,
+                yaw,
+                dp_record_prev_base_xy,
+                dp_record_prev_yaw,
+                record_dt,
+            )
             dp_target_quat = target_quat_for_dp(target_quat, ik_state, ee_quat)
             wrist_mask_rgb, wrist_second_rgb, front_mask_rgb, front_second_rgb = camera_images_for_record_frame(
                 gym,
@@ -1883,9 +2051,17 @@ def run_demo(
                 dp_camera_cache,
                 dp_recorder.frame_count,
             )
-            missing_required_camera = wrist_mask_rgb is None or wrist_second_rgb is None or (
-                args.rgb and (front_mask_rgb is None or front_second_rgb is None)
-            )
+            if args.rgb:
+                missing_required_camera = (
+                    wrist_mask_rgb is None
+                    or wrist_second_rgb is None
+                    or front_mask_rgb is None
+                    or front_second_rgb is None
+                )
+            elif bool(getattr(args, "depth_only", False)):
+                missing_required_camera = wrist_second_rgb is None or front_second_rgb is None
+            else:
+                missing_required_camera = wrist_mask_rgb is None or wrist_second_rgb is None
             if missing_required_camera:
                 if not dp_record_warned_no_camera:
                     missing_desc = "wrist/front camera RGB or mask images" if args.rgb else "wrist camera mask/depth images"
@@ -1944,9 +2120,13 @@ def run_demo(
                     ),
                 )
                 prev_dp_action = dp_action.copy()
+                dp_record_prev_base_xy = np.asarray(base_xy, dtype=np.float32).copy()
+                dp_record_prev_yaw = float(yaw)
             if len(door_pos_record) > 0:
                 signed_open_deg = math.degrees(args.door_motion_sign * float(door_pos_record[0]))
                 dp_record_success = dp_record_success or signed_open_deg >= float(args.pass_open_angle_deg)
+        if dp_recorder is not None:
+            dp_record_sim_steps += 1
 
         if viewer is not None:
             if args.draw_ik_target or args.draw_camera_axes:
@@ -1992,8 +2172,6 @@ def run_demo(
                 f"open_stage={door.open_stage}",
                 flush=True,
             )
-        prev_base_xy = np.asarray(base_xy, dtype=np.float32).copy()
-        prev_yaw = float(yaw)
         step += 1
 
     print(f"Done after {step} steps ({time.time() - start:.2f}s).")
@@ -2019,6 +2197,7 @@ def main():
     args = parse_args()
     gym = gymapi.acquire_gym()
     sim, dt = base_ik.create_sim(gym, args)
+    args.sim_dt = float(dt)
 
     plane_params = gymapi.PlaneParams()
     plane_params.normal = gymapi.Vec3(0.0, 0.0, 1.0)

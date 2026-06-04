@@ -2240,13 +2240,18 @@ class DoorPolicyController:
         if front_second_rgb is None:
             front_second_rgb = np.zeros_like(second_rgb)
         state = self._preprocess_state_for_policy(state)
-        return {
+        item = {
             OBS_STATE: _tensor_to_device(state, self.device, torch.float32),
-            self.image_keys[0]: _image_to_chw_float(mask_rgb, required=True).to(self.device),
-            self.image_keys[1]: _image_to_chw_float(second_rgb, required=True).to(self.device),
-            self.image_keys[2]: _image_to_chw_float(front_mask_rgb, required=True).to(self.device),
-            self.image_keys[3]: _image_to_chw_float(front_second_rgb, required=True).to(self.device),
         }
+        if self.vision_mode == "depth_only":
+            item[self.image_keys[0]] = _image_to_chw_float(second_rgb, required=True).to(self.device)
+            item[self.image_keys[1]] = _image_to_chw_float(front_second_rgb, required=True).to(self.device)
+        else:
+            item[self.image_keys[0]] = _image_to_chw_float(mask_rgb, required=True).to(self.device)
+            item[self.image_keys[1]] = _image_to_chw_float(second_rgb, required=True).to(self.device)
+            item[self.image_keys[2]] = _image_to_chw_float(front_mask_rgb, required=True).to(self.device)
+            item[self.image_keys[3]] = _image_to_chw_float(front_second_rgb, required=True).to(self.device)
+        return item
 
     def append_observation(
         self,

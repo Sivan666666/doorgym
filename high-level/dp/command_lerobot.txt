@@ -1,40 +1,38 @@
-# Official LeRobot training / play commands for Door DP / ACT / pi0.5.
+# Official LeRobot train / play / eval commands for Door policies.
 #
-# Run from anywhere. Change RUN_NAME if you start a fresh training run.
-# Official LeRobot train.py refuses to reuse an existing output_dir.
+# Run from anywhere. These commands target the current main dataset:
+#   local/door_pi05_state10_depthonly_wall_40each
 #
-# Current horizon convention:
-# - Diffusion Policy: predict 40 control steps, execute 20 control steps.
-#   At 50 Hz this is predict 0.8s, execute 0.4s.
-# - ACT: predict 100 control steps, execute 50 control steps.
-#   At 50 Hz this is predict 2.0s, execute 1.0s.
-# - pi0.5 / pi0.5 evo: predict 50 control steps, execute 50 control steps.
-#   num_inference_steps is diffusion/flow denoising steps, not robot execution steps.
-#
-# Important:
-# - All official LeRobot train commands use --dataset.use_imagenet_stats=false.
-#   Door images are depth/mask, not RGB ImageNet images.
-# - push_to_hub is disabled for all policies.
-# - wandb is enabled, artifact upload is disabled.
+# Dataset/runtime convention:
+# - Isaac Gym simulation/control: 50Hz, dt=0.02s.
+# - Dataset frames: 25Hz. One dataset/action step = 0.04s.
+# - Vision mode: depth_only, two image keys only:
+#     observation.images.wrist_masked_depth
+#     observation.images.front_masked_depth
+# - State/action in LeRobot files are physical values; LeRobot train applies its own stats normalization.
+# - All train commands use --dataset.use_imagenet_stats=false because depth images are not ImageNet RGB.
+# - push_to_hub is disabled. wandb is enabled, artifact upload is disabled.
 
 set -o pipefail
 
 PROJECT_ROOT=/home/sivan/whole_body/visual_whole_body
-DATASET_REPO_ID=local/4door_ikpush
-DATASET_ROOT=$PROJECT_ROOT/high-level/data/lerobot/local/4door_ikpush
+DATASET_REPO_ID=local/door_pi05_state10_depthonly_wall_40each
+DATASET_ROOT=$PROJECT_ROOT/high-level/data/lerobot/local/door_pi05_state10_depthonly_wall_40each
+RAW_ROOT=$PROJECT_ROOT/high-level/data/door_dp_raw/4door_ikpush_pi05_state10_depthonly_wall_40each
 OUTPUT_ROOT=$PROJECT_ROOT/high-level/dp/logs/lerobot-train
 
 cd "$PROJECT_ROOT"
+export PYTHONPATH="$PROJECT_ROOT/high-level/lerobot/src:${PYTHONPATH:-}"
 
 
 ## 1. Diffusion Policy, official LeRobot train.py
 #
-# Predict 40 steps, execute 20 steps.
-# drop_n_last_frames = horizon - n_action_steps - n_obs_steps + 1 = 40 - 20 - 16 + 1 = 5.
+# Horizon:
+# - predict 40 action steps = 1.6s at 25Hz.
+# - execute 20 action steps = 0.8s at 25Hz.
+# - drop_n_last_frames = horizon - n_action_steps - n_obs_steps + 1 = 40 - 20 - 16 + 1 = 5.
 
-export PYTHONPATH="$PROJECT_ROOT/high-level/lerobot/src:${PYTHONPATH:-}"
-
-DP_RUN_NAME=lerodp_4door_ikpush_h40_exec20_bs16_no_imagenet
+DP_RUN_NAME=lerodp_door_pi05_state10_depthonly_wall_h40_exec20_bs16_no_imagenet
 
 CUDA_VISIBLE_DEVICES=0 accelerate launch \
     --num-processes=1 \
@@ -69,11 +67,11 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
 
 ## 2. ACT ResNet18, official LeRobot train.py
 #
-# Predict 100 steps, execute 50 steps.
+# Horizon:
+# - predict 100 action steps = 4.0s at 25Hz.
+# - execute 50 action steps = 2.0s at 25Hz.
 
-export PYTHONPATH="$PROJECT_ROOT/high-level/lerobot/src:${PYTHONPATH:-}"
-
-ACT_RUN_NAME=leroact_4door_ikpush_chunk100_exec50_bs16_no_imagenet
+ACT_RUN_NAME=leroact_door_pi05_state10_depthonly_wall_chunk100_exec50_bs16_no_imagenet_$(date +%m%d_%H%M)
 
 CUDA_VISIBLE_DEVICES=0 accelerate launch \
     --num-processes=1 \
@@ -104,11 +102,9 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
 
 ## 2b. ACT + frozen DINOv2-base, official LeRobot train.py
 #
-# Predict 100 steps, execute 50 steps.
+# Same horizon as ACT ResNet18. DINOv2 backbone is frozen by default here.
 
-export PYTHONPATH="$PROJECT_ROOT/high-level/lerobot/src:${PYTHONPATH:-}"
-
-ACT_DINOV2_RUN_NAME=leroact_dinov2_base_4door_ikpush_chunk100_exec50_bs16_no_imagenet
+ACT_DINOV2_RUN_NAME=leroact_dinov2_base_door_pi05_state10_depthonly_wall_chunk100_exec50_bs16_no_imagenet_$(date +%m%d_%H%M)
 
 CUDA_VISIBLE_DEVICES=0 accelerate launch \
     --num-processes=1 \
@@ -143,13 +139,12 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
 #
 # Required environment:
 #   conda activate b1z1_lerobot
-# Source tree:
-#   high-level/lerobot
-# Predict 50 steps, execute 50 steps.
+# Horizon:
+# - predict 100 action steps = 4.0s at 25Hz.
+# - execute 50 action steps = 2.0s at 25Hz.
+# num_inference_steps controls flow/diffusion sampling, not robot execution length.
 
-export PYTHONPATH="$PROJECT_ROOT/high-level/lerobot/src:${PYTHONPATH:-}"
-
-PI05_RUN_NAME=pi05_4door_ikpush_chunk50_exec50_no_imagenet
+PI05_RUN_NAME=pi05_door_pi05_state10_depthonly_wall_chunk100_exec50_no_imagenet_$(date +%m%d_%H%M)
 
 CUDA_VISIBLE_DEVICES=0 accelerate launch \
     --num-processes=1 \
@@ -165,7 +160,7 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
     --policy.dtype=bfloat16 \
     --policy.push_to_hub=false \
     --policy.gradient_checkpointing=true \
-    --policy.chunk_size=50 \
+    --policy.chunk_size=100 \
     --policy.n_action_steps=50 \
     --policy.num_inference_steps=10 \
     --batch_size=16 \
@@ -186,14 +181,11 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
 #   conda activate b1z1_hwk_lerobot
 # Source tree:
 #   high-level/hwk/lerobot
-#
-# pi05_evo is provided by high-level/hwk/lerobot, not high-level/lerobot.
-# Keep the HWK source first in PYTHONPATH for this command.
-# Predict 50 steps, execute 50 steps.
+# Keep HWK source first in PYTHONPATH for this command.
 
 export PYTHONPATH="$PROJECT_ROOT/high-level/hwk/lerobot/src:$PROJECT_ROOT/high-level/lerobot/src:${PYTHONPATH:-}"
 
-PI05_EVO_RUN_NAME=pi05_evo_4door_ikpush_chunk50_exec50_no_imagenet
+PI05_EVO_RUN_NAME=pi05_evo_door_pi05_state10_depthonly_wall_chunk100_exec50_no_imagenet_$(date +%m%d_%H%M)
 
 CUDA_VISIBLE_DEVICES=0 accelerate launch \
     --num-processes=1 \
@@ -209,7 +201,7 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
     --policy.dtype=bfloat16 \
     --policy.push_to_hub=false \
     --policy.gradient_checkpointing=true \
-    --policy.chunk_size=50 \
+    --policy.chunk_size=100 \
     --policy.n_action_steps=50 \
     --policy.num_inference_steps=10 \
     --batch_size=16 \
@@ -223,54 +215,68 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
     --wandb.project=door-pi05 \
     --wandb.disable_artifact=true
 
+export PYTHONPATH="$PROJECT_ROOT/high-level/lerobot/src:${PYTHONPATH:-}"
 
-## 5. Play official LeRobot Diffusion checkpoint in Isaac Gym
+
+## 5. Play official LeRobot ACT checkpoint in Isaac Gym
 #
 # Runtime environment:
 #   conda activate b1z1
-#
-# The first run auto-wraps the official LeRobot checkpoint to Door format under
-# high-level/dp/logs/door-auto-wrapped/.
-# DP inference uses DDPM with 10 denoising steps. Robot executes 20 control steps per policy query.
+# The first run auto-wraps the official LeRobot checkpoint to Door format.
+# --dp_fps 25 is forwarded to float_ik and makes each action command last 0.04s.
 
 export DOOR_DP_LEROBOT_CONDA_ENV=b1z1_lerobot
 
+ACT_CKPT="$OUTPUT_ROOT/$ACT_RUN_NAME/checkpoints/100000"
+
 python "$PROJECT_ROOT/high-level/dp/play/play_door_policy.py" \
     --mode ikpush \
-    --checkpoint "$OUTPUT_ROOT/$DP_RUN_NAME/checkpoints/last" \
+    --checkpoint "$ACT_CKPT" \
     --num_envs 16 \
     --steps 2500 \
     --rl_device cuda:0 \
     --sim_device cuda:0 \
-    --dp_action_horizon 20 \
-    --dp_inference_steps 10 \
-    --dp_noise_scheduler_type DDPM \
-    --camera_display_scale 5 \
-    -- \
-    --door_cfg "$PROJECT_ROOT/high-level/experiments/isaacgym/b1z1_opendoor.yaml" \
-    --pass_open_angle_deg 80 \
-    --seed 123456
-
-
-## 6. Play official LeRobot ACT checkpoint in Isaac Gym
-#
-# ACT predicts 100 steps from its checkpoint and executes 50 steps via --dp_action_horizon 50.
-# dp_inference_steps / dp_noise_scheduler_type are ignored by ACT, but kept harmlessly for CLI symmetry.
-
-export DOOR_DP_LEROBOT_CONDA_ENV=b1z1_lerobot
-
-python "$PROJECT_ROOT/high-level/dp/play/play_door_policy.py" \
-    --mode ikpush \
-    --checkpoint "$OUTPUT_ROOT/$ACT_RUN_NAME/checkpoints/last" \
-    --num_envs 16 \
-    --steps 2500 \
-    --rl_device cuda:0 \
-    --sim_device cuda:0 \
+    --depth_only \
     --dp_action_horizon 50 \
-    --dp_inference_steps 10 \
-    --dp_noise_scheduler_type DDPM \
     --camera_display_scale 5 \
     -- \
     --door_cfg "$PROJECT_ROOT/high-level/experiments/isaacgym/b1z1_opendoor.yaml" \
     --pass_open_angle_deg 80 \
+    --dp_fps 25 \
     --seed 123456
+
+
+## 6. Expert-observation eval
+
+conda run -n b1z1_lerobot python "$PROJECT_ROOT/high-level/dp/eval/eval_door_dp_on_expert_obs.py" \
+    --raw_episode "$RAW_ROOT/episode_000000.npz" \
+    --checkpoint "$ACT_CKPT" \
+    --device cuda:0 \
+    --depth_only \
+    --action_horizon 50 \
+    --compare_horizon 50 \
+    --start 0 \
+    --end 1200 \
+    --stride 50 \
+    --eval_batch_size 16
+
+
+## 7. Success-rate eval
+
+python "$PROJECT_ROOT/high-level/dp/eval/eval_door_policy_success.py" \
+    --checkpoint "$ACT_CKPT" \
+    --yaml "$PROJECT_ROOT/high-level/experiments/isaacgym/b1z1_opendoor.yaml" \
+    --mode ikpush \
+    --num_envs 16 \
+    --total_trials 64 \
+    --steps 2500 \
+    --pass_open_angle_deg 80 \
+    --success_metric signed \
+    --door_motion_sign -1 \
+    --base_seed 123456 \
+    --headless \
+    --rl_device cuda:0 \
+    --sim_device cuda:0 \
+    --depth_only \
+    --dp_action_horizon 50 \
+    --dp_fps 25

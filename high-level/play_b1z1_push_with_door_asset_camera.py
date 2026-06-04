@@ -1489,7 +1489,7 @@ def parse_args():
     parser.add_argument("--dp_record_env_id", type=int, default=0)
     parser.add_argument("--dp_record_all_envs", dest="dp_record_all_envs", action="store_true", default=True)
     parser.add_argument("--no_dp_record_all_envs", dest="dp_record_all_envs", action="store_false")
-    parser.add_argument("--dp_fps", type=int, default=50)
+    parser.add_argument("--dp_fps", type=int, default=25)
     parser.add_argument("--dp_policy_checkpoint", type=str, default=None)
     parser.add_argument("--dp_control_env_id", type=int, default=0)
     parser.add_argument("--dp_control_all_envs", dest="dp_control_all_envs", action="store_true", default=True)
@@ -1866,6 +1866,10 @@ def main():
     dp_recorders = {}
     dp_record_success = torch.zeros(args.num_envs, device=env.device, dtype=torch.bool)
     dp_record_closed = torch.zeros(args.num_envs, device=env.device, dtype=torch.bool)
+    if args.record_dp_dataset and args.dp_fps <= 0:
+        raise ValueError("--dp_fps must be positive")
+    dp_record_stride = max(1, int(round((1.0 / float(env.dt)) / float(max(1, args.dp_fps)))))
+    dp_record_effective_fps = (1.0 / float(env.dt)) / float(dp_record_stride)
     if args.record_dp_dataset:
         if RawDoorDPRecorder is None:
             raise RuntimeError(
@@ -1895,11 +1899,16 @@ def main():
                     "door_asset_name": env.door_asset_names[door_asset_index],
                     "door_asset_path": door_asset_spec.get("path", ""),
                     "door_cfg": str(args.door_cfg),
+                    "sim_dt": float(env.dt),
+                    "sim_fps": 1.0 / float(env.dt),
+                    "record_sample_stride": int(dp_record_stride),
+                    "record_effective_fps": float(dp_record_effective_fps),
                 },
             )
         print(
             f"Recording raw Door DP dataset to {args.dp_raw_root} task={args.dp_task!r} "
-            f"env_ids={record_env_ids} success_angle_deg={args.pass_open_angle_deg}"
+            f"env_ids={record_env_ids} success_angle_deg={args.pass_open_angle_deg} "
+            f"record_fps={float(args.dp_fps):.2f} effective_fps={dp_record_effective_fps:.2f}"
         )
     dp_controller = None
     dp_logger = None
@@ -2509,6 +2518,11 @@ def main():
             for env_id, recorder in dp_recorders.items():
                 if bool(dp_record_closed[env_id].item()):
                     continue
+                should_close = bool(pass_done[env_id].item()) or step == args.steps - 1
+                if step % dp_record_stride != 0:
+                    if should_close:
+                        close_dp_recording(env_id, "pass_done" if bool(pass_done[env_id].item()) else "max_steps")
+                    continue
                 mask_rgb, second_rgb, front_mask_rgb, front_second_rgb = dp_image_inputs_from_camera_tensors(
                     camera_images,
                     env_id,
@@ -2516,7 +2530,6 @@ def main():
                     depth_lower=DOOR_RUNTIME["camera_depth_clip_lower"],
                     depth_far=DOOR_RUNTIME["camera_depth_clip_far"],
                 )
-                should_close = bool(pass_done[env_id].item()) or step == args.steps - 1
                 missing_required_camera = mask_rgb is None or second_rgb is None or (
                     args.rgb and (front_mask_rgb is None or front_second_rgb is None)
                 )

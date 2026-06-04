@@ -135,6 +135,14 @@ def parse_args():
             {"name": "--door_x", "type": float, "default": 2.5},
             {"name": "--door_y", "type": float, "default": 0.0},
             {"name": "--door_z_offset", "type": float, "default": 0.01},
+            {"name": "--no_door_side_walls", "action": "store_true", "help": "Disable the static side-wall actors beside each door."},
+            {"name": "--door_wall_height", "type": float, "default": 2.2},
+            {"name": "--door_wall_opening_width", "type": float, "default": 0.0, "help": "Wall opening width; <=0 uses the scaled door bounding-box width."},
+            {"name": "--door_wall_side_width", "type": float, "default": 1.0},
+            {"name": "--door_wall_thickness", "type": float, "default": 0.08},
+            {"name": "--door_wall_gap", "type": float, "default": 0.0},
+            {"name": "--door_wall_x_offset", "type": float, "default": 0.0},
+            {"name": "--door_wall_y_offset", "type": float, "default": 0.0},
             {"name": "--robot_x", "type": float, "default": 4.1},
             {"name": "--robot_y", "type": float, "default": -0.06},
             {"name": "--robot_z", "type": float, "default": 0.60},
@@ -372,6 +380,7 @@ def parse_args():
             {"name": "--show_seg", "action": "store_true"},
             {"name": "--no_show_seg", "action": "store_true"},
             {"name": "--rgb", "action": "store_true", "help": "Show RGB+mask camera previews instead of full depth+mask."},
+            {"name": "--depth_only", "action": "store_true", "help": "Record only wrist/front depth images, without handle mask images."},
             {"name": "--camera_rgb", "action": "store_true"},
             {"name": "--camera_depth", "action": "store_true"},
             {"name": "--no_camera_depth", "action": "store_true"},
@@ -394,7 +403,7 @@ def parse_args():
             {"name": "--dp_record_env_id", "type": int, "default": 0},
             {"name": "--dp_record_all_envs", "action": "store_true"},
             {"name": "--no_dp_record_all_envs", "action": "store_true"},
-            {"name": "--dp_fps", "type": int, "default": 50},
+            {"name": "--dp_fps", "type": int, "default": 25},
             {"name": "--camera_fps", "type": float, "default": 25.0},
             {"name": "--dp_record_state_mode", "type": str, "default": "full"},
             {"name": "--dp_policy_checkpoint", "type": str, "default": ""},
@@ -2603,9 +2612,13 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
         gym.simulate(sim)
         gym.fetch_results(sim, True)
 
+        record_camera_due = bool(
+            args.record_dp_dataset
+            and any(st.camera_handles and dc.float_dp_record_frame_due(st, dt) for st in env_states)
+        )
         need_camera_render = bool(
             any(st.camera_handles for st in env_states)
-            and (args.show_camera_images or args.record_dp_dataset or args.dp_policy_checkpoint)
+            and (args.show_camera_images or record_camera_due or args.dp_policy_checkpoint)
         )
         if viewer is not None and need_camera_render and (args.draw_ik_target or args.draw_camera_axes):
             gym.clear_lines(viewer)
@@ -2716,6 +2729,7 @@ def main():
     print(f"ikpull seed={seed}", flush=True)
     gym = gymapi.acquire_gym()
     sim, dt = base_ik.create_sim(gym, args)
+    args.sim_dt = float(dt)
 
     plane_params = gymapi.PlaneParams()
     plane_params.normal = gymapi.Vec3(0.0, 0.0, 1.0)

@@ -12,11 +12,16 @@ IMAGE_WIDTH = 96
 DEFAULT_DEPTH_LOWER_METERS = 0.02
 DEFAULT_DEPTH_FAR_METERS = 2.0
 DEPTH_IMAGE_KEYS = ["wrist_handle_mask", "wrist_masked_depth", "front_handle_mask", "front_masked_depth"]
+DEPTH_ONLY_IMAGE_KEYS = ["wrist_masked_depth", "front_masked_depth"]
 RGB_IMAGE_KEYS = ["wrist_handle_mask", "wrist_rgb", "front_handle_mask", "front_rgb"]
 DEPTH_LEROBOT_IMAGE_KEYS = [
     "observation.images.wrist_handle_mask",
     "observation.images.wrist_masked_depth",
     "observation.images.front_handle_mask",
+    "observation.images.front_masked_depth",
+]
+DEPTH_ONLY_LEROBOT_IMAGE_KEYS = [
+    "observation.images.wrist_masked_depth",
     "observation.images.front_masked_depth",
 ]
 RGB_LEROBOT_IMAGE_KEYS = [
@@ -63,18 +68,30 @@ ACTION_NAMES = [
 
 
 def normalize_vision_mode(vision_mode):
-    mode = str(vision_mode or "depth").lower()
-    if mode not in ("depth", "rgb"):
+    mode = str(vision_mode or "depth").lower().replace("-", "_")
+    if mode in ("depthonly", "depth2"):
+        mode = "depth_only"
+    if mode not in ("depth", "depth_only", "rgb"):
         raise ValueError(f"Unsupported Door DP vision mode: {vision_mode!r}")
     return mode
 
 
 def raw_image_keys_for_vision_mode(vision_mode):
-    return RGB_IMAGE_KEYS if normalize_vision_mode(vision_mode) == "rgb" else DEPTH_IMAGE_KEYS
+    mode = normalize_vision_mode(vision_mode)
+    if mode == "rgb":
+        return RGB_IMAGE_KEYS
+    if mode == "depth_only":
+        return DEPTH_ONLY_IMAGE_KEYS
+    return DEPTH_IMAGE_KEYS
 
 
 def lerobot_image_keys_for_vision_mode(vision_mode):
-    return RGB_LEROBOT_IMAGE_KEYS if normalize_vision_mode(vision_mode) == "rgb" else DEPTH_LEROBOT_IMAGE_KEYS
+    mode = normalize_vision_mode(vision_mode)
+    if mode == "rgb":
+        return RGB_LEROBOT_IMAGE_KEYS
+    if mode == "depth_only":
+        return DEPTH_ONLY_LEROBOT_IMAGE_KEYS
+    return DEPTH_LEROBOT_IMAGE_KEYS
 
 
 class DoorDPJsonlLogger:
@@ -797,7 +814,7 @@ class DoorDPLeRobotRecorder:
             "image_storage": self.image_storage,
             "video_codec": self.video_codec,
         }
-        if self.vision_mode == "rgb":
+        if self.vision_mode != "depth":
             sidecar["vision_mode"] = self.vision_mode
         for key in DATASET_METADATA_KEYS:
             if hasattr(self, "metadata") and key in self.metadata:
@@ -820,19 +837,25 @@ class DoorDPLeRobotRecorder:
         if self.vision_mode == "depth":
             front_mask_rgb = _zero_image_like(wrist_mask_rgb) if front_mask_rgb is None else front_mask_rgb
             front_second_rgb = _zero_image_like(wrist_second_rgb) if front_second_rgb is None else front_second_rgb
+        elif self.vision_mode == "depth_only":
+            front_second_rgb = _zero_image_like(wrist_second_rgb) if front_second_rgb is None else front_second_rgb
         elif front_mask_rgb is None or front_second_rgb is None:
             raise ValueError("RGB Door DP LeRobot frames require wrist/front RGB and mask images.")
         image_keys = lerobot_image_keys_for_vision_mode(self.vision_mode)
         frame = {
             "observation.state": np.asarray(state, dtype=np.float32),
-            image_keys[0]: np.asarray(wrist_mask_rgb, dtype=np.uint8),
-            image_keys[1]: np.asarray(wrist_second_rgb, dtype=np.uint8),
-            image_keys[2]: np.asarray(front_mask_rgb, dtype=np.uint8),
-            image_keys[3]: np.asarray(front_second_rgb, dtype=np.uint8),
             "action": np.asarray(action, dtype=np.float32),
             "subtask_index": np.asarray([subtask_index], dtype=np.int64),
             "task": self.task,
         }
+        if self.vision_mode == "depth_only":
+            frame[image_keys[0]] = np.asarray(wrist_second_rgb, dtype=np.uint8)
+            frame[image_keys[1]] = np.asarray(front_second_rgb, dtype=np.uint8)
+        else:
+            frame[image_keys[0]] = np.asarray(wrist_mask_rgb, dtype=np.uint8)
+            frame[image_keys[1]] = np.asarray(wrist_second_rgb, dtype=np.uint8)
+            frame[image_keys[2]] = np.asarray(front_mask_rgb, dtype=np.uint8)
+            frame[image_keys[3]] = np.asarray(front_second_rgb, dtype=np.uint8)
         try:
             self.dataset.add_frame(frame)
         except TypeError:
@@ -883,7 +906,7 @@ class RawDoorDPRecorder:
             "image_features": self.image_keys,
             "format": "door_dp_raw_npz_v1",
         }
-        if self.vision_mode == "rgb":
+        if self.vision_mode != "depth":
             sidecar["vision_mode"] = self.vision_mode
         for key in DATASET_METADATA_KEYS:
             if key in self.metadata:
@@ -906,14 +929,20 @@ class RawDoorDPRecorder:
         if self.vision_mode == "depth":
             front_mask_rgb = _zero_image_like(wrist_mask_rgb) if front_mask_rgb is None else front_mask_rgb
             front_second_rgb = _zero_image_like(wrist_second_rgb) if front_second_rgb is None else front_second_rgb
+        elif self.vision_mode == "depth_only":
+            front_second_rgb = _zero_image_like(wrist_second_rgb) if front_second_rgb is None else front_second_rgb
         elif front_mask_rgb is None or front_second_rgb is None:
             raise ValueError("RGB Door DP raw frames require wrist/front RGB and mask images.")
         self.frames["state"].append(np.asarray(state, dtype=np.float32).copy())
         self.frames["action"].append(np.asarray(action, dtype=np.float32).copy())
-        self.frames[self.image_keys[0]].append(np.asarray(wrist_mask_rgb, dtype=np.uint8).copy())
-        self.frames[self.image_keys[1]].append(np.asarray(wrist_second_rgb, dtype=np.uint8).copy())
-        self.frames[self.image_keys[2]].append(np.asarray(front_mask_rgb, dtype=np.uint8).copy())
-        self.frames[self.image_keys[3]].append(np.asarray(front_second_rgb, dtype=np.uint8).copy())
+        if self.vision_mode == "depth_only":
+            self.frames[self.image_keys[0]].append(np.asarray(wrist_second_rgb, dtype=np.uint8).copy())
+            self.frames[self.image_keys[1]].append(np.asarray(front_second_rgb, dtype=np.uint8).copy())
+        else:
+            self.frames[self.image_keys[0]].append(np.asarray(wrist_mask_rgb, dtype=np.uint8).copy())
+            self.frames[self.image_keys[1]].append(np.asarray(wrist_second_rgb, dtype=np.uint8).copy())
+            self.frames[self.image_keys[2]].append(np.asarray(front_mask_rgb, dtype=np.uint8).copy())
+            self.frames[self.image_keys[3]].append(np.asarray(front_second_rgb, dtype=np.uint8).copy())
         self.frames["subtask_index"].append(np.asarray([subtask_index], dtype=np.int64).copy())
         if replay_snapshot:
             for key, value in replay_snapshot.items():
@@ -946,7 +975,7 @@ class RawDoorDPRecorder:
             "state_feature_names": np.asarray(self.state_feature_names, dtype=object),
             "action_names": np.asarray(self.action_names, dtype=object),
         }
-        if self.vision_mode == "rgb":
+        if self.vision_mode != "depth":
             payload["vision_mode"] = np.asarray(self.vision_mode)
         for key in self.image_keys:
             payload[key] = np.stack(self.frames[key], axis=0).astype(np.uint8)
