@@ -361,7 +361,7 @@ def load_float_ik_module(mode):
     if mode == "ikpull":
         module_path = HIGH_LEVEL_ROOT / "float_ik" / "isaacgym_float_ik_b1z1_basearn_pull_door_parallel.py"
     elif mode == "ikpush":
-        module_path = HIGH_LEVEL_ROOT / "float_ik" / "isaacgym_float_ik_b1z1_basearn_push_door.py"
+        module_path = HIGH_LEVEL_ROOT / "float_ik" / "isaacgym_float_ik_b1z1_basearn_push_door_parallel.py"
     else:
         raise ValueError(f"Unsupported float_ik replay mode: {mode!r}")
     for path in (str(module_path.parent), str(HIGH_LEVEL_ROOT), str(DP_ROOT), str(REPO_ROOT), str(LOW_LEVEL_ROOT)):

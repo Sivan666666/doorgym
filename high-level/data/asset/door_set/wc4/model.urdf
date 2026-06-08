@@ -1,0 +1,913 @@
+<robot name="single_leaf_restroom_door">
+  <material name="pale_whitewashed_wood">
+    <color rgba="0.82 0.84 0.82 1" />
+    </material>
+  <material name="light_frame_wood">
+    <color rgba="0.88 0.88 0.84 1" />
+    </material>
+  <material name="subtle_gray_grain">
+    <color rgba="0.46 0.49 0.48 0.52" />
+    </material>
+  <material name="black_shadow_gap">
+    <color rgba="0.025 0.025 0.024 1" />
+    </material>
+  <material name="light_glass_gasket">
+    <color rgba="0.86 0.87 0.84 1" />
+    </material>
+  <material name="smoked_frosted_glass">
+    <color rgba="0.2 0.3 0.28 0.45" />
+    </material>
+  <material name="matte_black_metal">
+    <color rgba="0.005 0.005 0.005 1" />
+    </material>
+  <material name="brushed_hinge_metal">
+    <color rgba="0.66 0.68 0.68 1" />
+    </material>
+  <link name="fixed_frame">
+    <visual name="left_jamb">
+      <origin xyz="-0.4975 0.055 1.125" rpy="0 0 0" />
+      <geometry>
+        <box size="0.055 0.18 2.25" />
+        </geometry>
+      <material name="light_frame_wood">
+        <color rgba="0.88 0.88 0.84 1" />
+        </material>
+      </visual>
+    <visual name="right_jamb">
+      <origin xyz="0.4975 0.055 1.125" rpy="0 0 0" />
+      <geometry>
+        <box size="0.055 0.18 2.25" />
+        </geometry>
+      <material name="light_frame_wood">
+        <color rgba="0.88 0.88 0.84 1" />
+        </material>
+      </visual>
+    <visual name="header">
+      <origin xyz="0 0.055 2.23" rpy="0 0 0" />
+      <geometry>
+        <box size="1.05 0.18 0.04" />
+        </geometry>
+      <material name="light_frame_wood">
+        <color rgba="0.88 0.88 0.84 1" />
+        </material>
+      </visual>
+    <visual name="left_casing_trim">
+      <origin xyz="-0.502 -0.038 1.125" rpy="0 0 0" />
+      <geometry>
+        <box size="0.046 0.006 2.25" />
+        </geometry>
+      <material name="light_frame_wood">
+        <color rgba="0.88 0.88 0.84 1" />
+        </material>
+      </visual>
+    <visual name="right_casing_trim">
+      <origin xyz="0.502 -0.038 1.125" rpy="0 0 0" />
+      <geometry>
+        <box size="0.046 0.006 2.25" />
+        </geometry>
+      <material name="light_frame_wood">
+        <color rgba="0.88 0.88 0.84 1" />
+        </material>
+      </visual>
+    <visual name="header_casing_trim">
+      <origin xyz="0 -0.038 2.232" rpy="0 0 0" />
+      <geometry>
+        <box size="1.05 0.006 0.036" />
+        </geometry>
+      <material name="light_frame_wood">
+        <color rgba="0.88 0.88 0.84 1" />
+        </material>
+      </visual>
+    <visual name="left_stop">
+      <origin xyz="-0.468 0.09 1.1075" rpy="0 0 0" />
+      <geometry>
+        <box size="0.014 0.014 2.165" />
+        </geometry>
+      <material name="light_frame_wood">
+        <color rgba="0.88 0.88 0.84 1" />
+        </material>
+      </visual>
+    <visual name="right_stop">
+      <origin xyz="0.468 0.09 1.1075" rpy="0 0 0" />
+      <geometry>
+        <box size="0.014 0.014 2.165" />
+        </geometry>
+      <material name="light_frame_wood">
+        <color rgba="0.88 0.88 0.84 1" />
+        </material>
+      </visual>
+    <visual name="header_stop">
+      <origin xyz="0 0.09 2.213" rpy="0 0 0" />
+      <geometry>
+        <box size="0.936 0.014 0.014" />
+        </geometry>
+      <material name="light_frame_wood">
+        <color rgba="0.88 0.88 0.84 1" />
+        </material>
+      </visual>
+    <visual name="left_shadow_gap">
+      <origin xyz="-0.474 0.0575 1.105" rpy="0 0 0" />
+      <geometry>
+        <box size="0.004 0.155 2.155" />
+        </geometry>
+      <material name="black_shadow_gap">
+        <color rgba="0.025 0.025 0.024 1" />
+        </material>
+      </visual>
+    <visual name="right_shadow_gap">
+      <origin xyz="0.474 0.0575 1.105" rpy="0 0 0" />
+      <geometry>
+        <box size="0.004 0.155 2.155" />
+        </geometry>
+      <material name="black_shadow_gap">
+        <color rgba="0.025 0.025 0.024 1" />
+        </material>
+      </visual>
+    <visual name="top_shadow_gap">
+      <origin xyz="0 0.0575 2.207" rpy="0 0 0" />
+      <geometry>
+        <box size="0.93 0.155 0.004" />
+        </geometry>
+      <material name="black_shadow_gap">
+        <color rgba="0.025 0.025 0.024 1" />
+        </material>
+      </visual>
+    <visual name="frame_vertical_grain_0">
+      <origin xyz="-0.514 -0.041 1.105" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0025 0.001 2.12" />
+        </geometry>
+      <material name="subtle_gray_grain">
+        <color rgba="0.46 0.49 0.48 0.52" />
+        </material>
+      </visual>
+    <visual name="frame_vertical_grain_1">
+      <origin xyz="-0.502 -0.041 1.105" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0025 0.001 2.12" />
+        </geometry>
+      <material name="subtle_gray_grain">
+        <color rgba="0.46 0.49 0.48 0.52" />
+        </material>
+      </visual>
+    <visual name="frame_vertical_grain_2">
+      <origin xyz="-0.491 -0.041 1.105" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0025 0.001 2.12" />
+        </geometry>
+      <material name="subtle_gray_grain">
+        <color rgba="0.46 0.49 0.48 0.52" />
+        </material>
+      </visual>
+    <visual name="frame_vertical_grain_3">
+      <origin xyz="0.491 -0.041 1.105" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0025 0.001 2.12" />
+        </geometry>
+      <material name="subtle_gray_grain">
+        <color rgba="0.46 0.49 0.48 0.52" />
+        </material>
+      </visual>
+    <visual name="frame_vertical_grain_4">
+      <origin xyz="0.504 -0.041 1.105" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0025 0.001 2.12" />
+        </geometry>
+      <material name="subtle_gray_grain">
+        <color rgba="0.46 0.49 0.48 0.52" />
+        </material>
+      </visual>
+    <visual name="frame_vertical_grain_5">
+      <origin xyz="0.515 -0.041 1.105" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0025 0.001 2.12" />
+        </geometry>
+      <material name="subtle_gray_grain">
+        <color rgba="0.46 0.49 0.48 0.52" />
+        </material>
+      </visual>
+    <visual name="header_grain_line">
+      <origin xyz="0 -0.041 2.236" rpy="0 0 0" />
+      <geometry>
+        <box size="0.965 0.001 0.003" />
+        </geometry>
+      <material name="subtle_gray_grain">
+        <color rgba="0.46 0.49 0.48 0.52" />
+        </material>
+      </visual>
+    <collision name="left_jamb">
+      <origin xyz="-0.4975 0.055 1.125" rpy="0 0 0" />
+      <geometry>
+        <box size="0.055 0.18 2.25" />
+        </geometry>
+      </collision>
+    <collision name="right_jamb">
+      <origin xyz="0.4975 0.055 1.125" rpy="0 0 0" />
+      <geometry>
+        <box size="0.055 0.18 2.25" />
+        </geometry>
+      </collision>
+    <collision name="header">
+      <origin xyz="0 0.055 2.23" rpy="0 0 0" />
+      <geometry>
+        <box size="1.05 0.18 0.04" />
+        </geometry>
+      </collision>
+    <collision name="left_casing_trim">
+      <origin xyz="-0.502 -0.038 1.125" rpy="0 0 0" />
+      <geometry>
+        <box size="0.046 0.006 2.25" />
+        </geometry>
+      </collision>
+    <collision name="right_casing_trim">
+      <origin xyz="0.502 -0.038 1.125" rpy="0 0 0" />
+      <geometry>
+        <box size="0.046 0.006 2.25" />
+        </geometry>
+      </collision>
+    <collision name="header_casing_trim">
+      <origin xyz="0 -0.038 2.232" rpy="0 0 0" />
+      <geometry>
+        <box size="1.05 0.006 0.036" />
+        </geometry>
+      </collision>
+    <collision name="left_stop">
+      <origin xyz="-0.468 0.09 1.1075" rpy="0 0 0" />
+      <geometry>
+        <box size="0.014 0.014 2.165" />
+        </geometry>
+      </collision>
+    <collision name="right_stop">
+      <origin xyz="0.468 0.09 1.1075" rpy="0 0 0" />
+      <geometry>
+        <box size="0.014 0.014 2.165" />
+        </geometry>
+      </collision>
+    <collision name="header_stop">
+      <origin xyz="0 0.09 2.213" rpy="0 0 0" />
+      <geometry>
+        <box size="0.936 0.014 0.014" />
+        </geometry>
+      </collision>
+    <collision name="left_shadow_gap">
+      <origin xyz="-0.474 0.0575 1.105" rpy="0 0 0" />
+      <geometry>
+        <box size="0.004 0.155 2.155" />
+        </geometry>
+      </collision>
+    <collision name="right_shadow_gap">
+      <origin xyz="0.474 0.0575 1.105" rpy="0 0 0" />
+      <geometry>
+        <box size="0.004 0.155 2.155" />
+        </geometry>
+      </collision>
+    <collision name="top_shadow_gap">
+      <origin xyz="0 0.0575 2.207" rpy="0 0 0" />
+      <geometry>
+        <box size="0.93 0.155 0.004" />
+        </geometry>
+      </collision>
+    <collision name="frame_vertical_grain_0">
+      <origin xyz="-0.514 -0.041 1.105" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0025 0.001 2.12" />
+        </geometry>
+      </collision>
+    <collision name="frame_vertical_grain_1">
+      <origin xyz="-0.502 -0.041 1.105" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0025 0.001 2.12" />
+        </geometry>
+      </collision>
+    <collision name="frame_vertical_grain_2">
+      <origin xyz="-0.491 -0.041 1.105" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0025 0.001 2.12" />
+        </geometry>
+      </collision>
+    <collision name="frame_vertical_grain_3">
+      <origin xyz="0.491 -0.041 1.105" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0025 0.001 2.12" />
+        </geometry>
+      </collision>
+    <collision name="frame_vertical_grain_4">
+      <origin xyz="0.504 -0.041 1.105" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0025 0.001 2.12" />
+        </geometry>
+      </collision>
+    <collision name="frame_vertical_grain_5">
+      <origin xyz="0.515 -0.041 1.105" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0025 0.001 2.12" />
+        </geometry>
+      </collision>
+    <collision name="header_grain_line">
+      <origin xyz="0 -0.041 2.236" rpy="0 0 0" />
+      <geometry>
+        <box size="0.965 0.001 0.003" />
+        </geometry>
+      </collision>
+    </link>
+  <link name="door_panel">
+    <visual name="door_slab">
+      <geometry>
+        <mesh filename="assets/meshes/door_slab.obj" />
+        </geometry>
+      <material name="pale_whitewashed_wood">
+        <color rgba="0.82 0.84 0.82 1" />
+        </material>
+      </visual>
+    <visual name="glass_panel">
+      <origin xyz="0.728 -0.02 1.115" rpy="0 0 0" />
+      <geometry>
+        <box size="0.112 0.016 1.6" />
+        </geometry>
+      <material name="smoked_frosted_glass">
+        <color rgba="0.2 0.3 0.28 0.45" />
+        </material>
+      </visual>
+    <visual name="glass_gasket_left">
+      <origin xyz="0.667 -0.02 1.115" rpy="0 0 0" />
+      <geometry>
+        <box size="0.01 0.044 1.66" />
+        </geometry>
+      <material name="light_glass_gasket">
+        <color rgba="0.86 0.87 0.84 1" />
+        </material>
+      </visual>
+    <visual name="glass_gasket_right">
+      <origin xyz="0.789 -0.02 1.115" rpy="0 0 0" />
+      <geometry>
+        <box size="0.01 0.044 1.66" />
+        </geometry>
+      <material name="light_glass_gasket">
+        <color rgba="0.86 0.87 0.84 1" />
+        </material>
+      </visual>
+    <visual name="glass_gasket_top">
+      <origin xyz="0.728 -0.02 1.93" rpy="0 0 0" />
+      <geometry>
+        <box size="0.132 0.044 0.03" />
+        </geometry>
+      <material name="light_glass_gasket">
+        <color rgba="0.86 0.87 0.84 1" />
+        </material>
+      </visual>
+    <visual name="glass_gasket_bottom">
+      <origin xyz="0.728 -0.02 0.3" rpy="0 0 0" />
+      <geometry>
+        <box size="0.132 0.044 0.03" />
+        </geometry>
+      <material name="light_glass_gasket">
+        <color rgba="0.86 0.87 0.84 1" />
+        </material>
+      </visual>
+    <visual name="latch_edge_plate">
+      <origin xyz="0.915 -0.02 0.985" rpy="0 0 0" />
+      <geometry>
+        <box size="0.004 0.018 0.07" />
+        </geometry>
+      <material name="brushed_hinge_metal">
+        <color rgba="0.66 0.68 0.68 1" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_0">
+      <origin xyz="0.073 -0.04235 1.14" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0032 0.0009 2.03" />
+        </geometry>
+      <material name="subtle_gray_grain">
+        <color rgba="0.46 0.49 0.48 0.52" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_1">
+      <origin xyz="0.128 -0.04235 1.1" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0038 0.0009 1.95" />
+        </geometry>
+      <material name="subtle_gray_grain">
+        <color rgba="0.46 0.49 0.48 0.52" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_2">
+      <origin xyz="0.178 -0.04235 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0032 0.0009 1.87" />
+        </geometry>
+      <material name="subtle_gray_grain">
+        <color rgba="0.46 0.49 0.48 0.52" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_3">
+      <origin xyz="0.238 -0.04235 1.14" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0038 0.0009 2.03" />
+        </geometry>
+      <material name="subtle_gray_grain">
+        <color rgba="0.46 0.49 0.48 0.52" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_4">
+      <origin xyz="0.298 -0.04235 1.1" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0032 0.0009 1.95" />
+        </geometry>
+      <material name="subtle_gray_grain">
+        <color rgba="0.46 0.49 0.48 0.52" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_5">
+      <origin xyz="0.358 -0.04235 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0038 0.0009 1.87" />
+        </geometry>
+      <material name="subtle_gray_grain">
+        <color rgba="0.46 0.49 0.48 0.52" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_6">
+      <origin xyz="0.408 -0.04235 1.14" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0032 0.0009 2.03" />
+        </geometry>
+      <material name="subtle_gray_grain">
+        <color rgba="0.46 0.49 0.48 0.52" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_7">
+      <origin xyz="0.483 -0.04235 1.1" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0038 0.0009 1.95" />
+        </geometry>
+      <material name="subtle_gray_grain">
+        <color rgba="0.46 0.49 0.48 0.52" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_8">
+      <origin xyz="0.538 -0.04235 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0032 0.0009 1.87" />
+        </geometry>
+      <material name="subtle_gray_grain">
+        <color rgba="0.46 0.49 0.48 0.52" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_9">
+      <origin xyz="0.608 -0.04235 1.14" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0038 0.0009 2.03" />
+        </geometry>
+      <material name="subtle_gray_grain">
+        <color rgba="0.46 0.49 0.48 0.52" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_10">
+      <origin xyz="0.798 -0.04235 1.1" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0032 0.0009 1.95" />
+        </geometry>
+      <material name="subtle_gray_grain">
+        <color rgba="0.46 0.49 0.48 0.52" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_11">
+      <origin xyz="0.848 -0.04235 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0038 0.0009 1.87" />
+        </geometry>
+      <material name="subtle_gray_grain">
+        <color rgba="0.46 0.49 0.48 0.52" />
+        </material>
+      </visual>
+    <visual name="subtle_panel_seam_0">
+      <origin xyz="0.218 -0.04245 1.115" rpy="0 0 0" />
+      <geometry>
+        <box size="0.002 0.001 2.08" />
+        </geometry>
+      <material name="subtle_gray_grain">
+        <color rgba="0.46 0.49 0.48 0.52" />
+        </material>
+      </visual>
+    <visual name="subtle_panel_seam_1">
+      <origin xyz="0.568 -0.04245 1.115" rpy="0 0 0" />
+      <geometry>
+        <box size="0.002 0.001 2.08" />
+        </geometry>
+      <material name="subtle_gray_grain">
+        <color rgba="0.46 0.49 0.48 0.52" />
+        </material>
+      </visual>
+    <visual name="pictogram_border_top">
+      <origin xyz="0.348 -0.04255 1.598" rpy="0 0 0" />
+      <geometry>
+        <box size="0.084 0.001 0.006" />
+        </geometry>
+      <material name="matte_black_metal">
+        <color rgba="0.005 0.005 0.005 1" />
+        </material>
+      </visual>
+    <visual name="pictogram_border_bottom">
+      <origin xyz="0.348 -0.04255 1.512" rpy="0 0 0" />
+      <geometry>
+        <box size="0.084 0.001 0.006" />
+        </geometry>
+      <material name="matte_black_metal">
+        <color rgba="0.005 0.005 0.005 1" />
+        </material>
+      </visual>
+    <visual name="pictogram_border_left">
+      <origin xyz="0.306 -0.04255 1.555" rpy="0 0 0" />
+      <geometry>
+        <box size="0.006 0.001 0.086" />
+        </geometry>
+      <material name="matte_black_metal">
+        <color rgba="0.005 0.005 0.005 1" />
+        </material>
+      </visual>
+    <visual name="pictogram_border_right">
+      <origin xyz="0.39 -0.04255 1.555" rpy="0 0 0" />
+      <geometry>
+        <box size="0.006 0.001 0.086" />
+        </geometry>
+      <material name="matte_black_metal">
+        <color rgba="0.005 0.005 0.005 1" />
+        </material>
+      </visual>
+    <visual name="pictogram_head">
+      <origin xyz="0.348 -0.04255 1.579" rpy="1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.007" length="0.0012" />
+        </geometry>
+      <material name="matte_black_metal">
+        <color rgba="0.005 0.005 0.005 1" />
+        </material>
+      </visual>
+    <visual name="pictogram_torso">
+      <origin xyz="0.348 -0.04255 1.551" rpy="0 0 0" />
+      <geometry>
+        <box size="0.018 0.001 0.036" />
+        </geometry>
+      <material name="matte_black_metal">
+        <color rgba="0.005 0.005 0.005 1" />
+        </material>
+      </visual>
+    <visual name="pictogram_leg_0">
+      <origin xyz="0.342 -0.04255 1.522" rpy="0 0 0" />
+      <geometry>
+        <box size="0.007 0.001 0.03" />
+        </geometry>
+      <material name="matte_black_metal">
+        <color rgba="0.005 0.005 0.005 1" />
+        </material>
+      </visual>
+    <visual name="pictogram_leg_1">
+      <origin xyz="0.354 -0.04255 1.522" rpy="0 0 0" />
+      <geometry>
+        <box size="0.007 0.001 0.03" />
+        </geometry>
+      <material name="matte_black_metal">
+        <color rgba="0.005 0.005 0.005 1" />
+        </material>
+      </visual>
+    <collision name="door_slab">
+      <geometry>
+        <mesh filename="assets/meshes/door_slab.obj" />
+        </geometry>
+      </collision>
+    <collision name="glass_panel">
+      <origin xyz="0.728 -0.02 1.115" rpy="0 0 0" />
+      <geometry>
+        <box size="0.112 0.016 1.6" />
+        </geometry>
+      </collision>
+    <collision name="glass_gasket_left">
+      <origin xyz="0.667 -0.02 1.115" rpy="0 0 0" />
+      <geometry>
+        <box size="0.01 0.044 1.66" />
+        </geometry>
+      </collision>
+    <collision name="glass_gasket_right">
+      <origin xyz="0.789 -0.02 1.115" rpy="0 0 0" />
+      <geometry>
+        <box size="0.01 0.044 1.66" />
+        </geometry>
+      </collision>
+    <collision name="glass_gasket_top">
+      <origin xyz="0.728 -0.02 1.93" rpy="0 0 0" />
+      <geometry>
+        <box size="0.132 0.044 0.03" />
+        </geometry>
+      </collision>
+    <collision name="glass_gasket_bottom">
+      <origin xyz="0.728 -0.02 0.3" rpy="0 0 0" />
+      <geometry>
+        <box size="0.132 0.044 0.03" />
+        </geometry>
+      </collision>
+    <collision name="latch_edge_plate">
+      <origin xyz="0.915 -0.02 0.985" rpy="0 0 0" />
+      <geometry>
+        <box size="0.004 0.018 0.07" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_0">
+      <origin xyz="0.073 -0.04235 1.14" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0032 0.0009 2.03" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_1">
+      <origin xyz="0.128 -0.04235 1.1" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0038 0.0009 1.95" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_2">
+      <origin xyz="0.178 -0.04235 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0032 0.0009 1.87" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_3">
+      <origin xyz="0.238 -0.04235 1.14" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0038 0.0009 2.03" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_4">
+      <origin xyz="0.298 -0.04235 1.1" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0032 0.0009 1.95" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_5">
+      <origin xyz="0.358 -0.04235 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0038 0.0009 1.87" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_6">
+      <origin xyz="0.408 -0.04235 1.14" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0032 0.0009 2.03" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_7">
+      <origin xyz="0.483 -0.04235 1.1" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0038 0.0009 1.95" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_8">
+      <origin xyz="0.538 -0.04235 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0032 0.0009 1.87" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_9">
+      <origin xyz="0.608 -0.04235 1.14" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0038 0.0009 2.03" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_10">
+      <origin xyz="0.798 -0.04235 1.1" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0032 0.0009 1.95" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_11">
+      <origin xyz="0.848 -0.04235 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0038 0.0009 1.87" />
+        </geometry>
+      </collision>
+    <collision name="subtle_panel_seam_0">
+      <origin xyz="0.218 -0.04245 1.115" rpy="0 0 0" />
+      <geometry>
+        <box size="0.002 0.001 2.08" />
+        </geometry>
+      </collision>
+    <collision name="subtle_panel_seam_1">
+      <origin xyz="0.568 -0.04245 1.115" rpy="0 0 0" />
+      <geometry>
+        <box size="0.002 0.001 2.08" />
+        </geometry>
+      </collision>
+    <collision name="pictogram_border_top">
+      <origin xyz="0.348 -0.04255 1.598" rpy="0 0 0" />
+      <geometry>
+        <box size="0.084 0.001 0.006" />
+        </geometry>
+      </collision>
+    <collision name="pictogram_border_bottom">
+      <origin xyz="0.348 -0.04255 1.512" rpy="0 0 0" />
+      <geometry>
+        <box size="0.084 0.001 0.006" />
+        </geometry>
+      </collision>
+    <collision name="pictogram_border_left">
+      <origin xyz="0.306 -0.04255 1.555" rpy="0 0 0" />
+      <geometry>
+        <box size="0.006 0.001 0.086" />
+        </geometry>
+      </collision>
+    <collision name="pictogram_border_right">
+      <origin xyz="0.39 -0.04255 1.555" rpy="0 0 0" />
+      <geometry>
+        <box size="0.006 0.001 0.086" />
+        </geometry>
+      </collision>
+    <collision name="pictogram_head">
+      <origin xyz="0.348 -0.04255 1.579" rpy="1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.007" length="0.0012" />
+        </geometry>
+      </collision>
+    <collision name="pictogram_torso">
+      <origin xyz="0.348 -0.04255 1.551" rpy="0 0 0" />
+      <geometry>
+        <box size="0.018 0.001 0.036" />
+        </geometry>
+      </collision>
+    <collision name="pictogram_leg_0">
+      <origin xyz="0.342 -0.04255 1.522" rpy="0 0 0" />
+      <geometry>
+        <box size="0.007 0.001 0.03" />
+        </geometry>
+      </collision>
+    <collision name="pictogram_leg_1">
+      <origin xyz="0.354 -0.04255 1.522" rpy="0 0 0" />
+      <geometry>
+        <box size="0.007 0.001 0.03" />
+        </geometry>
+      </collision>
+    </link>
+  <link name="hinge_leaf_frame">
+    <visual name="frame_leaf">
+      <origin xyz="-0.48 0.143 1.115" rpy="0 0 0" />
+      <geometry>
+        <box size="0.02 0.004 2.05" />
+        </geometry>
+      <material name="brushed_hinge_metal">
+        <color rgba="0.66 0.68 0.68 1" />
+        </material>
+      </visual>
+    <collision name="frame_leaf">
+      <origin xyz="-0.48 0.143 1.115" rpy="0 0 0" />
+      <geometry>
+        <box size="0.02 0.004 2.05" />
+        </geometry>
+      </collision>
+    </link>
+  <link name="hinge_pin">
+    <visual name="pin">
+      <origin xyz="-0.463 0.143 1.115" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.007" length="2.05" />
+        </geometry>
+      <material name="brushed_hinge_metal">
+        <color rgba="0.66 0.68 0.68 1" />
+        </material>
+      </visual>
+    <collision name="pin">
+      <origin xyz="-0.463 0.143 1.115" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.007" length="2.05" />
+        </geometry>
+      </collision>
+    </link>
+  <link name="hinge_leaf_panel">
+    <visual name="panel_leaf">
+      <origin xyz="0.019 0.004 1.115" rpy="0 0 0" />
+      <geometry>
+        <box size="0.024 0.004 2.05" />
+        </geometry>
+      <material name="brushed_hinge_metal">
+        <color rgba="0.66 0.68 0.68 1" />
+        </material>
+      </visual>
+    <collision name="panel_leaf">
+      <origin xyz="0.019 0.004 1.115" rpy="0 0 0" />
+      <geometry>
+        <box size="0.024 0.004 2.05" />
+        </geometry>
+      </collision>
+    </link>
+  <link name="handle_back_plate">
+    <visual name="back_plate">
+      <geometry>
+        <box size="0.038 0.006 0.125" />
+        </geometry>
+      <material name="matte_black_metal">
+        <color rgba="0.005 0.005 0.005 1" />
+        </material>
+      </visual>
+    <visual name="handle_hub">
+      <origin xyz="0 -0.008 0" rpy="1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.012" length="0.01" />
+        </geometry>
+      <material name="matte_black_metal">
+        <color rgba="0.005 0.005 0.005 1" />
+        </material>
+      </visual>
+    <collision name="back_plate">
+      <geometry>
+        <box size="0.038 0.006 0.125" />
+        </geometry>
+      </collision>
+    <collision name="handle_hub">
+      <origin xyz="0 -0.008 0" rpy="1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.012" length="0.01" />
+        </geometry>
+      </collision>
+    </link>
+  <link name="lever_handle">
+    <visual name="long_grip">
+      <origin xyz="-0.05 -0.03 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.12 0.02 0.01" />
+        </geometry>
+      <material name="matte_black_metal">
+        <color rgba="0.005 0.005 0.005 1" />
+        </material>
+      </visual>
+    <visual name="short_return">
+      <origin xyz="0 -0.015 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.02 0.03 0.01" />
+        </geometry>
+      <material name="matte_black_metal">
+        <color rgba="0.005 0.005 0.005 1" />
+        </material>
+      </visual>
+    <collision name="long_grip">
+      <origin xyz="-0.05 -0.03 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.12 0.035 0.025" />
+        </geometry>
+      </collision>
+    <collision name="short_return">
+      <origin xyz="0 -0.015 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.03 0.04 0.025" />
+        </geometry>
+      </collision>
+    </link>
+  <link name="strike_plate">
+    <visual name="strike_face">
+      <origin xyz="0.473 0.123 0.985" rpy="0 0 0" />
+      <geometry>
+        <box size="0.004 0.036 0.07" />
+        </geometry>
+      <material name="brushed_hinge_metal">
+        <color rgba="0.66 0.68 0.68 1" />
+        </material>
+      </visual>
+    <collision name="strike_face">
+      <origin xyz="0.473 0.123 0.985" rpy="0 0 0" />
+      <geometry>
+        <box size="0.004 0.036 0.07" />
+        </geometry>
+      </collision>
+    </link>
+  <joint name="door_hinge_joint" type="revolute">
+    <origin xyz="-0.463 0.143 0" rpy="0 0 0" />
+    <parent link="fixed_frame" />
+    <child link="door_panel" />
+    <axis xyz="0 0 1" />
+    <limit effort="45" velocity="1.2" lower="0" upper="1.5708" />
+    </joint>
+  <joint name="frame_hinge_leaf_mount" type="fixed">
+    <parent link="fixed_frame" />
+    <child link="hinge_leaf_frame" />
+    </joint>
+  <joint name="hinge_pin_mount" type="fixed">
+    <parent link="fixed_frame" />
+    <child link="hinge_pin" />
+    </joint>
+  <joint name="panel_hinge_leaf_mount" type="fixed">
+    <parent link="door_panel" />
+    <child link="hinge_leaf_panel" />
+    </joint>
+  <joint name="back_plate_mount" type="fixed">
+    <origin xyz="0.868 -0.045 0.985" rpy="0 0 0" />
+    <parent link="door_panel" />
+    <child link="handle_back_plate" />
+    </joint>
+  <joint name="handle_spindle_joint" type="revolute">
+    <origin xyz="0 -0.013 0" rpy="0 0 0" />
+    <parent link="handle_back_plate" />
+    <child link="lever_handle" />
+    <axis xyz="0 -1 0" />
+    <limit effort="4" velocity="2" lower="0" upper="1.5708" />
+    </joint>
+  <joint name="strike_plate_mount" type="fixed">
+    <parent link="fixed_frame" />
+    <child link="strike_plate" />
+    </joint>
+  </robot>
