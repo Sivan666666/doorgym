@@ -46,15 +46,34 @@ DINOV2_MODEL_ALIASES = {
     "dinov2-large": "facebook/dinov2-large",
 }
 
+DEFM_MODEL_ALIASES = {
+    "defm-vit-l14": "defm_vit_l14",
+    "defm_vit_l14": "defm_vit_l14",
+    "defm-vit-l/14": "defm_vit_l14",
+}
+
+DEFM_DEPTH_MAX_C1 = 100.0
+DEFM_DEPTH_MAX_C2 = 9.0
+DEFM_MEAN = [0.248880, 0.495620, 0.492858]
+DEFM_STD = [0.139357, 0.271314, 0.297177]
+
 
 def is_dinov2_backbone(vision_backbone: str) -> bool:
     name = str(vision_backbone).lower()
     return name.startswith("dinov2") or name.startswith("facebook/dinov2")
 
 
+def is_defm_backbone(vision_backbone: str) -> bool:
+    return str(vision_backbone).lower() in DEFM_MODEL_ALIASES
+
+
 def resolve_dinov2_model_name(vision_backbone: str) -> str:
     name = str(vision_backbone)
     return DINOV2_MODEL_ALIASES.get(name.lower(), name)
+
+
+def resolve_defm_model_name(vision_backbone: str) -> str:
+    return DEFM_MODEL_ALIASES[str(vision_backbone).lower()]
 
 
 class ACTDINOv2Backbone(nn.Module):
@@ -127,6 +146,125 @@ class ACTDINOv2Backbone(nn.Module):
             )
         feature_map = patch_tokens.transpose(1, 2).reshape(batch_size, channels, grid_size, grid_size)
         if self.feature_grid_size != grid_size:
+            feature_map = F.adaptive_avg_pool2d(feature_map, (self.feature_grid_size, self.feature_grid_size))
+        return {"feature_map": feature_map}
+
+
+class ACTDeFMBackbone(nn.Module):
+    """DeFM depth backbone exposed through ACT's {"feature_map": tensor} interface."""
+
+    def __init__(
+        self,
+        vision_backbone: str,
+        image_size: int,
+        patch_size: int,
+        feature_grid_size: int,
+        depth_lower: float,
+        depth_far: float,
+        pretrained: bool = True,
+        pretrained_path: str | None = None,
+        freeze: bool = True,
+    ) -> None:
+        super().__init__()
+        self.model_name = resolve_defm_model_name(vision_backbone)
+        self.image_size = int(image_size)
+        self.patch_size = int(patch_size)
+        self.feature_grid_size = int(feature_grid_size)
+        self.depth_lower = float(depth_lower)
+        self.depth_far = float(depth_far)
+        self.freeze = bool(freeze)
+        hub_kwargs: dict[str, Any] = {"pretrained": bool(pretrained)}
+        if pretrained_path:
+            hub_kwargs["pretrained_path"] = str(pretrained_path)
+        try:
+            self.model = torch.hub.load(
+                "leggedrobotics/defm:main",
+                self.model_name,
+                trust_repo=True,
+                **hub_kwargs,
+            )
+        except TypeError as exc:
+            if "trust_repo" not in str(exc):
+                raise
+            self.model = torch.hub.load("leggedrobotics/defm:main", self.model_name, **hub_kwargs)
+        self.out_channels = self._infer_out_channels()
+        self.register_buffer(
+            "defm_mean",
+            torch.tensor(DEFM_MEAN, dtype=torch.float32).view(1, 3, 1, 1),
+            persistent=False,
+        )
+        self.register_buffer(
+            "defm_std",
+            torch.tensor(DEFM_STD, dtype=torch.float32).view(1, 3, 1, 1),
+            persistent=False,
+        )
+        if self.freeze:
+            for parameter in self.model.parameters():
+                parameter.requires_grad_(False)
+            self.model.eval()
+
+    def _infer_out_channels(self) -> int:
+        for attr in ("embed_dim", "num_features"):
+            value = getattr(self.model, attr, None)
+            if value is not None:
+                return int(value)
+        norm = getattr(self.model, "norm", None)
+        normalized_shape = getattr(norm, "normalized_shape", None)
+        if normalized_shape:
+            return int(normalized_shape[0])
+        raise ValueError("Could not infer DeFM output channel count from the loaded model.")
+
+    def train(self, mode: bool = True) -> "ACTDeFMBackbone":
+        super().train(mode)
+        if self.freeze:
+            self.model.eval()
+        return self
+
+    def _depth_visual_to_metric(self, x: Tensor) -> Tensor:
+        gray = x[:, :1].to(dtype=torch.float32).clamp(0.0, 1.0)
+        return torch.where(
+            gray > 0.0,
+            gray * (self.depth_far - self.depth_lower) + self.depth_lower,
+            torch.zeros_like(gray),
+        )
+
+    def _preprocess_depth(self, x: Tensor) -> Tensor:
+        depth = self._depth_visual_to_metric(x)
+        depth = torch.nan_to_num(depth, nan=0.0, posinf=0.0, neginf=0.0)
+        depth = torch.clamp(depth, min=0.0, max=DEFM_DEPTH_MAX_C1)
+        log_depth = torch.log1p(depth)
+        c1 = log_depth / math.log1p(DEFM_DEPTH_MAX_C1)
+        c2 = torch.clamp(log_depth / math.log1p(DEFM_DEPTH_MAX_C2), min=0.0, max=1.0)
+        batch_size = depth.shape[0]
+        flat = log_depth.reshape(batch_size, -1)
+        min_log = flat.min(dim=1).values.view(batch_size, 1, 1, 1)
+        max_log = flat.max(dim=1).values.view(batch_size, 1, 1, 1)
+        denom = max_log - min_log
+        denom_safe = torch.where(denom > 0.0, denom, torch.ones_like(denom))
+        c3 = (log_depth - min_log) / denom_safe
+        c3 = torch.where(denom > 0.0, c3, torch.zeros_like(c3))
+        x = torch.cat([c1, c2, c3], dim=1)
+        if x.shape[-2:] != (self.image_size, self.image_size):
+            x = F.interpolate(
+                x,
+                size=(self.image_size, self.image_size),
+                mode="bilinear",
+                align_corners=False,
+            )
+        return (x - self.defm_mean.to(dtype=x.dtype)) / self.defm_std.to(dtype=x.dtype)
+
+    def forward(self, x: Tensor) -> dict[str, Tensor]:
+        x = self._preprocess_depth(x)
+        context: Any = torch.no_grad() if self.freeze else torch.enable_grad()
+        with context:
+            outputs = self.model.get_intermediate_layers(
+                x,
+                n=1,
+                reshape=True,
+                return_class_token=True,
+            )
+        feature_map = outputs[0][0]
+        if self.feature_grid_size != feature_map.shape[-1] or self.feature_grid_size != feature_map.shape[-2]:
             feature_map = F.adaptive_avg_pool2d(feature_map, (self.feature_grid_size, self.feature_grid_size))
         return {"feature_map": feature_map}
 
@@ -414,7 +552,20 @@ class ACT(nn.Module):
 
         # Backbone for image feature extraction.
         if self.config.image_features:
-            if is_dinov2_backbone(config.vision_backbone):
+            if is_defm_backbone(config.vision_backbone):
+                self.backbone = ACTDeFMBackbone(
+                    config.vision_backbone,
+                    image_size=config.defm_image_size,
+                    patch_size=config.defm_patch_size,
+                    feature_grid_size=config.defm_feature_grid_size,
+                    depth_lower=config.defm_depth_lower,
+                    depth_far=config.defm_depth_far,
+                    pretrained=config.defm_pretrained,
+                    pretrained_path=config.defm_pretrained_path,
+                    freeze=bool(config.freeze_vision_backbone),
+                )
+                backbone_out_channels = self.backbone.out_channels
+            elif is_dinov2_backbone(config.vision_backbone):
                 self.backbone = ACTDINOv2Backbone(
                     config.vision_backbone,
                     image_size=config.dinov2_image_size,

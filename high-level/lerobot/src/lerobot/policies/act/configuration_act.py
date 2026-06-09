@@ -99,10 +99,17 @@ class ACTConfig(PreTrainedConfig):
     vision_backbone: str = "resnet18"
     pretrained_backbone_weights: str | None = "ResNet18_Weights.IMAGENET1K_V1"
     replace_final_stride_with_dilation: int = False
-    freeze_vision_backbone: bool = False
+    freeze_vision_backbone: bool | None = None
     dinov2_image_size: int = 224
     dinov2_feature_grid_size: int = 6
     dinov2_normalize_inputs: bool = True
+    defm_image_size: int = 224
+    defm_patch_size: int = 14
+    defm_feature_grid_size: int = 6
+    defm_depth_lower: float = 0.02
+    defm_depth_far: float = 2.0
+    defm_pretrained: bool = True
+    defm_pretrained_path: str | None = None
     # Transformer layers.
     pre_norm: bool = False
     dim_model: int = 512
@@ -139,13 +146,16 @@ class ACTConfig(PreTrainedConfig):
         vision_backbone = str(self.vision_backbone).lower()
         is_resnet = vision_backbone.startswith("resnet")
         is_dinov2 = vision_backbone.startswith("dinov2") or vision_backbone.startswith("facebook/dinov2")
-        if not (is_resnet or is_dinov2):
+        is_defm = vision_backbone in {"defm-vit-l14", "defm_vit_l14", "defm-vit-l/14"}
+        if self.freeze_vision_backbone is None:
+            self.freeze_vision_backbone = bool(is_defm)
+        if not (is_resnet or is_dinov2 or is_defm):
             raise ValueError(
-                "`vision_backbone` must be one of the ResNet variants or DINOv2 variants "
-                f"('dinov2-small', 'dinov2-base', 'dinov2-large', or 'facebook/dinov2-*'). "
+                "`vision_backbone` must be one of the ResNet, DINOv2, or DeFM variants "
+                "('dinov2-small/base/large', 'facebook/dinov2-*', or 'defm-vit-l14'). "
                 f"Got {self.vision_backbone}."
             )
-        if is_dinov2:
+        if is_dinov2 or is_defm:
             found_visual_norm = False
             for key in list(self.normalization_mapping):
                 if key == "VISUAL" or getattr(key, "value", None) == "VISUAL" or str(key).endswith(".VISUAL"):
@@ -153,11 +163,36 @@ class ACTConfig(PreTrainedConfig):
                     found_visual_norm = True
             if not found_visual_norm:
                 self.normalization_mapping["VISUAL"] = NormalizationMode.IDENTITY
+        if is_dinov2:
             if self.dinov2_image_size <= 0:
                 raise ValueError(f"`dinov2_image_size` must be positive. Got {self.dinov2_image_size}.")
             if self.dinov2_feature_grid_size <= 0:
                 raise ValueError(
                     f"`dinov2_feature_grid_size` must be positive. Got {self.dinov2_feature_grid_size}."
+                )
+        if is_defm:
+            non_depth_keys = [
+                key for key in self.image_features if "depth" not in str(key).lower()
+            ]
+            if non_depth_keys:
+                raise ValueError(
+                    "DeFM ACT backbone only supports depth image features. "
+                    f"Non-depth image features were configured: {non_depth_keys}."
+                )
+            if self.defm_image_size <= 0:
+                raise ValueError(f"`defm_image_size` must be positive. Got {self.defm_image_size}.")
+            if self.defm_patch_size <= 0:
+                raise ValueError(f"`defm_patch_size` must be positive. Got {self.defm_patch_size}.")
+            if self.defm_feature_grid_size <= 0:
+                raise ValueError(
+                    f"`defm_feature_grid_size` must be positive. Got {self.defm_feature_grid_size}."
+                )
+            if self.defm_depth_lower < 0.0:
+                raise ValueError(f"`defm_depth_lower` must be non-negative. Got {self.defm_depth_lower}.")
+            if self.defm_depth_far <= self.defm_depth_lower:
+                raise ValueError(
+                    "`defm_depth_far` must be greater than `defm_depth_lower`. "
+                    f"Got far={self.defm_depth_far}, lower={self.defm_depth_lower}."
                 )
         if self.temporal_ensemble_coeff is not None and self.n_action_steps > 1:
             raise NotImplementedError(

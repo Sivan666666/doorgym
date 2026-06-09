@@ -135,6 +135,47 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
     --wandb.disable_artifact=true
 
 
+## 2c. ACT + frozen DeFM ViT-L/14, official LeRobot train.py
+#
+# Same 100/50 horizon as ACT ResNet18/DINOv2.
+# DeFM consumes the two depth-only streams and internally applies metric-aware depth preprocessing.
+# ViT-L/14 is large, so batch_size defaults to 8; lower it to 4 only if CUDA OOM.
+
+ACT_DEFM_RUN_NAME=leroact_defm_vit_l14_door_pi05_state10_depthonly_wall_chunk100_exec50_bs8_no_imagenet_$(date +%m%d_%H%M)
+
+CUDA_VISIBLE_DEVICES=0 accelerate launch \
+    --num-processes=1 \
+    --mixed_precision=no \
+    "$(which lerobot-train)" \
+    --dataset.root="$DATASET_ROOT" \
+    --dataset.repo_id="$DATASET_REPO_ID" \
+    --dataset.video_backend=torchcodec \
+    --dataset.use_imagenet_stats=false \
+    --policy.type=act \
+    --policy.device=cuda \
+    --policy.push_to_hub=false \
+    --policy.chunk_size=100 \
+    --policy.n_action_steps=50 \
+    --policy.vision_backbone=defm-vit-l14 \
+    --policy.freeze_vision_backbone=true \
+    --policy.defm_image_size=224 \
+    --policy.defm_patch_size=14 \
+    --policy.defm_feature_grid_size=6 \
+    --policy.defm_depth_lower=0.02 \
+    --policy.defm_depth_far=2.0 \
+    --policy.defm_pretrained=true \
+    --batch_size=8 \
+    --steps=100000 \
+    --num_workers=4 \
+    --save_freq=1000 \
+    --log_freq=10 \
+    --job_name="$ACT_DEFM_RUN_NAME" \
+    --output_dir="$OUTPUT_ROOT/$ACT_DEFM_RUN_NAME" \
+    --wandb.enable=true \
+    --wandb.project=door-act \
+    --wandb.disable_artifact=true
+
+
 ## 3. pi0.5, official LeRobot train.py
 #
 # Required environment:
