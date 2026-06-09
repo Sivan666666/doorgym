@@ -31,6 +31,7 @@ DEFAULT_DOOR_ASSET_NAMES = (
     "99650089960006",
     "99655039960001",
     "99655039960006",
+    "wc4",
 )
 DEFAULT_WRIST_CAMERA_CFG = {
     "horizontal_fov": 69,
@@ -164,6 +165,11 @@ class DoorRuntime:
     door_body_index: int
     handle_goal_offset: np.ndarray
     handle_unlock_threshold: float
+    actor_scale: float = 1.0
+    actor_yaw: float = math.pi
+    actor_position_offset: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    robot_y_offset: float = 0.0
+    door_motion_sign_multiplier: float = 1.0
     open_stage: bool = False
 
 
@@ -372,6 +378,17 @@ def load_door_assets(gym, sim, args):
 
     doors = []
     for asset_index, spec, bounding, handle_bounding in specs:
+        actor_scale = float(spec.get("actor_scale", args.door_actor_scale))
+        if actor_scale <= 0.0:
+            raise ValueError(f"Door {spec.get('name', asset_index)!r} actor_scale must be positive")
+        actor_yaw = math.pi + float(spec.get("actor_yaw_offset", 0.0))
+        actor_position_offset = tuple(
+            float(value) for value in spec.get("actor_position_offset", (0.0, 0.0, 0.0))
+        )
+        if len(actor_position_offset) != 3:
+            raise ValueError(
+                f"Door {spec.get('name', asset_index)!r} actor_position_offset must contain exactly 3 values"
+            )
         door_file = os.path.join(asset_file_door, spec["path"])
         print(f"Loading door[{asset_index}]: root={asset_root}, file={door_file}, name={spec['name']}")
         door_asset = gym.load_asset(sim, asset_root, door_file, door_opts)
@@ -380,6 +397,30 @@ def load_door_assets(gym, sim, args):
 
         body_names = gym.get_asset_rigid_body_names(door_asset)
         dof_names = gym.get_asset_dof_names(door_asset)
+        if len(dof_names) < 2:
+            raise RuntimeError(
+                f"Door {spec['name']!r} must expose door and handle DOFs; loaded DOFs: {dof_names}"
+            )
+        expected_dofs = (
+            spec.get("door_dof_name", dof_names[0]),
+            spec.get("handle_dof_name", dof_names[1]),
+        )
+        if tuple(dof_names[:2]) != expected_dofs:
+            raise RuntimeError(
+                f"Door {spec['name']!r} DOF order must be {expected_dofs}, loaded {tuple(dof_names[:2])}"
+            )
+        handle_body_name = spec.get("handle_body_name")
+        door_body_name = spec.get("door_body_name")
+        if handle_body_name and handle_body_name not in body_names:
+            raise RuntimeError(
+                f"Door {spec['name']!r} handle body {handle_body_name!r} not found; loaded bodies: {body_names}"
+            )
+        if door_body_name and door_body_name not in body_names:
+            raise RuntimeError(
+                f"Door {spec['name']!r} door body {door_body_name!r} not found; loaded bodies: {body_names}"
+            )
+        handle_body_index = body_names.index(handle_body_name) if handle_body_name else len(body_names) - 1
+        door_body_index = body_names.index(door_body_name) if door_body_name else max(0, len(body_names) - 2)
         dof_props = gym.get_asset_dof_properties(door_asset)
         if len(dof_props["upper"]) >= 2:
             dof_props["upper"][1] = min(float(dof_props["upper"][1]), math.pi / 4)
@@ -391,7 +432,7 @@ def load_door_assets(gym, sim, args):
             prop.friction = 2.0
         gym.set_asset_rigid_shape_properties(door_asset, shape_props)
 
-        handle_goal_offset = args.door_actor_scale * np.asarray(handle_bounding["goal_pos"], dtype=np.float32)
+        handle_goal_offset = actor_scale * np.asarray(handle_bounding["goal_pos"], dtype=np.float32)
         handle_range = max(1.0e-6, float(upper[1] - lower[1]) if len(upper) >= 2 else 1.0)
         handle_unlock_threshold = args.handle_unlock_ratio * handle_range
         print("door_dofs:", dof_names)
@@ -410,10 +451,15 @@ def load_door_assets(gym, sim, args):
                 dof_names=dof_names,
                 dof_lower=lower,
                 dof_upper=upper,
-                handle_body_index=len(body_names) - 1,
-                door_body_index=max(0, len(body_names) - 2),
+                handle_body_index=handle_body_index,
+                door_body_index=door_body_index,
                 handle_goal_offset=handle_goal_offset,
                 handle_unlock_threshold=handle_unlock_threshold,
+                actor_scale=actor_scale,
+                actor_yaw=actor_yaw,
+                actor_position_offset=actor_position_offset,
+                robot_y_offset=float(spec.get("robot_y_offset", 0.0)),
+                door_motion_sign_multiplier=float(spec.get("door_motion_sign_multiplier", 1.0)),
             )
         )
     print(f"Loaded {len(doors)} door asset(s) for env cycling.", flush=True)
@@ -430,16 +476,48 @@ def clone_door_runtime(door):
         dof_lower=np.asarray(door.dof_lower, dtype=np.float32).copy(),
         dof_upper=np.asarray(door.dof_upper, dtype=np.float32).copy(),
         handle_goal_offset=np.asarray(door.handle_goal_offset, dtype=np.float32).copy(),
+        actor_position_offset=tuple(door.actor_position_offset),
         open_stage=False,
     )
 
 
-def robot_y_for_door(args, handle_bounding):
+def apply_door_runtime_overrides(args, door):
+    override_key = (int(door.asset_index), str(door.spec.get("name", "")))
+    if getattr(args, "_door_runtime_override_key", None) == override_key:
+        return
+    base_motion_sign = float(getattr(args, "_door_motion_sign_before_asset", args.door_motion_sign))
+    args._door_motion_sign_before_asset = base_motion_sign
+    args.door_motion_sign = base_motion_sign * float(door.door_motion_sign_multiplier)
+    adjusted_controller_values = {}
+    for name, multiplier in door.spec.get("controller_multipliers", {}).items():
+        if not hasattr(args, name):
+            raise ValueError(f"Door {door.spec.get('name', '')!r} cannot multiply unknown controller arg {name!r}")
+        setattr(args, name, float(getattr(args, name)) * float(multiplier))
+        adjusted_controller_values[name] = float(getattr(args, name))
+    for name, value in door.spec.get("controller_overrides", {}).items():
+        if not hasattr(args, name):
+            raise ValueError(f"Door {door.spec.get('name', '')!r} cannot override unknown controller arg {name!r}")
+        setattr(args, name, value)
+        adjusted_controller_values[name] = value
+    for metadata_attr in ("ikpush_randomization_json", "ikpull_randomization_json"):
+        raw_metadata = getattr(args, metadata_attr, "")
+        if not raw_metadata or not adjusted_controller_values:
+            continue
+        metadata = json.loads(raw_metadata)
+        metadata.update(adjusted_controller_values)
+        metadata["door_asset_controller_adjusted"] = True
+        setattr(args, metadata_attr, json.dumps(metadata, sort_keys=True))
+    args._door_runtime_override_key = override_key
+
+
+def robot_y_for_door(args, handle_bounding, door=None):
     handle_center_y = 0.5 * (
         float(handle_bounding["handle_min"][1]) + float(handle_bounding["handle_max"][1])
     )
-    handle_center_world_y = args.door_y - args.door_actor_scale * handle_center_y
-    return args.robot_y + handle_center_world_y
+    actor_scale = float(door.actor_scale) if door is not None else float(args.door_actor_scale)
+    robot_y_offset = float(door.robot_y_offset) if door is not None else 0.0
+    handle_center_world_y = args.door_y - actor_scale * handle_center_y
+    return args.robot_y + handle_center_world_y + robot_y_offset
 
 
 def configure_door_actor_dofs(gym, env, door_actor, door, args):
@@ -530,7 +608,7 @@ def create_door_side_walls(gym, sim, env, door, args, env_index=0):
     height = max(1.0e-3, float(getattr(args, "door_wall_height", 2.2)))
     opening_width = float(getattr(args, "door_wall_opening_width", 0.0))
     if opening_width <= 0.0:
-        opening_width = float(args.door_actor_scale) * (
+        opening_width = float(door.actor_scale) * (
             float(door.bounding["max"][0]) - float(door.bounding["min"][0])
         )
     opening_width = max(1.0e-3, opening_width)
@@ -573,7 +651,8 @@ def create_door_side_walls(gym, sim, env, door, args, env_index=0):
 
 def create_env_actors(gym, sim, base_asset, arm_asset, door, dof_props, dof_states, args):
     env = gym.create_env(sim, gymapi.Vec3(-2.5, -2.5, 0.0), gymapi.Vec3(2.5, 2.5, 2.5), 1)
-    robot_y = robot_y_for_door(args, door.handle_bounding)
+    apply_door_runtime_overrides(args, door)
+    robot_y = robot_y_for_door(args, door.handle_bounding, door)
 
     robot_pose = gymapi.Transform()
     robot_pose.p = gymapi.Vec3(args.robot_x, robot_y, args.robot_z)
@@ -591,15 +670,16 @@ def create_env_actors(gym, sim, base_asset, arm_asset, door, dof_props, dof_stat
     gym.set_actor_dof_position_targets(env, arm_actor, dof_states["pos"])
 
     door_pose = gymapi.Transform()
+    actor_offset = door.actor_position_offset
     door_pose.p = gymapi.Vec3(
-        float(args.door_x),
-        float(args.door_y),
-        float(-door.bounding["min"][2] * args.door_actor_scale + args.door_z_offset),
+        float(args.door_x + actor_offset[0]),
+        float(args.door_y + actor_offset[1]),
+        float(-door.bounding["min"][2] * door.actor_scale + args.door_z_offset + actor_offset[2]),
     )
-    door_pose.r = gymapi.Quat(0.0, 0.0, 1.0, 0.0)
+    door_pose.r = gymapi.Quat.from_euler_zyx(0.0, 0.0, float(door.actor_yaw))
     door_actor = gym.create_actor(env, door.asset, door_pose, "door", 0, 0, 1)
-    if abs(args.door_actor_scale - 1.0) > 1.0e-6:
-        gym.set_actor_scale(env, door_actor, args.door_actor_scale)
+    if abs(door.actor_scale - 1.0) > 1.0e-6:
+        gym.set_actor_scale(env, door_actor, door.actor_scale)
     try:
         gym.set_rigid_body_segmentation_id(env, door_actor, door.handle_body_index, int(args.handle_seg_id))
     except AttributeError:
@@ -628,7 +708,8 @@ def create_parallel_env_actors(
         gymapi.Vec3(2.5, 2.5, 2.5),
         int(envs_per_row),
     )
-    robot_y = robot_y_for_door(args, door.handle_bounding)
+    apply_door_runtime_overrides(args, door)
+    robot_y = robot_y_for_door(args, door.handle_bounding, door)
 
     robot_pose = gymapi.Transform()
     robot_pose.p = gymapi.Vec3(args.robot_x, robot_y, args.robot_z)
@@ -647,15 +728,16 @@ def create_parallel_env_actors(
     gym.set_actor_dof_position_targets(env, arm_actor, arm_dof_states["pos"])
 
     door_pose = gymapi.Transform()
+    actor_offset = door.actor_position_offset
     door_pose.p = gymapi.Vec3(
-        float(args.door_x),
-        float(args.door_y),
-        float(-door.bounding["min"][2] * args.door_actor_scale + args.door_z_offset),
+        float(args.door_x + actor_offset[0]),
+        float(args.door_y + actor_offset[1]),
+        float(-door.bounding["min"][2] * door.actor_scale + args.door_z_offset + actor_offset[2]),
     )
-    door_pose.r = gymapi.Quat(0.0, 0.0, 1.0, 0.0)
+    door_pose.r = gymapi.Quat.from_euler_zyx(0.0, 0.0, float(door.actor_yaw))
     door_actor = gym.create_actor(env, door.asset, door_pose, f"door_{env_index}", env_index, 0, 1)
-    if abs(args.door_actor_scale - 1.0) > 1.0e-6:
-        gym.set_actor_scale(env, door_actor, args.door_actor_scale)
+    if abs(door.actor_scale - 1.0) > 1.0e-6:
+        gym.set_actor_scale(env, door_actor, door.actor_scale)
     try:
         gym.set_rigid_body_segmentation_id(env, door_actor, door.handle_body_index, int(args.handle_seg_id))
     except AttributeError:
@@ -713,7 +795,7 @@ def set_robot_base_pose(gym, env, actor_handles, xy, z, yaw):
 def compute_base_walk_targets(args, door):
     yaw_start = float(args.robot_yaw)
     heading = np.array([math.cos(yaw_start), math.sin(yaw_start)], dtype=np.float32)
-    base_start = np.asarray([args.robot_x, robot_y_for_door(args, door.handle_bounding)], dtype=np.float32)
+    base_start = np.asarray([args.robot_x, robot_y_for_door(args, door.handle_bounding, door)], dtype=np.float32)
     robot_front = base_start + heading * args.robot_front_offset
     door_xy = np.asarray([args.door_x, args.door_y], dtype=np.float32)
     front_to_door = float(np.dot(door_xy - robot_front, heading))
@@ -2228,15 +2310,16 @@ def make_float_replay_snapshot(args, door, dof_names, dof_pos, dof_vel, door_pos
     root_state[10:13] = np.asarray([0.0, 0.0, yaw_rate], dtype=np.float32)
 
     door_root_state = np.zeros(13, dtype=np.float32)
+    actor_offset = door.actor_position_offset
     door_root_state[:3] = np.asarray(
         [
-            args.door_x,
-            args.door_y,
-            -float(door.bounding["min"][2]) * args.door_actor_scale + args.door_z_offset,
+            args.door_x + actor_offset[0],
+            args.door_y + actor_offset[1],
+            -float(door.bounding["min"][2]) * door.actor_scale + args.door_z_offset + actor_offset[2],
         ],
         dtype=np.float32,
     )
-    door_root_state[3:7] = np.asarray([0.0, 0.0, 1.0, 0.0], dtype=np.float32)
+    door_root_state[3:7] = base_ik.yaw_quat(float(door.actor_yaw))
     return {
         "replay_root_state": root_state,
         "replay_dof_pos": dp_dof_pos,
@@ -2389,6 +2472,10 @@ def make_float_dp_recorder(
         "door_asset_index": int(getattr(door, "asset_index", 0)),
         "door_asset_name": door.spec.get("name", ""),
         "door_asset_path": door.spec.get("path", ""),
+        "door_actor_scale": float(door.actor_scale),
+        "door_actor_yaw": float(door.actor_yaw),
+        "door_actor_position_offset": list(door.actor_position_offset),
+        "door_motion_sign": float(args.door_motion_sign),
         "door_cfg": str(args.door_cfg),
         "source_script": Path(sys.argv[0]).name,
         "action_frame": "base",
