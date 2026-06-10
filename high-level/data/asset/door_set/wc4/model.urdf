@@ -828,7 +828,7 @@
     </link>
   <link name="lever_handle">
     <visual name="long_grip">
-      <origin xyz="-0.05 -0.03 0" rpy="0 0 0" />
+      <origin xyz="-0.05 0 0.03" rpy="-1.5707963267948966 0 0" />
       <geometry>
         <box size="0.12 0.02 0.01" />
         </geometry>
@@ -837,7 +837,7 @@
         </material>
       </visual>
     <visual name="short_return">
-      <origin xyz="0 -0.015 0" rpy="0 0 0" />
+      <origin xyz="0 0 0.015" rpy="-1.5707963267948966 0 0" />
       <geometry>
         <box size="0.02 0.03 0.01" />
         </geometry>
@@ -846,13 +846,13 @@
         </material>
       </visual>
     <collision name="long_grip">
-      <origin xyz="-0.05 -0.03 0" rpy="0 0 0" />
+      <origin xyz="-0.05 0 0.03" rpy="-1.5707963267948966 0 0" />
       <geometry>
         <box size="0.12 0.02 0.01" />
         </geometry>
       </collision>
     <collision name="short_return">
-      <origin xyz="0 -0.015 0" rpy="0 0 0" />
+      <origin xyz="0 0 0.015" rpy="-1.5707963267948966 0 0" />
       <geometry>
         <box size="0.02 0.03 0.01" />
         </geometry>
@@ -900,10 +900,10 @@
     <child link="handle_back_plate" />
     </joint>
   <joint name="handle_spindle_joint" type="revolute">
-    <origin xyz="0 -0.013 0" rpy="0 0 0" />
+    <origin xyz="0 -0.013 0" rpy="1.5707963267948966 0 0" />
     <parent link="handle_back_plate" />
     <child link="lever_handle" />
-    <axis xyz="0 -1 0" />
+    <axis xyz="0 0 1" />
     <limit effort="4" velocity="2" lower="0" upper="1.5708" />
     </joint>
   <joint name="strike_plate_mount" type="fixed">
