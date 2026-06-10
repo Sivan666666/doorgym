@@ -335,6 +335,7 @@ def parse_args():
             {"name": "--no_enable_front_camera", "dest": "enable_front_camera", "action": "store_false"},
             {"name": "--show_camera_images", "dest": "show_camera_images", "action": "store_true", "default": True},
             {"name": "--no_show_camera_images", "dest": "show_camera_images", "action": "store_false"},
+            {"name": "--show_camera_masks", "action": "store_true", "default": False},
             {"name": "--show_seg", "action": "store_true"},
             {"name": "--no_show_seg", "action": "store_true"},
             {"name": "--rgb", "action": "store_true", "help": "Show RGB+mask camera previews instead of full depth+mask."},
@@ -957,10 +958,14 @@ def create_low_level_cameras(gym, env, arm_actor, actor_handles, args):
         elif not cameras:
             print("⚠️📷 No camera sensors were created; camera image windows are disabled.", flush=True)
         else:
+            show_camera_masks = bool(getattr(args, "show_camera_masks", False))
             pair_names = (
-                ", ".join(f"{name}_rgb/{name}_mask" for name in cameras.keys())
+                ", ".join(f"{name}_rgb" + (f"/{name}_mask" if show_camera_masks else "") for name in cameras.keys())
                 if args.rgb
-                else ", ".join(f"{name}_mask/{name}_full_depth" for name in cameras.keys())
+                else ", ".join(
+                    f"{name}_mask/{name}_full_depth" if show_camera_masks else f"{name}_full_depth"
+                    for name in cameras.keys()
+                )
             )
             print(
                 "Camera image windows enabled:",
@@ -1009,14 +1014,14 @@ def show_camera_handle_images(gym, sim, env, camera_handles, args):
         return
     gym.render_all_camera_sensors(sim)
     display_scale = max(1, int(args.camera_display_scale))
-    depth_only_display = bool(getattr(args, "depth_only", False)) and not bool(getattr(args, "rgb", False))
+    show_camera_masks = bool(getattr(args, "show_camera_masks", False)) and not bool(getattr(args, "depth_only", False))
     for prefix, camera_handle in camera_handles.items():
         camera_cfg = DEFAULT_WRIST_CAMERA_CFG if prefix == "wrist" else DEFAULT_FRONT_CAMERA_CFG
         width = int(camera_cfg.get("resolution", DEPTH_CAMERA_RESOLUTION)[0])
         height = int(camera_cfg.get("resolution", DEPTH_CAMERA_RESOLUTION)[1])
         handle_mask = None
         mask_vis = None
-        if not depth_only_display:
+        if show_camera_masks:
             seg_raw = gym.get_camera_image(sim, env, camera_handle, gymapi.IMAGE_SEGMENTATION)
             if seg_raw is None:
                 continue
@@ -1032,13 +1037,21 @@ def show_camera_handle_images(gym, sim, env, camera_handles, args):
             rgb_nonzero = int(np.count_nonzero(rgb_image))
             printed = getattr(args, "_camera_image_stats_printed", set())
             if prefix not in printed:
-                print(
-                    f"{prefix} camera image stats: "
-                    f"rgb_shape={tuple(rgb_image.shape)} "
-                    f"mask_pixels={int(handle_mask.sum())} "
-                    f"rgb_nonzero_pixels={rgb_nonzero}",
-                    flush=True,
-                )
+                if show_camera_masks:
+                    print(
+                        f"{prefix} camera image stats: "
+                        f"rgb_shape={tuple(rgb_image.shape)} "
+                        f"mask_pixels={int(handle_mask.sum())} "
+                        f"rgb_nonzero_pixels={rgb_nonzero}",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        f"{prefix} camera image stats: "
+                        f"rgb_shape={tuple(rgb_image.shape)} "
+                        f"rgb_nonzero_pixels={rgb_nonzero}",
+                        flush=True,
+                    )
                 printed.add(prefix)
                 args._camera_image_stats_printed = printed
             if rgb_nonzero == 0:
@@ -1053,10 +1066,12 @@ def show_camera_handle_images(gym, sim, env, camera_handles, args):
                     args._camera_blank_warned = blank_printed
 
             if display_scale > 1:
-                mask_vis = cv2.resize(mask_vis, None, fx=display_scale, fy=display_scale, interpolation=cv2.INTER_NEAREST)
+                if mask_vis is not None:
+                    mask_vis = cv2.resize(mask_vis, None, fx=display_scale, fy=display_scale, interpolation=cv2.INTER_NEAREST)
                 rgb_image = cv2.resize(rgb_image, None, fx=display_scale, fy=display_scale, interpolation=cv2.INTER_LINEAR)
             cv2.imshow(f"{prefix.capitalize()} RGB", rgb_image[..., ::-1].copy())
-            cv2.imshow(f"{prefix.capitalize()} Handle Mask", mask_vis)
+            if show_camera_masks:
+                cv2.imshow(f"{prefix.capitalize()} Handle Mask", mask_vis)
             continue
 
         depth_raw = gym.get_camera_image(sim, env, camera_handle, gymapi.IMAGE_DEPTH)
@@ -1093,7 +1108,7 @@ def show_camera_handle_images(gym, sim, env, camera_handles, args):
 
         printed = getattr(args, "_camera_image_stats_printed", set())
         if prefix not in printed:
-            if depth_only_display:
+            if not show_camera_masks:
                 print(
                     f"{prefix} camera image stats: "
                     f"depth_shape={tuple(depth_image.shape)} "
@@ -1112,7 +1127,7 @@ def show_camera_handle_images(gym, sim, env, camera_handles, args):
             args._camera_image_stats_printed = printed
 
         visible_printed = getattr(args, "_camera_handle_visible_printed", set())
-        if not depth_only_display and prefix not in visible_printed and handle_mask.sum() > 0:
+        if show_camera_masks and prefix not in visible_printed and handle_mask.sum() > 0:
             print(
                 f"{prefix} camera sees handle: "
                 f"mask_pixels={int(handle_mask.sum())} "
@@ -1138,7 +1153,7 @@ def show_camera_handle_images(gym, sim, env, camera_handles, args):
             depth_vis = cv2.resize(
                 depth_vis, None, fx=display_scale, fy=display_scale, interpolation=cv2.INTER_NEAREST
             )
-        if not depth_only_display:
+        if show_camera_masks:
             cv2.imshow(f"{prefix.capitalize()} Handle Mask", mask_vis)
         cv2.imshow(f"{prefix.capitalize()} Full Depth", depth_vis)
     cv2.waitKey(1)

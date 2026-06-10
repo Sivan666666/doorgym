@@ -377,6 +377,7 @@ def parse_args():
             {"name": "--no_enable_front_camera", "dest": "enable_front_camera", "action": "store_false"},
             {"name": "--show_camera_images", "dest": "show_camera_images", "action": "store_true", "default": True},
             {"name": "--no_show_camera_images", "dest": "show_camera_images", "action": "store_false"},
+            {"name": "--show_camera_masks", "action": "store_true", "default": False},
             {"name": "--show_seg", "action": "store_true"},
             {"name": "--no_show_seg", "action": "store_true"},
             {"name": "--rgb", "action": "store_true", "help": "Show RGB+mask camera previews instead of full depth+mask."},

@@ -25,8 +25,8 @@ class DepthNoiseConfig:
     edge_dilation_kernel_size: int = 3
     hole_noise_prob: float = 0.01
     hole_block_size: int = 8
-    dropout_prob: float = 0.0005
-    salt_pepper_prob: float = 0.0005
+    dropout_prob: float = 0.0
+    salt_pepper_prob: float = 0.0
     near_clip_m: float = 0.02
     far_clip_m: float = 2.0
 
@@ -38,7 +38,7 @@ def add_depth_aug_args(parser: Any) -> None:
     parser.add_argument("--depth_gaussian_std_m", type=float, default=0.005)
     parser.add_argument("--depth_edge_noise_prob", type=float, default=0.10)
     parser.add_argument("--depth_hole_noise_prob", type=float, default=0.01)
-    parser.add_argument("--depth_dropout_prob", type=float, default=0.0005)
+    parser.add_argument("--depth_dropout_prob", type=float, default=0.0)
     parser.add_argument("--enable_depth_camera_randomization", dest="enable_depth_camera_randomization", action="store_true", default=False)
     parser.add_argument("--no_enable_depth_camera_randomization", dest="enable_depth_camera_randomization", action="store_false")
     parser.add_argument("--depth_camera_pos_rand_m", type=float, default=0.01)
@@ -53,7 +53,7 @@ def depth_aug_custom_parameters() -> list[dict[str, Any]]:
         {"name": "--depth_gaussian_std_m", "type": float, "default": 0.005},
         {"name": "--depth_edge_noise_prob", "type": float, "default": 0.10},
         {"name": "--depth_hole_noise_prob", "type": float, "default": 0.01},
-        {"name": "--depth_dropout_prob", "type": float, "default": 0.0005},
+        {"name": "--depth_dropout_prob", "type": float, "default": 0.0},
         {"name": "--enable_depth_camera_randomization", "dest": "enable_depth_camera_randomization", "action": "store_true", "default": False},
         {"name": "--no_enable_depth_camera_randomization", "dest": "enable_depth_camera_randomization", "action": "store_false"},
         {"name": "--depth_camera_pos_rand_m", "type": float, "default": 0.01},
@@ -76,7 +76,7 @@ def add_depth_aug_command_args(cmd: list[str], args: Any) -> None:
         "--depth_hole_noise_prob",
         str(float(getattr(args, "depth_hole_noise_prob", 0.01))),
         "--depth_dropout_prob",
-        str(float(getattr(args, "depth_dropout_prob", 0.0005))),
+        str(float(getattr(args, "depth_dropout_prob", 0.0))),
     ]
     if bool(getattr(args, "enable_depth_camera_randomization", False)):
         cmd.append("--enable_depth_camera_randomization")
@@ -97,7 +97,7 @@ def depth_noise_config_from_args(args: Any) -> DepthNoiseConfig:
         gaussian_std_m=float(getattr(args, "depth_gaussian_std_m", 0.005)),
         edge_noise_prob=float(getattr(args, "depth_edge_noise_prob", 0.10)),
         hole_noise_prob=float(getattr(args, "depth_hole_noise_prob", 0.01)),
-        dropout_prob=float(getattr(args, "depth_dropout_prob", 0.0005)),
+        dropout_prob=float(getattr(args, "depth_dropout_prob", 0.0)),
         near_clip_m=float(getattr(args, "camera_depth_clip_lower", 0.02)),
         far_clip_m=float(getattr(args, "camera_depth_clip_far", 2.0)),
     )
