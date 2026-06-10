@@ -28,6 +28,11 @@ DP_ROOT = SCRIPT_DIR.parent
 HIGH_LEVEL_ROOT = DP_ROOT.parent
 REPO_ROOT = HIGH_LEVEL_ROOT.parent
 PLAY_SCRIPT = DP_ROOT / "play" / "play_door_policy.py"
+if str(DP_ROOT) not in sys.path:
+    sys.path.insert(0, str(DP_ROOT))
+
+from depth_camera_aug import add_depth_aug_args, add_depth_aug_command_args
+
 PRINT_LOCK = Lock()
 PROGRESS_RENDERER: "InlineProgress | None" = None
 
@@ -137,6 +142,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--rgb", action="store_true")
     parser.add_argument("--depth_only", action="store_true", help="Use wrist/front depth only, no mask image inputs.")
+    add_depth_aug_args(parser)
     parser.add_argument("--camera_display_scale", type=int, default=5)
     parser.add_argument("--run_root", type=str, default=None, help="Directory for logs and summary JSON.")
     parser.add_argument("--stream_output", action="store_true", help="Stream each play subprocess output to this terminal.")
@@ -365,6 +371,7 @@ def build_play_command(args: argparse.Namespace, batch_envs: int, batch_idx: int
     if not args.print_policy_steps:
         cmd.append("--no_dp_print")
     cmd += ["--camera_display_scale", str(args.camera_display_scale)]
+    add_depth_aug_command_args(cmd, args)
     cmd.append("--")
     cmd += [
         "--door_cfg",
@@ -578,6 +585,15 @@ def main() -> None:
         "dp_fps": int(args.dp_fps),
         "rgb": bool(args.rgb),
         "depth_only": bool(args.depth_only),
+        "depth_noise_enabled": bool(args.enable_depth_noise),
+        "depth_noise_prob": float(args.depth_noise_prob),
+        "depth_gaussian_std_m": float(args.depth_gaussian_std_m),
+        "depth_edge_noise_prob": float(args.depth_edge_noise_prob),
+        "depth_hole_noise_prob": float(args.depth_hole_noise_prob),
+        "depth_dropout_prob": float(args.depth_dropout_prob),
+        "depth_camera_randomization": bool(args.enable_depth_camera_randomization),
+        "depth_camera_pos_rand_m": float(args.depth_camera_pos_rand_m),
+        "depth_camera_rot_rand_deg": float(args.depth_camera_rot_rand_deg),
         "successes": total_successes,
         "trials": total,
         "success_rate": success_rate,

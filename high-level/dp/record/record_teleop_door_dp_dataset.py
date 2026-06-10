@@ -28,6 +28,7 @@ for _path in (str(DP_RECORD_ROOT), str(FLOAT_IK_ROOT)):
 
 import teleop  # noqa: E402
 import door_common as dc  # noqa: E402
+from depth_camera_aug import add_depth_aug_args, depth_aug_metadata_from_args  # noqa: E402
 from door_dp_common import RawDoorDPRecorder, normalize_vision_mode  # noqa: E402
 
 
@@ -95,6 +96,7 @@ def parse_args():
         action="store_true",
         help="Record only wrist/front depth images, without mask images.",
     )
+    add_depth_aug_args(parser)
     parser.add_argument(
         "--record_key",
         type=str,
@@ -142,6 +144,15 @@ def parse_args():
         raise ValueError("--rgb and --depth_only are mutually exclusive.")
     teleop_args.rgb = bool(record_args.rgb)
     teleop_args.depth_only = bool(record_args.depth_only)
+    teleop_args.enable_depth_noise = bool(record_args.enable_depth_noise)
+    teleop_args.depth_noise_prob = float(record_args.depth_noise_prob)
+    teleop_args.depth_gaussian_std_m = float(record_args.depth_gaussian_std_m)
+    teleop_args.depth_edge_noise_prob = float(record_args.depth_edge_noise_prob)
+    teleop_args.depth_hole_noise_prob = float(record_args.depth_hole_noise_prob)
+    teleop_args.depth_dropout_prob = float(record_args.depth_dropout_prob)
+    teleop_args.enable_depth_camera_randomization = bool(record_args.enable_depth_camera_randomization)
+    teleop_args.depth_camera_pos_rand_m = float(record_args.depth_camera_pos_rand_m)
+    teleop_args.depth_camera_rot_rand_deg = float(record_args.depth_camera_rot_rand_deg)
     if float(record_args.sim_fps) <= 0.0:
         raise ValueError("--sim_fps must be positive")
     teleop_args.sim_dt = 1.0 / float(record_args.sim_fps)
@@ -238,6 +249,7 @@ def make_recorder(record_args, teleop_args, door):
             "camera_fps": float(record_args.dp_fps) / float(camera_stride),
             "camera_sample_stride": int(camera_stride),
             "camera_hold_last_frame": True,
+            **depth_aug_metadata_from_args(teleop_args),
         },
     )
 

@@ -24,8 +24,18 @@ except ImportError:
 SCRIPT_DIR = Path(__file__).resolve().parent
 HIGH_LEVEL_ROOT = SCRIPT_DIR.parents[0]
 REPO_ROOT = HIGH_LEVEL_ROOT.parents[0]
+if str(HIGH_LEVEL_ROOT) not in sys.path:
+    sys.path.insert(0, str(HIGH_LEVEL_ROOT))
 BASE_FLOAT_IK_SCRIPT = SCRIPT_DIR / "isaacgym_visualize_b1z1_basearn.py"
 DEFAULT_DOOR_CFG = HIGH_LEVEL_ROOT / "data" / "cfg" / "b1z1_opendoor.yaml"
+from dp.depth_camera_aug import (
+    DEPTH_CAMERA_RESOLUTION,
+    apply_depth_noise,
+    depth_aug_metadata_from_args,
+    depth_aug_custom_parameters,
+    depth_noise_config_from_args,
+    jitter_camera_pose,
+)
 DEFAULT_DOOR_ASSET_NAMES = (
     "99650089960001",
     "99650089960006",
@@ -35,13 +45,13 @@ DEFAULT_DOOR_ASSET_NAMES = (
 )
 DEFAULT_WRIST_CAMERA_CFG = {
     "horizontal_fov": 69,
-    "resolution": [96, 54],
+    "resolution": DEPTH_CAMERA_RESOLUTION,
     "position": [0.0955, 0.22, -0.03175],
     "rotation": [-1.57, 0.0, -0.87],
 }
 DEFAULT_FRONT_CAMERA_CFG = {
     "horizontal_fov": 69,
-    "resolution": [96, 54],
+    "resolution": DEPTH_CAMERA_RESOLUTION,
     "position": [0.425, 0.04, 0.12],
     "rotation": [0.0, 0.0, 0.0],
 }
@@ -1469,6 +1479,25 @@ def local_camera_pose_from_cfg(camera_cfg, local_rot_override=None):
     return local_pos, base_ik.normalize_quat(local_quat)
 
 
+def depth_camera_noise_config_for_args(args):
+    return depth_noise_config_from_args(args)
+
+
+def depth_camera_randomization_metadata(args):
+    return depth_aug_metadata_from_args(args)
+
+
+def jitter_camera_pose_for_args(local_pos, local_rot, args):
+    return jitter_camera_pose(
+        local_pos,
+        local_rot,
+        None,
+        enabled=bool(getattr(args, "enable_depth_camera_randomization", False)),
+        pos_range_m=float(getattr(args, "depth_camera_pos_rand_m", 0.01)),
+        rot_range_deg=float(getattr(args, "depth_camera_rot_rand_deg", 2.0)),
+    )
+
+
 def draw_local_camera_axes(gym, viewer, env, actor, body_name, local_pos, local_quat, scale, thickness):
     body_index = get_actor_body_index(gym, env, actor, body_name)
     if body_index is None:
@@ -1534,18 +1563,25 @@ def draw_low_level_camera_axes(gym, viewer, env, arm_actor, actor_handles, args)
 
 def make_camera_properties(camera_cfg):
     props = gymapi.CameraProperties()
-    props.width = int(camera_cfg.get("resolution", [96, 54])[0])
-    props.height = int(camera_cfg.get("resolution", [96, 54])[1])
+    props.width = int(camera_cfg.get("resolution", DEPTH_CAMERA_RESOLUTION)[0])
+    props.height = int(camera_cfg.get("resolution", DEPTH_CAMERA_RESOLUTION)[1])
     if camera_cfg.get("horizontal_fov", None) is not None:
         props.horizontal_fov = float(camera_cfg["horizontal_fov"])
     return props
 
 
-def attach_camera_to_actor_body(gym, env, actor, body_name, camera_cfg, local_rot_override=None):
+def attach_camera_to_actor_body(gym, env, actor, body_name, camera_cfg, local_rot_override=None, args=None):
     body_handle = gym.find_actor_rigid_body_handle(env, actor, body_name)
     if body_handle < 0:
         return None
-    local_pos, local_quat = local_camera_pose_from_cfg(camera_cfg, local_rot_override)
+    local_pos = np.asarray(camera_cfg.get("position", [0.0, 0.0, 0.0]), dtype=np.float32)
+    local_rot = list(camera_cfg.get("rotation", [0.0, 0.0, 0.0]))
+    if local_rot_override is not None:
+        local_rot = list(local_rot_override)
+    if args is not None:
+        local_pos, local_rot = jitter_camera_pose_for_args(local_pos, local_rot, args)
+    local_quat = gym_quat_to_np(gymapi.Quat.from_euler_zyx(*local_rot))
+    local_quat = base_ik.normalize_quat(local_quat)
     local_transform = gymapi.Transform(
         gymapi.Vec3(float(local_pos[0]), float(local_pos[1]), float(local_pos[2])),
         gymapi.Quat(float(local_quat[0]), float(local_quat[1]), float(local_quat[2]), float(local_quat[3])),
@@ -1563,7 +1599,7 @@ def create_low_level_cameras(gym, env, arm_actor, actor_handles, args):
         wrist_rot = list(DEFAULT_WRIST_CAMERA_CFG["rotation"])
         wrist_rot[2] -= float(args.wrist_camera_down_tilt)
         wrist_camera = attach_camera_to_actor_body(
-            gym, env, arm_actor, "link06", DEFAULT_WRIST_CAMERA_CFG, wrist_rot
+            gym, env, arm_actor, "link06", DEFAULT_WRIST_CAMERA_CFG, wrist_rot, args=args
         )
         if wrist_camera is None:
             print("⚠️📷 Wrist camera sensor creation failed; wrist camera image display is disabled.", flush=True)
@@ -1579,11 +1615,11 @@ def create_low_level_cameras(gym, env, arm_actor, actor_handles, args):
         ]
         base_actor = actor_handles[0] if len(actor_handles) > 1 else arm_actor
         front_camera = attach_camera_to_actor_body(
-            gym, env, base_actor, "trunk", DEFAULT_FRONT_CAMERA_CFG, front_rot
+            gym, env, base_actor, "trunk", DEFAULT_FRONT_CAMERA_CFG, front_rot, args=args
         )
         if front_camera is None:
             front_camera = attach_camera_to_actor_body(
-                gym, env, base_actor, "base", DEFAULT_FRONT_CAMERA_CFG, front_rot
+                gym, env, base_actor, "base", DEFAULT_FRONT_CAMERA_CFG, front_rot, args=args
             )
         if front_camera is None:
             print("⚠️📷 Front camera sensor creation failed; front camera image display is disabled.", flush=True)
@@ -1651,8 +1687,8 @@ def show_camera_handle_images(gym, sim, env, camera_handles, args):
     depth_only_display = bool(getattr(args, "depth_only", False)) and not bool(getattr(args, "rgb", False))
     for prefix, camera_handle in camera_handles.items():
         camera_cfg = DEFAULT_WRIST_CAMERA_CFG if prefix == "wrist" else DEFAULT_FRONT_CAMERA_CFG
-        width = int(camera_cfg.get("resolution", [96, 54])[0])
-        height = int(camera_cfg.get("resolution", [96, 54])[1])
+        width = int(camera_cfg.get("resolution", DEPTH_CAMERA_RESOLUTION)[0])
+        height = int(camera_cfg.get("resolution", DEPTH_CAMERA_RESOLUTION)[1])
         handle_mask = None
         mask_vis = None
         if not depth_only_display:
@@ -1708,6 +1744,14 @@ def show_camera_handle_images(gym, sim, env, camera_handles, args):
             nan=0.0,
             posinf=float(args.camera_depth_clip_far),
             neginf=float(args.camera_depth_clip_far),
+        )
+        depth_image[depth_image < float(args.camera_depth_clip_lower)] = 0.0
+        depth_image = np.clip(depth_image, 0.0, float(args.camera_depth_clip_far))
+        depth_image = apply_depth_noise(
+            depth_image,
+            None,
+            depth_camera_noise_config_for_args(args),
+            valid_mask=depth_image >= float(args.camera_depth_clip_lower),
         )
         depth_image[depth_image < float(args.camera_depth_clip_lower)] = 0.0
         depth_image = np.clip(depth_image, 0.0, float(args.camera_depth_clip_far))
@@ -1806,8 +1850,8 @@ def capture_dp_camera_images_from_rendered(gym, sim, env, camera_handles, args):
         if seg_raw is None:
             continue
         camera_cfg = DEFAULT_WRIST_CAMERA_CFG if prefix == "wrist" else DEFAULT_FRONT_CAMERA_CFG
-        width = int(camera_cfg.get("resolution", [96, 54])[0])
-        height = int(camera_cfg.get("resolution", [96, 54])[1])
+        width = int(camera_cfg.get("resolution", DEPTH_CAMERA_RESOLUTION)[0])
+        height = int(camera_cfg.get("resolution", DEPTH_CAMERA_RESOLUTION)[1])
         seg_image = camera_image_to_array(seg_raw, height, width).astype(np.int32)
         handle_mask = (seg_image == int(args.handle_seg_id)).astype(np.float32)
         images[f"{prefix}_handle_mask"] = mask_to_rgb(handle_mask)
@@ -1838,6 +1882,14 @@ def capture_dp_camera_images_from_rendered(gym, sim, env, camera_handles, args):
             nan=0.0,
             posinf=float(args.camera_depth_clip_far),
             neginf=float(args.camera_depth_clip_far),
+        )
+        depth_image[depth_image < float(args.camera_depth_clip_lower)] = 0.0
+        depth_image = np.clip(depth_image, 0.0, float(args.camera_depth_clip_far))
+        depth_image = apply_depth_noise(
+            depth_image,
+            None,
+            depth_camera_noise_config_for_args(args),
+            valid_mask=depth_image >= float(args.camera_depth_clip_lower),
         )
         depth_image[depth_image < float(args.camera_depth_clip_lower)] = 0.0
         depth_image = np.clip(depth_image, 0.0, float(args.camera_depth_clip_far))
@@ -2501,6 +2553,7 @@ def make_float_dp_recorder(
         "camera_hold_last_frame": True,
         "door_side_walls": bool(door_side_walls_enabled(args)),
     }
+    metadata.update(depth_camera_randomization_metadata(args))
     sim_dt = getattr(args, "sim_dt", None)
     if sim_dt is not None:
         sim_dt = float(sim_dt)

@@ -848,13 +848,13 @@
     <collision name="long_grip">
       <origin xyz="-0.05 -0.03 0" rpy="0 0 0" />
       <geometry>
-        <box size="0.12 0.035 0.025" />
+        <box size="0.12 0.02 0.01" />
         </geometry>
       </collision>
     <collision name="short_return">
       <origin xyz="0 -0.015 0" rpy="0 0 0" />
       <geometry>
-        <box size="0.03 0.04 0.025" />
+        <box size="0.02 0.03 0.01" />
         </geometry>
       </collision>
     </link>

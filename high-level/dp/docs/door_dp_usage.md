@@ -144,10 +144,10 @@ Each `.npz` episode stores:
 ```text
 state                  [T, state_dim]
 action                 [T, 10]
-wrist_handle_mask      [T, 54, 96, 3]
-wrist_masked_depth     [T, 54, 96, 3]
-front_handle_mask      [T, 54, 96, 3]
-front_masked_depth     [T, 54, 96, 3]
+wrist_handle_mask      [T, 480, 640, 3]
+wrist_masked_depth     [T, 480, 640, 3]
+front_handle_mask      [T, 480, 640, 3]
+front_masked_depth     [T, 480, 640, 3]
 subtask_index          [T, 1]
 door_asset_index       scalar
 door_asset_name        scalar

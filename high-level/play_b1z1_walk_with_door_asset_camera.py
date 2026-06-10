@@ -33,6 +33,15 @@ from legged_gym.envs import *  # noqa: F401,F403,E402
 from legged_gym.envs.manip_loco.manip_loco import ManipLoco  # noqa: E402
 from legged_gym.utils import task_registry  # noqa: E402
 
+from dp.depth_camera_aug import (
+    DEPTH_CAMERA_RESOLUTION,
+    add_depth_aug_args,
+    apply_depth_noise,
+    depth_aug_metadata_from_args,
+    depth_noise_config_from_args,
+    jitter_camera_pose,
+)
+
 try:
     from dp.door_dp_common import (
         DoorDPJsonlLogger,
@@ -219,7 +228,7 @@ def _load_door_runtime(cfg_path):
             "wrist_camera",
             {
                 "horizontal_fov": 69,
-                "resolution": [96, 54],
+                "resolution": DEPTH_CAMERA_RESOLUTION,
                 "position": [0.0955, 0.22, -0.03175],
                 "rotation": [-1.57, 0.0, -0.87],
                 "rand_position": [0.0, 0.0, 0.0],
@@ -229,7 +238,7 @@ def _load_door_runtime(cfg_path):
             "onboard_camera",
             {
                 "horizontal_fov": 69,
-                "resolution": [96, 54],
+                "resolution": DEPTH_CAMERA_RESOLUTION,
                 "position": [0.425, 0.04, 0.12],
                 "rotation": [0.0, 0.0, 0.0],
                 "rand_position": [0.0, 0.0, 0.0],
@@ -735,8 +744,8 @@ class ManipLocoDoorAsset(ManipLoco):
         wrist_cfg = DOOR_RUNTIME["wrist_camera_cfg"]
         camera_props = gymapi.CameraProperties()
         camera_props.enable_tensors = True
-        camera_props.width = int(wrist_cfg.get("resolution", [96, 54])[0])
-        camera_props.height = int(wrist_cfg.get("resolution", [96, 54])[1])
+        camera_props.width = int(wrist_cfg.get("resolution", DEPTH_CAMERA_RESOLUTION)[0])
+        camera_props.height = int(wrist_cfg.get("resolution", DEPTH_CAMERA_RESOLUTION)[1])
         if wrist_cfg.get("horizontal_fov", None) is not None:
             horizontal_fov = wrist_cfg["horizontal_fov"]
             camera_props.horizontal_fov = (
@@ -752,6 +761,14 @@ class ManipLocoDoorAsset(ManipLoco):
         local_pos[2] += np.random.uniform(-rand_position[2], rand_position[2])
         local_rot = list(wrist_cfg.get("rotation", [-1.57, 0.0, -0.87]))
         local_rot[2] -= DOOR_RUNTIME["wrist_camera_down_tilt"]
+        local_pos, local_rot = jitter_camera_pose(
+            local_pos,
+            local_rot,
+            None,
+            enabled=DOOR_RUNTIME["enable_depth_camera_randomization"],
+            pos_range_m=DOOR_RUNTIME["depth_camera_pos_rand_m"],
+            rot_range_deg=DOOR_RUNTIME["depth_camera_rot_rand_deg"],
+        )
 
         local_transform = gymapi.Transform()
         local_transform.p = gymapi.Vec3(*local_pos)
@@ -784,8 +801,8 @@ class ManipLocoDoorAsset(ManipLoco):
         front_cfg = DOOR_RUNTIME["front_camera_cfg"]
         camera_props = gymapi.CameraProperties()
         camera_props.enable_tensors = True
-        camera_props.width = int(front_cfg.get("resolution", [96, 54])[0])
-        camera_props.height = int(front_cfg.get("resolution", [96, 54])[1])
+        camera_props.width = int(front_cfg.get("resolution", DEPTH_CAMERA_RESOLUTION)[0])
+        camera_props.height = int(front_cfg.get("resolution", DEPTH_CAMERA_RESOLUTION)[1])
         if front_cfg.get("horizontal_fov", None) is not None:
             horizontal_fov = front_cfg["horizontal_fov"]
             camera_props.horizontal_fov = (
@@ -804,6 +821,14 @@ class ManipLocoDoorAsset(ManipLoco):
         local_rot[0] = np.deg2rad(DOOR_RUNTIME["front_camera_yaw_deg"])
         local_rot[1] = np.deg2rad(DOOR_RUNTIME["front_camera_pitch_deg"])
         local_rot[2] = np.deg2rad(DOOR_RUNTIME["front_camera_roll_deg"])
+        local_pos, local_rot = jitter_camera_pose(
+            local_pos,
+            local_rot,
+            None,
+            enabled=DOOR_RUNTIME["enable_depth_camera_randomization"],
+            pos_range_m=DOOR_RUNTIME["depth_camera_pos_rand_m"],
+            rot_range_deg=DOOR_RUNTIME["depth_camera_rot_rand_deg"],
+        )
 
         local_transform = gymapi.Transform()
         local_transform.p = gymapi.Vec3(*local_pos)
@@ -924,6 +949,14 @@ class ManipLocoDoorAsset(ManipLoco):
                     nan=0.0,
                     posinf=float(DOOR_RUNTIME["camera_depth_clip_far"]),
                     neginf=float(DOOR_RUNTIME["camera_depth_clip_far"]),
+                )
+                depth_image[depth_image < DOOR_RUNTIME["camera_depth_clip_lower"]] = 0
+                depth_image = torch.clamp(depth_image, 0.0, DOOR_RUNTIME["camera_depth_clip_far"])
+                depth_image = apply_depth_noise(
+                    depth_image,
+                    None,
+                    DOOR_RUNTIME["depth_noise_config"],
+                    valid_mask=depth_image >= DOOR_RUNTIME["camera_depth_clip_lower"],
                 )
                 depth_image[depth_image < DOOR_RUNTIME["camera_depth_clip_lower"]] = 0
                 depth_image = torch.clamp(depth_image, 0.0, DOOR_RUNTIME["camera_depth_clip_far"])
@@ -1505,6 +1538,7 @@ def parse_args():
     parser.add_argument("--front_camera_yaw_deg", type=float, default=0.0)
     parser.add_argument("--front_camera_pitch_deg", type=float, default=-60.0)
     parser.add_argument("--front_camera_roll_deg", type=float, default=0.0)
+    add_depth_aug_args(parser)
     parser.add_argument("--camera_axis_scale", type=float, default=0.10)
     parser.add_argument("--camera_axis_thickness", type=float, default=0.004)
     parser.add_argument("--draw_camera_axes", dest="draw_camera_axes", action="store_true", default=True)
@@ -1649,6 +1683,10 @@ def main():
     DOOR_RUNTIME["front_camera_yaw_deg"] = args.front_camera_yaw_deg
     DOOR_RUNTIME["front_camera_pitch_deg"] = args.front_camera_pitch_deg
     DOOR_RUNTIME["front_camera_roll_deg"] = args.front_camera_roll_deg
+    DOOR_RUNTIME["enable_depth_camera_randomization"] = bool(args.enable_depth_camera_randomization)
+    DOOR_RUNTIME["depth_camera_pos_rand_m"] = float(args.depth_camera_pos_rand_m)
+    DOOR_RUNTIME["depth_camera_rot_rand_deg"] = float(args.depth_camera_rot_rand_deg)
+    DOOR_RUNTIME["depth_noise_config"] = depth_noise_config_from_args(args)
 
     low_args = build_low_level_args(args)
     env_cfg, train_cfg = task_registry.get_cfgs(name="b1z1")
@@ -1724,6 +1762,8 @@ def main():
             "front_roll_deg": args.front_camera_roll_deg,
             "display_scale": args.camera_display_scale,
             "depth_clip": [args.camera_depth_clip_lower, args.camera_depth_clip_far],
+            "depth_noise_enabled": bool(args.enable_depth_noise),
+            "depth_camera_randomization": bool(args.enable_depth_camera_randomization),
             "cfg": DOOR_RUNTIME["wrist_camera_cfg"],
             "front_cfg": DOOR_RUNTIME["front_camera_cfg"],
         },
@@ -1943,6 +1983,7 @@ def main():
                     "sim_fps": 1.0 / float(env.dt),
                     "record_sample_stride": int(dp_record_stride),
                     "record_effective_fps": float(dp_record_effective_fps),
+                    **depth_aug_metadata_from_args(args),
                 },
             )
         print(

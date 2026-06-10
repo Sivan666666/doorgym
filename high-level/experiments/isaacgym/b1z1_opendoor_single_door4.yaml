@@ -99,15 +99,15 @@ sensor:
   depth_clip_lower: 0.15
   depth_clip_rand_range: [0.18, 0.25]
   enableCamera: False
-  resized_resolution: [96, 54]
+  resized_resolution: [640, 480]
   onboard_camera:
     horizontal_fov: 69
-    resolution: [96, 54]
+    resolution: [640, 480]
     position: [0.425, 0.04, 0.12]
     rotation: [0.0, 0.0, 0.0]
   wrist_camera:
     horizontal_fov: 69
-    resolution: [96, 54]
+    resolution: [640, 480]
     position: [0.0955, 0.22, -0.03175]
     rotation: [-1.57, 0.0, -0.87]
     rand_position: [0.005, 0.005, 0.005]

@@ -8,6 +8,12 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 RECORD_SCRIPT = REPO_ROOT / "high-level" / "dp" / "record" / "record_door_dp_dataset.py"
+DP_ROOT = REPO_ROOT / "high-level" / "dp"
+if str(DP_ROOT) not in sys.path:
+    sys.path.insert(0, str(DP_ROOT))
+
+from depth_camera_aug import add_depth_aug_args, add_depth_aug_command_args
+
 DEFAULT_DOOR_CFG = REPO_ROOT / "high-level" / "experiments" / "isaacgym" / "b1z1_opendoor_single_door0.yaml"
 DEFAULT_RAW_ROOTS = {
     "ikpush": REPO_ROOT / "high-level" / "data" / "door_dp_raw" / "single_door0_push_sweep",
@@ -36,6 +42,7 @@ def parse_args():
     parser.add_argument("--headless", dest="headless", action="store_true", default=True, help="Forward --headless. On by default.")
     parser.add_argument("--no_headless", "--no-headless", dest="headless", action="store_false", help="Open the Isaac Gym viewer.")
     parser.add_argument("--rgb", action="store_true", help="Record RGB+mask Door DP data.")
+    add_depth_aug_args(parser)
     parser.add_argument("--preview_cameras", action="store_true", help="Show OpenCV camera preview windows.")
     parser.add_argument("--dry_run", action="store_true", help="Print commands without launching Isaac Gym.")
     parser.add_argument(
@@ -79,6 +86,7 @@ def build_command(args, play_args, num_envs, seed):
         cmd.append("--headless")
     if args.rgb:
         cmd.append("--rgb")
+    add_depth_aug_command_args(cmd, args)
 
     extra = args.extra_play_args[1:] if args.extra_play_args[:1] == ["--"] else args.extra_play_args
     cmd += [

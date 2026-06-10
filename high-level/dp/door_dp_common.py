@@ -6,9 +6,13 @@ from collections import deque
 import numpy as np
 import torch
 
+try:
+    from dp.depth_camera_aug import DEPTH_IMAGE_HEIGHT, DEPTH_IMAGE_WIDTH
+except Exception:
+    from depth_camera_aug import DEPTH_IMAGE_HEIGHT, DEPTH_IMAGE_WIDTH
 
-IMAGE_HEIGHT = 54
-IMAGE_WIDTH = 96
+IMAGE_HEIGHT = DEPTH_IMAGE_HEIGHT
+IMAGE_WIDTH = DEPTH_IMAGE_WIDTH
 DEFAULT_DEPTH_LOWER_METERS = 0.02
 DEFAULT_DEPTH_FAR_METERS = 2.0
 DEPTH_IMAGE_KEYS = ["wrist_handle_mask", "wrist_masked_depth", "front_handle_mask", "front_masked_depth"]
@@ -48,6 +52,11 @@ DATASET_METADATA_KEYS = (
     "camera_fps",
     "camera_sample_stride",
     "camera_hold_last_frame",
+    "image_width",
+    "image_height",
+    "depth_noise_enabled",
+    "depth_noise_config",
+    "depth_camera_randomization_config",
 )
 STATE_PREPROCESS_VERSION = "door_dp_state_robust_quantile_v1"
 ACTION_PREPROCESS_VERSION = "door_dp_action_robust_quantile_v1"
@@ -811,6 +820,8 @@ class DoorDPLeRobotRecorder:
             "state": self.state_feature_names,
             "action": self.action_names,
             "image_features": lerobot_image_keys_for_vision_mode(self.vision_mode),
+            "image_width": IMAGE_WIDTH,
+            "image_height": IMAGE_HEIGHT,
             "image_storage": self.image_storage,
             "video_codec": self.video_codec,
         }
@@ -904,6 +915,8 @@ class RawDoorDPRecorder:
             "state": self.state_feature_names,
             "action": self.action_names,
             "image_features": self.image_keys,
+            "image_width": IMAGE_WIDTH,
+            "image_height": IMAGE_HEIGHT,
             "format": "door_dp_raw_npz_v1",
         }
         if self.vision_mode != "depth":

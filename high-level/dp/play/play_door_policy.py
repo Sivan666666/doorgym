@@ -11,6 +11,10 @@ from datetime import datetime
 DP_ROOT = Path(__file__).resolve().parents[1]
 HIGH_LEVEL_ROOT = DP_ROOT.parent
 PROJECT_ROOT = HIGH_LEVEL_ROOT.parent
+if str(DP_ROOT) not in sys.path:
+    sys.path.insert(0, str(DP_ROOT))
+
+from depth_camera_aug import add_depth_aug_args, add_depth_aug_command_args
 
 
 def load_json(path):
@@ -155,6 +159,7 @@ def parse_args():
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--rgb", action="store_true", help="Run a RGB+mask Door policy checkpoint. Push/ikpush/ikpull modes only.")
     parser.add_argument("--depth_only", action="store_true", help="Run a Door policy checkpoint trained with wrist/front depth only.")
+    add_depth_aug_args(parser)
     parser.add_argument("--show_seg", dest="show_seg", action="store_true", default=True)
     parser.add_argument("--no_show_seg", dest="show_seg", action="store_false")
     parser.add_argument("--camera_display_scale", type=int, default=5)
@@ -311,6 +316,7 @@ def main():
         cmd.append("--headless")
     if not args.show_seg:
         cmd.append("--no_show_seg")
+    add_depth_aug_command_args(cmd, args)
     extra = args.play_args[1:] if args.play_args[:1] == ["--"] else args.play_args
     cmd += extra
     print(f"Running Door policy: {' '.join(cmd)}", flush=True)

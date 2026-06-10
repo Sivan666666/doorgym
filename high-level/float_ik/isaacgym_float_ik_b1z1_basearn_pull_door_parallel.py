@@ -397,6 +397,7 @@ def parse_args():
             {"name": "--front_camera_yaw_deg", "type": float, "default": 0.0},
             {"name": "--front_camera_pitch_deg", "type": float, "default": -30.0},
             {"name": "--front_camera_roll_deg", "type": float, "default": 0.0},
+            *dc.depth_aug_custom_parameters(),
             {"name": "--record_dp_dataset", "action": "store_true"},
             {"name": "--dp_raw_root", "type": str, "default": str(HIGH_LEVEL_ROOT / "data" / "door_dp_raw" / "local_door_dp")},
             {"name": "--dp_task", "type": str, "default": "pull lever door open"},

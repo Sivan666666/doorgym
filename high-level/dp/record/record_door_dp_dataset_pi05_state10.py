@@ -9,6 +9,10 @@ import yaml
 
 DP_ROOT = Path(__file__).resolve().parents[1]
 HIGH_LEVEL_ROOT = DP_ROOT.parent
+if str(DP_ROOT) not in sys.path:
+    sys.path.insert(0, str(DP_ROOT))
+
+from depth_camera_aug import add_depth_aug_args, add_depth_aug_command_args
 
 
 def parse_args():
@@ -77,6 +81,7 @@ def parse_args():
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--rgb", action="store_true", help="Record RGB+mask vision for push/ikpush/ikpull data instead of full depth+mask.")
     parser.add_argument("--depth_only", action="store_true", help="Record only wrist/front depth images, without mask images.")
+    add_depth_aug_args(parser)
     parser.add_argument("--record_env_id", type=int, default=0)
     parser.add_argument("--record_all_envs", dest="record_all_envs", action="store_true", default=True)
     parser.add_argument("--no_record_all_envs", dest="record_all_envs", action="store_false")
@@ -261,6 +266,7 @@ def run_one(mode, rollout_idx, args):
         if args.seed >= 0:
             cmd += ["--seed", str(int(args.seed) + int(rollout_idx))]
         cmd += default_float_ik_scripted_args(mode)
+        add_depth_aug_command_args(cmd, args)
         cmd += extra
         print(
             f"\n=== Recording {mode} rollout {rollout_idx + 1}/{args.num_rollouts} "
@@ -310,6 +316,7 @@ def run_one(mode, rollout_idx, args):
     if not args.record_all_envs:
         cmd.append("--no_dp_record_all_envs")
     extra = forwarded_play_args(args)
+    add_depth_aug_command_args(cmd, args)
     cmd += extra
     print(
         f"\n=== Recording {mode} rollout {rollout_idx + 1}/{args.num_rollouts} "
