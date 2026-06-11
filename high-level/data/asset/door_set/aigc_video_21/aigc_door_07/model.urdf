@@ -1,0 +1,635 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="single_leaf_six_panel_door">
+  <material name="satin_white_paint">
+    <color rgba="0.94 0.935 0.905 1" />
+  </material>
+  <material name="bevel_highlight_white">
+    <color rgba="0.98 0.975 0.95 1" />
+  </material>
+  <material name="narrow_reveal_shadow">
+    <color rgba="0.055 0.05 0.044 1" />
+  </material>
+  <material name="satin_nickel">
+    <color rgba="0.66 0.64 0.58 1" />
+  </material>
+  <material name="warm_brushed_bronze">
+    <color rgba="0.72 0.49 0.25 1" />
+  </material>
+  <material name="keyhole_dark">
+    <color rgba="0.02 0.018 0.015 1" />
+  </material>
+  <link name="fixed_frame" />
+  <link name="left_jamb">
+    <visual name="left_jamb_board">
+      <origin xyz="-0.037 0.024 1.0235" rpy="0 0 0" />
+      <geometry>
+        <box size="0.062 0.092 2.027" />
+      </geometry>
+      <material name="satin_white_paint">
+        <color rgba="0.94 0.935 0.905 1" />
+      </material>
+    </visual>
+    <visual name="left_casing_flat">
+      <origin xyz="-0.0865 -0.019 1.051" rpy="0 0 0" />
+      <geometry>
+        <box size="0.037 0.018 2.082" />
+      </geometry>
+      <material name="satin_white_paint">
+        <color rgba="0.94 0.935 0.905 1" />
+      </material>
+    </visual>
+    <visual name="left_casing_bead">
+      <origin xyz="-0.071 -0.02 1.051" rpy="0 0 0" />
+      <geometry>
+        <box size="0.006 0.016 2.082" />
+      </geometry>
+      <material name="satin_white_paint">
+        <color rgba="0.94 0.935 0.905 1" />
+      </material>
+    </visual>
+    <visual name="left_inner_stop">
+      <origin xyz="0 0.0375 1.012" rpy="0 0 0" />
+      <geometry>
+        <box size="0.012 0.015 2" />
+      </geometry>
+      <material name="narrow_reveal_shadow">
+        <color rgba="0.055 0.05 0.044 1" />
+      </material>
+    </visual>
+    <collision name="left_jamb_board">
+      <origin xyz="-0.037 0.024 1.0235" rpy="0 0 0" />
+      <geometry>
+        <box size="0.062 0.092 2.027" />
+      </geometry>
+    </collision>
+    <collision name="left_casing_flat">
+      <origin xyz="-0.0865 -0.019 1.051" rpy="0 0 0" />
+      <geometry>
+        <box size="0.037 0.018 2.082" />
+      </geometry>
+    </collision>
+    <collision name="left_casing_bead">
+      <origin xyz="-0.071 -0.02 1.051" rpy="0 0 0" />
+      <geometry>
+        <box size="0.006 0.016 2.082" />
+      </geometry>
+    </collision>
+    <collision name="left_inner_stop">
+      <origin xyz="0 0.0375 1.012" rpy="0 0 0" />
+      <geometry>
+        <box size="0.012 0.015 2" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="right_jamb">
+    <visual name="right_jamb_board">
+      <origin xyz="0.89875 0.024 1.0235" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0625 0.092 2.027" />
+      </geometry>
+      <material name="satin_white_paint">
+        <color rgba="0.94 0.935 0.905 1" />
+      </material>
+    </visual>
+    <visual name="right_casing_flat">
+      <origin xyz="0.9485 -0.019 1.051" rpy="0 0 0" />
+      <geometry>
+        <box size="0.037 0.018 2.082" />
+      </geometry>
+      <material name="satin_white_paint">
+        <color rgba="0.94 0.935 0.905 1" />
+      </material>
+    </visual>
+    <visual name="right_casing_bead">
+      <origin xyz="0.933 -0.02 1.051" rpy="0 0 0" />
+      <geometry>
+        <box size="0.006 0.016 2.082" />
+      </geometry>
+      <material name="satin_white_paint">
+        <color rgba="0.94 0.935 0.905 1" />
+      </material>
+    </visual>
+    <visual name="right_inner_stop">
+      <origin xyz="0.86 0.0375 1.012" rpy="0 0 0" />
+      <geometry>
+        <box size="0.015 0.015 2" />
+      </geometry>
+      <material name="narrow_reveal_shadow">
+        <color rgba="0.055 0.05 0.044 1" />
+      </material>
+    </visual>
+    <collision name="right_jamb_board">
+      <origin xyz="0.89875 0.024 1.0235" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0625 0.092 2.027" />
+      </geometry>
+    </collision>
+    <collision name="right_casing_flat">
+      <origin xyz="0.9485 -0.019 1.051" rpy="0 0 0" />
+      <geometry>
+        <box size="0.037 0.018 2.082" />
+      </geometry>
+    </collision>
+    <collision name="right_casing_bead">
+      <origin xyz="0.933 -0.02 1.051" rpy="0 0 0" />
+      <geometry>
+        <box size="0.006 0.016 2.082" />
+      </geometry>
+    </collision>
+    <collision name="right_inner_stop">
+      <origin xyz="0.86 0.0375 1.012" rpy="0 0 0" />
+      <geometry>
+        <box size="0.015 0.015 2" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="header">
+    <visual name="header_board">
+      <origin xyz="0.431 0.024 2.0645" rpy="0 0 0" />
+      <geometry>
+        <box size="0.998 0.092 0.055" />
+      </geometry>
+      <material name="satin_white_paint">
+        <color rgba="0.94 0.935 0.905 1" />
+      </material>
+    </visual>
+    <visual name="header_casing">
+      <origin xyz="0.431 -0.025 2.1135" rpy="0 0 0" />
+      <geometry>
+        <box size="1.072 0.018 0.043" />
+      </geometry>
+      <material name="satin_white_paint">
+        <color rgba="0.94 0.935 0.905 1" />
+      </material>
+    </visual>
+    <visual name="header_inner_stop">
+      <origin xyz="0.42925 0.0375 2.037" rpy="0 0 0" />
+      <geometry>
+        <box size="0.858 0.015 0.01" />
+      </geometry>
+      <material name="narrow_reveal_shadow">
+        <color rgba="0.055 0.05 0.044 1" />
+      </material>
+    </visual>
+    <collision name="header_board">
+      <origin xyz="0.431 0.024 2.0645" rpy="0 0 0" />
+      <geometry>
+        <box size="0.998 0.092 0.055" />
+      </geometry>
+    </collision>
+    <collision name="header_casing">
+      <origin xyz="0.431 -0.025 2.1135" rpy="0 0 0" />
+      <geometry>
+        <box size="1.072 0.018 0.043" />
+      </geometry>
+    </collision>
+    <collision name="header_inner_stop">
+      <origin xyz="0.42925 0.0375 2.037" rpy="0 0 0" />
+      <geometry>
+        <box size="0.858 0.015 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="threshold">
+    <visual name="compact_threshold_sill">
+      <origin xyz="0.43075 0.0175 0.005" rpy="0 0 0" />
+      <geometry>
+        <box size="0.8735 0.075 0.01" />
+      </geometry>
+      <material name="satin_white_paint">
+        <color rgba="0.94 0.935 0.905 1" />
+      </material>
+    </visual>
+    <visual name="threshold_shadow_line">
+      <origin xyz="0.43075 -0.023 0.013" rpy="0 0 0" />
+      <geometry>
+        <box size="0.8735 0.006 0.006" />
+      </geometry>
+      <material name="narrow_reveal_shadow">
+        <color rgba="0.055 0.05 0.044 1" />
+      </material>
+    </visual>
+    <collision name="compact_threshold_sill">
+      <origin xyz="0.43075 0.0175 0.005" rpy="0 0 0" />
+      <geometry>
+        <box size="0.8735 0.075 0.01" />
+      </geometry>
+    </collision>
+    <collision name="threshold_shadow_line">
+      <origin xyz="0.43075 -0.023 0.013" rpy="0 0 0" />
+      <geometry>
+        <box size="0.8735 0.006 0.006" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="door_panel">
+    <visual name="door_slab">
+      <geometry>
+        <mesh filename="assets/meshes/six_panel_molded_door_panel.obj" />
+      </geometry>
+      <material name="satin_white_paint">
+        <color rgba="0.94 0.935 0.905 1" />
+      </material>
+    </visual>
+    <collision name="door_slab">
+      <geometry>
+        <mesh filename="assets/meshes/six_panel_molded_door_panel.obj" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="hinge_leaf_frame_0">
+    <visual name="hinge_leaf_frame_body">
+      <origin xyz="0 0 1.6875" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="assets/meshes/hinge_leaf_frame_mesh.obj" />
+      </geometry>
+      <material name="satin_nickel">
+        <color rgba="0.66 0.64 0.58 1" />
+      </material>
+    </visual>
+    <collision name="hinge_leaf_frame_body">
+      <origin xyz="0 0 1.6875" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="assets/meshes/hinge_leaf_frame_mesh.obj" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="hinge_pin_0">
+    <visual name="hinge_pin_barrel">
+      <origin xyz="0 -0.031 1.735" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.00345" length="0.103" />
+      </geometry>
+      <material name="satin_nickel">
+        <color rgba="0.66 0.64 0.58 1" />
+      </material>
+    </visual>
+    <collision name="hinge_pin_barrel">
+      <origin xyz="0 -0.031 1.735" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.00345" length="0.103" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="hinge_leaf_panel_0">
+    <visual name="hinge_leaf_panel_body">
+      <origin xyz="0 0 1.6875" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="assets/meshes/hinge_leaf_panel_mesh.obj" />
+      </geometry>
+      <material name="satin_nickel">
+        <color rgba="0.66 0.64 0.58 1" />
+      </material>
+    </visual>
+    <collision name="hinge_leaf_panel_body">
+      <origin xyz="0 0 1.6875" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="assets/meshes/hinge_leaf_panel_mesh.obj" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="hinge_leaf_frame_1">
+    <visual name="hinge_leaf_frame_body">
+      <origin xyz="0 0 0.9875" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="assets/meshes/hinge_leaf_frame_mesh.obj" />
+      </geometry>
+      <material name="satin_nickel">
+        <color rgba="0.66 0.64 0.58 1" />
+      </material>
+    </visual>
+    <collision name="hinge_leaf_frame_body">
+      <origin xyz="0 0 0.9875" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="assets/meshes/hinge_leaf_frame_mesh.obj" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="hinge_pin_1">
+    <visual name="hinge_pin_barrel">
+      <origin xyz="0 -0.031 1.035" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.00345" length="0.103" />
+      </geometry>
+      <material name="satin_nickel">
+        <color rgba="0.66 0.64 0.58 1" />
+      </material>
+    </visual>
+    <collision name="hinge_pin_barrel">
+      <origin xyz="0 -0.031 1.035" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.00345" length="0.103" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="hinge_leaf_panel_1">
+    <visual name="hinge_leaf_panel_body">
+      <origin xyz="0 0 0.9875" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="assets/meshes/hinge_leaf_panel_mesh.obj" />
+      </geometry>
+      <material name="satin_nickel">
+        <color rgba="0.66 0.64 0.58 1" />
+      </material>
+    </visual>
+    <collision name="hinge_leaf_panel_body">
+      <origin xyz="0 0 0.9875" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="assets/meshes/hinge_leaf_panel_mesh.obj" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="hinge_leaf_frame_2">
+    <visual name="hinge_leaf_frame_body">
+      <origin xyz="0 0 0.2875" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="assets/meshes/hinge_leaf_frame_mesh.obj" />
+      </geometry>
+      <material name="satin_nickel">
+        <color rgba="0.66 0.64 0.58 1" />
+      </material>
+    </visual>
+    <collision name="hinge_leaf_frame_body">
+      <origin xyz="0 0 0.2875" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="assets/meshes/hinge_leaf_frame_mesh.obj" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="hinge_pin_2">
+    <visual name="hinge_pin_barrel">
+      <origin xyz="0 -0.031 0.335" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.00345" length="0.103" />
+      </geometry>
+      <material name="satin_nickel">
+        <color rgba="0.66 0.64 0.58 1" />
+      </material>
+    </visual>
+    <collision name="hinge_pin_barrel">
+      <origin xyz="0 -0.031 0.335" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.00345" length="0.103" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="hinge_leaf_panel_2">
+    <visual name="hinge_leaf_panel_body">
+      <origin xyz="0 0 0.2875" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="assets/meshes/hinge_leaf_panel_mesh.obj" />
+      </geometry>
+      <material name="satin_nickel">
+        <color rgba="0.66 0.64 0.58 1" />
+      </material>
+    </visual>
+    <collision name="hinge_leaf_panel_body">
+      <origin xyz="0 0 0.2875" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="assets/meshes/hinge_leaf_panel_mesh.obj" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="handle_back_plate">
+    <visual name="rosette_trim">
+      <origin xyz="0.769 0.006 0.955" rpy="1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.038" length="0.006" />
+      </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.72 0.49 0.25 1" />
+      </material>
+    </visual>
+    <visual name="handle_back_plate_disc">
+      <origin xyz="0.769 0.0022 0.955" rpy="1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.026" length="0.0025" />
+      </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.72 0.49 0.25 1" />
+      </material>
+    </visual>
+    <collision name="rosette_trim">
+      <origin xyz="0.769 0.006 0.955" rpy="1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.038" length="0.006" />
+      </geometry>
+    </collision>
+    <collision name="handle_back_plate_disc">
+      <origin xyz="0.769 0.0022 0.955" rpy="1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.026" length="0.0025" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="lock_cylinder">
+    <visual name="lock_cylinder_trim">
+      <origin xyz="0.769 0.0065 0.87" rpy="1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0135" length="0.005" />
+      </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.72 0.49 0.25 1" />
+      </material>
+    </visual>
+    <visual name="keyhole_slot">
+      <origin xyz="0.769 0.0042 0.87" rpy="0 0 0" />
+      <geometry>
+        <box size="0.004 0.0015 0.014" />
+      </geometry>
+      <material name="keyhole_dark">
+        <color rgba="0.02 0.018 0.015 1" />
+      </material>
+    </visual>
+    <collision name="lock_cylinder_trim">
+      <origin xyz="0.769 0.0065 0.87" rpy="1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0135" length="0.005" />
+      </geometry>
+    </collision>
+    <collision name="keyhole_slot">
+      <origin xyz="0.769 0.0042 0.87" rpy="0 0 0" />
+      <geometry>
+        <box size="0.004 0.0015 0.014" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="lever_handle">
+    <visual name="spindle_hub">
+      <origin xyz="0 0 0.006" rpy="3.67320510335e-06 -0 -0.0303456112513" />
+      <geometry>
+        <cylinder radius="0.02" length="0.012" />
+      </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.72 0.49 0.25 1" />
+      </material>
+    </visual>
+    <visual name="lever">
+      <origin xyz="0 0 0" rpy="-1.57079632679 -0 -0.0303456112513" />
+      <geometry>
+        <mesh filename="assets/meshes/curved_down_press_lever.obj" />
+      </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.72 0.49 0.25 1" />
+      </material>
+    </visual>
+    <collision name="spindle_hub">
+      <origin xyz="0 0 0.006" rpy="3.67320510335e-06 -0 -0.0303456112513" />
+      <geometry>
+        <cylinder radius="0.02" length="0.012" />
+      </geometry>
+    </collision>
+    <collision name="lever">
+      <origin xyz="0 0 0" rpy="-1.57079632679 -0 -0.0303456112513" />
+      <geometry>
+        <mesh filename="assets/meshes/curved_down_press_lever.obj" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="latch_tongue">
+    <visual name="small_latch_tongue">
+      <origin xyz="0.8646 0.019 0.95" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0012 0.02 0.018" />
+      </geometry>
+      <material name="satin_nickel">
+        <color rgba="0.66 0.64 0.58 1" />
+      </material>
+    </visual>
+    <visual name="latch_face_detail">
+      <origin xyz="0.8645 0.03 0.95" rpy="0 0 0" />
+      <geometry>
+        <box size="0.001 0.03 0.062" />
+      </geometry>
+      <material name="satin_nickel">
+        <color rgba="0.66 0.64 0.58 1" />
+      </material>
+    </visual>
+    <collision name="small_latch_tongue">
+      <origin xyz="0.8646 0.019 0.95" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0012 0.02 0.018" />
+      </geometry>
+    </collision>
+    <collision name="latch_face_detail">
+      <origin xyz="0.8645 0.03 0.95" rpy="0 0 0" />
+      <geometry>
+        <box size="0.001 0.03 0.062" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="strike_plate">
+    <visual name="strike_plate_face">
+      <origin xyz="0.867 0.005 0.95" rpy="0 0 0" />
+      <geometry>
+        <box size="0.001 0.04 0.11" />
+      </geometry>
+      <material name="satin_nickel">
+        <color rgba="0.66 0.64 0.58 1" />
+      </material>
+    </visual>
+    <visual name="strike_latch_opening">
+      <origin xyz="0.8665 0.004 0.95" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0008 0.02 0.03" />
+      </geometry>
+      <material name="narrow_reveal_shadow">
+        <color rgba="0.055 0.05 0.044 1" />
+      </material>
+    </visual>
+    <collision name="strike_plate_face">
+      <origin xyz="0.867 0.005 0.95" rpy="0 0 0" />
+      <geometry>
+        <box size="0.001 0.04 0.11" />
+      </geometry>
+    </collision>
+    <collision name="strike_latch_opening">
+      <origin xyz="0.8665 0.004 0.95" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0008 0.02 0.03" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="fixed_frame_to_left_jamb" type="fixed">
+    <parent link="fixed_frame" />
+    <child link="left_jamb" />
+  </joint>
+  <joint name="fixed_frame_to_right_jamb" type="fixed">
+    <parent link="fixed_frame" />
+    <child link="right_jamb" />
+  </joint>
+  <joint name="fixed_frame_to_header" type="fixed">
+    <parent link="fixed_frame" />
+    <child link="header" />
+  </joint>
+  <joint name="fixed_frame_to_threshold" type="fixed">
+    <parent link="fixed_frame" />
+    <child link="threshold" />
+  </joint>
+  <joint name="door_hinge_joint" type="revolute">
+    <origin xyz="0 -0.031 0" rpy="0 0 0" />
+    <parent link="fixed_frame" />
+    <child link="door_panel" />
+    <axis xyz="0 0 1" />
+    <limit effort="45" velocity="1.2" lower="0" upper="1.8326" />
+  </joint>
+  <joint name="left_jamb_to_hinge_leaf_frame_0" type="fixed">
+    <parent link="left_jamb" />
+    <child link="hinge_leaf_frame_0" />
+  </joint>
+  <joint name="hinge_leaf_frame_to_hinge_pin_0" type="fixed">
+    <parent link="hinge_leaf_frame_0" />
+    <child link="hinge_pin_0" />
+  </joint>
+  <joint name="door_panel_to_hinge_leaf_panel_0" type="fixed">
+    <parent link="door_panel" />
+    <child link="hinge_leaf_panel_0" />
+  </joint>
+  <joint name="left_jamb_to_hinge_leaf_frame_1" type="fixed">
+    <parent link="left_jamb" />
+    <child link="hinge_leaf_frame_1" />
+  </joint>
+  <joint name="hinge_leaf_frame_to_hinge_pin_1" type="fixed">
+    <parent link="hinge_leaf_frame_1" />
+    <child link="hinge_pin_1" />
+  </joint>
+  <joint name="door_panel_to_hinge_leaf_panel_1" type="fixed">
+    <parent link="door_panel" />
+    <child link="hinge_leaf_panel_1" />
+  </joint>
+  <joint name="left_jamb_to_hinge_leaf_frame_2" type="fixed">
+    <parent link="left_jamb" />
+    <child link="hinge_leaf_frame_2" />
+  </joint>
+  <joint name="hinge_leaf_frame_to_hinge_pin_2" type="fixed">
+    <parent link="hinge_leaf_frame_2" />
+    <child link="hinge_pin_2" />
+  </joint>
+  <joint name="door_panel_to_hinge_leaf_panel_2" type="fixed">
+    <parent link="door_panel" />
+    <child link="hinge_leaf_panel_2" />
+  </joint>
+  <joint name="door_panel_to_handle_back_plate" type="fixed">
+    <parent link="door_panel" />
+    <child link="handle_back_plate" />
+  </joint>
+  <joint name="door_panel_to_lock_cylinder" type="fixed">
+    <parent link="door_panel" />
+    <child link="lock_cylinder" />
+  </joint>
+  <joint name="handle_spindle_joint" type="revolute">
+    <origin xyz="0.769 0.003 0.955" rpy="1.57079632679 -0.0303456112513 0" />
+    <parent link="door_panel" />
+    <child link="lever_handle" />
+    <axis xyz="0 0 1" />
+    <limit effort="1.5" velocity="3" lower="0" upper="0.523599" />
+  </joint>
+  <joint name="door_panel_to_latch_tongue" type="fixed">
+    <parent link="door_panel" />
+    <child link="latch_tongue" />
+  </joint>
+  <joint name="right_jamb_to_strike_plate" type="fixed">
+    <parent link="right_jamb" />
+    <child link="strike_plate" />
+  </joint>
+</robot>

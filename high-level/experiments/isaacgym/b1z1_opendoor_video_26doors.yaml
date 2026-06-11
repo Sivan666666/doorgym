@@ -1,0 +1,619 @@
+env:
+  numEnvs: 4096
+  numAgents: 1
+  envSpacing: 5.0
+  enableDebugVis: false
+  cameraMode: full
+  isFlagrun: false
+  maxEpisodeLength: 220
+  pdControl: true
+  powerScale: 1.0
+  controlFrequencyInv: 4
+  controlFrequencyLow: 8
+  imgDelayFrame: 4
+  doorOpenSuccessThreshold: 0.45
+  doorOpenHoldSteps: 6
+  handleOpenThresholdRatio: 0.55
+  baseDoorDisThreshold: 0.85
+  eeFarThreshold: 1.1
+  holdSteps: 10
+  lastCommands: false
+  smallValueSetZero: false
+  useTanh: false
+  wandb: false
+  low_policy_path: /home/sivan/whole_body/visual_whole_body/low-level/logs/b1z1-low/b1z1_try/model_28400.pt
+  asset:
+    assetRoot: data/asset
+    assetFileRobot: b1z1-col/urdf/b1z1.urdf
+    assetFileDoor: door_set/
+    load_block: video_26doors
+    trainAssets:
+      video_26doors:
+        '0':
+          bounding_box: 99650089960001/bounding_box.json
+          handle_bounding: 99650089960001/handle_bounding.json
+          name: '99650089960001'
+          path: 99650089960001/mobility.urdf
+        '1':
+          bounding_box: 99650089960006/bounding_box.json
+          handle_bounding: 99650089960006/handle_bounding.json
+          name: '99650089960006'
+          path: 99650089960006/mobility.urdf
+        '2':
+          bounding_box: 99655039960001/bounding_box.json
+          handle_bounding: 99655039960001/handle_bounding.json
+          name: '99655039960001'
+          path: 99655039960001/mobility.urdf
+        '3':
+          bounding_box: 99655039960006/bounding_box.json
+          handle_bounding: 99655039960006/handle_bounding.json
+          name: '99655039960006'
+          path: 99655039960006/mobility.urdf
+        '4':
+          bounding_box: wc4/bounding_box.json
+          handle_bounding: wc4/handle_bounding.json
+          name: wc4
+          path: wc4/model.urdf
+          actor_scale: 0.93
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.11
+          - 0.0
+          - 0.0
+          robot_y_offset: 0.18
+          door_motion_sign_multiplier: -1.0
+          door_body_name: door_panel
+          handle_body_name: lever_handle
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_spindle_joint
+          controller_multipliers:
+            door_joint_friction: 0.05
+            door_joint_damping: 0.1
+        '5':
+          bounding_box: aigc_video_21/aigc_door_00/bounding_box.json
+          handle_bounding: aigc_video_21/aigc_door_00/handle_bounding.json
+          name: aigc_door_00
+          path: aigc_video_21/aigc_door_00/model.urdf
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.016863551
+          - -0.41
+          - 0.0
+          robot_y_offset: 0.0
+          door_motion_sign_multiplier: -1.0
+          door_body_name: door_panel
+          handle_body_name: lever_handle
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_spindle_joint
+          controller_overrides:
+            handle_rotate_right_distance: 0.009546579
+            handle_rotate_down_distance: 0.031274266
+            handle_rotate_angle: 0.59253905
+            handle_unlock_ratio: 0.2
+        '6':
+          bounding_box: aigc_video_21/aigc_door_01/bounding_box.json
+          handle_bounding: aigc_video_21/aigc_door_01/handle_bounding.json
+          name: aigc_door_01
+          path: aigc_video_21/aigc_door_01/model.urdf
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.021466667
+          - -0.0
+          - 0.0
+          robot_y_offset: 0.0
+          door_motion_sign_multiplier: -1.0
+          door_body_name: door_panel
+          handle_body_name: lever_handle
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_spindle_joint
+          controller_overrides:
+            handle_rotate_right_distance: 0.01286974
+            handle_rotate_down_distance: 0.042160828
+            handle_rotate_angle: 0.59253905
+            handle_unlock_ratio: 0.2
+        '7':
+          bounding_box: aigc_video_21/aigc_door_02/bounding_box.json
+          handle_bounding: aigc_video_21/aigc_door_02/handle_bounding.json
+          name: aigc_door_02
+          path: aigc_video_21/aigc_door_02/model.urdf
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.02777619
+          - 0.004
+          - 0.0
+          robot_y_offset: 0.0
+          door_motion_sign_multiplier: -1.0
+          door_body_name: door_panel
+          handle_body_name: lever_handle
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_spindle_joint
+          controller_overrides:
+            handle_rotate_right_distance: 0.006595407
+            handle_rotate_down_distance: 0.025411034
+            handle_rotate_angle: 0.50789103
+            handle_unlock_ratio: 0.2
+        '8':
+          bounding_box: aigc_video_21/aigc_door_03/bounding_box.json
+          handle_bounding: aigc_video_21/aigc_door_03/handle_bounding.json
+          name: aigc_door_03
+          path: aigc_video_21/aigc_door_03/model.urdf
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - -0.00176798
+          - -0.0
+          - 0.0
+          robot_y_offset: 0.0
+          door_motion_sign_multiplier: -1.0
+          door_body_name: door_panel
+          handle_body_name: lever_handle
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_spindle_joint
+          controller_overrides:
+            handle_rotate_right_distance: 0.012426638
+            handle_rotate_down_distance: 0.040709238
+            handle_rotate_angle: 0.59253905
+            handle_unlock_ratio: 0.2
+        '9':
+          bounding_box: aigc_video_21/aigc_door_04/bounding_box.json
+          handle_bounding: aigc_video_21/aigc_door_04/handle_bounding.json
+          name: aigc_door_04
+          path: aigc_video_21/aigc_door_04/model.urdf
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.031758491
+          - -0.4475
+          - 0.0
+          robot_y_offset: 0.0
+          door_motion_sign_multiplier: -1.0
+          door_body_name: door_panel
+          handle_body_name: lever_handle
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_spindle_joint
+          controller_overrides:
+            handle_rotate_right_distance: 0.014148081
+            handle_rotate_down_distance: 0.046348629
+            handle_rotate_angle: 0.59253905
+            handle_unlock_ratio: 0.2
+        '10':
+          bounding_box: aigc_video_21/aigc_door_05/bounding_box.json
+          handle_bounding: aigc_video_21/aigc_door_05/handle_bounding.json
+          name: aigc_door_05
+          path: aigc_video_21/aigc_door_05/model.urdf
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.010447686
+          - -0.452
+          - 0.0
+          robot_y_offset: 0.0
+          door_motion_sign_multiplier: -1.0
+          door_body_name: door_panel
+          handle_body_name: lever_handle
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_spindle_joint
+          controller_overrides:
+            handle_rotate_right_distance: 0.010386474
+            handle_rotate_down_distance: 0.0400174
+            handle_rotate_angle: 0.50789103
+            handle_unlock_ratio: 0.2
+        '11':
+          bounding_box: aigc_video_21/aigc_door_06/bounding_box.json
+          handle_bounding: aigc_video_21/aigc_door_06/handle_bounding.json
+          name: aigc_door_06
+          path: aigc_video_21/aigc_door_06/model.urdf
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.025712933
+          - -0.4465
+          - 0.0
+          robot_y_offset: 0.0
+          door_motion_sign_multiplier: -1.0
+          door_body_name: door_panel
+          handle_body_name: lever_handle
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_spindle_joint
+          controller_overrides:
+            handle_rotate_right_distance: 0.009372446
+            handle_rotate_down_distance: 0.036110514
+            handle_rotate_angle: 0.50789103
+            handle_unlock_ratio: 0.2
+        '12':
+          bounding_box: aigc_video_21/aigc_door_07/bounding_box.json
+          handle_bounding: aigc_video_21/aigc_door_07/handle_bounding.json
+          name: aigc_door_07
+          path: aigc_video_21/aigc_door_07/model.urdf
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.031926316
+          - -0.431
+          - 0.0
+          robot_y_offset: 0.0
+          door_motion_sign_multiplier: -1.0
+          door_body_name: door_panel
+          handle_body_name: lever_handle
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_spindle_joint
+          controller_overrides:
+            handle_rotate_right_distance: 0.006523528
+            handle_rotate_down_distance: 0.025134096
+            handle_rotate_angle: 0.50789103
+            handle_unlock_ratio: 0.2
+        '13':
+          bounding_box: aigc_video_21/aigc_door_08/bounding_box.json
+          handle_bounding: aigc_video_21/aigc_door_08/handle_bounding.json
+          name: aigc_door_08
+          path: aigc_video_21/aigc_door_08/model.urdf
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.006052356
+          - -0.4425
+          - 0.0
+          robot_y_offset: 0.0
+          door_motion_sign_multiplier: -1.0
+          door_body_name: door_panel
+          handle_body_name: lever_handle
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_spindle_joint
+          controller_overrides:
+            handle_rotate_right_distance: 0.00978177
+            handle_rotate_down_distance: 0.037687574
+            handle_rotate_angle: 0.50789103
+            handle_unlock_ratio: 0.2
+        '14':
+          bounding_box: aigc_video_21/aigc_door_09/bounding_box.json
+          handle_bounding: aigc_video_21/aigc_door_09/handle_bounding.json
+          name: aigc_door_09
+          path: aigc_video_21/aigc_door_09/model.urdf
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.041296429
+          - -0.42625
+          - 0.0
+          robot_y_offset: 0.0
+          door_motion_sign_multiplier: -1.0
+          door_body_name: door_panel
+          handle_body_name: lever_handle
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_spindle_joint
+          controller_overrides:
+            handle_rotate_right_distance: 0.013039609
+            handle_rotate_down_distance: 0.042717312
+            handle_rotate_angle: 0.59253905
+            handle_unlock_ratio: 0.2
+        '15':
+          bounding_box: aigc_video_21/aigc_door_10/bounding_box.json
+          handle_bounding: aigc_video_21/aigc_door_10/handle_bounding.json
+          name: aigc_door_10
+          path: aigc_video_21/aigc_door_10/model.urdf
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.028044999
+          - -0.4225
+          - 0.0
+          robot_y_offset: 0.0
+          door_motion_sign_multiplier: -1.0
+          door_body_name: door_panel
+          handle_body_name: lever_handle
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_spindle_joint
+          controller_overrides:
+            handle_rotate_right_distance: 0.011643753
+            handle_rotate_down_distance: 0.044861491
+            handle_rotate_angle: 0.50789103
+            handle_unlock_ratio: 0.2
+        '16':
+          bounding_box: aigc_video_21/aigc_door_11/bounding_box.json
+          handle_bounding: aigc_video_21/aigc_door_11/handle_bounding.json
+          name: aigc_door_11
+          path: aigc_video_21/aigc_door_11/model.urdf
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.017881818
+          - -0.448
+          - 0.0
+          robot_y_offset: 0.0
+          door_motion_sign_multiplier: -1.0
+          door_body_name: door_panel
+          handle_body_name: lever_handle
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_spindle_joint
+          controller_overrides:
+            handle_rotate_right_distance: 0.011625003
+            handle_rotate_down_distance: 0.044789252
+            handle_rotate_angle: 0.50789103
+            handle_unlock_ratio: 0.2
+        '17':
+          bounding_box: aigc_video_21/aigc_door_13/bounding_box.json
+          handle_bounding: aigc_video_21/aigc_door_13/handle_bounding.json
+          name: aigc_door_13
+          path: aigc_video_21/aigc_door_13/model.urdf
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.030076087
+          - 0.005
+          - 0.0
+          robot_y_offset: 0.0
+          door_motion_sign_multiplier: -1.0
+          door_body_name: door_panel
+          handle_body_name: lever_handle
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_spindle_joint
+          controller_overrides:
+            handle_rotate_right_distance: 0.009719547
+            handle_rotate_down_distance: 0.037447839
+            handle_rotate_angle: 0.50789103
+            handle_unlock_ratio: 0.2
+        '18':
+          bounding_box: aigc_video_21/aigc_door_14/bounding_box.json
+          handle_bounding: aigc_video_21/aigc_door_14/handle_bounding.json
+          name: aigc_door_14
+          path: aigc_video_21/aigc_door_14/model.urdf
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - -0.002579268
+          - -0.433
+          - 0.0
+          robot_y_offset: 0.0
+          door_motion_sign_multiplier: -1.0
+          door_body_name: door_panel
+          handle_body_name: lever_handle
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_spindle_joint
+          controller_overrides:
+            handle_rotate_right_distance: 0.008968014
+            handle_rotate_down_distance: 0.034552305
+            handle_rotate_angle: 0.50789103
+            handle_unlock_ratio: 0.2
+        '19':
+          bounding_box: aigc_video_21/aigc_door_15/bounding_box.json
+          handle_bounding: aigc_video_21/aigc_door_15/handle_bounding.json
+          name: aigc_door_15
+          path: aigc_video_21/aigc_door_15/model.urdf
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.028495022
+          - -0.4375
+          - 0.0
+          robot_y_offset: 0.0
+          door_motion_sign_multiplier: -1.0
+          door_body_name: door_panel
+          handle_body_name: lever_handle
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_spindle_joint
+          controller_overrides:
+            handle_rotate_right_distance: 0.009340902
+            handle_rotate_down_distance: 0.035988983
+            handle_rotate_angle: 0.50789103
+            handle_unlock_ratio: 0.2
+        '20':
+          bounding_box: aigc_video_21/aigc_door_16/bounding_box.json
+          handle_bounding: aigc_video_21/aigc_door_16/handle_bounding.json
+          name: aigc_door_16
+          path: aigc_video_21/aigc_door_16/model.urdf
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.009705106
+          - 0.003
+          - 0.0
+          robot_y_offset: 0.0
+          door_motion_sign_multiplier: -1.0
+          door_body_name: door_panel
+          handle_body_name: lever_handle
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_spindle_joint
+          controller_overrides:
+            handle_rotate_right_distance: 0.009466281
+            handle_rotate_down_distance: 0.036472047
+            handle_rotate_angle: 0.50789103
+            handle_unlock_ratio: 0.2
+        '21':
+          bounding_box: aigc_video_21/aigc_door_17/bounding_box.json
+          handle_bounding: aigc_video_21/aigc_door_17/handle_bounding.json
+          name: aigc_door_17
+          path: aigc_video_21/aigc_door_17/model.urdf
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.017107692
+          - -0.45
+          - 0.0
+          robot_y_offset: 0.0
+          door_motion_sign_multiplier: -1.0
+          door_body_name: door_panel
+          handle_body_name: lever_handle
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_spindle_joint
+          controller_overrides:
+            handle_rotate_right_distance: 0.013553389
+            handle_rotate_down_distance: 0.044400438
+            handle_rotate_angle: 0.59253905
+            handle_unlock_ratio: 0.2
+        '22':
+          bounding_box: aigc_video_21/aigc_door_20/bounding_box.json
+          handle_bounding: aigc_video_21/aigc_door_20/handle_bounding.json
+          name: aigc_door_20
+          path: aigc_video_21/aigc_door_20/model.urdf
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.011939183
+          - -0.0
+          - 0.0
+          robot_y_offset: 0.0
+          door_motion_sign_multiplier: -1.0
+          door_body_name: door_panel
+          handle_body_name: lever_handle
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_spindle_joint
+          controller_overrides:
+            handle_rotate_right_distance: 0.010244737
+            handle_rotate_down_distance: 0.033561408
+            handle_rotate_angle: 0.59253905
+            handle_unlock_ratio: 0.2
+        '23':
+          bounding_box: aigc_video_21/aigc_door_21/bounding_box.json
+          handle_bounding: aigc_video_21/aigc_door_21/handle_bounding.json
+          name: aigc_door_21
+          path: aigc_video_21/aigc_door_21/model.urdf
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.001971528
+          - -0.4135
+          - 0.0
+          robot_y_offset: 0.0
+          door_motion_sign_multiplier: -1.0
+          door_body_name: door_panel
+          handle_body_name: lever_handle
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_spindle_joint
+          controller_overrides:
+            handle_rotate_right_distance: 0.009025295
+            handle_rotate_down_distance: 0.034772998
+            handle_rotate_angle: 0.50789103
+            handle_unlock_ratio: 0.2
+        '24':
+          bounding_box: aigc_video_21/aigc_door_22/bounding_box.json
+          handle_bounding: aigc_video_21/aigc_door_22/handle_bounding.json
+          name: aigc_door_22
+          path: aigc_video_21/aigc_door_22/model.urdf
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.017095238
+          - -0.437
+          - 0.0
+          robot_y_offset: 0.0
+          door_motion_sign_multiplier: -1.0
+          door_body_name: door_panel
+          handle_body_name: lever_handle
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_spindle_joint
+          controller_overrides:
+            handle_rotate_right_distance: 0.008646612
+            handle_rotate_down_distance: 0.033313993
+            handle_rotate_angle: 0.50789103
+            handle_unlock_ratio: 0.2
+        '25':
+          bounding_box: aigc_video_21/aigc_door_23/bounding_box.json
+          handle_bounding: aigc_video_21/aigc_door_23/handle_bounding.json
+          name: aigc_door_23
+          path: aigc_video_21/aigc_door_23/model.urdf
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.036946247
+          - -0.46375
+          - 0.0
+          robot_y_offset: 0.0
+          door_motion_sign_multiplier: -1.0
+          door_body_name: door_panel
+          handle_body_name: lever_handle
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_spindle_joint
+          controller_overrides:
+            handle_rotate_right_distance: 0.007969709
+            handle_rotate_down_distance: 0.026108493
+            handle_rotate_angle: 0.59253905
+            handle_unlock_ratio: 0.2
+    control:
+      stiffness:
+        joint: 80
+        z1: 5
+      damping:
+        joint: 2.0
+        z1: 0.5
+    float_ik_include_all: true
+  plane:
+    staticFriction: 1.0
+    dynamicFriction: 1.0
+    restitution: 0.0
+physics_engine: physx
+sim:
+  substeps: 1
+  use_gpu_pipeline: true
+  up_axis: z
+  gravity:
+  - 0.0
+  - 0.0
+  - -9.81
+  dt: 0.005
+  physx:
+    use_gpu: true
+    num_threads: 4
+    solver_type: 1
+    num_position_iterations: 8
+    num_velocity_iterations: 0
+    contact_offset: 0.02
+    rest_offset: 0.0
+    bounce_threshold_velocity: 0.2
+    max_depenetration_velocity: 50.0
+    default_buffer_size_multiplier: 100.0
+    max_gpu_contact_pairs: 1000000
+reward:
+  base_height_target: 0.55
+  only_positive_rewards: false
+  scales:
+    approach_handle: 1.0
+    ee_align_handle: 0.15
+    lever_press: 1.0
+    door_open_progress: 2.0
+    door_open_success: 5.0
+    base_command_penalty: -0.05
+    action_rate: -0.001
+    gripper_rate: -0.001
+    base_height: 0.2
+sensor:
+  depth_clip_lower: 0.15
+  depth_clip_rand_range:
+  - 0.18
+  - 0.25
+  enableCamera: false
+  resized_resolution:
+  - 640
+  - 480
+  onboard_camera:
+    horizontal_fov: 69
+    resolution:
+    - 640
+    - 480
+    position:
+    - 0.425
+    - 0.04
+    - 0.12
+    rotation:
+    - 0.0
+    - 0.0
+    - 0.0
+  wrist_camera:
+    horizontal_fov: 69
+    resolution:
+    - 640
+    - 480
+    position:
+    - 0.0955
+    - 0.22
+    - -0.03175
+    rotation:
+    - -1.57
+    - 0.0
+    - -0.87
+    rand_position:
+    - 0.005
+    - 0.005
+    - 0.005

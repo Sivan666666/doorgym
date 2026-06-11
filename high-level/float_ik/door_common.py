@@ -350,6 +350,8 @@ def load_door_specs(args):
         if args.door_index >= len(specs):
             raise RuntimeError(f"--door_index={args.door_index} out of range for {len(specs)} doors")
         selected_entries = [specs[args.door_index]]
+    elif bool(asset_cfg.get("float_ik_include_all", False)):
+        selected_entries = specs
     else:
         for name in DEFAULT_DOOR_ASSET_NAMES:
             selected_entries.extend((idx, spec) for idx, spec in specs if spec.get("name") == name)

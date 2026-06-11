@@ -45,7 +45,9 @@ IsaacGymEnvs/
 !/high-level/data/asset/door_set/99655039960001/
 !/high-level/data/asset/door_set/99655039960006/
 !/high-level/data/asset/door_set/wc4/
-
+!/high-level/data/asset/door_set/aigc_video_21/
+!/high-level/data/asset/door_set/aigc_video_21/**/*
+/high-level/data/asset/25_aigc_doors/
 # Node artifact files
 node_modules/
 dist/

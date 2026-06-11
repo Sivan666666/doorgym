@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "source_directory": "rec_using-the-reference-image-for-overall-proportion_20260610_194505_694187_5b0d4e43",
+  "source_urdf": "model.urdf",
+  "prepared_name": "aigc_door_17",
+  "handle_type": "lever",
+  "ready_for_scripted_gt": true,
+  "physical_policy": {
+    "actor_scale": 1.0,
+    "visual_geometry_resized": false,
+    "collision_geometry_resized": false,
+    "source_asset_modified": false
+  },
+  "warnings": [],
+  "metrics": {
+    "handle_axis_source": [
+      0.0,
+      -1.0,
+      0.0
+    ],
+    "handle_outward_score_m": 0.03640769230769236,
+    "handle_planar_anisotropy": 108.96458751065008,
+    "canonical_basis_columns_in_source_frame": [
+      [
+        0.9999999999999312,
+        3.7139771159284515e-07,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        -1.0
+      ],
+      [
+        -3.7139771159284515e-07,
+        0.9999999999999312,
+        0.0
+      ]
+    ],
+    "source_compile_status": "success",
+    "source_compile_warnings": [],
+    "visual_elements": 40,
+    "collision_elements": 40,
+    "unscaled_extents_m": [
+      1.058,
+      0.201982031,
+      2.21
+    ],
+    "door_panel_extents_m": [
+      0.9,
+      0.048999999999999995,
+      2.1
+    ],
+    "fixed_frame_extents_m": [
+      1.058,
+      0.17099999999999999,
+      2.21
+    ],
+    "door_panel_to_frame_width_ratio": 0.8506616257088847,
+    "handle_reframe_sample_angle_rad": 0.3054325,
+    "handle_joint_lower_rad": 0.0,
+    "handle_joint_upper_rad": 0.610865,
+    "handle_contact_radius_m": 0.0795038504220541,
+    "controller_overrides": {
+      "handle_rotate_right_distance": 0.013553389188486207,
+      "handle_rotate_down_distance": 0.04440043800473155,
+      "handle_rotate_angle": 0.59253905,
+      "handle_unlock_ratio": 0.2
+    },
+    "visual_preservation_max_error_m": 4.3665071558507407e-13,
+    "collision_preservation_max_error_m": 4.3665071558507407e-13
+  }
+}

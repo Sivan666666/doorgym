@@ -1785,6 +1785,23 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
         step += 1
 
     elapsed = time.time() - start
+    for st in env_states:
+        door_pos = st.last_door_pos
+        raw_open_deg = (
+            math.degrees(float(door_pos[0]))
+            if door_pos is not None and len(door_pos)
+            else 0.0
+        )
+        signed_open_deg = float(st.args.door_motion_sign) * raw_open_deg
+        passed = signed_open_deg >= float(args.pass_open_angle_deg)
+        print(
+            "GT_DOOR_RESULT "
+            f"env={st.index} "
+            f"name={st.door.spec.get('name', st.door.asset_index)} "
+            f"open_deg={signed_open_deg:.1f} "
+            f"passed={passed}",
+            flush=True,
+        )
     print(f"Done after {step} steps ({elapsed:.2f}s).")
     dc.finish_float_dp_recorders(env_states, args)
     if dp_logger is not None:

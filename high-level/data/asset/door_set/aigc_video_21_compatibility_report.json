@@ -1,0 +1,2703 @@
+{
+  "schema_version": 1,
+  "mode": "generate",
+  "source_root": "/home/robodog/loco-manipulation/doorgym/high-level/data/asset/25_aigc_doors",
+  "source_pattern": "rec_using-the-reference-image-*",
+  "source_count": 25,
+  "ready_count": 21,
+  "review_count": 4,
+  "failed_count": 0,
+  "policy": {
+    "source_assets_modified": false,
+    "actor_scale": 1.0,
+    "collision_geometry_resized": false,
+    "handle_clearance_m": 0.025,
+    "review_assets_in_yaml": false
+  },
+  "doors": [
+    {
+      "source": "/home/robodog/loco-manipulation/doorgym/high-level/data/asset/25_aigc_doors/rec_using-the-reference-image-for-overall-proportion_20260610_133539_066287_93a4ac59",
+      "name": "aigc_door_00",
+      "handle_type": "lever",
+      "ready_for_scripted_gt": true,
+      "door_joint_name": "door_hinge_joint",
+      "handle_joint_name": "handle_spindle_joint",
+      "door_body_name": "door_panel",
+      "handle_body_name": "lever_handle",
+      "actor_scale": 1.0,
+      "actor_yaw_offset": -1.5707963267948966,
+      "actor_position_offset": [
+        0.016863551,
+        -0.41,
+        0.0
+      ],
+      "door_motion_sign_multiplier": -1.0,
+      "bounding_box": {
+        "min": [
+          -0.1,
+          -0.012,
+          -0.005
+        ],
+        "max": [
+          0.92,
+          0.115,
+          2.145
+        ]
+      },
+      "handle_bounding": {
+        "handle_min": [
+          -0.129,
+          -0.017000018,
+          -6.2e-08
+        ],
+        "handle_max": [
+          0.017,
+          0.017000018,
+          0.012
+        ],
+        "goal_pos": [
+          -0.056,
+          0.0,
+          0.037
+        ]
+      },
+      "warnings": [],
+      "errors": [],
+      "metrics": {
+        "handle_axis_source": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "handle_outward_score_m": 0.021942312463816033,
+        "handle_planar_anisotropy": 17.629380922369723,
+        "canonical_basis_columns_in_source_frame": [
+          [
+            1.0,
+            -0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "source_compile_status": "success",
+        "source_compile_warnings": [],
+        "visual_elements": 36,
+        "collision_elements": 36,
+        "unscaled_extents_m": [
+          1.02,
+          0.127,
+          2.15
+        ],
+        "door_panel_extents_m": [
+          0.82,
+          0.04755,
+          2.03
+        ],
+        "fixed_frame_extents_m": [
+          1.02,
+          0.123,
+          2.15
+        ],
+        "door_panel_to_frame_width_ratio": 0.8039215686274509,
+        "handle_reframe_sample_angle_rad": 0.3054325,
+        "handle_joint_lower_rad": 0.0,
+        "handle_joint_upper_rad": 0.610865,
+        "handle_contact_radius_m": 0.056,
+        "controller_overrides": {
+          "handle_rotate_right_distance": 0.009546579071655709,
+          "handle_rotate_down_distance": 0.031274265523814695,
+          "handle_rotate_angle": 0.59253905,
+          "handle_unlock_ratio": 0.2
+        },
+        "visual_preservation_max_error_m": 1.90578455794288e-13,
+        "collision_preservation_max_error_m": 1.90578455794288e-13
+      }
+    },
+    {
+      "source": "/home/robodog/loco-manipulation/doorgym/high-level/data/asset/25_aigc_doors/rec_using-the-reference-image-for-overall-proportion_20260610_144220_404149_a1666c1a",
+      "name": "aigc_door_01",
+      "handle_type": "lever",
+      "ready_for_scripted_gt": true,
+      "door_joint_name": "door_hinge_joint",
+      "handle_joint_name": "handle_spindle_joint",
+      "door_body_name": "door_panel",
+      "handle_body_name": "lever_handle",
+      "actor_scale": 1.0,
+      "actor_yaw_offset": -1.5707963267948966,
+      "actor_position_offset": [
+        0.021466667,
+        -0.0,
+        0.0
+      ],
+      "door_motion_sign_multiplier": -1.0,
+      "bounding_box": {
+        "min": [
+          -0.585,
+          -0.026987165,
+          0.0
+        ],
+        "max": [
+          0.585,
+          0.12,
+          2.165
+        ]
+      },
+      "handle_bounding": {
+        "handle_min": [
+          -0.162987165,
+          -0.012000037,
+          -4.4e-08
+        ],
+        "handle_max": [
+          0.012,
+          0.012000037,
+          0.031987165
+        ],
+        "goal_pos": [
+          -0.075493583,
+          0.0,
+          0.056987165
+        ]
+      },
+      "warnings": [],
+      "errors": [],
+      "metrics": {
+        "handle_axis_source": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "handle_outward_score_m": 0.03608157349896472,
+        "handle_planar_anisotropy": 68.42474762729223,
+        "canonical_basis_columns_in_source_frame": [
+          [
+            1.0,
+            -0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "source_compile_status": "success",
+        "source_compile_warnings": [],
+        "visual_elements": 39,
+        "collision_elements": 39,
+        "unscaled_extents_m": [
+          1.17,
+          0.146987165,
+          2.165
+        ],
+        "door_panel_extents_m": [
+          0.9319999999999999,
+          0.044,
+          2.0
+        ],
+        "fixed_frame_extents_m": [
+          1.17,
+          0.127,
+          2.165
+        ],
+        "door_panel_to_frame_width_ratio": 0.7965811965811965,
+        "handle_reframe_sample_angle_rad": 0.3054325,
+        "handle_joint_lower_rad": 0.0,
+        "handle_joint_upper_rad": 0.610865,
+        "handle_contact_radius_m": 0.07549358253585525,
+        "controller_overrides": {
+          "handle_rotate_right_distance": 0.012869740269305511,
+          "handle_rotate_down_distance": 0.04216082759947066,
+          "handle_rotate_angle": 0.59253905,
+          "handle_unlock_ratio": 0.2
+        },
+        "visual_preservation_max_error_m": 2.4017940414289285e-13,
+        "collision_preservation_max_error_m": 2.4017940414289285e-13
+      }
+    },
+    {
+      "source": "/home/robodog/loco-manipulation/doorgym/high-level/data/asset/25_aigc_doors/rec_using-the-reference-image-for-overall-proportion_20260610_145408_481318_cb8ca903",
+      "name": "aigc_door_02",
+      "handle_type": "lever",
+      "ready_for_scripted_gt": true,
+      "door_joint_name": "door_hinge_joint",
+      "handle_joint_name": "handle_spindle_joint",
+      "door_body_name": "door_panel",
+      "handle_body_name": "lever_handle",
+      "actor_scale": 1.0,
+      "actor_yaw_offset": -1.5707963267948966,
+      "actor_position_offset": [
+        0.02777619,
+        0.004,
+        0.0
+      ],
+      "door_motion_sign_multiplier": -1.0,
+      "bounding_box": {
+        "min": [
+          -0.502,
+          -0.09,
+          0.0
+        ],
+        "max": [
+          0.494,
+          0.06,
+          2.15
+        ]
+      },
+      "handle_bounding": {
+        "handle_min": [
+          -0.117,
+          -0.015000007,
+          -4.6e-08
+        ],
+        "handle_max": [
+          0.0125,
+          0.015000007,
+          0.021
+        ],
+        "goal_pos": [
+          -0.05225,
+          0.0,
+          0.046
+        ]
+      },
+      "warnings": [],
+      "errors": [],
+      "metrics": {
+        "handle_axis_source": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "handle_outward_score_m": 0.027881453634085212,
+        "handle_planar_anisotropy": 11.502892194381687,
+        "canonical_basis_columns_in_source_frame": [
+          [
+            1.0,
+            -0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "source_compile_status": "success",
+        "source_compile_warnings": [],
+        "visual_elements": 51,
+        "collision_elements": 51,
+        "unscaled_extents_m": [
+          0.996,
+          0.15,
+          2.15
+        ],
+        "door_panel_extents_m": [
+          0.84,
+          0.055,
+          2.045
+        ],
+        "fixed_frame_extents_m": [
+          0.996,
+          0.15000000000000002,
+          2.15
+        ],
+        "door_panel_to_frame_width_ratio": 0.8433734939759036,
+        "handle_reframe_sample_angle_rad": 0.2617995,
+        "handle_joint_lower_rad": 0.0,
+        "handle_joint_upper_rad": 0.523599,
+        "handle_contact_radius_m": 0.05225,
+        "controller_overrides": {
+          "handle_rotate_right_distance": 0.006595406877606643,
+          "handle_rotate_down_distance": 0.02541103356474729,
+          "handle_rotate_angle": 0.50789103,
+          "handle_unlock_ratio": 0.2
+        },
+        "visual_preservation_max_error_m": 1.4911682999496634e-13,
+        "collision_preservation_max_error_m": 1.4911682999496634e-13
+      }
+    },
+    {
+      "source": "/home/robodog/loco-manipulation/doorgym/high-level/data/asset/25_aigc_doors/rec_using-the-reference-image-for-overall-proportion_20260610_151444_424431_821df59d",
+      "name": "aigc_door_03",
+      "handle_type": "lever",
+      "ready_for_scripted_gt": true,
+      "door_joint_name": "door_hinge_joint",
+      "handle_joint_name": "handle_spindle_joint",
+      "door_body_name": "door_panel",
+      "handle_body_name": "lever_handle",
+      "actor_scale": 1.0,
+      "actor_yaw_offset": -1.5707963267948966,
+      "actor_position_offset": [
+        -0.00176798,
+        -0.0,
+        0.0
+      ],
+      "door_motion_sign_multiplier": -1.0,
+      "bounding_box": {
+        "min": [
+          -0.587,
+          -0.0855,
+          0.0
+        ],
+        "max": [
+          0.587,
+          0.055,
+          2.275
+        ]
+      },
+      "handle_bounding": {
+        "handle_min": [
+          -0.163788705,
+          -0.018000026,
+          -0.007000066
+        ],
+        "handle_max": [
+          0.018,
+          0.018000026,
+          0.026982031
+        ],
+        "goal_pos": [
+          -0.072894353,
+          0.0,
+          0.051982031
+        ]
+      },
+      "warnings": [],
+      "errors": [],
+      "metrics": {
+        "handle_axis_source": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "handle_outward_score_m": 0.021432019704433536,
+        "handle_planar_anisotropy": 71.41108878258562,
+        "canonical_basis_columns_in_source_frame": [
+          [
+            0.9999999999999347,
+            3.616795852349877e-07,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          [
+            -3.616795852349877e-07,
+            0.9999999999999347,
+            0.0
+          ]
+        ],
+        "source_compile_status": "success",
+        "source_compile_warnings": [],
+        "visual_elements": 115,
+        "collision_elements": 115,
+        "unscaled_extents_m": [
+          1.174,
+          0.1405,
+          2.275
+        ],
+        "door_panel_extents_m": [
+          0.842,
+          0.0645000550980462,
+          2.05
+        ],
+        "fixed_frame_extents_m": [
+          1.174,
+          0.1405,
+          2.275
+        ],
+        "door_panel_to_frame_width_ratio": 0.717206132879046,
+        "handle_reframe_sample_angle_rad": 0.3054325,
+        "handle_joint_lower_rad": 0.0,
+        "handle_joint_upper_rad": 0.610865,
+        "handle_contact_radius_m": 0.07289435271215088,
+        "controller_overrides": {
+          "handle_rotate_right_distance": 0.012426637536494804,
+          "handle_rotate_down_distance": 0.04070923824832872,
+          "handle_rotate_angle": 0.59253905,
+          "handle_unlock_ratio": 0.2
+        },
+        "visual_preservation_max_error_m": 4.0401709755499837e-13,
+        "collision_preservation_max_error_m": 4.0401709755499837e-13
+      }
+    },
+    {
+      "source": "/home/robodog/loco-manipulation/doorgym/high-level/data/asset/25_aigc_doors/rec_using-the-reference-image-for-overall-proportion_20260610_152759_469492_cdfe437e",
+      "name": "aigc_door_04",
+      "handle_type": "lever",
+      "ready_for_scripted_gt": true,
+      "door_joint_name": "door_hinge_joint",
+      "handle_joint_name": "handle_spindle_joint",
+      "door_body_name": "door_panel",
+      "handle_body_name": "lever_handle",
+      "actor_scale": 1.0,
+      "actor_yaw_offset": -1.5707963267948966,
+      "actor_position_offset": [
+        0.031758491,
+        -0.4475,
+        0.0
+      ],
+      "door_motion_sign_multiplier": -1.0,
+      "bounding_box": {
+        "min": [
+          -0.115,
+          -0.071,
+          0.0
+        ],
+        "max": [
+          1.01,
+          0.09,
+          2.218
+        ]
+      },
+      "handle_bounding": {
+        "handle_min": [
+          -0.192984599,
+          -0.027000022,
+          0.003999901
+        ],
+        "handle_max": [
+          0.027,
+          0.027000022,
+          0.028984598
+        ],
+        "goal_pos": [
+          -0.082992299,
+          0.0,
+          0.053984598
+        ]
+      },
+      "warnings": [],
+      "errors": [],
+      "metrics": {
+        "handle_axis_source": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "handle_outward_score_m": 0.03909182389937109,
+        "handle_planar_anisotropy": 49.98384117676571,
+        "canonical_basis_columns_in_source_frame": [
+          [
+            0.9999999999997232,
+            7.441166635743636e-07,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          [
+            -7.441166635743636e-07,
+            0.9999999999997232,
+            0.0
+          ]
+        ],
+        "source_compile_status": "success",
+        "source_compile_warnings": [],
+        "visual_elements": 62,
+        "collision_elements": 62,
+        "unscaled_extents_m": [
+          1.125,
+          0.16099999999999998,
+          2.218
+        ],
+        "door_panel_extents_m": [
+          0.897,
+          0.057,
+          2.05
+        ],
+        "fixed_frame_extents_m": [
+          1.125,
+          0.16100000000000003,
+          2.218
+        ],
+        "door_panel_to_frame_width_ratio": 0.7973333333333333,
+        "handle_reframe_sample_angle_rad": 0.3054325,
+        "handle_joint_lower_rad": 0.0,
+        "handle_joint_upper_rad": 0.610865,
+        "handle_contact_radius_m": 0.08299229926915352,
+        "controller_overrides": {
+          "handle_rotate_right_distance": 0.014148081201990863,
+          "handle_rotate_down_distance": 0.04634862863884642,
+          "handle_rotate_angle": 0.59253905,
+          "handle_unlock_ratio": 0.2
+        },
+        "visual_preservation_max_error_m": 4.808306530712514e-13,
+        "collision_preservation_max_error_m": 4.808306530712514e-13
+      }
+    },
+    {
+      "source": "/home/robodog/loco-manipulation/doorgym/high-level/data/asset/25_aigc_doors/rec_using-the-reference-image-for-overall-proportion_20260610_161038_309387_2dbe2f90",
+      "name": "aigc_door_05",
+      "handle_type": "lever",
+      "ready_for_scripted_gt": true,
+      "door_joint_name": "door_hinge_joint",
+      "handle_joint_name": "handle_spindle_joint",
+      "door_body_name": "door_panel",
+      "handle_body_name": "lever_handle",
+      "actor_scale": 1.0,
+      "actor_yaw_offset": -1.5707963267948966,
+      "actor_position_offset": [
+        0.010447686,
+        -0.452,
+        0.0
+      ],
+      "door_motion_sign_multiplier": -1.0,
+      "bounding_box": {
+        "min": [
+          -0.158,
+          -0.08,
+          -0.015
+        ],
+        "max": [
+          1.062,
+          0.062,
+          2.275
+        ]
+      },
+      "handle_bounding": {
+        "handle_min": [
+          -0.190566498,
+          -0.025999472,
+          -0.007000081
+        ],
+        "handle_max": [
+          0.025999468,
+          0.025999472,
+          0.026978181
+        ],
+        "goal_pos": [
+          -0.082283515,
+          0.0,
+          0.051978181
+        ]
+      },
+      "warnings": [],
+      "errors": [],
+      "metrics": {
+        "handle_axis_source": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "handle_outward_score_m": 0.01985987441973475,
+        "handle_planar_anisotropy": 40.5309800534552,
+        "canonical_basis_columns_in_source_frame": [
+          [
+            0.9999795442180067,
+            -0.0063961821071214205,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          [
+            0.0063961821071214205,
+            0.9999795442180067,
+            0.0
+          ]
+        ],
+        "source_compile_status": "success",
+        "source_compile_warnings": [],
+        "visual_elements": 170,
+        "collision_elements": 170,
+        "unscaled_extents_m": [
+          1.22,
+          0.14200000000000002,
+          2.29
+        ],
+        "door_panel_extents_m": [
+          0.924,
+          0.0685,
+          2.04
+        ],
+        "fixed_frame_extents_m": [
+          1.22,
+          0.14200000000000002,
+          2.29
+        ],
+        "door_panel_to_frame_width_ratio": 0.7573770491803279,
+        "handle_reframe_sample_angle_rad": 0.2617995,
+        "handle_joint_lower_rad": 0.0,
+        "handle_joint_upper_rad": 0.523599,
+        "handle_contact_radius_m": 0.08228351483799762,
+        "controller_overrides": {
+          "handle_rotate_right_distance": 0.010386473869400531,
+          "handle_rotate_down_distance": 0.0400174001411242,
+          "handle_rotate_angle": 0.50789103,
+          "handle_unlock_ratio": 0.2
+        },
+        "visual_preservation_max_error_m": 4.655165142253281e-13,
+        "collision_preservation_max_error_m": 4.655165142253281e-13
+      }
+    },
+    {
+      "source": "/home/robodog/loco-manipulation/doorgym/high-level/data/asset/25_aigc_doors/rec_using-the-reference-image-for-overall-proportion_20260610_162811_304962_a16a279d",
+      "name": "aigc_door_06",
+      "handle_type": "lever",
+      "ready_for_scripted_gt": true,
+      "door_joint_name": "door_hinge_joint",
+      "handle_joint_name": "handle_spindle_joint",
+      "door_body_name": "door_panel",
+      "handle_body_name": "lever_handle",
+      "actor_scale": 1.0,
+      "actor_yaw_offset": -1.5707963267948966,
+      "actor_position_offset": [
+        0.025712933,
+        -0.4465,
+        0.0
+      ],
+      "door_motion_sign_multiplier": -1.0,
+      "bounding_box": {
+        "min": [
+          -0.134,
+          -0.045,
+          -0.0255
+        ],
+        "max": [
+          1.027,
+          0.07,
+          2.24
+        ]
+      },
+      "handle_bounding": {
+        "handle_min": [
+          -0.172500403,
+          -0.024000014,
+          -0.002000037
+        ],
+        "handle_max": [
+          0.024,
+          0.024000014,
+          0.014
+        ],
+        "goal_pos": [
+          -0.074250201,
+          0.0,
+          0.039
+        ]
+      },
+      "warnings": [],
+      "errors": [],
+      "metrics": {
+        "handle_axis_source": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "handle_outward_score_m": 0.030005666594880468,
+        "handle_planar_anisotropy": 176.85115564834803,
+        "canonical_basis_columns_in_source_frame": [
+          [
+            0.9999999909169967,
+            -0.0001347813291875689,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          [
+            0.0001347813291875689,
+            0.9999999909169967,
+            0.0
+          ]
+        ],
+        "source_compile_status": "success",
+        "source_compile_warnings": [],
+        "visual_elements": 62,
+        "collision_elements": 62,
+        "unscaled_extents_m": [
+          1.161,
+          0.115,
+          2.2655000000000003
+        ],
+        "door_panel_extents_m": [
+          0.93,
+          0.0665,
+          2.1
+        ],
+        "fixed_frame_extents_m": [
+          1.161,
+          0.11500000000000002,
+          2.2655
+        ],
+        "door_panel_to_frame_width_ratio": 0.8010335917312662,
+        "handle_reframe_sample_angle_rad": 0.2617995,
+        "handle_joint_lower_rad": 0.0,
+        "handle_joint_upper_rad": 0.523599,
+        "handle_contact_radius_m": 0.07425020149659063,
+        "controller_overrides": {
+          "handle_rotate_right_distance": 0.00937244573424484,
+          "handle_rotate_down_distance": 0.03611051411328448,
+          "handle_rotate_angle": 0.50789103,
+          "handle_unlock_ratio": 0.2
+        },
+        "visual_preservation_max_error_m": 2.280953204092384e-13,
+        "collision_preservation_max_error_m": 2.280953204092384e-13
+      }
+    },
+    {
+      "source": "/home/robodog/loco-manipulation/doorgym/high-level/data/asset/25_aigc_doors/rec_using-the-reference-image-for-overall-proportion_20260610_164520_357064_c5d683a7",
+      "name": "aigc_door_07",
+      "handle_type": "lever",
+      "ready_for_scripted_gt": true,
+      "door_joint_name": "door_hinge_joint",
+      "handle_joint_name": "handle_spindle_joint",
+      "door_body_name": "door_panel",
+      "handle_body_name": "lever_handle",
+      "actor_scale": 1.0,
+      "actor_yaw_offset": -1.5707963267948966,
+      "actor_position_offset": [
+        0.031926316,
+        -0.431,
+        0.0
+      ],
+      "door_motion_sign_multiplier": -1.0,
+      "bounding_box": {
+        "min": [
+          -0.105,
+          -0.053314,
+          0.0
+        ],
+        "max": [
+          0.967,
+          0.07,
+          2.135
+        ]
+      },
+      "handle_bounding": {
+        "handle_min": [
+          -0.123357612,
+          -0.01999651,
+          -7.3e-08
+        ],
+        "handle_max": [
+          0.019996488,
+          0.01999651,
+          0.025314
+        ],
+        "goal_pos": [
+          -0.051680562,
+          0.0,
+          0.050314
+        ]
+      },
+      "warnings": [],
+      "errors": [],
+      "metrics": {
+        "handle_axis_source": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "handle_outward_score_m": 0.043173719059228434,
+        "handle_planar_anisotropy": 29.797364683095594,
+        "canonical_basis_columns_in_source_frame": [
+          [
+            0.9995396072701427,
+            -0.03034095414203421,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          [
+            0.03034095414203421,
+            0.9995396072701427,
+            0.0
+          ]
+        ],
+        "source_compile_status": "success",
+        "source_compile_warnings": [],
+        "visual_elements": 33,
+        "collision_elements": 33,
+        "unscaled_extents_m": [
+          1.072,
+          0.12331400000000001,
+          2.135
+        ],
+        "door_panel_extents_m": [
+          0.86,
+          0.044,
+          2.02
+        ],
+        "fixed_frame_extents_m": [
+          1.072,
+          0.10700000000000001,
+          2.1350000000000002
+        ],
+        "door_panel_to_frame_width_ratio": 0.8022388059701492,
+        "handle_reframe_sample_angle_rad": 0.2617995,
+        "handle_joint_lower_rad": 0.0,
+        "handle_joint_upper_rad": 0.523599,
+        "handle_contact_radius_m": 0.05168056180108083,
+        "controller_overrides": {
+          "handle_rotate_right_distance": 0.00652352789935739,
+          "handle_rotate_down_distance": 0.02513409551334472,
+          "handle_rotate_angle": 0.50789103,
+          "handle_unlock_ratio": 0.2
+        },
+        "visual_preservation_max_error_m": 1.379521497035796e-13,
+        "collision_preservation_max_error_m": 1.379521497035796e-13
+      }
+    },
+    {
+      "source": "/home/robodog/loco-manipulation/doorgym/high-level/data/asset/25_aigc_doors/rec_using-the-reference-image-for-overall-proportion_20260610_170120_408501_5b935599",
+      "name": "aigc_door_08",
+      "handle_type": "lever",
+      "ready_for_scripted_gt": true,
+      "door_joint_name": "door_hinge_joint",
+      "handle_joint_name": "handle_spindle_joint",
+      "door_body_name": "door_panel",
+      "handle_body_name": "lever_handle",
+      "actor_scale": 1.0,
+      "actor_yaw_offset": -1.5707963267948966,
+      "actor_position_offset": [
+        0.006052356,
+        -0.4425,
+        0.0
+      ],
+      "door_motion_sign_multiplier": -1.0,
+      "bounding_box": {
+        "min": [
+          -0.095,
+          -0.05575,
+          0.0
+        ],
+        "max": [
+          0.98,
+          0.065,
+          2.17
+        ]
+      },
+      "handle_bounding": {
+        "handle_min": [
+          -0.180985882,
+          -0.026000026,
+          -0.002
+        ],
+        "handle_max": [
+          0.026,
+          0.026000026,
+          0.022985882
+        ],
+        "goal_pos": [
+          -0.077492941,
+          0.0,
+          0.047985882
+        ]
+      },
+      "warnings": [],
+      "errors": [],
+      "metrics": {
+        "handle_axis_source": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "handle_outward_score_m": 0.011052356020942417,
+        "handle_planar_anisotropy": 59.52833737477646,
+        "canonical_basis_columns_in_source_frame": [
+          [
+            0.9999999999998235,
+            5.942825492709065e-07,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          [
+            -5.942825492709065e-07,
+            0.9999999999998235,
+            0.0
+          ]
+        ],
+        "source_compile_status": "success",
+        "source_compile_warnings": [],
+        "visual_elements": 70,
+        "collision_elements": 70,
+        "unscaled_extents_m": [
+          1.075,
+          0.12075,
+          2.17
+        ],
+        "door_panel_extents_m": [
+          0.901,
+          0.066,
+          2.0199999999999996
+        ],
+        "fixed_frame_extents_m": [
+          1.075,
+          0.12075,
+          2.17
+        ],
+        "door_panel_to_frame_width_ratio": 0.838139534883721,
+        "handle_reframe_sample_angle_rad": 0.2617995,
+        "handle_joint_lower_rad": 0.0,
+        "handle_joint_upper_rad": 0.523599,
+        "handle_contact_radius_m": 0.07749294095498403,
+        "controller_overrides": {
+          "handle_rotate_right_distance": 0.00978176987063095,
+          "handle_rotate_down_distance": 0.037687573658145054,
+          "handle_rotate_angle": 0.50789103,
+          "handle_unlock_ratio": 0.2
+        },
+        "visual_preservation_max_error_m": 4.5169944173917287e-13,
+        "collision_preservation_max_error_m": 4.5169944173917287e-13
+      }
+    },
+    {
+      "source": "/home/robodog/loco-manipulation/doorgym/high-level/data/asset/25_aigc_doors/rec_using-the-reference-image-for-overall-proportion_20260610_172041_424808_f575df48",
+      "name": "aigc_door_09",
+      "handle_type": "lever",
+      "ready_for_scripted_gt": true,
+      "door_joint_name": "door_hinge_joint",
+      "handle_joint_name": "handle_spindle_joint",
+      "door_body_name": "door_panel",
+      "handle_body_name": "lever_handle",
+      "actor_scale": 1.0,
+      "actor_yaw_offset": -1.5707963267948966,
+      "actor_position_offset": [
+        0.041296429,
+        -0.42625,
+        0.0
+      ],
+      "door_motion_sign_multiplier": -1.0,
+      "bounding_box": {
+        "min": [
+          -0.1,
+          -0.092,
+          0.0
+        ],
+        "max": [
+          0.9525,
+          0.076,
+          2.18
+        ]
+      },
+      "handle_bounding": {
+        "handle_min": [
+          -0.18197993,
+          -0.028999929,
+          -0.016978181
+        ],
+        "handle_max": [
+          0.028999874,
+          0.028999929,
+          0.016978181
+        ],
+        "goal_pos": [
+          -0.076490028,
+          0.0,
+          0.041978181
+        ]
+      },
+      "warnings": [],
+      "errors": [],
+      "metrics": {
+        "handle_axis_source": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "handle_outward_score_m": 0.008796428571428531,
+        "handle_planar_anisotropy": 29.982699607420713,
+        "canonical_basis_columns_in_source_frame": [
+          [
+            0.9999956387064936,
+            -0.0029533993959779976,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          [
+            0.0029533993959779976,
+            0.9999956387064936,
+            0.0
+          ]
+        ],
+        "source_compile_status": "success",
+        "source_compile_warnings": [],
+        "visual_elements": 128,
+        "collision_elements": 128,
+        "unscaled_extents_m": [
+          1.0525,
+          0.16799999999999998,
+          2.18
+        ],
+        "door_panel_extents_m": [
+          0.884,
+          0.112,
+          2.03
+        ],
+        "fixed_frame_extents_m": [
+          1.0525,
+          0.168,
+          2.18
+        ],
+        "door_panel_to_frame_width_ratio": 0.8399049881235154,
+        "handle_reframe_sample_angle_rad": 0.3054325,
+        "handle_joint_lower_rad": 0.0,
+        "handle_joint_upper_rad": 0.610865,
+        "handle_contact_radius_m": 0.0764900281298415,
+        "controller_overrides": {
+          "handle_rotate_right_distance": 0.013039608959548237,
+          "handle_rotate_down_distance": 0.042717311601012824,
+          "handle_rotate_angle": 0.59253905,
+          "handle_unlock_ratio": 0.2
+        },
+        "visual_preservation_max_error_m": 4.3653969328261155e-13,
+        "collision_preservation_max_error_m": 4.3653969328261155e-13
+      }
+    },
+    {
+      "source": "/home/robodog/loco-manipulation/doorgym/high-level/data/asset/25_aigc_doors/rec_using-the-reference-image-for-overall-proportion_20260610_174114_489374_ac1983e4",
+      "name": "aigc_door_10",
+      "handle_type": "lever",
+      "ready_for_scripted_gt": true,
+      "door_joint_name": "door_hinge_joint",
+      "handle_joint_name": "handle_spindle_joint",
+      "door_body_name": "door_panel",
+      "handle_body_name": "lever_handle",
+      "actor_scale": 1.0,
+      "actor_yaw_offset": -1.5707963267948966,
+      "actor_position_offset": [
+        0.028044999,
+        -0.4225,
+        0.0
+      ],
+      "door_motion_sign_multiplier": -1.0,
+      "bounding_box": {
+        "min": [
+          -0.145,
+          -0.061,
+          0.0
+        ],
+        "max": [
+          0.99,
+          0.055,
+          2.191
+        ]
+      },
+      "handle_bounding": {
+        "handle_min": [
+          -0.194487807,
+          -0.010000029,
+          -3.7e-08
+        ],
+        "handle_max": [
+          0.01,
+          0.010000029,
+          0.027487807
+        ],
+        "goal_pos": [
+          -0.092243904,
+          0.0,
+          0.052487807
+        ]
+      },
+      "warnings": [],
+      "errors": [],
+      "metrics": {
+        "handle_axis_source": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "handle_outward_score_m": 0.04887833214172234,
+        "handle_planar_anisotropy": 137.2114562313201,
+        "canonical_basis_columns_in_source_frame": [
+          [
+            0.9999999999996914,
+            7.856401781035929e-07,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          [
+            -7.856401781035929e-07,
+            0.9999999999996914,
+            0.0
+          ]
+        ],
+        "source_compile_status": "success",
+        "source_compile_warnings": [],
+        "visual_elements": 39,
+        "collision_elements": 39,
+        "unscaled_extents_m": [
+          1.135,
+          0.11599999999999999,
+          2.191
+        ],
+        "door_panel_extents_m": [
+          0.89,
+          0.046200000000000005,
+          2.0349999999999997
+        ],
+        "fixed_frame_extents_m": [
+          1.135,
+          0.11599999999999999,
+          2.191
+        ],
+        "door_panel_to_frame_width_ratio": 0.7841409691629956,
+        "handle_reframe_sample_angle_rad": 0.2617995,
+        "handle_joint_lower_rad": 0.0,
+        "handle_joint_upper_rad": 0.523599,
+        "handle_contact_radius_m": 0.09224390359806314,
+        "controller_overrides": {
+          "handle_rotate_right_distance": 0.011643752654697604,
+          "handle_rotate_down_distance": 0.044861491492319536,
+          "handle_rotate_angle": 0.50789103,
+          "handle_unlock_ratio": 0.2
+        },
+        "visual_preservation_max_error_m": 4.895944760718862e-13,
+        "collision_preservation_max_error_m": 4.895944760718862e-13
+      }
+    },
+    {
+      "source": "/home/robodog/loco-manipulation/doorgym/high-level/data/asset/25_aigc_doors/rec_using-the-reference-image-for-overall-proportion_20260610_175935_501250_42de7943",
+      "name": "aigc_door_11",
+      "handle_type": "lever",
+      "ready_for_scripted_gt": true,
+      "door_joint_name": "door_hinge_joint",
+      "handle_joint_name": "handle_spindle_joint",
+      "door_body_name": "door_panel",
+      "handle_body_name": "lever_handle",
+      "actor_scale": 1.0,
+      "actor_yaw_offset": -1.5707963267948966,
+      "actor_position_offset": [
+        0.017881818,
+        -0.448,
+        0.0
+      ],
+      "door_motion_sign_multiplier": -1.0,
+      "bounding_box": {
+        "min": [
+          -0.083,
+          -0.092,
+          0.0
+        ],
+        "max": [
+          0.979,
+          0.06,
+          2.158
+        ]
+      },
+      "handle_bounding": {
+        "handle_min": [
+          -0.185190759,
+          -0.010000047,
+          -0.01
+        ],
+        "handle_max": [
+          0.001000028,
+          0.010000025,
+          0.01
+        ],
+        "goal_pos": [
+          -0.092095366,
+          -1.1e-08,
+          0.035
+        ]
+      },
+      "warnings": [],
+      "errors": [],
+      "metrics": {
+        "handle_axis_source": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "handle_outward_score_m": 0.030881818181818017,
+        "handle_planar_anisotropy": 184.10918579515507,
+        "canonical_basis_columns_in_source_frame": [
+          [
+            0.9999999999995919,
+            9.034803448920806e-07,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          [
+            -9.034803448920806e-07,
+            0.9999999999995919,
+            0.0
+          ]
+        ],
+        "source_compile_status": "success",
+        "source_compile_warnings": [],
+        "visual_elements": 88,
+        "collision_elements": 88,
+        "unscaled_extents_m": [
+          1.062,
+          0.152,
+          2.158
+        ],
+        "door_panel_extents_m": [
+          0.891,
+          0.045,
+          2.0500000000000003
+        ],
+        "fixed_frame_extents_m": [
+          1.062,
+          0.1365,
+          2.158
+        ],
+        "door_panel_to_frame_width_ratio": 0.8389830508474576,
+        "handle_reframe_sample_angle_rad": 0.2617995,
+        "handle_joint_lower_rad": 0.0,
+        "handle_joint_upper_rad": 0.523599,
+        "handle_contact_radius_m": 0.09209536574195164,
+        "controller_overrides": {
+          "handle_rotate_right_distance": 0.011625003035601282,
+          "handle_rotate_down_distance": 0.0447892522493093,
+          "handle_rotate_angle": 0.50789103,
+          "handle_unlock_ratio": 0.2
+        },
+        "visual_preservation_max_error_m": 4.665434705231064e-13,
+        "collision_preservation_max_error_m": 4.665434705231064e-13
+      }
+    },
+    {
+      "source": "/home/robodog/loco-manipulation/doorgym/high-level/data/asset/25_aigc_doors/rec_using-the-reference-image-for-overall-proportion_20260610_181135_558218_95e44f9a",
+      "name": "aigc_door_12",
+      "handle_type": "knob",
+      "ready_for_scripted_gt": false,
+      "door_joint_name": "door_hinge_joint",
+      "handle_joint_name": "handle_spindle_joint",
+      "door_body_name": "door_panel",
+      "handle_body_name": "door_knob",
+      "actor_scale": 1.0,
+      "actor_yaw_offset": -1.5707963267948966,
+      "actor_position_offset": [
+        0.0134,
+        -0.4335,
+        0.0
+      ],
+      "door_motion_sign_multiplier": -1.0,
+      "bounding_box": {
+        "min": [
+          -0.145,
+          -0.076000077,
+          -0.01
+        ],
+        "max": [
+          1.012,
+          0.066,
+          2.205
+        ]
+      },
+      "handle_bounding": {
+        "handle_min": [
+          -0.028,
+          -0.028000068,
+          -1.03e-07
+        ],
+        "handle_max": [
+          0.028,
+          0.027999971,
+          0.044000077
+        ],
+        "goal_pos": [
+          0.0,
+          -4.8e-08,
+          0.069000077
+        ]
+      },
+      "warnings": [
+        "Round knob detected: the current scripted GT trajectory presses a lever and requires controller-level review for this asset."
+      ],
+      "errors": [],
+      "metrics": {
+        "handle_axis_source": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "handle_outward_score_m": -0.05514972293633727,
+        "handle_planar_anisotropy": 1.0,
+        "canonical_basis_columns_in_source_frame": [
+          [
+            1.0,
+            0.0,
+            -0.0
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          [
+            0.0,
+            1.0,
+            -0.0
+          ]
+        ],
+        "source_compile_status": "success",
+        "source_compile_warnings": [],
+        "visual_elements": 122,
+        "collision_elements": 122,
+        "unscaled_extents_m": [
+          1.157,
+          0.142000077,
+          2.215
+        ],
+        "door_panel_extents_m": [
+          0.852,
+          0.049199999999999994,
+          2.02
+        ],
+        "fixed_frame_extents_m": [
+          1.157,
+          0.11000000000000001,
+          2.215
+        ],
+        "door_panel_to_frame_width_ratio": 0.7363872082973206,
+        "handle_reframe_sample_angle_rad": 0.392699,
+        "handle_joint_lower_rad": 0.0,
+        "handle_joint_upper_rad": 0.785398,
+        "handle_contact_radius_m": 0.03,
+        "controller_overrides": {
+          "handle_rotate_right_distance": 0.008292903342294817,
+          "handle_rotate_down_distance": 0.020707533766555698,
+          "handle_rotate_angle": 0.76183606,
+          "handle_unlock_ratio": 0.2
+        },
+        "visual_preservation_max_error_m": 2.156053113822054e-13,
+        "collision_preservation_max_error_m": 2.156053113822054e-13
+      }
+    },
+    {
+      "source": "/home/robodog/loco-manipulation/doorgym/high-level/data/asset/25_aigc_doors/rec_using-the-reference-image-for-overall-proportion_20260610_183953_600529_809002ad",
+      "name": "aigc_door_13",
+      "handle_type": "lever",
+      "ready_for_scripted_gt": true,
+      "door_joint_name": "door_hinge_joint",
+      "handle_joint_name": "handle_spindle_joint",
+      "door_body_name": "door_panel",
+      "handle_body_name": "lever_handle",
+      "actor_scale": 1.0,
+      "actor_yaw_offset": -1.5707963267948966,
+      "actor_position_offset": [
+        0.030076087,
+        0.005,
+        0.0
+      ],
+      "door_motion_sign_multiplier": -1.0,
+      "bounding_box": {
+        "min": [
+          -0.599,
+          -0.057,
+          -0.005001791
+        ],
+        "max": [
+          0.589,
+          0.085,
+          2.282
+        ]
+      },
+      "handle_bounding": {
+        "handle_min": [
+          -0.178,
+          -0.024000022,
+          -0.006500088
+        ],
+        "handle_max": [
+          0.024,
+          0.024000022,
+          0.009500029
+        ],
+        "goal_pos": [
+          -0.077,
+          0.0,
+          0.034500029
+        ]
+      },
+      "warnings": [],
+      "errors": [],
+      "metrics": {
+        "handle_axis_source": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "handle_outward_score_m": 0.028099163879598675,
+        "handle_planar_anisotropy": 46.49270692420828,
+        "canonical_basis_columns_in_source_frame": [
+          [
+            1.0,
+            -0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "source_compile_status": "success",
+        "source_compile_warnings": [],
+        "visual_elements": 86,
+        "collision_elements": 86,
+        "unscaled_extents_m": [
+          1.188,
+          0.14200000000000002,
+          2.2870017910000002
+        ],
+        "door_panel_extents_m": [
+          0.894,
+          0.04585,
+          2.07
+        ],
+        "fixed_frame_extents_m": [
+          1.1880000000000002,
+          0.14200000000000002,
+          2.287001790925778
+        ],
+        "door_panel_to_frame_width_ratio": 0.7525252525252525,
+        "handle_reframe_sample_angle_rad": 0.2617995,
+        "handle_joint_lower_rad": 0.0,
+        "handle_joint_upper_rad": 0.523599,
+        "handle_contact_radius_m": 0.07700000000000001,
+        "controller_overrides": {
+          "handle_rotate_right_distance": 0.00971954697752558,
+          "handle_rotate_down_distance": 0.03744783893752233,
+          "handle_rotate_angle": 0.50789103,
+          "handle_unlock_ratio": 0.2
+        },
+        "visual_preservation_max_error_m": 2.5461577290997184e-13,
+        "collision_preservation_max_error_m": 2.5461577290997184e-13
+      }
+    },
+    {
+      "source": "/home/robodog/loco-manipulation/doorgym/high-level/data/asset/25_aigc_doors/rec_using-the-reference-image-for-overall-proportion_20260610_185617_636160_746172d9",
+      "name": "aigc_door_14",
+      "handle_type": "lever",
+      "ready_for_scripted_gt": true,
+      "door_joint_name": "door_hinge_joint",
+      "handle_joint_name": "handle_spindle_joint",
+      "door_body_name": "door_panel",
+      "handle_body_name": "lever_handle",
+      "actor_scale": 1.0,
+      "actor_yaw_offset": -1.5707963267948966,
+      "actor_position_offset": [
+        -0.002579268,
+        -0.433,
+        0.0
+      ],
+      "door_motion_sign_multiplier": -1.0,
+      "bounding_box": {
+        "min": [
+          -0.163,
+          -0.101626,
+          -0.024
+        ],
+        "max": [
+          1.029,
+          0.084,
+          2.2225
+        ]
+      },
+      "handle_bounding": {
+        "handle_min": [
+          -0.162091519,
+          -0.019999098,
+          0.011999927
+        ],
+        "handle_max": [
+          0.019999074,
+          0.019999098,
+          0.045626
+        ],
+        "goal_pos": [
+          -0.071046222,
+          0.0,
+          0.070626
+        ]
+      },
+      "warnings": [],
+      "errors": [],
+      "metrics": {
+        "handle_axis_source": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "handle_outward_score_m": 0.0027419431840426667,
+        "handle_planar_anisotropy": 54.656237492755025,
+        "canonical_basis_columns_in_source_frame": [
+          [
+            0.9982766720354221,
+            -0.05868292826608383,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          [
+            0.05868292826608383,
+            0.9982766720354221,
+            0.0
+          ]
+        ],
+        "source_compile_status": "success",
+        "source_compile_warnings": [],
+        "visual_elements": 79,
+        "collision_elements": 79,
+        "unscaled_extents_m": [
+          1.192,
+          0.185626,
+          2.2465
+        ],
+        "door_panel_extents_m": [
+          0.862,
+          0.07800001836601878,
+          2.022
+        ],
+        "fixed_frame_extents_m": [
+          1.192,
+          0.168,
+          2.2465
+        ],
+        "door_panel_to_frame_width_ratio": 0.7231543624161074,
+        "handle_reframe_sample_angle_rad": 0.2617995,
+        "handle_joint_lower_rad": 0.0,
+        "handle_joint_upper_rad": 0.523599,
+        "handle_contact_radius_m": 0.0710462223597362,
+        "controller_overrides": {
+          "handle_rotate_right_distance": 0.00896801423118421,
+          "handle_rotate_down_distance": 0.03455230509151686,
+          "handle_rotate_angle": 0.50789103,
+          "handle_unlock_ratio": 0.2
+        },
+        "visual_preservation_max_error_m": 1.8880730312531568e-13,
+        "collision_preservation_max_error_m": 1.8880730312531568e-13
+      }
+    },
+    {
+      "source": "/home/robodog/loco-manipulation/doorgym/high-level/data/asset/25_aigc_doors/rec_using-the-reference-image-for-overall-proportion_20260610_191608_644365_483217f8",
+      "name": "aigc_door_15",
+      "handle_type": "lever",
+      "ready_for_scripted_gt": true,
+      "door_joint_name": "door_hinge_joint",
+      "handle_joint_name": "handle_spindle_joint",
+      "door_body_name": "door_panel",
+      "handle_body_name": "lever_handle",
+      "actor_scale": 1.0,
+      "actor_yaw_offset": -1.5707963267948966,
+      "actor_position_offset": [
+        0.028495022,
+        -0.4375,
+        0.0
+      ],
+      "door_motion_sign_multiplier": -1.0,
+      "bounding_box": {
+        "min": [
+          -0.11,
+          -0.074,
+          -0.01
+        ],
+        "max": [
+          0.985,
+          0.045,
+          2.245
+        ]
+      },
+      "handle_bounding": {
+        "handle_min": [
+          -0.166000619,
+          -0.018000022,
+          -6.6e-08
+        ],
+        "handle_max": [
+          0.018,
+          0.018000022,
+          0.023
+        ],
+        "goal_pos": [
+          -0.07400031,
+          0.0,
+          0.048
+        ]
+      },
+      "warnings": [],
+      "errors": [],
+      "metrics": {
+        "handle_axis_source": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "handle_outward_score_m": 0.04190273166356156,
+        "handle_planar_anisotropy": 96.71028083732773,
+        "canonical_basis_columns_in_source_frame": [
+          [
+            0.9999999879507604,
+            -0.0001552368488203672,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          [
+            0.0001552368488203672,
+            0.9999999879507604,
+            0.0
+          ]
+        ],
+        "source_compile_status": "success",
+        "source_compile_warnings": [],
+        "visual_elements": 44,
+        "collision_elements": 44,
+        "unscaled_extents_m": [
+          1.095,
+          0.119,
+          2.255
+        ],
+        "door_panel_extents_m": [
+          0.86,
+          0.045799999999999993,
+          2.08
+        ],
+        "fixed_frame_extents_m": [
+          1.095,
+          0.102,
+          2.255
+        ],
+        "door_panel_to_frame_width_ratio": 0.7853881278538812,
+        "handle_reframe_sample_angle_rad": 0.2617995,
+        "handle_joint_lower_rad": 0.0,
+        "handle_joint_upper_rad": 0.523599,
+        "handle_contact_radius_m": 0.07400030958034325,
+        "controller_overrides": {
+          "handle_rotate_right_distance": 0.009340902406721849,
+          "handle_rotate_down_distance": 0.03598898278560369,
+          "handle_rotate_angle": 0.50789103,
+          "handle_unlock_ratio": 0.2
+        },
+        "visual_preservation_max_error_m": 2.1098400804220319e-13,
+        "collision_preservation_max_error_m": 2.1098400804220319e-13
+      }
+    },
+    {
+      "source": "/home/robodog/loco-manipulation/doorgym/high-level/data/asset/25_aigc_doors/rec_using-the-reference-image-for-overall-proportion_20260610_193220_721835_ab3c271a",
+      "name": "aigc_door_16",
+      "handle_type": "lever",
+      "ready_for_scripted_gt": true,
+      "door_joint_name": "door_hinge_joint",
+      "handle_joint_name": "handle_spindle_joint",
+      "door_body_name": "door_panel",
+      "handle_body_name": "lever_handle",
+      "actor_scale": 1.0,
+      "actor_yaw_offset": -1.5707963267948966,
+      "actor_position_offset": [
+        0.009705106,
+        0.003,
+        0.0
+      ],
+      "door_motion_sign_multiplier": -1.0,
+      "bounding_box": {
+        "min": [
+          -0.521,
+          -0.104,
+          0.0
+        ],
+        "max": [
+          0.515,
+          0.065,
+          2.235
+        ]
+      },
+      "handle_bounding": {
+        "handle_min": [
+          -0.167987165,
+          -0.018000018,
+          -0.005000066
+        ],
+        "handle_max": [
+          0.018,
+          0.018000018,
+          0.016
+        ],
+        "goal_pos": [
+          -0.074993583,
+          0.0,
+          0.041
+        ]
+      },
+      "warnings": [],
+      "errors": [],
+      "metrics": {
+        "handle_axis_source": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "handle_outward_score_m": 0.017847963525835786,
+        "handle_planar_anisotropy": 79.04016480840484,
+        "canonical_basis_columns_in_source_frame": [
+          [
+            0.9999999999998128,
+            6.119121313322489e-07,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          [
+            -6.119121313322489e-07,
+            0.9999999999998128,
+            0.0
+          ]
+        ],
+        "source_compile_status": "success",
+        "source_compile_warnings": [],
+        "visual_elements": 76,
+        "collision_elements": 76,
+        "unscaled_extents_m": [
+          1.036,
+          0.16899999999999998,
+          2.235
+        ],
+        "door_panel_extents_m": [
+          0.822,
+          0.0508000514248647,
+          2.0300000000000002
+        ],
+        "fixed_frame_extents_m": [
+          1.036,
+          0.159,
+          2.235
+        ],
+        "door_panel_to_frame_width_ratio": 0.7934362934362934,
+        "handle_reframe_sample_angle_rad": 0.2617995,
+        "handle_joint_lower_rad": 0.0,
+        "handle_joint_upper_rad": 0.523599,
+        "handle_contact_radius_m": 0.0749935826908146,
+        "controller_overrides": {
+          "handle_rotate_right_distance": 0.009466281168523659,
+          "handle_rotate_down_distance": 0.03647204683056347,
+          "handle_rotate_angle": 0.50789103,
+          "handle_unlock_ratio": 0.2
+        },
+        "visual_preservation_max_error_m": 4.037742362683616e-13,
+        "collision_preservation_max_error_m": 4.037742362683616e-13
+      }
+    },
+    {
+      "source": "/home/robodog/loco-manipulation/doorgym/high-level/data/asset/25_aigc_doors/rec_using-the-reference-image-for-overall-proportion_20260610_194505_694187_5b0d4e43",
+      "name": "aigc_door_17",
+      "handle_type": "lever",
+      "ready_for_scripted_gt": true,
+      "door_joint_name": "door_hinge_joint",
+      "handle_joint_name": "handle_spindle_joint",
+      "door_body_name": "door_panel",
+      "handle_body_name": "lever_handle",
+      "actor_scale": 1.0,
+      "actor_yaw_offset": -1.5707963267948966,
+      "actor_position_offset": [
+        0.017107692,
+        -0.45,
+        0.0
+      ],
+      "door_motion_sign_multiplier": -1.0,
+      "bounding_box": {
+        "min": [
+          -0.079,
+          -0.119482031,
+          0.0
+        ],
+        "max": [
+          0.979,
+          0.0825,
+          2.21
+        ]
+      },
+      "handle_bounding": {
+        "handle_min": [
+          -0.172989732,
+          -0.014,
+          -4e-08
+        ],
+        "handle_max": [
+          0.013982031,
+          0.014,
+          0.031982031
+        ],
+        "goal_pos": [
+          -0.07950385,
+          0.0,
+          0.056982031
+        ]
+      },
+      "warnings": [],
+      "errors": [],
+      "metrics": {
+        "handle_axis_source": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "handle_outward_score_m": 0.03640769230769236,
+        "handle_planar_anisotropy": 108.96458751065008,
+        "canonical_basis_columns_in_source_frame": [
+          [
+            0.9999999999999312,
+            3.7139771159284515e-07,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          [
+            -3.7139771159284515e-07,
+            0.9999999999999312,
+            0.0
+          ]
+        ],
+        "source_compile_status": "success",
+        "source_compile_warnings": [],
+        "visual_elements": 40,
+        "collision_elements": 40,
+        "unscaled_extents_m": [
+          1.058,
+          0.201982031,
+          2.21
+        ],
+        "door_panel_extents_m": [
+          0.9,
+          0.048999999999999995,
+          2.1
+        ],
+        "fixed_frame_extents_m": [
+          1.058,
+          0.17099999999999999,
+          2.21
+        ],
+        "door_panel_to_frame_width_ratio": 0.8506616257088847,
+        "handle_reframe_sample_angle_rad": 0.3054325,
+        "handle_joint_lower_rad": 0.0,
+        "handle_joint_upper_rad": 0.610865,
+        "handle_contact_radius_m": 0.0795038504220541,
+        "controller_overrides": {
+          "handle_rotate_right_distance": 0.013553389188486207,
+          "handle_rotate_down_distance": 0.04440043800473155,
+          "handle_rotate_angle": 0.59253905,
+          "handle_unlock_ratio": 0.2
+        },
+        "visual_preservation_max_error_m": 4.3665071558507407e-13,
+        "collision_preservation_max_error_m": 4.3665071558507407e-13
+      }
+    },
+    {
+      "source": "/home/robodog/loco-manipulation/doorgym/high-level/data/asset/25_aigc_doors/rec_using-the-reference-image-for-overall-proportion_20260611_005533_328453_93182fe0",
+      "name": "aigc_door_18",
+      "handle_type": "lever",
+      "ready_for_scripted_gt": false,
+      "door_joint_name": "door_hinge_joint",
+      "handle_joint_name": "handle_spindle_joint",
+      "door_body_name": "door_panel",
+      "handle_body_name": "lever_handle",
+      "actor_scale": 1.0,
+      "actor_yaw_offset": -1.5707963267948966,
+      "actor_position_offset": [
+        0.016031122,
+        0.0075,
+        0.0
+      ],
+      "door_motion_sign_multiplier": -1.0,
+      "bounding_box": {
+        "min": [
+          -1.12,
+          -0.12848524,
+          0.0
+        ],
+        "max": [
+          1.105,
+          0.07,
+          2.227502147
+        ]
+      },
+      "handle_bounding": {
+        "handle_min": [
+          -0.171486034,
+          -0.017999805,
+          -0.013000033
+        ],
+        "handle_max": [
+          0.017999783,
+          0.017999805,
+          0.04348524
+        ],
+        "goal_pos": [
+          -0.076743125,
+          0.0,
+          0.06848524
+        ]
+      },
+      "warnings": [
+        "Door panel is wider than the fixed frame by a factor of 1.90; source geometry requires review.",
+        "Unusual unscaled door width: 2.225 m."
+      ],
+      "errors": [],
+      "metrics": {
+        "handle_axis_source": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "handle_outward_score_m": 0.02980890022675721,
+        "handle_planar_anisotropy": 77.82600952931519,
+        "canonical_basis_columns_in_source_frame": [
+          [
+            0.9999879630808544,
+            -0.004906495022310302,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          [
+            0.004906495022310302,
+            0.9999879630808544,
+            0.0
+          ]
+        ],
+        "source_compile_status": "success",
+        "source_compile_warnings": [],
+        "visual_elements": 121,
+        "collision_elements": 121,
+        "unscaled_extents_m": [
+          2.225,
+          0.19848524,
+          2.227502147
+        ],
+        "door_panel_extents_m": [
+          2.225,
+          0.086,
+          2.01
+        ],
+        "fixed_frame_extents_m": [
+          1.1690000330509596,
+          0.1590000183660188,
+          2.2275021469883525
+        ],
+        "door_panel_to_frame_width_ratio": 1.903336130960577,
+        "handle_reframe_sample_angle_rad": 0.3054325,
+        "handle_joint_lower_rad": 0.0,
+        "handle_joint_upper_rad": 0.610865,
+        "handle_contact_radius_m": 0.07674312504938162,
+        "controller_overrides": {
+          "handle_rotate_right_distance": 0.013082755562319349,
+          "handle_rotate_down_distance": 0.04285865839145849,
+          "handle_rotate_angle": 0.59253905,
+          "handle_unlock_ratio": 0.2
+        },
+        "visual_preservation_max_error_m": 4.3250125703053754e-13,
+        "collision_preservation_max_error_m": 4.3250125703053754e-13
+      }
+    },
+    {
+      "source": "/home/robodog/loco-manipulation/doorgym/high-level/data/asset/25_aigc_doors/rec_using-the-reference-image-for-overall-proportion_20260611_011445_300330_82469f6d",
+      "name": "aigc_door_19",
+      "handle_type": "knob",
+      "ready_for_scripted_gt": false,
+      "door_joint_name": "door_hinge_joint",
+      "handle_joint_name": "handle_spindle_joint",
+      "door_body_name": "door_panel",
+      "handle_body_name": "door_knob",
+      "actor_scale": 1.0,
+      "actor_yaw_offset": -1.5707963267948966,
+      "actor_position_offset": [
+        0.01107619,
+        -0.39675,
+        0.0
+      ],
+      "door_motion_sign_multiplier": -1.0,
+      "bounding_box": {
+        "min": [
+          -0.105,
+          -0.055100073,
+          0.0
+        ],
+        "max": [
+          0.8985,
+          0.065,
+          2.198
+        ]
+      },
+      "handle_bounding": {
+        "handle_min": [
+          -0.028,
+          -0.028000076,
+          -1.03e-07
+        ],
+        "handle_max": [
+          0.028,
+          0.027999979,
+          0.033100073
+        ],
+        "goal_pos": [
+          0.0,
+          -4.9e-08,
+          0.058100073
+        ]
+      },
+      "warnings": [
+        "Round knob detected: the current scripted GT trajectory presses a lever and requires controller-level review for this asset."
+      ],
+      "errors": [],
+      "metrics": {
+        "handle_axis_source": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "handle_outward_score_m": 0.028085575330810592,
+        "handle_planar_anisotropy": 1.0,
+        "canonical_basis_columns_in_source_frame": [
+          [
+            1.0,
+            -0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "source_compile_status": "success",
+        "source_compile_warnings": [],
+        "visual_elements": 96,
+        "collision_elements": 96,
+        "unscaled_extents_m": [
+          1.0035,
+          0.120100073,
+          2.198
+        ],
+        "door_panel_extents_m": [
+          0.762,
+          0.051000000000000004,
+          2.03
+        ],
+        "fixed_frame_extents_m": [
+          1.0035,
+          0.11750000000000001,
+          2.198
+        ],
+        "door_panel_to_frame_width_ratio": 0.7593423019431987,
+        "handle_reframe_sample_angle_rad": 0.392699,
+        "handle_joint_lower_rad": 0.0,
+        "handle_joint_upper_rad": 0.785398,
+        "handle_contact_radius_m": 0.03,
+        "controller_overrides": {
+          "handle_rotate_right_distance": 0.008292903342294817,
+          "handle_rotate_down_distance": 0.020707533766555698,
+          "handle_rotate_angle": 0.76183606,
+          "handle_unlock_ratio": 0.2
+        },
+        "visual_preservation_max_error_m": 1.6209256159527285e-13,
+        "collision_preservation_max_error_m": 1.6209256159527285e-13
+      }
+    },
+    {
+      "source": "/home/robodog/loco-manipulation/doorgym/high-level/data/asset/25_aigc_doors/rec_using-the-reference-image-for-overall-proportion_20260611_014418_330751_76e54af4",
+      "name": "aigc_door_20",
+      "handle_type": "lever",
+      "ready_for_scripted_gt": true,
+      "door_joint_name": "door_hinge_joint",
+      "handle_joint_name": "handle_spindle_joint",
+      "door_body_name": "door_panel",
+      "handle_body_name": "lever_handle",
+      "actor_scale": 1.0,
+      "actor_yaw_offset": -1.5707963267948966,
+      "actor_position_offset": [
+        0.011939183,
+        -0.0,
+        0.0
+      ],
+      "door_motion_sign_multiplier": -1.0,
+      "bounding_box": {
+        "min": [
+          -0.5325,
+          -0.089,
+          0.0
+        ],
+        "max": [
+          0.5325,
+          0.06,
+          2.16
+        ]
+      },
+      "handle_bounding": {
+        "handle_min": [
+          -0.137190759,
+          -0.017000018,
+          -0.006190759
+        ],
+        "handle_max": [
+          0.017,
+          0.017000018,
+          0.008190759
+        ],
+        "goal_pos": [
+          -0.06009538,
+          0.0,
+          0.033190759
+        ]
+      },
+      "warnings": [],
+      "errors": [],
+      "metrics": {
+        "handle_axis_source": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "handle_outward_score_m": 0.0022963255494502927,
+        "handle_planar_anisotropy": 85.09631295571546,
+        "canonical_basis_columns_in_source_frame": [
+          [
+            0.999999999999825,
+            5.916113401466358e-07,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          [
+            -5.916113401466358e-07,
+            0.999999999999825,
+            0.0
+          ]
+        ],
+        "source_compile_status": "success",
+        "source_compile_warnings": [],
+        "visual_elements": 86,
+        "collision_elements": 86,
+        "unscaled_extents_m": [
+          1.065,
+          0.149,
+          2.16
+        ],
+        "door_panel_extents_m": [
+          0.932,
+          0.07600000000000001,
+          2.0
+        ],
+        "fixed_frame_extents_m": [
+          1.065,
+          0.14900000000000002,
+          2.16
+        ],
+        "door_panel_to_frame_width_ratio": 0.8751173708920189,
+        "handle_reframe_sample_angle_rad": 0.3054325,
+        "handle_joint_lower_rad": 0.0,
+        "handle_joint_upper_rad": 0.610865,
+        "handle_contact_radius_m": 0.06009537953368385,
+        "controller_overrides": {
+          "handle_rotate_right_distance": 0.010244737367133447,
+          "handle_rotate_down_distance": 0.03356140814805086,
+          "handle_rotate_angle": 0.59253905,
+          "handle_unlock_ratio": 0.2
+        },
+        "visual_preservation_max_error_m": 3.4325320363848277e-13,
+        "collision_preservation_max_error_m": 3.4325320363848277e-13
+      }
+    },
+    {
+      "source": "/home/robodog/loco-manipulation/doorgym/high-level/data/asset/25_aigc_doors/rec_using-the-reference-image-for-overall-proportion_20260611_020039_417109_e5654919",
+      "name": "aigc_door_21",
+      "handle_type": "lever",
+      "ready_for_scripted_gt": true,
+      "door_joint_name": "door_hinge_joint",
+      "handle_joint_name": "handle_spindle_joint",
+      "door_body_name": "door_panel",
+      "handle_body_name": "lever_handle",
+      "actor_scale": 1.0,
+      "actor_yaw_offset": -1.5707963267948966,
+      "actor_position_offset": [
+        0.001971528,
+        -0.4135,
+        0.0
+      ],
+      "door_motion_sign_multiplier": -1.0,
+      "bounding_box": {
+        "min": [
+          -0.105,
+          -0.026,
+          0.0
+        ],
+        "max": [
+          0.932,
+          0.074,
+          2.155
+        ]
+      },
+      "handle_bounding": {
+        "handle_min": [
+          -0.16100002,
+          -0.018000018,
+          0.007999934
+        ],
+        "handle_max": [
+          0.018,
+          0.018000018,
+          0.026
+        ],
+        "goal_pos": [
+          -0.07150001,
+          0.0,
+          0.051
+        ]
+      },
+      "warnings": [],
+      "errors": [],
+      "metrics": {
+        "handle_axis_source": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "handle_outward_score_m": 0.01830486111111114,
+        "handle_planar_anisotropy": 82.72501904951731,
+        "canonical_basis_columns_in_source_frame": [
+          [
+            0.9999999999992388,
+            1.2339553509898457e-06,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          [
+            -1.2339553509898457e-06,
+            0.9999999999992388,
+            0.0
+          ]
+        ],
+        "source_compile_status": "success",
+        "source_compile_warnings": [],
+        "visual_elements": 51,
+        "collision_elements": 51,
+        "unscaled_extents_m": [
+          1.0370000000000001,
+          0.09999999999999999,
+          2.155
+        ],
+        "door_panel_extents_m": [
+          0.8150000000000001,
+          0.047,
+          2.03
+        ],
+        "fixed_frame_extents_m": [
+          1.0370000000000001,
+          0.07800000000000001,
+          2.1550000000000002
+        ],
+        "door_panel_to_frame_width_ratio": 0.7859209257473481,
+        "handle_reframe_sample_angle_rad": 0.2617995,
+        "handle_joint_lower_rad": 0.0,
+        "handle_joint_upper_rad": 0.523599,
+        "handle_contact_radius_m": 0.07150000975696552,
+        "controller_overrides": {
+          "handle_rotate_right_distance": 0.009025294853589138,
+          "handle_rotate_down_distance": 0.03477299804428727,
+          "handle_rotate_angle": 0.50789103,
+          "handle_unlock_ratio": 0.2
+        },
+        "visual_preservation_max_error_m": 4.578559753554146e-13,
+        "collision_preservation_max_error_m": 4.578559753554146e-13
+      }
+    },
+    {
+      "source": "/home/robodog/loco-manipulation/doorgym/high-level/data/asset/25_aigc_doors/rec_using-the-reference-image-for-overall-proportion_20260611_021312_471443_62763622",
+      "name": "aigc_door_22",
+      "handle_type": "lever",
+      "ready_for_scripted_gt": true,
+      "door_joint_name": "door_hinge_joint",
+      "handle_joint_name": "handle_spindle_joint",
+      "door_body_name": "door_panel",
+      "handle_body_name": "lever_handle",
+      "actor_scale": 1.0,
+      "actor_yaw_offset": -1.5707963267948966,
+      "actor_position_offset": [
+        0.017095238,
+        -0.437,
+        0.0
+      ],
+      "door_motion_sign_multiplier": -1.0,
+      "bounding_box": {
+        "min": [
+          -0.126,
+          -0.03,
+          0.0
+        ],
+        "max": [
+          1.0,
+          0.08,
+          2.187
+        ]
+      },
+      "handle_bounding": {
+        "handle_min": [
+          -0.151000025,
+          -0.014000026,
+          -0.008000051
+        ],
+        "handle_max": [
+          0.014,
+          0.014000026,
+          0.016
+        ],
+        "goal_pos": [
+          -0.068500013,
+          0.0,
+          0.041
+        ]
+      },
+      "warnings": [],
+      "errors": [],
+      "metrics": {
+        "handle_axis_source": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "handle_outward_score_m": 0.03076190476190476,
+        "handle_planar_anisotropy": 78.60963747136715,
+        "canonical_basis_columns_in_source_frame": [
+          [
+            0.9999999999993484,
+            1.141613828072993e-06,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          [
+            -1.141613828072993e-06,
+            0.9999999999993484,
+            0.0
+          ]
+        ],
+        "source_compile_status": "success",
+        "source_compile_warnings": [],
+        "visual_elements": 50,
+        "collision_elements": 50,
+        "unscaled_extents_m": [
+          1.126,
+          0.11,
+          2.187
+        ],
+        "door_panel_extents_m": [
+          0.898,
+          0.045,
+          2.03
+        ],
+        "fixed_frame_extents_m": [
+          1.1260000000000001,
+          0.11,
+          2.1870000000000003
+        ],
+        "door_panel_to_frame_width_ratio": 0.797513321492007,
+        "handle_reframe_sample_angle_rad": 0.2617995,
+        "handle_joint_lower_rad": 0.0,
+        "handle_joint_upper_rad": 0.523599,
+        "handle_contact_radius_m": 0.06850001265795098,
+        "controller_overrides": {
+          "handle_rotate_right_distance": 0.00864661157129937,
+          "handle_rotate_down_distance": 0.03331399274328817,
+          "handle_rotate_angle": 0.50789103,
+          "handle_unlock_ratio": 0.2
+        },
+        "visual_preservation_max_error_m": 3.7879074876734364e-13,
+        "collision_preservation_max_error_m": 3.7879074876734364e-13
+      }
+    },
+    {
+      "source": "/home/robodog/loco-manipulation/doorgym/high-level/data/asset/25_aigc_doors/rec_using-the-reference-image-for-overall-proportion_20260611_023806_435601_8e53c223",
+      "name": "aigc_door_23",
+      "handle_type": "lever",
+      "ready_for_scripted_gt": true,
+      "door_joint_name": "door_hinge_joint",
+      "handle_joint_name": "handle_spindle_joint",
+      "door_body_name": "door_panel",
+      "handle_body_name": "lever_handle",
+      "actor_scale": 1.0,
+      "actor_yaw_offset": -1.5707963267948966,
+      "actor_position_offset": [
+        0.036946247,
+        -0.46375,
+        0.0
+      ],
+      "door_motion_sign_multiplier": -1.0,
+      "bounding_box": {
+        "min": [
+          -0.103,
+          -0.057,
+          0.0
+        ],
+        "max": [
+          1.0305,
+          0.0755,
+          2.14
+        ]
+      },
+      "handle_bounding": {
+        "handle_min": [
+          -0.117500235,
+          -0.024000011,
+          -0.003000088
+        ],
+        "handle_max": [
+          0.024,
+          0.024000011,
+          0.011
+        ],
+        "goal_pos": [
+          -0.046750118,
+          0.0,
+          0.036
+        ]
+      },
+      "warnings": [],
+      "errors": [],
+      "metrics": {
+        "handle_axis_source": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "handle_outward_score_m": 0.03307241459213245,
+        "handle_planar_anisotropy": 108.83513104383195,
+        "canonical_basis_columns_in_source_frame": [
+          [
+            0.9999999930511774,
+            -0.00011788827482507907,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          [
+            0.00011788827482507907,
+            0.9999999930511774,
+            0.0
+          ]
+        ],
+        "source_compile_status": "success",
+        "source_compile_warnings": [],
+        "visual_elements": 62,
+        "collision_elements": 62,
+        "unscaled_extents_m": [
+          1.1335,
+          0.1325,
+          2.14
+        ],
+        "door_panel_extents_m": [
+          0.925,
+          0.07,
+          2.03
+        ],
+        "fixed_frame_extents_m": [
+          1.1335,
+          0.1325,
+          2.14
+        ],
+        "door_panel_to_frame_width_ratio": 0.8160564622849582,
+        "handle_reframe_sample_angle_rad": 0.3054325,
+        "handle_joint_lower_rad": 0.0,
+        "handle_joint_upper_rad": 0.610865,
+        "handle_contact_radius_m": 0.0467501175627825,
+        "controller_overrides": {
+          "handle_rotate_right_distance": 0.007969708820041133,
+          "handle_rotate_down_distance": 0.02610849267728594,
+          "handle_rotate_angle": 0.59253905,
+          "handle_unlock_ratio": 0.2
+        },
+        "visual_preservation_max_error_m": 2.274014310188477e-13,
+        "collision_preservation_max_error_m": 2.274014310188477e-13
+      }
+    },
+    {
+      "source": "/home/robodog/loco-manipulation/doorgym/high-level/data/asset/25_aigc_doors/rec_using-the-reference-image-for-overall-proportion_20260611_025718_482072_e24ca555",
+      "name": "aigc_door_24",
+      "handle_type": "knob",
+      "ready_for_scripted_gt": false,
+      "door_joint_name": "door_hinge_joint",
+      "handle_joint_name": "handle_spindle_joint",
+      "door_body_name": "door_panel",
+      "handle_body_name": "door_knob",
+      "actor_scale": 1.0,
+      "actor_yaw_offset": -1.5707963267948966,
+      "actor_position_offset": [
+        0.0101725,
+        0.00275,
+        0.0
+      ],
+      "door_motion_sign_multiplier": -1.0,
+      "bounding_box": {
+        "min": [
+          -0.517,
+          -0.066000087,
+          0.0
+        ],
+        "max": [
+          0.5115,
+          0.07,
+          2.203
+        ]
+      },
+      "handle_bounding": {
+        "handle_min": [
+          -0.033436,
+          -0.033436123,
+          -6.4e-08
+        ],
+        "handle_max": [
+          0.033436,
+          0.033435877,
+          0.040000087
+        ],
+        "goal_pos": [
+          0.0,
+          -1.23e-07,
+          0.065000087
+        ]
+      },
+      "warnings": [
+        "Round knob detected: the current scripted GT trajectory presses a lever and requires controller-level review for this asset."
+      ],
+      "errors": [],
+      "metrics": {
+        "handle_axis_source": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "handle_outward_score_m": -0.028300912250676935,
+        "handle_planar_anisotropy": 1.0,
+        "canonical_basis_columns_in_source_frame": [
+          [
+            1.0,
+            0.0,
+            -0.0
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          [
+            0.0,
+            1.0,
+            -0.0
+          ]
+        ],
+        "source_compile_status": "success",
+        "source_compile_warnings": [],
+        "visual_elements": 106,
+        "collision_elements": 106,
+        "unscaled_extents_m": [
+          1.0285,
+          0.136000087,
+          2.203
+        ],
+        "door_panel_extents_m": [
+          0.82,
+          0.047,
+          2.0300000000000002
+        ],
+        "fixed_frame_extents_m": [
+          1.0285,
+          0.10400000000000001,
+          2.203
+        ],
+        "door_panel_to_frame_width_ratio": 0.797277588721439,
+        "handle_reframe_sample_angle_rad": 0.392699,
+        "handle_joint_lower_rad": 0.0,
+        "handle_joint_upper_rad": 0.785398,
+        "handle_contact_radius_m": 0.03,
+        "controller_overrides": {
+          "handle_rotate_right_distance": 0.008292903342294817,
+          "handle_rotate_down_distance": 0.020707533766555698,
+          "handle_rotate_angle": 0.76183606,
+          "handle_unlock_ratio": 0.2
+        },
+        "visual_preservation_max_error_m": 1.9595436384634013e-13,
+        "collision_preservation_max_error_m": 1.9595436384634013e-13
+      }
+    }
+  ]
+}

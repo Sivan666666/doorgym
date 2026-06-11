@@ -1,0 +1,975 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="single_leaf_fire_security_door">
+  <material name="slightly_glossy_worn_red_powder_coat">
+    <color rgba="0.67 0.02 0.015 1" />
+  </material>
+  <material name="dark_red_inset_shadow">
+    <color rgba="0.22 0.005 0.004 1" />
+  </material>
+  <material name="chipped_red_edge_wear">
+    <color rgba="0.95 0.3 0.22 1" />
+  </material>
+  <material name="fine_pale_surface_scratches">
+    <color rgba="0.95 0.55 0.48 1" />
+  </material>
+  <material name="dark_gray_painted_metal_frame">
+    <color rgba="0.15 0.16 0.16 1" />
+  </material>
+  <material name="black_rubber_seals">
+    <color rgba="0.02 0.02 0.018 1" />
+  </material>
+  <material name="brushed_silver_metal">
+    <color rgba="0.78 0.78 0.75 1" />
+  </material>
+  <material name="dark_oiled_keyway">
+    <color rgba="0.04 0.04 0.045 1" />
+  </material>
+  <link name="fixed_frame">
+    <visual name="left_jamb">
+      <origin xyz="-0.0675 0.02 1.09" rpy="0 0 0" />
+      <geometry>
+        <box size="0.075 0.1 2.23" />
+      </geometry>
+      <material name="dark_gray_painted_metal_frame">
+        <color rgba="0.15 0.16 0.16 1" />
+      </material>
+    </visual>
+    <visual name="right_jamb">
+      <origin xyz="0.9605 0.02 1.09" rpy="0 0 0" />
+      <geometry>
+        <box size="0.075 0.1 2.23" />
+      </geometry>
+      <material name="dark_gray_painted_metal_frame">
+        <color rgba="0.15 0.16 0.16 1" />
+      </material>
+    </visual>
+    <visual name="header">
+      <origin xyz="0.4465 0.02 2.165" rpy="0 0 0" />
+      <geometry>
+        <box size="1.103 0.1 0.08" />
+      </geometry>
+      <material name="dark_gray_painted_metal_frame">
+        <color rgba="0.15 0.16 0.16 1" />
+      </material>
+    </visual>
+    <visual name="threshold">
+      <origin xyz="0.4465 0.018 -0.0085" rpy="0 0 0" />
+      <geometry>
+        <box size="1.103 0.095 0.025" />
+      </geometry>
+      <material name="dark_gray_painted_metal_frame">
+        <color rgba="0.15 0.16 0.16 1" />
+      </material>
+    </visual>
+    <visual name="compact_casing_left">
+      <origin xyz="-0.118 -0.035 1.097" rpy="0 0 0" />
+      <geometry>
+        <box size="0.03 0.02 2.245" />
+      </geometry>
+      <material name="dark_gray_painted_metal_frame">
+        <color rgba="0.15 0.16 0.16 1" />
+      </material>
+    </visual>
+    <visual name="compact_casing_right">
+      <origin xyz="1.011 -0.035 1.097" rpy="0 0 0" />
+      <geometry>
+        <box size="0.03 0.02 2.245" />
+      </geometry>
+      <material name="dark_gray_painted_metal_frame">
+        <color rgba="0.15 0.16 0.16 1" />
+      </material>
+    </visual>
+    <visual name="compact_casing_header">
+      <origin xyz="0.4465 -0.035 2.223" rpy="0 0 0" />
+      <geometry>
+        <box size="1.161 0.02 0.034" />
+      </geometry>
+      <material name="dark_gray_painted_metal_frame">
+        <color rgba="0.15 0.16 0.16 1" />
+      </material>
+    </visual>
+    <visual name="left_door_stop">
+      <origin xyz="-0.027 0.04 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.012 0.02 2.09" />
+      </geometry>
+      <material name="black_rubber_seals">
+        <color rgba="0.02 0.02 0.018 1" />
+      </material>
+    </visual>
+    <visual name="right_door_stop">
+      <origin xyz="0.934 0.04 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.012 0.02 2.09" />
+      </geometry>
+      <material name="black_rubber_seals">
+        <color rgba="0.02 0.02 0.018 1" />
+      </material>
+    </visual>
+    <visual name="header_door_stop">
+      <origin xyz="0.47 0.04 2.121" rpy="0 0 0" />
+      <geometry>
+        <box size="0.99 0.02 0.014" />
+      </geometry>
+      <material name="black_rubber_seals">
+        <color rgba="0.02 0.02 0.018 1" />
+      </material>
+    </visual>
+    <visual name="left_seal">
+      <origin xyz="-0.028 0.017 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.004 0.014 2.07" />
+      </geometry>
+      <material name="black_rubber_seals">
+        <color rgba="0.02 0.02 0.018 1" />
+      </material>
+    </visual>
+    <visual name="right_seal">
+      <origin xyz="0.927 0.017 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.004 0.014 2.07" />
+      </geometry>
+      <material name="black_rubber_seals">
+        <color rgba="0.02 0.02 0.018 1" />
+      </material>
+    </visual>
+    <visual name="header_seal">
+      <origin xyz="0.47 0.017 2.12" rpy="0 0 0" />
+      <geometry>
+        <box size="0.96 0.014 0.004" />
+      </geometry>
+      <material name="black_rubber_seals">
+        <color rgba="0.02 0.02 0.018 1" />
+      </material>
+    </visual>
+    <visual name="strike_plate">
+      <origin xyz="0.925 -0.004 1.005" rpy="0 0 0" />
+      <geometry>
+        <box size="0.004 0.045 0.16" />
+      </geometry>
+      <material name="brushed_silver_metal">
+        <color rgba="0.78 0.78 0.75 1" />
+      </material>
+    </visual>
+    <visual name="strike_latch_slot">
+      <origin xyz="0.9225 -0.007 1.005" rpy="0 0 0" />
+      <geometry>
+        <box size="0.005 0.02 0.05" />
+      </geometry>
+      <material name="dark_oiled_keyway">
+        <color rgba="0.04 0.04 0.045 1" />
+      </material>
+    </visual>
+    <visual name="strike_screw_upper">
+      <origin xyz="0.922 -0.012 1.065" rpy="3.14159265359 1.57079265359 3.14159265359" />
+      <geometry>
+        <cylinder radius="0.004" length="0.002" />
+      </geometry>
+      <material name="brushed_silver_metal">
+        <color rgba="0.78 0.78 0.75 1" />
+      </material>
+    </visual>
+    <visual name="strike_screw_lower">
+      <origin xyz="0.922 -0.012 0.945" rpy="3.14159265359 1.57079265359 3.14159265359" />
+      <geometry>
+        <cylinder radius="0.004" length="0.002" />
+      </geometry>
+      <material name="brushed_silver_metal">
+        <color rgba="0.78 0.78 0.75 1" />
+      </material>
+    </visual>
+    <visual name="hinge_leaf_frame_upper">
+      <origin xyz="-0.038 -0.024 1.73" rpy="0 0 0" />
+      <geometry>
+        <box size="0.048 0.004 0.26" />
+      </geometry>
+      <material name="slightly_glossy_worn_red_powder_coat">
+        <color rgba="0.67 0.02 0.015 1" />
+      </material>
+    </visual>
+    <visual name="hinge_pin_upper_frame_bottom">
+      <origin xyz="0 -0.034 1.6405" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.01" length="0.075" />
+      </geometry>
+      <material name="slightly_glossy_worn_red_powder_coat">
+        <color rgba="0.67 0.02 0.015 1" />
+      </material>
+    </visual>
+    <visual name="hinge_leaf_frame_upper_strap_bottom">
+      <origin xyz="-0.032 -0.024 1.6405" rpy="0 0 0" />
+      <geometry>
+        <box size="0.064 0.004 0.0525" />
+      </geometry>
+      <material name="slightly_glossy_worn_red_powder_coat">
+        <color rgba="0.67 0.02 0.015 1" />
+      </material>
+    </visual>
+    <visual name="hinge_pin_upper_frame_top">
+      <origin xyz="0 -0.034 1.8195" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.01" length="0.075" />
+      </geometry>
+      <material name="slightly_glossy_worn_red_powder_coat">
+        <color rgba="0.67 0.02 0.015 1" />
+      </material>
+    </visual>
+    <visual name="hinge_leaf_frame_upper_strap_top">
+      <origin xyz="-0.032 -0.024 1.8195" rpy="0 0 0" />
+      <geometry>
+        <box size="0.064 0.004 0.0525" />
+      </geometry>
+      <material name="slightly_glossy_worn_red_powder_coat">
+        <color rgba="0.67 0.02 0.015 1" />
+      </material>
+    </visual>
+    <visual name="hinge_screw_frame_upper_0">
+      <origin xyz="-0.038 -0.0263 1.652" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0045" length="0.002" />
+      </geometry>
+      <material name="dark_red_inset_shadow">
+        <color rgba="0.22 0.005 0.004 1" />
+      </material>
+    </visual>
+    <visual name="hinge_screw_frame_upper_1">
+      <origin xyz="-0.038 -0.0263 1.808" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0045" length="0.002" />
+      </geometry>
+      <material name="dark_red_inset_shadow">
+        <color rgba="0.22 0.005 0.004 1" />
+      </material>
+    </visual>
+    <visual name="hinge_leaf_frame_lower">
+      <origin xyz="-0.038 -0.024 0.57" rpy="0 0 0" />
+      <geometry>
+        <box size="0.048 0.004 0.26" />
+      </geometry>
+      <material name="slightly_glossy_worn_red_powder_coat">
+        <color rgba="0.67 0.02 0.015 1" />
+      </material>
+    </visual>
+    <visual name="hinge_pin_lower_frame_bottom">
+      <origin xyz="0 -0.034 0.4805" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.01" length="0.075" />
+      </geometry>
+      <material name="slightly_glossy_worn_red_powder_coat">
+        <color rgba="0.67 0.02 0.015 1" />
+      </material>
+    </visual>
+    <visual name="hinge_leaf_frame_lower_strap_bottom">
+      <origin xyz="-0.032 -0.024 0.4805" rpy="0 0 0" />
+      <geometry>
+        <box size="0.064 0.004 0.0525" />
+      </geometry>
+      <material name="slightly_glossy_worn_red_powder_coat">
+        <color rgba="0.67 0.02 0.015 1" />
+      </material>
+    </visual>
+    <visual name="hinge_pin_lower_frame_top">
+      <origin xyz="0 -0.034 0.6595" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.01" length="0.075" />
+      </geometry>
+      <material name="slightly_glossy_worn_red_powder_coat">
+        <color rgba="0.67 0.02 0.015 1" />
+      </material>
+    </visual>
+    <visual name="hinge_leaf_frame_lower_strap_top">
+      <origin xyz="-0.032 -0.024 0.6595" rpy="0 0 0" />
+      <geometry>
+        <box size="0.064 0.004 0.0525" />
+      </geometry>
+      <material name="slightly_glossy_worn_red_powder_coat">
+        <color rgba="0.67 0.02 0.015 1" />
+      </material>
+    </visual>
+    <visual name="hinge_screw_frame_lower_0">
+      <origin xyz="-0.038 -0.0263 0.492" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0045" length="0.002" />
+      </geometry>
+      <material name="dark_red_inset_shadow">
+        <color rgba="0.22 0.005 0.004 1" />
+      </material>
+    </visual>
+    <visual name="hinge_screw_frame_lower_1">
+      <origin xyz="-0.038 -0.0263 0.648" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0045" length="0.002" />
+      </geometry>
+      <material name="dark_red_inset_shadow">
+        <color rgba="0.22 0.005 0.004 1" />
+      </material>
+    </visual>
+    <collision name="left_jamb">
+      <origin xyz="-0.0675 0.02 1.09" rpy="0 0 0" />
+      <geometry>
+        <box size="0.075 0.1 2.23" />
+      </geometry>
+    </collision>
+    <collision name="right_jamb">
+      <origin xyz="0.9605 0.02 1.09" rpy="0 0 0" />
+      <geometry>
+        <box size="0.075 0.1 2.23" />
+      </geometry>
+    </collision>
+    <collision name="header">
+      <origin xyz="0.4465 0.02 2.165" rpy="0 0 0" />
+      <geometry>
+        <box size="1.103 0.1 0.08" />
+      </geometry>
+    </collision>
+    <collision name="threshold">
+      <origin xyz="0.4465 0.018 -0.0085" rpy="0 0 0" />
+      <geometry>
+        <box size="1.103 0.095 0.025" />
+      </geometry>
+    </collision>
+    <collision name="compact_casing_left">
+      <origin xyz="-0.118 -0.035 1.097" rpy="0 0 0" />
+      <geometry>
+        <box size="0.03 0.02 2.245" />
+      </geometry>
+    </collision>
+    <collision name="compact_casing_right">
+      <origin xyz="1.011 -0.035 1.097" rpy="0 0 0" />
+      <geometry>
+        <box size="0.03 0.02 2.245" />
+      </geometry>
+    </collision>
+    <collision name="compact_casing_header">
+      <origin xyz="0.4465 -0.035 2.223" rpy="0 0 0" />
+      <geometry>
+        <box size="1.161 0.02 0.034" />
+      </geometry>
+    </collision>
+    <collision name="left_door_stop">
+      <origin xyz="-0.027 0.04 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.012 0.02 2.09" />
+      </geometry>
+    </collision>
+    <collision name="right_door_stop">
+      <origin xyz="0.934 0.04 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.012 0.02 2.09" />
+      </geometry>
+    </collision>
+    <collision name="header_door_stop">
+      <origin xyz="0.47 0.04 2.121" rpy="0 0 0" />
+      <geometry>
+        <box size="0.99 0.02 0.014" />
+      </geometry>
+    </collision>
+    <collision name="left_seal">
+      <origin xyz="-0.028 0.017 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.004 0.014 2.07" />
+      </geometry>
+    </collision>
+    <collision name="right_seal">
+      <origin xyz="0.927 0.017 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.004 0.014 2.07" />
+      </geometry>
+    </collision>
+    <collision name="header_seal">
+      <origin xyz="0.47 0.017 2.12" rpy="0 0 0" />
+      <geometry>
+        <box size="0.96 0.014 0.004" />
+      </geometry>
+    </collision>
+    <collision name="strike_plate">
+      <origin xyz="0.925 -0.004 1.005" rpy="0 0 0" />
+      <geometry>
+        <box size="0.004 0.045 0.16" />
+      </geometry>
+    </collision>
+    <collision name="strike_latch_slot">
+      <origin xyz="0.9225 -0.007 1.005" rpy="0 0 0" />
+      <geometry>
+        <box size="0.005 0.02 0.05" />
+      </geometry>
+    </collision>
+    <collision name="strike_screw_upper">
+      <origin xyz="0.922 -0.012 1.065" rpy="3.14159265359 1.57079265359 3.14159265359" />
+      <geometry>
+        <cylinder radius="0.004" length="0.002" />
+      </geometry>
+    </collision>
+    <collision name="strike_screw_lower">
+      <origin xyz="0.922 -0.012 0.945" rpy="3.14159265359 1.57079265359 3.14159265359" />
+      <geometry>
+        <cylinder radius="0.004" length="0.002" />
+      </geometry>
+    </collision>
+    <collision name="hinge_leaf_frame_upper">
+      <origin xyz="-0.038 -0.024 1.73" rpy="0 0 0" />
+      <geometry>
+        <box size="0.048 0.004 0.26" />
+      </geometry>
+    </collision>
+    <collision name="hinge_pin_upper_frame_bottom">
+      <origin xyz="0 -0.034 1.6405" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.01" length="0.075" />
+      </geometry>
+    </collision>
+    <collision name="hinge_leaf_frame_upper_strap_bottom">
+      <origin xyz="-0.032 -0.024 1.6405" rpy="0 0 0" />
+      <geometry>
+        <box size="0.064 0.004 0.0525" />
+      </geometry>
+    </collision>
+    <collision name="hinge_pin_upper_frame_top">
+      <origin xyz="0 -0.034 1.8195" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.01" length="0.075" />
+      </geometry>
+    </collision>
+    <collision name="hinge_leaf_frame_upper_strap_top">
+      <origin xyz="-0.032 -0.024 1.8195" rpy="0 0 0" />
+      <geometry>
+        <box size="0.064 0.004 0.0525" />
+      </geometry>
+    </collision>
+    <collision name="hinge_screw_frame_upper_0">
+      <origin xyz="-0.038 -0.0263 1.652" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0045" length="0.002" />
+      </geometry>
+    </collision>
+    <collision name="hinge_screw_frame_upper_1">
+      <origin xyz="-0.038 -0.0263 1.808" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0045" length="0.002" />
+      </geometry>
+    </collision>
+    <collision name="hinge_leaf_frame_lower">
+      <origin xyz="-0.038 -0.024 0.57" rpy="0 0 0" />
+      <geometry>
+        <box size="0.048 0.004 0.26" />
+      </geometry>
+    </collision>
+    <collision name="hinge_pin_lower_frame_bottom">
+      <origin xyz="0 -0.034 0.4805" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.01" length="0.075" />
+      </geometry>
+    </collision>
+    <collision name="hinge_leaf_frame_lower_strap_bottom">
+      <origin xyz="-0.032 -0.024 0.4805" rpy="0 0 0" />
+      <geometry>
+        <box size="0.064 0.004 0.0525" />
+      </geometry>
+    </collision>
+    <collision name="hinge_pin_lower_frame_top">
+      <origin xyz="0 -0.034 0.6595" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.01" length="0.075" />
+      </geometry>
+    </collision>
+    <collision name="hinge_leaf_frame_lower_strap_top">
+      <origin xyz="-0.032 -0.024 0.6595" rpy="0 0 0" />
+      <geometry>
+        <box size="0.064 0.004 0.0525" />
+      </geometry>
+    </collision>
+    <collision name="hinge_screw_frame_lower_0">
+      <origin xyz="-0.038 -0.0263 0.492" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0045" length="0.002" />
+      </geometry>
+    </collision>
+    <collision name="hinge_screw_frame_lower_1">
+      <origin xyz="-0.038 -0.0263 0.648" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0045" length="0.002" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="door_panel">
+    <visual name="door_slab">
+      <geometry>
+        <mesh filename="assets/meshes/red_beveled_door_slab.obj" />
+      </geometry>
+      <material name="slightly_glossy_worn_red_powder_coat">
+        <color rgba="0.67 0.02 0.015 1" />
+      </material>
+    </visual>
+    <visual name="inset_seam_left">
+      <origin xyz="0.06 0.0115 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.004 0.0012 1.99" />
+      </geometry>
+      <material name="dark_red_inset_shadow">
+        <color rgba="0.22 0.005 0.004 1" />
+      </material>
+    </visual>
+    <visual name="inset_seam_right">
+      <origin xyz="0.88 0.0115 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.004 0.0012 1.99" />
+      </geometry>
+      <material name="dark_red_inset_shadow">
+        <color rgba="0.22 0.005 0.004 1" />
+      </material>
+    </visual>
+    <visual name="inset_seam_top">
+      <origin xyz="0.47 0.0115 2.056" rpy="0 0 0" />
+      <geometry>
+        <box size="0.824 0.0012 0.004" />
+      </geometry>
+      <material name="dark_red_inset_shadow">
+        <color rgba="0.22 0.005 0.004 1" />
+      </material>
+    </visual>
+    <visual name="inset_seam_bottom">
+      <origin xyz="0.47 0.0115 0.064" rpy="0 0 0" />
+      <geometry>
+        <box size="0.824 0.0012 0.004" />
+      </geometry>
+      <material name="dark_red_inset_shadow">
+        <color rgba="0.22 0.005 0.004 1" />
+      </material>
+    </visual>
+    <visual name="worn_free_edge_highlight">
+      <origin xyz="0.916 0.0112 1.23" rpy="0 0 0" />
+      <geometry>
+        <box size="0.006 0.001 0.68" />
+      </geometry>
+      <material name="chipped_red_edge_wear">
+        <color rgba="0.95 0.3 0.22 1" />
+      </material>
+    </visual>
+    <visual name="worn_bottom_edge">
+      <origin xyz="0.48 0.0112 0.031" rpy="0 0 0" />
+      <geometry>
+        <box size="0.76 0.001 0.005" />
+      </geometry>
+      <material name="chipped_red_edge_wear">
+        <color rgba="0.95 0.3 0.22 1" />
+      </material>
+    </visual>
+    <visual name="scratch_0">
+      <origin xyz="0.35 0.0111 1.44" rpy="0 -0.24 0" />
+      <geometry>
+        <box size="0.115 0.0008 0.0015" />
+      </geometry>
+      <material name="fine_pale_surface_scratches">
+        <color rgba="0.95 0.55 0.48 1" />
+      </material>
+    </visual>
+    <visual name="scratch_1">
+      <origin xyz="0.54 0.0111 1.31" rpy="0 0.34 0" />
+      <geometry>
+        <box size="0.085 0.0008 0.0015" />
+      </geometry>
+      <material name="fine_pale_surface_scratches">
+        <color rgba="0.95 0.55 0.48 1" />
+      </material>
+    </visual>
+    <visual name="scratch_2">
+      <origin xyz="0.62 0.0111 1.53" rpy="0 -0.58 0" />
+      <geometry>
+        <box size="0.062 0.0008 0.0015" />
+      </geometry>
+      <material name="fine_pale_surface_scratches">
+        <color rgba="0.95 0.55 0.48 1" />
+      </material>
+    </visual>
+    <visual name="scratch_3">
+      <origin xyz="0.71 0.0111 1.24" rpy="0 0.18 0" />
+      <geometry>
+        <box size="0.07 0.0008 0.0015" />
+      </geometry>
+      <material name="fine_pale_surface_scratches">
+        <color rgba="0.95 0.55 0.48 1" />
+      </material>
+    </visual>
+    <visual name="scratch_4">
+      <origin xyz="0.42 0.0111 0.94" rpy="0 -0.42 0" />
+      <geometry>
+        <box size="0.105 0.0008 0.0015" />
+      </geometry>
+      <material name="fine_pale_surface_scratches">
+        <color rgba="0.95 0.55 0.48 1" />
+      </material>
+    </visual>
+    <visual name="scratch_5">
+      <origin xyz="0.3 0.0111 1.68" rpy="0 0.62 0" />
+      <geometry>
+        <box size="0.052 0.0008 0.0015" />
+      </geometry>
+      <material name="fine_pale_surface_scratches">
+        <color rgba="0.95 0.55 0.48 1" />
+      </material>
+    </visual>
+    <visual name="hinge_leaf_panel_upper">
+      <origin xyz="0.038 0.0105 1.73" rpy="0 0 0" />
+      <geometry>
+        <box size="0.048 0.004 0.26" />
+      </geometry>
+      <material name="slightly_glossy_worn_red_powder_coat">
+        <color rgba="0.67 0.02 0.015 1" />
+      </material>
+    </visual>
+    <visual name="hinge_pin_upper_panel">
+      <origin xyz="0 0 1.73" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.01" length="0.092" />
+      </geometry>
+      <material name="slightly_glossy_worn_red_powder_coat">
+        <color rgba="0.67 0.02 0.015 1" />
+      </material>
+    </visual>
+    <visual name="hinge_leaf_panel_upper_knuckle_strap">
+      <origin xyz="0.032 0.0105 1.73" rpy="0 0 0" />
+      <geometry>
+        <box size="0.064 0.004 0.06624" />
+      </geometry>
+      <material name="slightly_glossy_worn_red_powder_coat">
+        <color rgba="0.67 0.02 0.015 1" />
+      </material>
+    </visual>
+    <visual name="hinge_screw_panel_upper_0">
+      <origin xyz="0.038 0.0082 1.652" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0045" length="0.002" />
+      </geometry>
+      <material name="dark_red_inset_shadow">
+        <color rgba="0.22 0.005 0.004 1" />
+      </material>
+    </visual>
+    <visual name="hinge_screw_panel_upper_1">
+      <origin xyz="0.038 0.0082 1.808" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0045" length="0.002" />
+      </geometry>
+      <material name="dark_red_inset_shadow">
+        <color rgba="0.22 0.005 0.004 1" />
+      </material>
+    </visual>
+    <visual name="hinge_leaf_panel_lower">
+      <origin xyz="0.038 0.0105 0.57" rpy="0 0 0" />
+      <geometry>
+        <box size="0.048 0.004 0.26" />
+      </geometry>
+      <material name="slightly_glossy_worn_red_powder_coat">
+        <color rgba="0.67 0.02 0.015 1" />
+      </material>
+    </visual>
+    <visual name="hinge_pin_lower_panel">
+      <origin xyz="0 0 0.57" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.01" length="0.092" />
+      </geometry>
+      <material name="slightly_glossy_worn_red_powder_coat">
+        <color rgba="0.67 0.02 0.015 1" />
+      </material>
+    </visual>
+    <visual name="hinge_leaf_panel_lower_knuckle_strap">
+      <origin xyz="0.032 0.0105 0.57" rpy="0 0 0" />
+      <geometry>
+        <box size="0.064 0.004 0.06624" />
+      </geometry>
+      <material name="slightly_glossy_worn_red_powder_coat">
+        <color rgba="0.67 0.02 0.015 1" />
+      </material>
+    </visual>
+    <visual name="hinge_screw_panel_lower_0">
+      <origin xyz="0.038 0.0082 0.492" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0045" length="0.002" />
+      </geometry>
+      <material name="dark_red_inset_shadow">
+        <color rgba="0.22 0.005 0.004 1" />
+      </material>
+    </visual>
+    <visual name="hinge_screw_panel_lower_1">
+      <origin xyz="0.038 0.0082 0.648" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0045" length="0.002" />
+      </geometry>
+      <material name="dark_red_inset_shadow">
+        <color rgba="0.22 0.005 0.004 1" />
+      </material>
+    </visual>
+    <visual name="handle_back_plate">
+      <origin xyz="0.785 0.0105 1.05" rpy="0 0 0" />
+      <geometry>
+        <box size="0.08 0.003 0.116" />
+      </geometry>
+      <material name="brushed_silver_metal">
+        <color rgba="0.78 0.78 0.75 1" />
+      </material>
+    </visual>
+    <visual name="handle_rosette">
+      <origin xyz="0.785 0.0065 1.05" rpy="-1.5708 0 0" />
+      <geometry>
+        <mesh filename="assets/meshes/handle_rosette_ring.obj" />
+      </geometry>
+      <material name="brushed_silver_metal">
+        <color rgba="0.78 0.78 0.75 1" />
+      </material>
+    </visual>
+    <visual name="lock_cylinder">
+      <origin xyz="0.785 0.008 0.9" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.027" length="0.007" />
+      </geometry>
+      <material name="brushed_silver_metal">
+        <color rgba="0.78 0.78 0.75 1" />
+      </material>
+    </visual>
+    <visual name="keyhole_round">
+      <origin xyz="0.785 0.00375 0.904" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.006" length="0.0015" />
+      </geometry>
+      <material name="dark_oiled_keyway">
+        <color rgba="0.04 0.04 0.045 1" />
+      </material>
+    </visual>
+    <visual name="keyhole_slot">
+      <origin xyz="0.785 0.00365 0.891" rpy="0 0 0" />
+      <geometry>
+        <box size="0.007 0.0015 0.02" />
+      </geometry>
+      <material name="dark_oiled_keyway">
+        <color rgba="0.04 0.04 0.045 1" />
+      </material>
+    </visual>
+    <collision name="door_slab">
+      <geometry>
+        <mesh filename="assets/meshes/red_beveled_door_slab.obj" />
+      </geometry>
+    </collision>
+    <collision name="inset_seam_left">
+      <origin xyz="0.06 0.0115 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.004 0.0012 1.99" />
+      </geometry>
+    </collision>
+    <collision name="inset_seam_right">
+      <origin xyz="0.88 0.0115 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.004 0.0012 1.99" />
+      </geometry>
+    </collision>
+    <collision name="inset_seam_top">
+      <origin xyz="0.47 0.0115 2.056" rpy="0 0 0" />
+      <geometry>
+        <box size="0.824 0.0012 0.004" />
+      </geometry>
+    </collision>
+    <collision name="inset_seam_bottom">
+      <origin xyz="0.47 0.0115 0.064" rpy="0 0 0" />
+      <geometry>
+        <box size="0.824 0.0012 0.004" />
+      </geometry>
+    </collision>
+    <collision name="worn_free_edge_highlight">
+      <origin xyz="0.916 0.0112 1.23" rpy="0 0 0" />
+      <geometry>
+        <box size="0.006 0.001 0.68" />
+      </geometry>
+    </collision>
+    <collision name="worn_bottom_edge">
+      <origin xyz="0.48 0.0112 0.031" rpy="0 0 0" />
+      <geometry>
+        <box size="0.76 0.001 0.005" />
+      </geometry>
+    </collision>
+    <collision name="scratch_0">
+      <origin xyz="0.35 0.0111 1.44" rpy="0 -0.24 0" />
+      <geometry>
+        <box size="0.115 0.0008 0.0015" />
+      </geometry>
+    </collision>
+    <collision name="scratch_1">
+      <origin xyz="0.54 0.0111 1.31" rpy="0 0.34 0" />
+      <geometry>
+        <box size="0.085 0.0008 0.0015" />
+      </geometry>
+    </collision>
+    <collision name="scratch_2">
+      <origin xyz="0.62 0.0111 1.53" rpy="0 -0.58 0" />
+      <geometry>
+        <box size="0.062 0.0008 0.0015" />
+      </geometry>
+    </collision>
+    <collision name="scratch_3">
+      <origin xyz="0.71 0.0111 1.24" rpy="0 0.18 0" />
+      <geometry>
+        <box size="0.07 0.0008 0.0015" />
+      </geometry>
+    </collision>
+    <collision name="scratch_4">
+      <origin xyz="0.42 0.0111 0.94" rpy="0 -0.42 0" />
+      <geometry>
+        <box size="0.105 0.0008 0.0015" />
+      </geometry>
+    </collision>
+    <collision name="scratch_5">
+      <origin xyz="0.3 0.0111 1.68" rpy="0 0.62 0" />
+      <geometry>
+        <box size="0.052 0.0008 0.0015" />
+      </geometry>
+    </collision>
+    <collision name="hinge_leaf_panel_upper">
+      <origin xyz="0.038 0.0105 1.73" rpy="0 0 0" />
+      <geometry>
+        <box size="0.048 0.004 0.26" />
+      </geometry>
+    </collision>
+    <collision name="hinge_pin_upper_panel">
+      <origin xyz="0 0 1.73" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.01" length="0.092" />
+      </geometry>
+    </collision>
+    <collision name="hinge_leaf_panel_upper_knuckle_strap">
+      <origin xyz="0.032 0.0105 1.73" rpy="0 0 0" />
+      <geometry>
+        <box size="0.064 0.004 0.06624" />
+      </geometry>
+    </collision>
+    <collision name="hinge_screw_panel_upper_0">
+      <origin xyz="0.038 0.0082 1.652" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0045" length="0.002" />
+      </geometry>
+    </collision>
+    <collision name="hinge_screw_panel_upper_1">
+      <origin xyz="0.038 0.0082 1.808" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0045" length="0.002" />
+      </geometry>
+    </collision>
+    <collision name="hinge_leaf_panel_lower">
+      <origin xyz="0.038 0.0105 0.57" rpy="0 0 0" />
+      <geometry>
+        <box size="0.048 0.004 0.26" />
+      </geometry>
+    </collision>
+    <collision name="hinge_pin_lower_panel">
+      <origin xyz="0 0 0.57" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.01" length="0.092" />
+      </geometry>
+    </collision>
+    <collision name="hinge_leaf_panel_lower_knuckle_strap">
+      <origin xyz="0.032 0.0105 0.57" rpy="0 0 0" />
+      <geometry>
+        <box size="0.064 0.004 0.06624" />
+      </geometry>
+    </collision>
+    <collision name="hinge_screw_panel_lower_0">
+      <origin xyz="0.038 0.0082 0.492" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0045" length="0.002" />
+      </geometry>
+    </collision>
+    <collision name="hinge_screw_panel_lower_1">
+      <origin xyz="0.038 0.0082 0.648" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0045" length="0.002" />
+      </geometry>
+    </collision>
+    <collision name="handle_back_plate">
+      <origin xyz="0.785 0.0105 1.05" rpy="0 0 0" />
+      <geometry>
+        <box size="0.08 0.003 0.116" />
+      </geometry>
+    </collision>
+    <collision name="handle_rosette">
+      <origin xyz="0.785 0.0065 1.05" rpy="-1.5708 0 0" />
+      <geometry>
+        <mesh filename="assets/meshes/handle_rosette_ring.obj" />
+      </geometry>
+    </collision>
+    <collision name="lock_cylinder">
+      <origin xyz="0.785 0.008 0.9" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.027" length="0.007" />
+      </geometry>
+    </collision>
+    <collision name="keyhole_round">
+      <origin xyz="0.785 0.00375 0.904" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.006" length="0.0015" />
+      </geometry>
+    </collision>
+    <collision name="keyhole_slot">
+      <origin xyz="0.785 0.00365 0.891" rpy="0 0 0" />
+      <geometry>
+        <box size="0.007 0.0015 0.02" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="lever_handle">
+    <visual name="lever_grip">
+      <origin xyz="0 0 0" rpy="-1.57079632679 -0 -0.000134781329596" />
+      <geometry>
+        <mesh filename="assets/meshes/silver_handle_lever_grip.obj" />
+      </geometry>
+      <material name="brushed_silver_metal">
+        <color rgba="0.78 0.78 0.75 1" />
+      </material>
+    </visual>
+    <visual name="handle_pivot_cap">
+      <origin xyz="0 0 0.004" rpy="3.14158898038 -0 -0.000134781329596" />
+      <geometry>
+        <cylinder radius="0.024" length="0.008" />
+      </geometry>
+      <material name="brushed_silver_metal">
+        <color rgba="0.78 0.78 0.75 1" />
+      </material>
+    </visual>
+    <visual name="short_spindle">
+      <origin xyz="0 0 -0.001" rpy="3.14158898038 -0 -0.000134781329596" />
+      <geometry>
+        <cylinder radius="0.01" length="0.002" />
+      </geometry>
+      <material name="brushed_silver_metal">
+        <color rgba="0.78 0.78 0.75 1" />
+      </material>
+    </visual>
+    <collision name="lever_grip">
+      <origin xyz="0 0 0" rpy="-1.57079632679 -0 -0.000134781329596" />
+      <geometry>
+        <mesh filename="assets/meshes/silver_handle_lever_grip.obj" />
+      </geometry>
+    </collision>
+    <collision name="handle_pivot_cap">
+      <origin xyz="0 0 0.004" rpy="3.14158898038 -0 -0.000134781329596" />
+      <geometry>
+        <cylinder radius="0.024" length="0.008" />
+      </geometry>
+    </collision>
+    <collision name="short_spindle">
+      <origin xyz="0 0 -0.001" rpy="3.14158898038 -0 -0.000134781329596" />
+      <geometry>
+        <cylinder radius="0.01" length="0.002" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="door_hinge_joint" type="revolute">
+    <origin xyz="0 -0.034 0" rpy="0 0 0" />
+    <parent link="fixed_frame" />
+    <child link="door_panel" />
+    <axis xyz="0 0 1" />
+    <limit effort="120" velocity="1.2" lower="0" upper="1.8326" />
+  </joint>
+  <joint name="handle_spindle_joint" type="revolute">
+    <origin xyz="0.785 0.0035 1.05" rpy="1.57079632679 -0.000134781329596 0" />
+    <parent link="door_panel" />
+    <child link="lever_handle" />
+    <axis xyz="0 0 1" />
+    <limit effort="4" velocity="3" lower="0" upper="0.523599" />
+  </joint>
+</robot>

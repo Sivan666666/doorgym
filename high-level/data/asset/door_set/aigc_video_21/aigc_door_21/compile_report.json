@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "record_id": "rec_using-the-reference-image-for-overall-proportion_20260611_020039_417109_e5654919",
+  "status": "success",
+  "urdf_path": "model.urdf",
+  "warnings": [],
+  "checks_run": [
+    "compile_urdf_fast"
+  ],
+  "overlap_allowances": [],
+  "metrics": {
+    "compile_level": "full",
+    "validation_level": "none",
+    "fingerprint_inputs": {
+      "model_py_sha256": "d641e1cecaf0c7a19a0cf42bd253add17e49feece5d1a477da05b2768d2815b5",
+      "sdk_fingerprint": null
+    },
+    "materialization_fingerprint": "d7e95d1126d6d8f36d5e1fbb21a0e87bfaf42f7ce332342e04d735c9abfe4513",
+    "model_py_mtime_ns": 1781143986589423492,
+    "model_py_size_bytes": 23751,
+    "materialization_status": "available",
+    "visual_mesh_bytes": 0,
+    "visual_mesh_file_count": 0,
+    "compile_elapsed_seconds": 0.00502052299270872
+  },
+  "signal_bundle": {
+    "status": "success",
+    "summary": "status=success failures=0 warnings=0 notes=0\nCompile passed cleanly.",
+    "signals": []
+  }
+}
