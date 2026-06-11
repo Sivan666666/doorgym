@@ -43,6 +43,54 @@ DEFAULT_DOOR_ASSET_NAMES = (
     "99655039960006",
     "wc4",
 )
+
+
+def _reorder_preferred_door(entries, preferred_name):
+    if not preferred_name:
+        return list(entries)
+    preferred = [entry for entry in entries if entry[1].get("name") == preferred_name]
+    others = [entry for entry in entries if entry[1].get("name") != preferred_name]
+    return preferred + others
+
+
+def _select_diverse_door_entries(entries, max_count, preferred_name=""):
+    entries = list(entries)
+    if not entries:
+        return []
+
+    preferred = []
+    pool = entries
+    if preferred_name:
+        preferred = [entry for entry in entries if entry[1].get("name") == preferred_name]
+        if preferred:
+            preferred = preferred[:1]
+            pool = [entry for entry in entries if entry[1].get("name") != preferred_name]
+        else:
+            preferred = []
+
+    if max_count is None or int(max_count) <= 0:
+        max_count = len(entries)
+    max_count = max(1, min(int(max_count), len(entries)))
+    remaining = max_count - len(preferred)
+    if remaining <= 0:
+        return preferred[:max_count]
+    if remaining >= len(pool):
+        return preferred + pool
+
+    if remaining == 1:
+        sampled = [pool[0]]
+    else:
+        sampled = []
+        used = set()
+        for i in range(remaining):
+            idx = int(round(i * (len(pool) - 1) / float(remaining - 1)))
+            while idx in used and idx + 1 < len(pool):
+                idx += 1
+            while idx in used and idx > 0:
+                idx -= 1
+            used.add(idx)
+            sampled.append(pool[idx])
+    return preferred + sampled
 DEFAULT_WRIST_CAMERA_CFG = {
     "horizontal_fov": 69,
     "resolution": DEPTH_CAMERA_RESOLUTION,
@@ -351,10 +399,23 @@ def load_door_specs(args):
             raise RuntimeError(f"--door_index={args.door_index} out of range for {len(specs)} doors")
         selected_entries = [specs[args.door_index]]
     else:
-        for name in DEFAULT_DOOR_ASSET_NAMES:
-            selected_entries.extend((idx, spec) for idx, spec in specs if spec.get("name") == name)
-        if not selected_entries:
-            selected_entries = specs
+        selection = str(getattr(args, "door_selection", "default")).strip().lower()
+        preferred_name = str(getattr(args, "door_prefer_name", "") or "")
+        max_unique = int(getattr(args, "door_max_unique_assets", 0) or 0)
+        if selection in ("all", "all_doors"):
+            selected_entries = _reorder_preferred_door(specs, preferred_name)
+        elif selection in ("diverse", "spread", "sample"):
+            env_count = max(1, int(getattr(args, "num_envs", len(specs)) or len(specs)))
+            if max_unique <= 0:
+                max_unique = min(env_count, len(specs))
+            else:
+                max_unique = min(max_unique, env_count, len(specs))
+            selected_entries = _select_diverse_door_entries(specs, max_unique, preferred_name=preferred_name)
+        else:
+            for name in DEFAULT_DOOR_ASSET_NAMES:
+                selected_entries.extend((idx, spec) for idx, spec in specs if spec.get("name") == name)
+            if not selected_entries:
+                selected_entries = specs
     if not selected_entries:
         raise RuntimeError(f"No door assets found in {cfg_path}")
 

@@ -48,7 +48,7 @@ def parse_args():
         "--steps",
         type=int,
         default=None,
-        help="Simulator steps. Defaults to 2210 for ikpush, 4300 for ikpull, and 2500 for pull/push.",
+        help="Simulator steps. Defaults to 2405 for ikpush, 4300 for ikpull, and 2500 for pull/push.",
     )
     parser.add_argument(
         "--seed",
@@ -61,7 +61,8 @@ def parse_args():
     parser.add_argument("--graphics_device_id", type=int, default=None)
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--rgb", action="store_true", help="Record RGB+mask vision for push/ikpush/ikpull data instead of full depth+mask.")
-    parser.add_argument("--depth_only", action="store_true", help="Record only wrist/front depth images, without mask images.")
+    parser.add_argument("--depth_only", dest="depth_only", action="store_true", default=True, help="Record only wrist/front depth images, without mask images.")
+    parser.add_argument("--no_depth_only", dest="depth_only", action="store_false", help="Record legacy depth+mask image inputs.")
     add_depth_aug_args(parser)
     parser.add_argument("--record_env_id", type=int, default=0)
     parser.add_argument("--record_all_envs", dest="record_all_envs", action="store_true", default=True)
@@ -211,8 +212,13 @@ def main():
     if args.num_rollouts <= 0:
         raise ValueError("--num_rollouts must be positive")
     modes = ["pull", "push"] if args.mode == "both" else [args.mode]
+    explicit_depth_only = "--depth_only" in sys.argv[1:]
     if args.steps is None:
-        args.steps = 2210 if modes == ["ikpush"] else (4300 if modes == ["ikpull"] else 2500)
+        args.steps = 2405 if modes == ["ikpush"] else (4300 if modes == ["ikpull"] else 2500)
+    if args.rgb:
+        args.depth_only = False
+    elif args.depth_only and any(mode not in ("ikpush", "ikpull") for mode in modes) and not explicit_depth_only:
+        args.depth_only = False
     if args.rgb and any(mode not in ("push", "ikpush", "ikpull") for mode in modes):
         raise ValueError("--rgb recording is only wired for push/ikpush/ikpull mode.")
     if args.headless:

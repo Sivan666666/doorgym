@@ -211,7 +211,7 @@ def parse_args():
             {"name": "--asset_file", "type": str, "default": base_ik.DEFAULT_ASSET_FILE},
             {"name": "--rl_device", "type": str, "default": "cuda:0"},
             {"name": "--num_envs", "type": int, "default": 1},
-            {"name": "--steps", "type": int, "default": 2900},
+            {"name": "--steps", "type": int, "default": 2405},
             {"name": "--door_cfg", "type": str, "default": str(DEFAULT_DOOR_CFG)},
             {"name": "--door_name", "type": str, "default": ""},
             {"name": "--door_index", "type": int, "default": -1},
@@ -339,7 +339,8 @@ def parse_args():
             {"name": "--show_seg", "action": "store_true"},
             {"name": "--no_show_seg", "action": "store_true"},
             {"name": "--rgb", "action": "store_true", "help": "Show RGB+mask camera previews instead of full depth+mask."},
-            {"name": "--depth_only", "action": "store_true", "help": "Record only wrist/front depth images, without handle mask images."},
+            {"name": "--depth_only", "dest": "depth_only", "action": "store_true", "default": True, "help": "Record/use only wrist/front depth images, without handle mask images."},
+            {"name": "--no_depth_only", "dest": "depth_only", "action": "store_false", "help": "Use legacy depth+mask image inputs."},
             {"name": "--camera_rgb", "action": "store_true"},
             {"name": "--camera_depth", "action": "store_true"},
             {"name": "--no_camera_depth", "action": "store_true"},
@@ -348,7 +349,7 @@ def parse_args():
             {"name": "--handle_seg_id", "type": int, "default": 2},
             {"name": "--camera_depth_clip_lower", "type": float, "default": 0.02},
             {"name": "--camera_depth_clip_far", "type": float, "default": 2.0},
-            {"name": "--camera_display_scale", "type": int, "default": 5},
+            {"name": "--camera_display_scale", "type": int, "default": 1},
             {"name": "--camera_display_interval", "type": int, "default": 1},
             {"name": "--camera_axis_scale", "type": float, "default": 0.10},
             {"name": "--camera_axis_thickness", "type": float, "default": 0.004},
@@ -394,6 +395,8 @@ def parse_args():
         args.show_camera_images = True
     args.camera_rgb = bool(args.camera_rgb or args.rgb)
     args.camera_depth = bool((args.camera_depth or not args.no_camera_depth) and not args.rgb)
+    if bool(getattr(args, "rgb", False)):
+        args.depth_only = False
     args.camera_seg = bool(args.camera_seg or not args.no_camera_seg)
     if bool(getattr(args, "rgb", False)) and bool(getattr(args, "depth_only", False)):
         raise ValueError("--rgb and --depth_only are mutually exclusive.")
@@ -1964,7 +1967,7 @@ def run_demo(
     if gripper_idx is not None:
         home_positions[gripper_idx] = np.clip(args.gripper_open, ik_state.lower[gripper_idx].item(), ik_state.upper[gripper_idx].item())
 
-    max_steps = args.steps if args.steps > 0 else 2900
+    max_steps = args.steps if args.steps > 0 else 2405
     dp_recorder = None
     dp_record_success = False
     dp_record_warned_no_camera = False

@@ -37,7 +37,7 @@ env:
           handle_bounding: "wc4/handle_bounding.json"
           name: "wc4"
           path: "wc4/model.urdf"
-          actor_scale: 0.93
+          actor_scale: 1.0
           actor_yaw_offset: -1.5707963267948966
           actor_position_offset: [0.11, 0.0, 0.0]
           robot_y_offset: 0.18
@@ -47,8 +47,12 @@ env:
           door_dof_name: "door_hinge_joint"
           handle_dof_name: "handle_spindle_joint"
           controller_multipliers:
-            door_joint_friction: 0.05
-            door_joint_damping: 0.1
+            door_joint_friction: 0.5
+            door_joint_damping: 0.5
+            handle_joint_friction: 0.5
+            handle_joint_damping: 0.5
+            handle_spring_stiffness: 0.5
+            handle_spring_damping: 0.5
 
     control:
       stiffness: {"joint": 80, "z1": 5}

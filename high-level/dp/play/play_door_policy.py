@@ -158,11 +158,12 @@ def parse_args():
     parser.add_argument("--graphics_device_id", type=int, default=None)
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--rgb", action="store_true", help="Run a RGB+mask Door policy checkpoint. Push/ikpush/ikpull modes only.")
-    parser.add_argument("--depth_only", action="store_true", help="Run a Door policy checkpoint trained with wrist/front depth only.")
+    parser.add_argument("--depth_only", dest="depth_only", action="store_true", default=True, help="Run a Door policy checkpoint trained with wrist/front depth only.")
+    parser.add_argument("--no_depth_only", dest="depth_only", action="store_false", help="Run a legacy depth+mask Door policy checkpoint.")
     add_depth_aug_args(parser)
     parser.add_argument("--show_seg", dest="show_seg", action="store_true", default=True)
     parser.add_argument("--no_show_seg", dest="show_seg", action="store_false")
-    parser.add_argument("--camera_display_scale", type=int, default=5)
+    parser.add_argument("--camera_display_scale", type=int, default=1)
     parser.add_argument(
         "--debug_visuals",
         action="store_true",
@@ -208,9 +209,9 @@ def main():
         checkpoint_path = (Path.cwd() / checkpoint_path).resolve()
     checkpoint_path = auto_wrap_official_lerobot_checkpoint(checkpoint_path, args)
     if args.steps is None:
-        args.steps = 4300 if args.mode == "ikpull" else 2500
-    if args.rgb and args.depth_only:
-        raise ValueError("--rgb and --depth_only are mutually exclusive.")
+        args.steps = 4300 if args.mode == "ikpull" else (2405 if args.mode == "ikpush" else 2500)
+    if args.rgb:
+        args.depth_only = False
     if args.rgb and args.mode not in ("push", "ikpush", "ikpull"):
         raise ValueError("--rgb Door policy play is only wired for push/ikpush/ikpull mode.")
     warmstart_params = [

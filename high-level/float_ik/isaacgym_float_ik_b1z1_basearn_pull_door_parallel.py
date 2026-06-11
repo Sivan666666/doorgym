@@ -390,7 +390,7 @@ def parse_args():
             {"name": "--handle_seg_id", "type": int, "default": 2},
             {"name": "--camera_depth_clip_lower", "type": float, "default": 0.02},
             {"name": "--camera_depth_clip_far", "type": float, "default": 2.0},
-            {"name": "--camera_display_scale", "type": int, "default": 5},
+            {"name": "--camera_display_scale", "type": int, "default": 1},
             {"name": "--camera_display_interval", "type": int, "default": 1},
             {"name": "--camera_axis_scale", "type": float, "default": 0.10},
             {"name": "--camera_axis_thickness", "type": float, "default": 0.004},

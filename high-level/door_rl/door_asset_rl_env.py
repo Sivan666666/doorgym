@@ -100,7 +100,7 @@ def build_default_runtime_args(**overrides):
         handle_seg_id=2,
         camera_depth_clip_lower=0.02,
         camera_depth_clip_far=2.0,
-        camera_display_scale=5,
+        camera_display_scale=1,
         wrist_camera_down_tilt=0.20,
         front_camera_yaw_deg=0.0,
         front_camera_pitch_deg=-60.0,

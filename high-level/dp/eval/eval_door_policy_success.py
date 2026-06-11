@@ -141,9 +141,10 @@ def parse_args() -> argparse.Namespace:
         help="Policy observation/action update rate forwarded to the float_ik play script.",
     )
     parser.add_argument("--rgb", action="store_true")
-    parser.add_argument("--depth_only", action="store_true", help="Use wrist/front depth only, no mask image inputs.")
+    parser.add_argument("--depth_only", dest="depth_only", action="store_true", default=True, help="Use wrist/front depth only, no mask image inputs.")
+    parser.add_argument("--no_depth_only", dest="depth_only", action="store_false", help="Use legacy depth+mask image inputs.")
     add_depth_aug_args(parser)
-    parser.add_argument("--camera_display_scale", type=int, default=5)
+    parser.add_argument("--camera_display_scale", type=int, default=1)
     parser.add_argument("--run_root", type=str, default=None, help="Directory for logs and summary JSON.")
     parser.add_argument("--stream_output", action="store_true", help="Stream each play subprocess output to this terminal.")
     parser.add_argument("--progress_interval", type=float, default=5.0, help="Seconds between per-batch progress updates.")
@@ -464,12 +465,12 @@ def main() -> None:
         raise ValueError("--parallel_batches must be positive.")
     if args.progress_interval <= 0:
         raise ValueError("--progress_interval must be positive.")
-    if args.rgb and args.depth_only:
-        raise ValueError("--rgb and --depth_only are mutually exclusive.")
+    if args.rgb:
+        args.depth_only = False
     if args.dp_fps <= 0:
         raise ValueError("--dp_fps must be positive.")
     if args.steps is None:
-        args.steps = 4300 if args.mode == "ikpull" else 2500
+        args.steps = 4300 if args.mode == "ikpull" else (2405 if args.mode == "ikpush" else 2500)
     PROGRESS_RENDERER = InlineProgress(enabled=not args.no_progress)
 
     metric = success_metric_for_mode(args.mode, args.success_metric)

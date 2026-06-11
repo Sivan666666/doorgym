@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""Parallel float-base B1Z1 base+arm IK door-push recorder.
+"""Parallel float-base B1Z1 base+arm IK door-push overview video recorder.
 
-This is the high-throughput variant of isaacgym_float_ik_b1z1_basearn_push_door.py.
-It keeps the same asset/controller helpers, but records multiple Isaac Gym envs
-inside one simulator process.
+This is a video-focused copy of isaacgym_float_ik_b1z1_basearn_push_door_parallel.py.
+It keeps the same asset/controller helpers, but defaults to a large env grid and
+records the Isaac Gym viewer while moving the viewer camera from env0 to the
+diagonal far env after env0's door starts opening.
 """
 
 from __future__ import annotations
 
 import json
 import math
+import colorsys
 import sys
 import tempfile
 import time
@@ -91,7 +93,7 @@ def parse_args():
             {"name": "--asset_root", "type": str, "default": str(base_ik.DEFAULT_ASSET_ROOT)},
             {"name": "--asset_file", "type": str, "default": base_ik.DEFAULT_ASSET_FILE},
             {"name": "--rl_device", "type": str, "default": "cuda:0"},
-            {"name": "--num_envs", "type": int, "default": 1},
+            {"name": "--num_envs", "type": int, "default": 1024},
             {"name": "--steps", "type": int, "default": 2405},
             {"name": "--seed", "type": int, "default": -1},
             {"name": "--door_cfg", "type": str, "default": str(DEFAULT_DOOR_CFG)},
@@ -306,6 +308,36 @@ def parse_args():
             {"name": "--no_dp_warmstart_expert_obs", "dest": "dp_warmstart_expert_obs", "action": "store_false"},
             {"name": "--pass_open_angle_deg", "type": float, "default": 80.0},
             {"name": "--no_preview_trajectory_at_spawn", "action": "store_true"},
+            {
+                "name": "--video_path",
+                "type": str,
+                "default": str(
+                    HIGH_LEVEL_ROOT
+                    / "logs"
+                    / "float_ik_videos"
+                    / f"ikpush_parallel_1024_{time.strftime('%Y%m%d_%H%M%S')}.mp4"
+                ),
+            },
+            {"name": "--no_overview_video", "action": "store_true"},
+            {"name": "--video_fps", "type": float, "default": 25.0},
+            {"name": "--video_capture_stride", "type": int, "default": 2},
+            {"name": "--video_max_frames", "type": int, "default": -1},
+            {"name": "--video_output_width", "type": int, "default": 0},
+            {"name": "--video_output_height", "type": int, "default": 0},
+            {"name": "--video_open_trigger_deg", "type": float, "default": 5.0},
+            {"name": "--video_transition_start_step", "type": int, "default": -1},
+            {"name": "--video_transition_steps", "type": int, "default": 1200},
+            {"name": "--video_initial_height", "type": float, "default": 1.8},
+            {"name": "--video_start_robot_x_offset", "type": float, "default": 0.8},
+            {"name": "--video_start_y_offset", "type": float, "default": 1.10},
+            {"name": "--video_start_target_y_offset", "type": float, "default": 0.0},
+            {"name": "--video_far_height", "type": float, "default": 22.0},
+            {"name": "--video_far_margin", "type": float, "default": 12.0},
+            {"name": "--no_video_colorful_walls", "action": "store_true"},
+            {"name": "--video_wall_color_saturation", "type": float, "default": 0.62},
+            {"name": "--video_wall_color_value", "type": float, "default": 0.88},
+            {"name": "--video_keep_debug", "action": "store_true"},
+            {"name": "--video_keep_low_level_cameras", "action": "store_true"},
         ],
     )
 
@@ -343,6 +375,20 @@ def parse_args():
     args.enable_collision_physx_check = args.enable_base_door_collision_check or "--enable_collision_physx_check" in argv
     args.enable_collision_geom_check = args.enable_base_door_collision_check or "--enable_collision_geom_check" in argv
     args.dp_action_horizon = None if int(args.dp_action_horizon) < 0 else int(args.dp_action_horizon)
+    args.record_overview_video = bool(args.video_path and not args.no_overview_video)
+    if args.record_overview_video and args.headless:
+        raise ValueError("Overview video recording uses the Isaac Gym viewer; run without --headless.")
+    if args.record_overview_video and cv2 is None:
+        raise RuntimeError("OpenCV is required to encode the overview mp4 video.")
+    if args.record_overview_video and not args.video_keep_debug:
+        args.draw_ik_target = False
+        args.draw_camera_axes = False
+    if args.record_overview_video and not args.video_keep_low_level_cameras and not (
+        args.dp_policy_checkpoint or args.record_dp_dataset
+    ):
+        args.show_camera_images = False
+        args.enable_wrist_camera = False
+        args.enable_front_camera = False
     if args.num_envs <= 0:
         raise ValueError("--num_envs must be positive.")
     if not args.dp_record_all_envs and (args.dp_record_env_id < 0 or args.dp_record_env_id >= args.num_envs):
@@ -497,6 +543,13 @@ def sample_env_value(rng, args, attr, half_attr, lower=None, upper=None):
     return value
 
 
+def colorful_wall_rgb(env_index, args):
+    hue = (float(env_index) * 0.618033988749895) % 1.0
+    saturation = min(1.0, max(0.0, float(getattr(args, "video_wall_color_saturation", 0.62))))
+    value = min(1.0, max(0.0, float(getattr(args, "video_wall_color_value", 0.88))))
+    return colorsys.hsv_to_rgb(hue, saturation, value)
+
+
 def make_env_args(args, env_index):
     env_args = SimpleNamespace(**vars(args))
     env_seed = seed_for_env(args, env_index)
@@ -542,6 +595,13 @@ def make_env_args(args, env_index):
     set_sampled("handle_joint_damping", "ikpush_handle_joint_damping_rand", lower=0.0)
     set_sampled("handle_spring_stiffness", "ikpush_handle_spring_stiffness_rand", lower=0.0)
     set_sampled("handle_spring_damping", "ikpush_handle_spring_damping_rand", lower=0.0)
+
+    if not bool(getattr(args, "no_video_colorful_walls", False)):
+        wall_r, wall_g, wall_b = colorful_wall_rgb(env_index, args)
+        env_args.door_wall_color_r = float(wall_r)
+        env_args.door_wall_color_g = float(wall_g)
+        env_args.door_wall_color_b = float(wall_b)
+        sampled["door_wall_color_rgb"] = [float(wall_r), float(wall_g), float(wall_b)]
 
     env_args.ikpush_randomization_json = json.dumps(sampled, sort_keys=True)
     return env_args
@@ -1504,6 +1564,164 @@ def create_parallel_env_states(
     return env_states, vision_mode
 
 
+def smoothstep01(value):
+    x = float(np.clip(value, 0.0, 1.0))
+    return x * x * (3.0 - 2.0 * x)
+
+
+def vec3_to_np(vec):
+    return np.array([float(vec.x), float(vec.y), float(vec.z)], dtype=np.float32)
+
+
+def np_to_vec3(values):
+    arr = np.asarray(values, dtype=np.float32).reshape(3)
+    return gymapi.Vec3(float(arr[0]), float(arr[1]), float(arr[2]))
+
+
+class OverviewVideoRecorder:
+    def __init__(self, gym, sim, viewer, env_states, args):
+        self.gym = gym
+        self.sim = sim
+        self.viewer = viewer
+        self.env_states = env_states
+        self.args = args
+        self.enabled = bool(getattr(args, "record_overview_video", False))
+        self.writer = None
+        self.frame_count = 0
+        self.trigger_step = None
+        self.tmp_dir = None
+        self.path = Path(getattr(args, "video_path", ""))
+        self.anchors = None
+        if not self.enabled:
+            return
+        if viewer is None:
+            raise RuntimeError("Overview video recording requires a non-headless Isaac Gym viewer.")
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.tmp_dir = tempfile.TemporaryDirectory(prefix="ikpush_parallel_video_frames_")
+        self.anchors = self._compute_camera_anchors()
+        print(
+            f"Overview video: path={self.path} fps={float(args.video_fps):.2f} "
+            f"capture_stride={int(args.video_capture_stride)} "
+            f"trigger_deg={float(args.video_open_trigger_deg):.1f} "
+            f"transition_steps={int(args.video_transition_steps)}",
+            flush=True,
+        )
+
+    def _env_door_focus_world(self, st, z=0.8):
+        origin = vec3_to_np(self.gym.get_env_origin(st.env))
+        return origin + np.array([float(st.args.door_x) + 0.3, float(st.args.door_y), float(z)], dtype=np.float32)
+
+    def _compute_camera_anchors(self):
+        first = self.env_states[0]
+        far_index = max(0, len(self.env_states) - 1)
+        far = self.env_states[far_index]
+        start_target = self._env_door_focus_world(first, z=0.8)
+        start_target[1] += float(getattr(self.args, "video_start_target_y_offset", 0.0))
+        far_target = self._env_door_focus_world(far, z=0.8)
+        center_target = 0.5 * (start_target + far_target)
+        center_target[2] = 1.1
+
+        start_origin = vec3_to_np(self.gym.get_env_origin(first.env))
+        start_pos = start_origin + np.array(
+            [
+                float(first.args.robot_x) + float(getattr(self.args, "video_start_robot_x_offset", 0.25)),
+                float(first.args.robot_y) + float(getattr(self.args, "video_start_y_offset", 1.10)),
+                float(self.args.video_initial_height),
+            ],
+            dtype=np.float32,
+        )
+
+        span_xy = far_target[:2] - start_target[:2]
+        span_norm = float(np.linalg.norm(span_xy))
+        if span_norm < 1.0e-6:
+            diag = np.array([1.0, 1.0], dtype=np.float32) / math.sqrt(2.0)
+        else:
+            diag = span_xy / span_norm
+        side = np.array([-diag[1], diag[0]], dtype=np.float32)
+        far_margin = float(self.args.video_far_margin)
+        end_pos = far_target.copy()
+        end_pos[:2] = far_target[:2] + diag * far_margin + side * (0.5 * far_margin)
+        end_pos[2] = float(self.args.video_far_height)
+
+        print(
+            "Overview camera anchors: "
+            f"env0_start_pos={start_pos.round(3).tolist()} "
+            f"env0_target={start_target.round(3).tolist()} "
+            f"far_env={far_index} far_target={far_target.round(3).tolist()} "
+            f"end_pos={end_pos.round(3).tolist()}",
+            flush=True,
+        )
+        return {
+            "start_pos": start_pos,
+            "start_target": start_target,
+            "end_pos": end_pos,
+            "end_target": center_target,
+        }
+
+    def update_camera(self, step):
+        if not self.enabled or self.anchors is None:
+            return
+        explicit_start = int(getattr(self.args, "video_transition_start_step", -1))
+        if self.trigger_step is None and explicit_start >= 0 and step >= explicit_start:
+            self.trigger_step = int(step)
+        if self.trigger_step is None:
+            door_pos = self.env_states[0].last_door_pos
+            door_deg = 0.0
+            if door_pos is not None and len(door_pos):
+                door_deg = abs(math.degrees(float(door_pos[0])))
+            if door_deg >= float(self.args.video_open_trigger_deg):
+                self.trigger_step = int(step)
+                print(f"Overview camera transition triggered at step={step} door0={door_deg:.1f}deg", flush=True)
+
+        if self.trigger_step is None:
+            alpha = 0.0
+        else:
+            denom = max(1, int(getattr(self.args, "video_transition_steps", 1200)))
+            alpha = smoothstep01((int(step) - int(self.trigger_step)) / float(denom))
+
+        pos = (1.0 - alpha) * self.anchors["start_pos"] + alpha * self.anchors["end_pos"]
+        target = (1.0 - alpha) * self.anchors["start_target"] + alpha * self.anchors["end_target"]
+        self.gym.viewer_camera_look_at(self.viewer, None, np_to_vec3(pos), np_to_vec3(target))
+
+    def capture(self, step):
+        if not self.enabled:
+            return
+        max_frames = int(getattr(self.args, "video_max_frames", -1))
+        if max_frames >= 0 and self.frame_count >= max_frames:
+            return
+        stride = max(1, int(getattr(self.args, "video_capture_stride", 2)))
+        if int(step) % stride != 0:
+            return
+        frame_path = Path(self.tmp_dir.name) / f"frame_{self.frame_count:06d}.png"
+        self.gym.write_viewer_image_to_file(self.viewer, str(frame_path))
+        frame = cv2.imread(str(frame_path), cv2.IMREAD_COLOR)
+        if frame is None:
+            raise RuntimeError(f"Failed to read viewer frame written to {frame_path}")
+        output_width = int(getattr(self.args, "video_output_width", 0))
+        output_height = int(getattr(self.args, "video_output_height", 0))
+        if output_width > 0 and output_height > 0:
+            frame = cv2.resize(frame, (output_width, output_height), interpolation=cv2.INTER_AREA)
+        if self.writer is None:
+            height, width = frame.shape[:2]
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            self.writer = cv2.VideoWriter(str(self.path), fourcc, float(self.args.video_fps), (width, height))
+            if not self.writer.isOpened():
+                raise RuntimeError(f"Failed to open video writer for {self.path}")
+            print(f"Overview video frame size: {width}x{height}", flush=True)
+        self.writer.write(frame)
+        self.frame_count += 1
+
+    def close(self):
+        if self.writer is not None:
+            self.writer.release()
+            self.writer = None
+        if self.tmp_dir is not None:
+            self.tmp_dir.cleanup()
+            self.tmp_dir = None
+        if self.enabled:
+            print(f"Overview video saved: {self.path} frames={self.frame_count}", flush=True)
+
+
 def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
     if not env_states:
         raise RuntimeError("No parallel envs were created.")
@@ -1550,6 +1768,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
             flush=True,
         )
 
+    video_recorder = OverviewVideoRecorder(gym, sim, viewer, env_states, args)
     while step < max_steps:
         if viewer is not None and gym.query_viewer_has_closed(viewer):
             break
@@ -1750,6 +1969,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
             st.prev_yaw = float(st.traj.get("yaw", st.yaw_start))
 
         if viewer is not None:
+            video_recorder.update_camera(step)
             if args.draw_ik_target or args.draw_camera_axes:
                 gym.clear_lines(viewer)
             for st in env_states[: min(4, len(env_states))]:
@@ -1783,6 +2003,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                         )
                         gymutil.draw_lines(goal_sphere, gym, viewer, st.env, target_pose)
             gym.draw_viewer(viewer, sim, True)
+            video_recorder.capture(step)
             gym.sync_frame_time(sim)
 
         if args.log_interval > 0 and step % args.log_interval == 0:
@@ -1800,6 +2021,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
             )
         step += 1
 
+    video_recorder.close()
     elapsed = time.time() - start
     print(f"Done after {step} steps ({elapsed:.2f}s).")
     dc.finish_float_dp_recorders(env_states, args)

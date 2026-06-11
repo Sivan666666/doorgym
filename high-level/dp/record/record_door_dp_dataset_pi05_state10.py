@@ -1,6 +1,10 @@
 import argparse
+import json
+import os
+import shlex
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -9,6 +13,7 @@ import yaml
 
 DP_ROOT = Path(__file__).resolve().parents[1]
 HIGH_LEVEL_ROOT = DP_ROOT.parent
+REPO_ROOT = HIGH_LEVEL_ROOT.parent
 if str(DP_ROOT) not in sys.path:
     sys.path.insert(0, str(DP_ROOT))
 
@@ -80,12 +85,26 @@ def parse_args():
     parser.add_argument("--graphics_device_id", type=int, default=None)
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--rgb", action="store_true", help="Record RGB+mask vision for push/ikpush/ikpull data instead of full depth+mask.")
-    parser.add_argument("--depth_only", action="store_true", help="Record only wrist/front depth images, without mask images.")
+    parser.add_argument("--depth_only", dest="depth_only", action="store_true", default=True, help="Record only wrist/front depth images, without mask images.")
+    parser.add_argument("--no_depth_only", dest="depth_only", action="store_false", help="Record legacy depth+mask image inputs.")
     add_depth_aug_args(parser)
     parser.add_argument("--record_env_id", type=int, default=0)
     parser.add_argument("--record_all_envs", dest="record_all_envs", action="store_true", default=True)
     parser.add_argument("--no_record_all_envs", dest="record_all_envs", action="store_false")
     parser.add_argument("--no_preview_trajectory_at_spawn", action="store_true", default=True)
+    parser.add_argument(
+        "--run_log_root",
+        type=str,
+        default=None,
+        help="Directory for per-run command/log/git metadata. Defaults to <raw_root>/_run_logs.",
+    )
+    parser.add_argument(
+        "--no_save_run_metadata",
+        dest="save_run_metadata",
+        action="store_false",
+        default=True,
+        help="Disable automatic command, args, git, and terminal log capture.",
+    )
     parser.add_argument(
         "play_args",
         nargs=argparse.REMAINDER,
@@ -211,6 +230,117 @@ def quota_complete(counts, door_names, target):
     return all(int(counts.get(name, 0)) >= int(target) for name in door_names)
 
 
+class TeeStream:
+    def __init__(self, *streams):
+        self.streams = streams
+
+    def write(self, data):
+        for stream in self.streams:
+            stream.write(data)
+            stream.flush()
+        return len(data)
+
+    def flush(self):
+        for stream in self.streams:
+            stream.flush()
+
+    def isatty(self):
+        return any(getattr(stream, "isatty", lambda: False)() for stream in self.streams)
+
+
+def unique_run_dir(root):
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    base = Path(root) / f"{stamp}_pid{os.getpid()}"
+    candidate = base
+    suffix = 1
+    while candidate.exists():
+        candidate = Path(f"{base}_{suffix}")
+        suffix += 1
+    candidate.mkdir(parents=True, exist_ok=False)
+    return candidate
+
+
+def capture_command(cmd, cwd):
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=str(cwd),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except Exception as exc:
+        return f"failed to run {' '.join(cmd)}: {exc}\n"
+    output = result.stdout or ""
+    if result.stderr:
+        output += result.stderr
+    if result.returncode != 0:
+        output += f"\n[exit_code={result.returncode}]\n"
+    return output
+
+
+def write_run_metadata(args):
+    if not bool(getattr(args, "save_run_metadata", True)):
+        args.run_metadata_dir = ""
+        return None, None
+
+    root = Path(args.run_log_root).expanduser() if args.run_log_root else Path(args.raw_root) / "_run_logs"
+    run_dir = unique_run_dir(root)
+    args.run_metadata_dir = str(run_dir)
+
+    top_level_cmd = [sys.executable] + sys.argv
+    (run_dir / "command.txt").write_text(shlex.join(top_level_cmd) + "\n", encoding="utf-8")
+    (run_dir / "argv.json").write_text(json.dumps(top_level_cmd, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    (run_dir / "args.json").write_text(
+        json.dumps(vars(args), indent=2, ensure_ascii=False, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "git_commit.txt").write_text(
+        capture_command(["git", "rev-parse", "HEAD"], REPO_ROOT),
+        encoding="utf-8",
+    )
+    (run_dir / "git_status.txt").write_text(
+        capture_command(["git", "status", "--short"], REPO_ROOT),
+        encoding="utf-8",
+    )
+    (run_dir / "git_diff.patch").write_text(
+        capture_command(["git", "diff"], REPO_ROOT),
+        encoding="utf-8",
+    )
+    (run_dir / "subprocess_commands.txt").write_text("", encoding="utf-8")
+
+    terminal_log = (run_dir / "terminal.log").open("a", encoding="utf-8", buffering=1)
+    sys.stdout = TeeStream(sys.__stdout__, terminal_log)
+    sys.stderr = TeeStream(sys.__stderr__, terminal_log)
+
+    print(f"Run metadata will be saved to: {run_dir}", flush=True)
+    return run_dir, terminal_log
+
+
+def run_logged_subprocess(cmd, args, cwd, check=True):
+    run_dir = getattr(args, "run_metadata_dir", "")
+    if run_dir:
+        with (Path(run_dir) / "subprocess_commands.txt").open("a", encoding="utf-8") as f:
+            f.write(shlex.join([str(item) for item in cmd]) + "\n")
+
+    process = subprocess.Popen(
+        cmd,
+        cwd=str(cwd),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    assert process.stdout is not None
+    for line in process.stdout:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+    returncode = process.wait()
+    if check and returncode != 0:
+        raise subprocess.CalledProcessError(returncode, cmd)
+    return returncode
+
+
 def run_one(mode, rollout_idx, args):
     script, task, is_float_ik = script_for_mode(mode)
     attempts = args.num_envs if args.record_all_envs else 1
@@ -273,7 +403,7 @@ def run_one(mode, rollout_idx, args):
             f"({attempts} parallel float_ik env{'s' if attempts != 1 else ''}): {' '.join(cmd)} ===",
             flush=True,
         )
-        subprocess.run(cmd, cwd=str(HIGH_LEVEL_ROOT), check=True)
+        run_logged_subprocess(cmd, args, cwd=HIGH_LEVEL_ROOT, check=True)
         return
 
     cmd = [
@@ -323,7 +453,7 @@ def run_one(mode, rollout_idx, args):
         f"({attempts} parallel attempt{'s' if attempts != 1 else ''}): {' '.join(cmd)} ===",
         flush=True,
     )
-    subprocess.run(cmd, cwd=str(HIGH_LEVEL_ROOT), check=True)
+    run_logged_subprocess(cmd, args, cwd=HIGH_LEVEL_ROOT, check=True)
 
 
 def main():
@@ -338,10 +468,19 @@ def main():
     if args.max_quota_rollouts <= 0:
         raise ValueError("--max_quota_rollouts must be positive")
     modes = ["pull", "push"] if args.mode == "both" else [args.mode]
+    explicit_depth_only = "--depth_only" in sys.argv[1:]
     if args.steps is None:
         args.steps = 2405 if modes == ["ikpush"] else (4300 if modes == ["ikpull"] else 2500)
+    if args.rgb:
+        args.depth_only = False
+    elif args.depth_only and any(mode not in ("ikpush", "ikpull") for mode in modes) and not explicit_depth_only:
+        args.depth_only = False
     if args.rgb and any(mode not in ("push", "ikpush", "ikpull") for mode in modes):
         raise ValueError("--rgb recording is only wired for push/ikpush/ikpull mode.")
+
+    run_dir, terminal_log = write_run_metadata(args)
+    _ = run_dir, terminal_log
+
     if args.headless:
         print(
             "⚠️📷 Headless raw recording requested. If Isaac Gym cannot render camera tensors, "

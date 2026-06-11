@@ -19,7 +19,7 @@ DEFAULT_RAW_ROOTS = {
     "ikpush": REPO_ROOT / "high-level" / "data" / "door_dp_raw" / "single_door0_push_sweep",
     "ikpull": REPO_ROOT / "high-level" / "data" / "door_dp_raw" / "single_door0_pull_sweep",
 }
-DEFAULT_STEPS = {"ikpush": 2210, "ikpull": 4300}
+DEFAULT_STEPS = {"ikpush": 2405, "ikpull": 4300}
 
 
 def parse_args():

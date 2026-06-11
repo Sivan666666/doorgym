@@ -93,8 +93,16 @@ def parse_args():
     )
     parser.add_argument(
         "--depth_only",
+        dest="depth_only",
         action="store_true",
+        default=True,
         help="Record only wrist/front depth images, without mask images.",
+    )
+    parser.add_argument(
+        "--no_depth_only",
+        dest="depth_only",
+        action="store_false",
+        help="Record legacy depth+mask image inputs.",
     )
     add_depth_aug_args(parser)
     parser.add_argument(
@@ -140,8 +148,8 @@ def parse_args():
     finally:
         sys.argv = old_argv
 
-    if record_args.rgb and record_args.depth_only:
-        raise ValueError("--rgb and --depth_only are mutually exclusive.")
+    if record_args.rgb:
+        record_args.depth_only = False
     teleop_args.rgb = bool(record_args.rgb)
     teleop_args.depth_only = bool(record_args.depth_only)
     teleop_args.enable_depth_noise = bool(record_args.enable_depth_noise)

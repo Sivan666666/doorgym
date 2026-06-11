@@ -1533,7 +1533,7 @@ def parse_args():
     parser.add_argument("--handle_seg_id", type=int, default=2)
     parser.add_argument("--camera_depth_clip_lower", type=float, default=0.02)
     parser.add_argument("--camera_depth_clip_far", type=float, default=2.0)
-    parser.add_argument("--camera_display_scale", type=int, default=5)
+    parser.add_argument("--camera_display_scale", type=int, default=1)
     parser.add_argument("--wrist_camera_down_tilt", type=float, default=0.20)
     parser.add_argument("--front_camera_yaw_deg", type=float, default=0.0)
     parser.add_argument("--front_camera_pitch_deg", type=float, default=-60.0)

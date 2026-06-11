@@ -119,7 +119,7 @@ python "$PROJECT_ROOT/high-level/dp/play/play_door_policy.py" \
     --sim_device cuda:0 \
     --depth_only \
     --dp_action_horizon 50 \
-    --camera_display_scale 5 \
+    --camera_display_scale 1 \
     -- \
     --door_cfg "$PROJECT_ROOT/high-level/experiments/isaacgym/b1z1_opendoor.yaml" \
     --pass_open_angle_deg 80 \
