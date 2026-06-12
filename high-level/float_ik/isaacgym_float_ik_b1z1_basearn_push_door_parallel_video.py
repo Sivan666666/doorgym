@@ -103,7 +103,7 @@ def parse_args():
                 "name": "--door_selection",
                 "type": str,
                 "default": "diverse",
-                "help": "Door cycling mode when --door_name/--door_index are unset: default, diverse, or all.",
+                "help": "Door cycling mode when --door_name/--door_index are unset: default, diverse, all, push_left, or push_right.",
             },
             {"name": "--door_prefer_name", "type": str, "default": "wc4"},
             {

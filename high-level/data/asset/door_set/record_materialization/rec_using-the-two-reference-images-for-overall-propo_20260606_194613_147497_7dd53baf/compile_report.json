@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "record_id": "rec_using-the-two-reference-images-for-overall-propo_20260606_194613_147497_7dd53baf",
+  "status": "success",
+  "urdf_path": "model.urdf",
+  "warnings": [],
+  "checks_run": [
+    "compile_urdf_fast"
+  ],
+  "overlap_allowances": [],
+  "metrics": {
+    "compile_level": "full",
+    "validation_level": "none",
+    "fingerprint_inputs": {
+      "model_py_sha256": "b5f19fd009b9f3d8ec4d5fbe5dc35aa4f864afaf7344c0b19c8a0cee8ce6ec94",
+      "sdk_fingerprint": null
+    },
+    "materialization_fingerprint": "177d0815a81a65595e355f713e0a500f8c73318ecf7340be5d1beda4444acaf5",
+    "model_py_mtime_ns": 1780841749362609424,
+    "model_py_size_bytes": 24995,
+    "materialization_status": "available",
+    "visual_mesh_bytes": 7577,
+    "visual_mesh_file_count": 1,
+    "compile_elapsed_seconds": 0.8398796200053766
+  },
+  "signal_bundle": {
+    "status": "success",
+    "summary": "status=success failures=0 warnings=0 notes=0\nCompile passed cleanly.",
+    "signals": []
+  }
+}

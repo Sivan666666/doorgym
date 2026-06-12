@@ -1,0 +1,952 @@
+[
+  {
+    "name": "rec_using-the-reference-image-for-overall-proportion_20260610_133539_066287_93a4ac59",
+    "src": "/home/sivan/Downloads/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_133539_066287_93a4ac59",
+    "dst": "/home/sivan/whole_body/visual_whole_body/high-level/data/asset/door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_133539_066287_93a4ac59",
+    "status": "ok",
+    "variant": "push_left",
+    "door_dof_name": "door_hinge_joint",
+    "handle_dof_name": "lever_handle_joint",
+    "door_body_name": "door_panel",
+    "handle_body_name": "条形把手",
+    "door_axis": [
+      0.0,
+      0.0,
+      -1.0
+    ],
+    "handle_axis": [
+      0.0,
+      -1.0,
+      0.0
+    ],
+    "actor_yaw_offset": -1.5707963267948966,
+    "door_motion_sign_multiplier": 1.0,
+    "handle_center_world": [
+      0.7208,
+      -0.0032,
+      0.965
+    ],
+    "handle_side": "left",
+    "handle_was_behind": false,
+    "handle_front_delta_before_yaw_fix": -0.03442499999999998,
+    "handle_front_delta_after_yaw_fix": -0.03442499999999998,
+    "handle_side_delta_after_yaw_fix": -0.3008,
+    "handle_center_after_yaw": [
+      -0.0032,
+      -0.7208,
+      0.965
+    ],
+    "door_center_after_yaw": [
+      0.031225,
+      -0.42,
+      1.035
+    ],
+    "handle_axis_after_yaw": [
+      -1.0,
+      -0.0,
+      0.0
+    ],
+    "handle_rotate_direction": "positive_clockwise_from_robot",
+    "warnings": []
+  },
+  {
+    "name": "rec_using-the-reference-image-for-overall-proportion_20260610_144220_404149_a1666c1a",
+    "src": "/home/sivan/Downloads/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_144220_404149_a1666c1a",
+    "dst": "/home/sivan/whole_body/visual_whole_body/high-level/data/asset/door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_144220_404149_a1666c1a",
+    "status": "ok",
+    "variant": "push_left",
+    "door_dof_name": "door_hinge_joint",
+    "handle_dof_name": "handle_actuation_joint",
+    "door_body_name": "door_panel",
+    "handle_body_name": "条形把手",
+    "door_axis": [
+      0.0,
+      0.0,
+      -1.0
+    ],
+    "handle_axis": [
+      0.0,
+      -1.0,
+      0.0
+    ],
+    "actor_yaw_offset": -1.5707963267948966,
+    "door_motion_sign_multiplier": 1.0,
+    "handle_center_world": [
+      0.3395,
+      -0.0125,
+      1.022296
+    ],
+    "handle_side": "left",
+    "handle_was_behind": false,
+    "handle_front_delta_before_yaw_fix": -0.04749997796073565,
+    "handle_front_delta_after_yaw_fix": -0.04749997796073565,
+    "handle_side_delta_after_yaw_fix": -0.33849999999999997,
+    "handle_center_after_yaw": [
+      -0.0125,
+      -0.3395,
+      1.022296
+    ],
+    "door_center_after_yaw": [
+      0.035,
+      -0.001,
+      1.035
+    ],
+    "handle_axis_after_yaw": [
+      -1.0,
+      -0.0,
+      0.0
+    ],
+    "handle_rotate_direction": "positive_clockwise_from_robot",
+    "warnings": []
+  },
+  {
+    "name": "rec_using-the-reference-image-for-overall-proportion_20260610_145408_481318_cb8ca903",
+    "src": "/home/sivan/Downloads/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_145408_481318_cb8ca903",
+    "dst": "/home/sivan/whole_body/visual_whole_body/high-level/data/asset/door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_145408_481318_cb8ca903",
+    "status": "ok",
+    "variant": "push_left",
+    "door_dof_name": "door_hinge_joint",
+    "handle_dof_name": "handle_actuation_joint",
+    "door_body_name": "door_panel",
+    "handle_body_name": "条形把手",
+    "door_axis": [
+      0.0,
+      0.0,
+      -1.0
+    ],
+    "handle_axis": [
+      0.0,
+      -1.0,
+      0.0
+    ],
+    "actor_yaw_offset": -1.5707963267948966,
+    "door_motion_sign_multiplier": 1.0,
+    "handle_center_world": [
+      0.291,
+      -0.057,
+      1.06
+    ],
+    "handle_side": "left",
+    "handle_was_behind": false,
+    "handle_front_delta_before_yaw_fix": -0.03949999999999998,
+    "handle_front_delta_after_yaw_fix": -0.03949999999999998,
+    "handle_side_delta_after_yaw_fix": -0.291,
+    "handle_center_after_yaw": [
+      -0.057,
+      -0.291,
+      1.06
+    ],
+    "door_center_after_yaw": [
+      -0.0175,
+      0.0,
+      1.0425
+    ],
+    "handle_axis_after_yaw": [
+      -1.0,
+      -0.0,
+      0.0
+    ],
+    "handle_rotate_direction": "positive_clockwise_from_robot",
+    "warnings": []
+  },
+  {
+    "name": "rec_using-the-reference-image-for-overall-proportion_20260610_151444_424431_821df59d",
+    "src": "/home/sivan/Downloads/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_151444_424431_821df59d",
+    "dst": "/home/sivan/whole_body/visual_whole_body/high-level/data/asset/door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_151444_424431_821df59d",
+    "status": "ok",
+    "variant": "push_right",
+    "door_dof_name": "door_hinge_joint",
+    "handle_dof_name": "handle_actuation_joint",
+    "door_body_name": "door_panel",
+    "handle_body_name": "条形把手",
+    "door_axis": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "handle_axis": [
+      0.0,
+      -1.0,
+      0.0
+    ],
+    "actor_yaw_offset": 1.5707963267948966,
+    "door_motion_sign_multiplier": -1.0,
+    "handle_center_world": [
+      0.2765,
+      0.04813,
+      1.015
+    ],
+    "handle_side": "right",
+    "handle_was_behind": true,
+    "handle_front_delta_before_yaw_fix": 0.034879846708238724,
+    "handle_front_delta_after_yaw_fix": -0.03487984670823874,
+    "handle_side_delta_after_yaw_fix": 0.2764999745475183,
+    "handle_center_after_yaw": [
+      -0.04813,
+      0.2765,
+      1.015
+    ],
+    "door_center_after_yaw": [
+      -0.01325,
+      0.0,
+      1.05
+    ],
+    "handle_axis_after_yaw": [
+      1.0,
+      -0.0,
+      0.0
+    ],
+    "handle_rotate_direction": "positive_counterclockwise_from_robot",
+    "warnings": []
+  },
+  {
+    "name": "rec_using-the-reference-image-for-overall-proportion_20260610_152759_469492_cdfe437e",
+    "src": "/home/sivan/Downloads/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_152759_469492_cdfe437e",
+    "dst": "/home/sivan/whole_body/visual_whole_body/high-level/data/asset/door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_152759_469492_cdfe437e",
+    "status": "ok",
+    "variant": "push_left",
+    "door_dof_name": "door_hinge_joint",
+    "handle_dof_name": "handle_actuation_joint",
+    "door_body_name": "door_panel",
+    "handle_body_name": "条形把手",
+    "door_axis": [
+      0.0,
+      0.0,
+      -1.0
+    ],
+    "handle_axis": [
+      0.0,
+      -1.0,
+      0.0
+    ],
+    "actor_yaw_offset": -1.5707963267948966,
+    "door_motion_sign_multiplier": 1.0,
+    "handle_center_world": [
+      0.756168,
+      -0.03929,
+      1.02
+    ],
+    "handle_side": "left",
+    "handle_was_behind": false,
+    "handle_front_delta_before_yaw_fix": -0.03929048224398399,
+    "handle_front_delta_after_yaw_fix": -0.03929048224398399,
+    "handle_side_delta_after_yaw_fix": -0.30766754732614254,
+    "handle_center_after_yaw": [
+      -0.03929,
+      -0.756168,
+      1.02
+    ],
+    "door_center_after_yaw": [
+      0.0,
+      -0.4485,
+      1.05
+    ],
+    "handle_axis_after_yaw": [
+      -1.0,
+      -0.0,
+      0.0
+    ],
+    "handle_rotate_direction": "positive_clockwise_from_robot",
+    "warnings": []
+  },
+  {
+    "name": "rec_using-the-reference-image-for-overall-proportion_20260610_161038_309387_2dbe2f90",
+    "src": "/home/sivan/Downloads/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_161038_309387_2dbe2f90",
+    "dst": "/home/sivan/whole_body/visual_whole_body/high-level/data/asset/door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_161038_309387_2dbe2f90",
+    "status": "ok",
+    "variant": "push_left",
+    "door_dof_name": "door_hinge_joint",
+    "handle_dof_name": "handle_actuation_joint",
+    "door_body_name": "door_panel",
+    "handle_body_name": "条形把手",
+    "door_axis": [
+      0.0,
+      0.0,
+      -1.0
+    ],
+    "handle_axis": [
+      0.0,
+      -1.0,
+      0.0
+    ],
+    "actor_yaw_offset": -1.5707963267948966,
+    "door_motion_sign_multiplier": 1.0,
+    "handle_center_world": [
+      0.730627,
+      -0.04643,
+      1.055
+    ],
+    "handle_side": "left",
+    "handle_was_behind": false,
+    "handle_front_delta_before_yaw_fix": -0.03467999999999999,
+    "handle_front_delta_after_yaw_fix": -0.03467999999999999,
+    "handle_side_delta_after_yaw_fix": -0.278627,
+    "handle_center_after_yaw": [
+      -0.04643,
+      -0.730627,
+      1.055
+    ],
+    "door_center_after_yaw": [
+      -0.01175,
+      -0.452,
+      1.075
+    ],
+    "handle_axis_after_yaw": [
+      -1.0,
+      -0.0,
+      0.0
+    ],
+    "handle_rotate_direction": "positive_clockwise_from_robot",
+    "warnings": []
+  },
+  {
+    "name": "rec_using-the-reference-image-for-overall-proportion_20260610_162811_304962_a16a279d",
+    "src": "/home/sivan/Downloads/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_162811_304962_a16a279d",
+    "dst": "/home/sivan/whole_body/visual_whole_body/high-level/data/asset/door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_162811_304962_a16a279d",
+    "status": "ok",
+    "variant": "push_right",
+    "door_dof_name": "door_hinge_joint",
+    "handle_dof_name": "handle_actuation_joint",
+    "door_body_name": "door_panel",
+    "handle_body_name": "条形把手",
+    "door_axis": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "handle_axis": [
+      0.0,
+      -1.0,
+      0.0
+    ],
+    "actor_yaw_offset": 1.5707963267948966,
+    "door_motion_sign_multiplier": -1.0,
+    "handle_center_world": [
+      0.7735,
+      0.0365,
+      1.05
+    ],
+    "handle_side": "right",
+    "handle_was_behind": true,
+    "handle_front_delta_before_yaw_fix": 0.02575000000000005,
+    "handle_front_delta_after_yaw_fix": -0.02574999999999998,
+    "handle_side_delta_after_yaw_fix": 0.31850000000000006,
+    "handle_center_after_yaw": [
+      -0.0365,
+      0.7735,
+      1.05
+    ],
+    "door_center_after_yaw": [
+      -0.01075,
+      0.455,
+      1.062
+    ],
+    "handle_axis_after_yaw": [
+      1.0,
+      -0.0,
+      0.0
+    ],
+    "handle_rotate_direction": "positive_counterclockwise_from_robot",
+    "warnings": []
+  },
+  {
+    "name": "rec_using-the-reference-image-for-overall-proportion_20260610_164520_357064_c5d683a7",
+    "src": "/home/sivan/Downloads/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_164520_357064_c5d683a7",
+    "dst": "/home/sivan/whole_body/visual_whole_body/high-level/data/asset/door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_164520_357064_c5d683a7",
+    "status": "ok",
+    "variant": "push_left",
+    "door_dof_name": "door_hinge_joint",
+    "handle_dof_name": "handle_actuation_joint",
+    "door_body_name": "door_panel",
+    "handle_body_name": "条形把手",
+    "door_axis": [
+      0.0,
+      0.0,
+      -1.0
+    ],
+    "handle_axis": [
+      0.0,
+      -1.0,
+      0.0
+    ],
+    "actor_yaw_offset": -1.5707963267948966,
+    "door_motion_sign_multiplier": 1.0,
+    "handle_center_world": [
+      0.708944,
+      -0.04514,
+      0.949533
+    ],
+    "handle_side": "left",
+    "handle_was_behind": false,
+    "handle_front_delta_before_yaw_fix": -0.045140499999999986,
+    "handle_front_delta_after_yaw_fix": -0.045140499999999986,
+    "handle_side_delta_after_yaw_fix": -0.27494350000000006,
+    "handle_center_after_yaw": [
+      -0.04514,
+      -0.708944,
+      0.949533
+    ],
+    "door_center_after_yaw": [
+      0.0,
+      -0.434,
+      1.022
+    ],
+    "handle_axis_after_yaw": [
+      -1.0,
+      -0.0,
+      0.0
+    ],
+    "handle_rotate_direction": "positive_clockwise_from_robot",
+    "warnings": []
+  },
+  {
+    "name": "rec_using-the-reference-image-for-overall-proportion_20260610_170120_408501_5b935599",
+    "src": "/home/sivan/Downloads/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_170120_408501_5b935599",
+    "dst": "/home/sivan/whole_body/visual_whole_body/high-level/data/asset/door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_170120_408501_5b935599",
+    "status": "ok",
+    "variant": "push_left",
+    "door_dof_name": "door_hinge_joint",
+    "handle_dof_name": "handle_actuation_joint",
+    "door_body_name": "door_panel",
+    "handle_body_name": "条形把手",
+    "door_axis": [
+      0.0,
+      0.0,
+      -1.0
+    ],
+    "handle_axis": [
+      0.0,
+      -1.0,
+      0.0
+    ],
+    "actor_yaw_offset": -1.5707963267948966,
+    "door_motion_sign_multiplier": 1.0,
+    "handle_center_world": [
+      0.794,
+      -0.004,
+      1.05
+    ],
+    "handle_side": "left",
+    "handle_was_behind": false,
+    "handle_front_delta_before_yaw_fix": -0.027999999999999976,
+    "handle_front_delta_after_yaw_fix": -0.027999999999999976,
+    "handle_side_delta_after_yaw_fix": -0.3524999660634702,
+    "handle_center_after_yaw": [
+      -0.004,
+      -0.794,
+      1.05
+    ],
+    "door_center_after_yaw": [
+      0.024,
+      -0.4415,
+      1.048
+    ],
+    "handle_axis_after_yaw": [
+      -1.0,
+      -0.0,
+      0.0
+    ],
+    "handle_rotate_direction": "positive_clockwise_from_robot",
+    "warnings": []
+  },
+  {
+    "name": "rec_using-the-reference-image-for-overall-proportion_20260610_172041_424808_f575df48",
+    "src": "/home/sivan/Downloads/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_172041_424808_f575df48",
+    "dst": "/home/sivan/whole_body/visual_whole_body/high-level/data/asset/door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_172041_424808_f575df48",
+    "status": "ok",
+    "variant": "push_right",
+    "door_dof_name": "door_hinge_joint",
+    "handle_dof_name": "handle_actuation_joint",
+    "door_body_name": "door_panel",
+    "handle_body_name": "条形把手",
+    "door_axis": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "handle_axis": [
+      0.0,
+      -1.0,
+      0.0
+    ],
+    "actor_yaw_offset": 1.5707963267948966,
+    "door_motion_sign_multiplier": -1.0,
+    "handle_center_world": [
+      0.739433,
+      0.047,
+      1.05
+    ],
+    "handle_side": "right",
+    "handle_was_behind": true,
+    "handle_front_delta_before_yaw_fix": 0.013000000000000046,
+    "handle_front_delta_after_yaw_fix": -0.012999999999999977,
+    "handle_side_delta_after_yaw_fix": 0.30743291419087276,
+    "handle_center_after_yaw": [
+      -0.047,
+      0.739433,
+      1.05
+    ],
+    "door_center_after_yaw": [
+      -0.034,
+      0.432,
+      1.055
+    ],
+    "handle_axis_after_yaw": [
+      1.0,
+      -0.0,
+      0.0
+    ],
+    "handle_rotate_direction": "positive_counterclockwise_from_robot",
+    "warnings": []
+  },
+  {
+    "name": "rec_using-the-reference-image-for-overall-proportion_20260610_174114_489374_ac1983e4",
+    "src": "/home/sivan/Downloads/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_172041_424808_f575df48/rec_using-the-reference-image-for-overall-proportion_20260610_174114_489374_ac1983e4",
+    "dst": "/home/sivan/whole_body/visual_whole_body/high-level/data/asset/door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_174114_489374_ac1983e4",
+    "status": "ok",
+    "variant": "push_left",
+    "door_dof_name": "door_hinge_joint",
+    "handle_dof_name": "handle_actuation_joint",
+    "door_body_name": "door_panel",
+    "handle_body_name": "条形把手",
+    "door_axis": [
+      0.0,
+      0.0,
+      -1.0
+    ],
+    "handle_axis": [
+      0.0,
+      -1.0,
+      0.0
+    ],
+    "actor_yaw_offset": -1.5707963267948966,
+    "door_motion_sign_multiplier": 1.0,
+    "handle_center_world": [
+      0.78,
+      -0.047056,
+      1.055
+    ],
+    "handle_side": "left",
+    "handle_was_behind": false,
+    "handle_front_delta_before_yaw_fix": -0.04645584910871418,
+    "handle_front_delta_after_yaw_fix": -0.04645584910871418,
+    "handle_side_delta_after_yaw_fix": -0.32299996945700166,
+    "handle_center_after_yaw": [
+      -0.047056,
+      -0.78,
+      1.055
+    ],
+    "door_center_after_yaw": [
+      -0.0006,
+      -0.457,
+      1.0525
+    ],
+    "handle_axis_after_yaw": [
+      -1.0,
+      -0.0,
+      0.0
+    ],
+    "handle_rotate_direction": "positive_clockwise_from_robot",
+    "warnings": []
+  },
+  {
+    "name": "rec_using-the-reference-image-for-overall-proportion_20260610_175935_501250_42de7943",
+    "src": "/home/sivan/Downloads/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_175935_501250_42de7943",
+    "dst": "/home/sivan/whole_body/visual_whole_body/high-level/data/asset/door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_175935_501250_42de7943",
+    "status": "ok",
+    "variant": "push_left",
+    "door_dof_name": "door_hinge_joint",
+    "handle_dof_name": "handle_actuation_joint",
+    "door_body_name": "door_panel",
+    "handle_body_name": "条形把手",
+    "door_axis": [
+      0.0,
+      0.0,
+      -1.0
+    ],
+    "handle_axis": [
+      0.0,
+      -1.0,
+      0.0
+    ],
+    "actor_yaw_offset": -1.5707963267948966,
+    "door_motion_sign_multiplier": 1.0,
+    "handle_center_world": [
+      0.76,
+      -0.082,
+      1.02
+    ],
+    "handle_side": "left",
+    "handle_was_behind": false,
+    "handle_front_delta_before_yaw_fix": -0.044499999999999984,
+    "handle_front_delta_after_yaw_fix": -0.044499999999999984,
+    "handle_side_delta_after_yaw_fix": -0.30550002597357007,
+    "handle_center_after_yaw": [
+      -0.082,
+      -0.76,
+      1.02
+    ],
+    "door_center_after_yaw": [
+      -0.0375,
+      -0.4545,
+      1.054
+    ],
+    "handle_axis_after_yaw": [
+      -1.0,
+      -0.0,
+      0.0
+    ],
+    "handle_rotate_direction": "positive_clockwise_from_robot",
+    "warnings": []
+  },
+  {
+    "name": "rec_using-the-reference-image-for-overall-proportion_20260610_181135_558218_95e44f9a",
+    "src": "/home/sivan/Downloads/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_181135_558218_95e44f9a",
+    "dst": "/home/sivan/whole_body/visual_whole_body/high-level/data/asset/door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_181135_558218_95e44f9a",
+    "status": "ok",
+    "variant": "push_right",
+    "door_dof_name": "door_hinge_joint",
+    "handle_dof_name": "handle_actuation_joint",
+    "door_body_name": "door_panel",
+    "handle_body_name": "圆形把手",
+    "door_axis": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "handle_axis": [
+      0.0,
+      1.0,
+      0.0
+    ],
+    "actor_yaw_offset": 1.5707963267948966,
+    "door_motion_sign_multiplier": -1.0,
+    "handle_center_world": [
+      0.792122,
+      0.074289,
+      1.023564
+    ],
+    "handle_side": "right",
+    "handle_was_behind": true,
+    "handle_front_delta_before_yaw_fix": 0.07168896817690232,
+    "handle_front_delta_after_yaw_fix": -0.07168896817690228,
+    "handle_side_delta_after_yaw_fix": 0.360122,
+    "handle_center_after_yaw": [
+      -0.074289,
+      0.792122,
+      1.023564
+    ],
+    "door_center_after_yaw": [
+      -0.0026,
+      0.432,
+      1.04
+    ],
+    "handle_axis_after_yaw": [
+      -1.0,
+      0.0,
+      0.0
+    ],
+    "handle_rotate_direction": "positive_clockwise_from_robot",
+    "warnings": []
+  },
+  {
+    "name": "rec_using-the-reference-image-for-overall-proportion_20260610_183953_600529_809002ad",
+    "src": "/home/sivan/Downloads/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_183953_600529_809002ad",
+    "dst": "/home/sivan/whole_body/visual_whole_body/high-level/data/asset/door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_183953_600529_809002ad",
+    "status": "ok",
+    "variant": "push_right",
+    "door_dof_name": "door_hinge_joint",
+    "handle_dof_name": "handle_actuation_joint",
+    "door_body_name": "door_panel",
+    "handle_body_name": "条形把手",
+    "door_axis": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "handle_axis": [
+      0.0,
+      -1.0,
+      0.0
+    ],
+    "actor_yaw_offset": 1.5707963267948966,
+    "door_motion_sign_multiplier": -1.0,
+    "handle_center_world": [
+      0.227,
+      0.0375,
+      1.06
+    ],
+    "handle_side": "right",
+    "handle_was_behind": true,
+    "handle_front_delta_before_yaw_fix": 0.03707497061436255,
+    "handle_front_delta_after_yaw_fix": -0.037074970614362525,
+    "handle_side_delta_after_yaw_fix": 0.224,
+    "handle_center_after_yaw": [
+      -0.0375,
+      0.227,
+      1.06
+    ],
+    "door_center_after_yaw": [
+      -0.000425,
+      0.003,
+      1.1
+    ],
+    "handle_axis_after_yaw": [
+      1.0,
+      -0.0,
+      0.0
+    ],
+    "handle_rotate_direction": "positive_counterclockwise_from_robot",
+    "warnings": []
+  },
+  {
+    "name": "rec_using-the-reference-image-for-overall-proportion_20260610_185617_636160_746172d9",
+    "src": "/home/sivan/Downloads/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_185617_636160_746172d9",
+    "dst": "/home/sivan/whole_body/visual_whole_body/high-level/data/asset/door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_185617_636160_746172d9",
+    "status": "ok",
+    "variant": "push_right",
+    "door_dof_name": "door_hinge_joint",
+    "handle_dof_name": "handle_actuation_joint",
+    "door_body_name": "door_panel",
+    "handle_body_name": "条形把手",
+    "door_axis": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "handle_axis": [
+      0.0,
+      -1.0,
+      0.0
+    ],
+    "actor_yaw_offset": 1.5707963267948966,
+    "door_motion_sign_multiplier": -1.0,
+    "handle_center_world": [
+      0.690215,
+      0.09046,
+      0.962334
+    ],
+    "handle_side": "right",
+    "handle_was_behind": true,
+    "handle_front_delta_before_yaw_fix": 0.039459490816990656,
+    "handle_front_delta_after_yaw_fix": -0.03945949081699059,
+    "handle_side_delta_after_yaw_fix": 0.255215,
+    "handle_center_after_yaw": [
+      -0.090459,
+      0.690215,
+      0.962334
+    ],
+    "door_center_after_yaw": [
+      -0.051,
+      0.435,
+      1.023
+    ],
+    "handle_axis_after_yaw": [
+      1.0,
+      -0.0,
+      0.0
+    ],
+    "handle_rotate_direction": "positive_counterclockwise_from_robot",
+    "warnings": []
+  },
+  {
+    "name": "rec_using-the-reference-image-for-overall-proportion_20260610_191608_644365_483217f8",
+    "src": "/home/sivan/Downloads/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_191608_644365_483217f8",
+    "dst": "/home/sivan/whole_body/visual_whole_body/high-level/data/asset/door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_191608_644365_483217f8",
+    "status": "ok",
+    "variant": "push_left",
+    "door_dof_name": "door_hinge_joint",
+    "handle_dof_name": "handle_actuation_joint",
+    "door_body_name": "door_panel",
+    "handle_body_name": "条形把手",
+    "door_axis": [
+      0.0,
+      0.0,
+      -1.0
+    ],
+    "handle_axis": [
+      0.0,
+      -1.0,
+      0.0
+    ],
+    "actor_yaw_offset": -1.5707963267948966,
+    "door_motion_sign_multiplier": 1.0,
+    "handle_center_world": [
+      0.7052,
+      -0.063,
+      1.02
+    ],
+    "handle_side": "left",
+    "handle_was_behind": false,
+    "handle_front_delta_before_yaw_fix": -0.04009998734888687,
+    "handle_front_delta_after_yaw_fix": -0.04009998734888687,
+    "handle_side_delta_after_yaw_fix": -0.26319999999999993,
+    "handle_center_after_yaw": [
+      -0.063,
+      -0.7052,
+      1.02
+    ],
+    "door_center_after_yaw": [
+      -0.0229,
+      -0.442,
+      1.06
+    ],
+    "handle_axis_after_yaw": [
+      -1.0,
+      -0.0,
+      0.0
+    ],
+    "handle_rotate_direction": "positive_clockwise_from_robot",
+    "warnings": []
+  },
+  {
+    "name": "rec_using-the-reference-image-for-overall-proportion_20260610_193220_721835_ab3c271a",
+    "src": "/home/sivan/Downloads/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_193220_721835_ab3c271a",
+    "dst": "/home/sivan/whole_body/visual_whole_body/high-level/data/asset/door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_193220_721835_ab3c271a",
+    "status": "ok",
+    "variant": "push_left",
+    "door_dof_name": "door_hinge_joint",
+    "handle_dof_name": "handle_actuation_joint",
+    "door_body_name": "door_panel",
+    "handle_body_name": "条形把手",
+    "door_axis": [
+      0.0,
+      0.0,
+      -1.0
+    ],
+    "handle_axis": [
+      0.0,
+      -1.0,
+      0.0
+    ],
+    "actor_yaw_offset": -1.5707963267948966,
+    "door_motion_sign_multiplier": 1.0,
+    "handle_center_world": [
+      0.2955,
+      -0.093,
+      0.985
+    ],
+    "handle_side": "left",
+    "handle_was_behind": false,
+    "handle_front_delta_before_yaw_fix": -0.033599920369008676,
+    "handle_front_delta_after_yaw_fix": -0.033599920369008676,
+    "handle_side_delta_after_yaw_fix": -0.2934999745475183,
+    "handle_center_after_yaw": [
+      -0.093,
+      -0.2955,
+      0.985
+    ],
+    "door_center_after_yaw": [
+      -0.0594,
+      -0.002,
+      1.037
+    ],
+    "handle_axis_after_yaw": [
+      -1.0,
+      -0.0,
+      0.0
+    ],
+    "handle_rotate_direction": "positive_clockwise_from_robot",
+    "warnings": []
+  },
+  {
+    "name": "rec_using-the-reference-image-for-overall-proportion_20260610_194505_694187_5b0d4e43",
+    "src": "/home/sivan/Downloads/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_194505_694187_5b0d4e43",
+    "dst": "/home/sivan/whole_body/visual_whole_body/high-level/data/asset/door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_194505_694187_5b0d4e43",
+    "status": "ok",
+    "variant": "push_left",
+    "door_dof_name": "door_hinge_joint",
+    "handle_dof_name": "handle_actuation_joint",
+    "door_body_name": "door_panel",
+    "handle_body_name": "条形把手",
+    "door_axis": [
+      0.0,
+      0.0,
+      -1.0
+    ],
+    "handle_axis": [
+      0.0,
+      -1.0,
+      0.0
+    ],
+    "actor_yaw_offset": -1.5707963267948966,
+    "door_motion_sign_multiplier": 1.0,
+    "handle_center_world": [
+      0.78079,
+      -0.0995,
+      1.067
+    ],
+    "handle_side": "left",
+    "handle_was_behind": false,
+    "handle_front_delta_before_yaw_fix": -0.042500007731170575,
+    "handle_front_delta_after_yaw_fix": -0.042500007731170575,
+    "handle_side_delta_after_yaw_fix": -0.33079048224398405,
+    "handle_center_after_yaw": [
+      -0.0995,
+      -0.78079,
+      1.067
+    ],
+    "door_center_after_yaw": [
+      -0.057,
+      -0.45,
+      1.062
+    ],
+    "handle_axis_after_yaw": [
+      -1.0,
+      -0.0,
+      0.0
+    ],
+    "handle_rotate_direction": "positive_clockwise_from_robot",
+    "warnings": []
+  },
+  {
+    "name": "rec_using-the-two-reference-images-for-overall-propo_20260606_194613_147497_7dd53baf",
+    "src": "/home/sivan/Downloads/record_materialization/rec_using-the-two-reference-images-for-overall-propo_20260606_194613_147497_7dd53baf",
+    "dst": "/home/sivan/whole_body/visual_whole_body/high-level/data/asset/door_set/record_materialization/rec_using-the-two-reference-images-for-overall-propo_20260606_194613_147497_7dd53baf",
+    "status": "ok",
+    "variant": "push_left",
+    "door_dof_name": "door_hinge_joint",
+    "handle_dof_name": "handle_spindle_joint",
+    "door_body_name": "door_panel",
+    "handle_body_name": "条形把手",
+    "door_axis": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "handle_axis": [
+      0.0,
+      -1.0,
+      0.0
+    ],
+    "actor_yaw_offset": -1.5707963267948966,
+    "door_motion_sign_multiplier": -1.0,
+    "handle_center_world": [
+      0.405,
+      0.06,
+      0.985
+    ],
+    "handle_side": "left",
+    "handle_was_behind": false,
+    "handle_front_delta_before_yaw_fix": -0.06242498714378414,
+    "handle_front_delta_after_yaw_fix": -0.06242498714378414,
+    "handle_side_delta_after_yaw_fix": -0.40299999999999997,
+    "handle_center_after_yaw": [
+      0.06,
+      -0.405,
+      0.985
+    ],
+    "door_center_after_yaw": [
+      0.122425,
+      -0.002,
+      1.115
+    ],
+    "handle_axis_after_yaw": [
+      -1.0,
+      -0.0,
+      0.0
+    ],
+    "handle_rotate_direction": "positive_clockwise_from_robot",
+    "warnings": []
+  }
+]

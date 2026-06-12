@@ -9,6 +9,7 @@ import math
 import os
 import sys
 import tempfile
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -228,6 +229,7 @@ class DoorRuntime:
     actor_position_offset: tuple[float, float, float] = (0.0, 0.0, 0.0)
     robot_y_offset: float = 0.0
     door_motion_sign_multiplier: float = 1.0
+    body_rgba: dict | None = None
     open_stage: bool = False
 
 
@@ -404,6 +406,20 @@ def load_door_specs(args):
         max_unique = int(getattr(args, "door_max_unique_assets", 0) or 0)
         if selection in ("all", "all_doors"):
             selected_entries = _reorder_preferred_door(specs, preferred_name)
+        elif selection in ("push_left", "left", "left_handle"):
+            selected_entries = [
+                (idx, spec)
+                for idx, spec in specs
+                if str(spec.get("generated_variant", "")).lower() == "push_left"
+                or str(spec.get("handle_side", "")).lower() == "left"
+            ]
+        elif selection in ("push_right", "right", "right_handle"):
+            selected_entries = [
+                (idx, spec)
+                for idx, spec in specs
+                if str(spec.get("generated_variant", "")).lower() == "push_right"
+                or str(spec.get("handle_side", "")).lower() == "right"
+            ]
         elif selection in ("diverse", "spread", "sample"):
             env_count = max(1, int(getattr(args, "num_envs", len(specs)) or len(specs)))
             if max_unique <= 0:
@@ -433,12 +449,83 @@ def load_door_specs(args):
     return str(asset_root), asset_file_door, loaded_specs
 
 
+def parse_rgba_values(text):
+    if not text:
+        return None
+    try:
+        values = [float(value) for value in str(text).replace(",", " ").split()]
+    except ValueError:
+        return None
+    if len(values) < 3:
+        return None
+    while len(values) < 4:
+        values.append(1.0)
+    return tuple(max(0.0, min(1.0, value)) for value in values[:4])
+
+
+def load_urdf_link_rgba(asset_root, door_file):
+    urdf_path = Path(asset_root) / door_file
+    try:
+        root = ET.parse(urdf_path).getroot()
+    except Exception as exc:
+        print(f"Warning: failed to parse door URDF colors from {urdf_path}: {exc}", flush=True)
+        return {}
+
+    material_rgba = {}
+    for material in root.findall("material"):
+        name = material.get("name")
+        color = material.find("color")
+        rgba = parse_rgba_values(color.get("rgba") if color is not None else None)
+        if name and rgba is not None:
+            material_rgba[name] = rgba
+
+    link_rgba = {}
+    for link in root.findall("link"):
+        link_name = link.get("name")
+        if not link_name:
+            continue
+        for visual in link.findall("visual"):
+            material = visual.find("material")
+            if material is None:
+                continue
+            color = material.find("color")
+            rgba = parse_rgba_values(color.get("rgba") if color is not None else None)
+            if rgba is None:
+                rgba = material_rgba.get(material.get("name"))
+            if rgba is not None and rgba[3] > 0.01:
+                link_rgba[link_name] = rgba
+                break
+    return link_rgba
+
+
+def apply_door_urdf_rgba_colors(gym, env, door_actor, door, args):
+    if not bool(getattr(args, "door_use_urdf_rgba", False)):
+        return
+    body_rgba = door.body_rgba or {}
+    for body_index, body_name in enumerate(door.body_names):
+        rgba = body_rgba.get(body_name)
+        if rgba is None:
+            continue
+        try:
+            gym.set_rigid_body_color(
+                env,
+                door_actor,
+                body_index,
+                gymapi.MESH_VISUAL,
+                gymapi.Vec3(float(rgba[0]), float(rgba[1]), float(rgba[2])),
+            )
+        except Exception:
+            pass
+
+
 def load_door_assets(gym, sim, args):
     asset_root, asset_file_door, specs = load_door_specs(args)
     door_opts = gymapi.AssetOptions()
     door_opts.fix_base_link = True
     door_opts.collapse_fixed_joints = True
-    door_opts.use_mesh_materials = True
+    door_opts.use_mesh_materials = not bool(getattr(args, "door_use_urdf_rgba", False))
+    if hasattr(door_opts, "disable_visual_materials"):
+        door_opts.disable_visual_materials = False
     door_opts.mesh_normal_mode = gymapi.COMPUTE_PER_VERTEX
     door_opts.override_com = True
     door_opts.override_inertia = True
@@ -446,6 +533,11 @@ def load_door_assets(gym, sim, args):
     door_opts.vhacd_enabled = True
     door_opts.vhacd_params = gymapi.VhacdParams()
     door_opts.vhacd_params.resolution = args.door_vhacd_resolution
+    print(
+        "Door visual material source: "
+        + ("URDF rgba" if bool(getattr(args, "door_use_urdf_rgba", False)) else "mesh materials"),
+        flush=True,
+    )
 
     doors = []
     for asset_index, spec, bounding, handle_bounding in specs:
@@ -462,6 +554,7 @@ def load_door_assets(gym, sim, args):
             )
         door_file = os.path.join(asset_file_door, spec["path"])
         print(f"Loading door[{asset_index}]: root={asset_root}, file={door_file}, name={spec['name']}")
+        body_rgba = load_urdf_link_rgba(asset_root, door_file) if bool(getattr(args, "door_use_urdf_rgba", False)) else {}
         door_asset = gym.load_asset(sim, asset_root, door_file, door_opts)
         if door_asset is None:
             raise RuntimeError(f"Failed to load door asset {door_file}")
@@ -531,6 +624,7 @@ def load_door_assets(gym, sim, args):
                 actor_position_offset=actor_position_offset,
                 robot_y_offset=float(spec.get("robot_y_offset", 0.0)),
                 door_motion_sign_multiplier=float(spec.get("door_motion_sign_multiplier", 1.0)),
+                body_rgba=body_rgba,
             )
         )
     print(f"Loaded {len(doors)} door asset(s) for env cycling.", flush=True)
@@ -670,6 +764,28 @@ def create_door_side_wall_asset(gym, sim, args):
     return asset
 
 
+def door_world_xy_bounds_from_bbox(args, door):
+    actor_offset = door.actor_position_offset
+    origin_x = float(args.door_x + actor_offset[0])
+    origin_y = float(args.door_y + actor_offset[1])
+    scale = float(door.actor_scale)
+    yaw = float(door.actor_yaw)
+    c = math.cos(yaw)
+    s = math.sin(yaw)
+    min_x = float(door.bounding["min"][0])
+    max_x = float(door.bounding["max"][0])
+    min_y = float(door.bounding["min"][1])
+    max_y = float(door.bounding["max"][1])
+
+    xs = []
+    ys = []
+    for local_x in (min_x, max_x):
+        for local_y in (min_y, max_y):
+            xs.append(origin_x + scale * (c * local_x - s * local_y))
+            ys.append(origin_y + scale * (s * local_x + c * local_y))
+    return min(xs), max(xs), min(ys), max(ys)
+
+
 def create_door_side_walls(gym, sim, env, door, args, env_index=0):
     if not door_side_walls_enabled(args):
         return []
@@ -678,15 +794,16 @@ def create_door_side_walls(gym, sim, env, door, args, env_index=0):
     side_width = max(1.0e-3, float(getattr(args, "door_wall_side_width", 1.0)))
     height = max(1.0e-3, float(getattr(args, "door_wall_height", 2.2)))
     opening_width = float(getattr(args, "door_wall_opening_width", 0.0))
+    world_min_x, world_max_x, world_min_y, world_max_y = door_world_xy_bounds_from_bbox(args, door)
+    opening_center_y = 0.5 * (world_min_y + world_max_y)
     if opening_width <= 0.0:
-        opening_width = float(door.actor_scale) * (
-            float(door.bounding["max"][0]) - float(door.bounding["min"][0])
-        )
+        clearance = max(0.0, float(getattr(args, "door_wall_opening_clearance", 0.0)))
+        opening_width = (world_max_y - world_min_y) + 2.0 * clearance
     opening_width = max(1.0e-3, opening_width)
     gap = max(0.0, float(getattr(args, "door_wall_gap", 0.0)))
 
-    x = float(args.door_x) + float(getattr(args, "door_wall_x_offset", 0.0))
-    y_center = float(args.door_y) + float(getattr(args, "door_wall_y_offset", 0.0))
+    x = 0.5 * (world_min_x + world_max_x) + float(getattr(args, "door_wall_x_offset", 0.0))
+    y_center = opening_center_y + float(getattr(args, "door_wall_y_offset", 0.0))
     z = float(getattr(args, "door_z_offset", 0.0)) + 0.5 * height
     y_offsets = (
         -0.5 * opening_width - gap - 0.5 * side_width,
@@ -755,6 +872,7 @@ def create_env_actors(gym, sim, base_asset, arm_asset, door, dof_props, dof_stat
         gym.set_rigid_body_segmentation_id(env, door_actor, door.handle_body_index, int(args.handle_seg_id))
     except AttributeError:
         print("set_rigid_body_segmentation_id is not available; handle mask will use the door actor segmentation.")
+    apply_door_urdf_rgba_colors(gym, env, door_actor, door, args)
 
     configure_door_actor_dofs(gym, env, door_actor, door, args)
     create_door_side_walls(gym, sim, env, door, args, env_index=0)
@@ -814,6 +932,7 @@ def create_parallel_env_actors(
     except AttributeError:
         if env_index == 0:
             print("set_rigid_body_segmentation_id is not available; handle mask will use the door actor segmentation.")
+    apply_door_urdf_rgba_colors(gym, env, door_actor, door, args)
 
     configure_door_actor_dofs(gym, env, door_actor, door, args)
     create_door_side_walls(gym, sim, env, door, args, env_index=env_index)
@@ -2627,6 +2746,7 @@ def make_float_dp_recorder(
         "camera_sample_stride": int(float_dp_camera_sample_stride(args)),
         "camera_hold_last_frame": True,
         "door_side_walls": bool(door_side_walls_enabled(args)),
+        "door_use_urdf_rgba": bool(getattr(args, "door_use_urdf_rgba", False)),
     }
     metadata.update(depth_camera_randomization_metadata(args))
     sim_dt = getattr(args, "sim_dt", None)
@@ -2646,6 +2766,7 @@ def make_float_dp_recorder(
         "door_z_offset",
         "door_wall_height",
         "door_wall_opening_width",
+        "door_wall_opening_clearance",
         "door_wall_side_width",
         "door_wall_thickness",
         "door_wall_gap",

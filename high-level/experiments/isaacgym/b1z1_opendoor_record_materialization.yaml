@@ -1,0 +1,406 @@
+env:
+  asset:
+    assetRoot: data/asset
+    assetFileDoor: ''
+    load_block: record_materialization
+    trainAssets:
+      record_materialization:
+        '0':
+          name: rec_using-the-reference-image-for-overall-proportion_20260610_133539_066287_93a4ac59
+          path: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_133539_066287_93a4ac59/model.urdf
+          bounding_box: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_133539_066287_93a4ac59/bounding_box.json
+          handle_bounding: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_133539_066287_93a4ac59/handle_bounding.json
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.0
+          - 0.0
+          - 0.0
+          robot_y_offset: 0.18
+          door_motion_sign_multiplier: 1.0
+          door_body_name: door_panel
+          handle_body_name: 条形把手
+          door_dof_name: door_hinge_joint
+          handle_dof_name: lever_handle_joint
+          generated_variant: push_left
+          handle_side: left
+          handle_was_behind: false
+          handle_rotate_direction: positive_clockwise_from_robot
+        '1':
+          name: rec_using-the-reference-image-for-overall-proportion_20260610_144220_404149_a1666c1a
+          path: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_144220_404149_a1666c1a/model.urdf
+          bounding_box: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_144220_404149_a1666c1a/bounding_box.json
+          handle_bounding: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_144220_404149_a1666c1a/handle_bounding.json
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.0
+          - 0.0
+          - 0.0
+          robot_y_offset: 0.18
+          door_motion_sign_multiplier: 1.0
+          door_body_name: door_panel
+          handle_body_name: 条形把手
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_actuation_joint
+          generated_variant: push_left
+          handle_side: left
+          handle_was_behind: false
+          handle_rotate_direction: positive_clockwise_from_robot
+        '2':
+          name: rec_using-the-reference-image-for-overall-proportion_20260610_145408_481318_cb8ca903
+          path: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_145408_481318_cb8ca903/model.urdf
+          bounding_box: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_145408_481318_cb8ca903/bounding_box.json
+          handle_bounding: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_145408_481318_cb8ca903/handle_bounding.json
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.0
+          - 0.0
+          - 0.0
+          robot_y_offset: 0.18
+          door_motion_sign_multiplier: 1.0
+          door_body_name: door_panel
+          handle_body_name: 条形把手
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_actuation_joint
+          generated_variant: push_left
+          handle_side: left
+          handle_was_behind: false
+          handle_rotate_direction: positive_clockwise_from_robot
+        '3':
+          name: rec_using-the-reference-image-for-overall-proportion_20260610_151444_424431_821df59d
+          path: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_151444_424431_821df59d/model.urdf
+          bounding_box: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_151444_424431_821df59d/bounding_box.json
+          handle_bounding: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_151444_424431_821df59d/handle_bounding.json
+          actor_scale: 1.0
+          actor_yaw_offset: 1.5707963267948966
+          actor_position_offset:
+          - 0.0
+          - 0.0
+          - 0.0
+          robot_y_offset: 0.18
+          door_motion_sign_multiplier: -1.0
+          door_body_name: door_panel
+          handle_body_name: 条形把手
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_actuation_joint
+          generated_variant: push_right
+          handle_side: right
+          handle_was_behind: true
+          handle_rotate_direction: positive_counterclockwise_from_robot
+        '4':
+          name: rec_using-the-reference-image-for-overall-proportion_20260610_152759_469492_cdfe437e
+          path: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_152759_469492_cdfe437e/model.urdf
+          bounding_box: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_152759_469492_cdfe437e/bounding_box.json
+          handle_bounding: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_152759_469492_cdfe437e/handle_bounding.json
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.0
+          - 0.0
+          - 0.0
+          robot_y_offset: 0.18
+          door_motion_sign_multiplier: 1.0
+          door_body_name: door_panel
+          handle_body_name: 条形把手
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_actuation_joint
+          generated_variant: push_left
+          handle_side: left
+          handle_was_behind: false
+          handle_rotate_direction: positive_clockwise_from_robot
+        '5':
+          name: rec_using-the-reference-image-for-overall-proportion_20260610_161038_309387_2dbe2f90
+          path: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_161038_309387_2dbe2f90/model.urdf
+          bounding_box: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_161038_309387_2dbe2f90/bounding_box.json
+          handle_bounding: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_161038_309387_2dbe2f90/handle_bounding.json
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.0
+          - 0.0
+          - 0.0
+          robot_y_offset: 0.18
+          door_motion_sign_multiplier: 1.0
+          door_body_name: door_panel
+          handle_body_name: 条形把手
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_actuation_joint
+          generated_variant: push_left
+          handle_side: left
+          handle_was_behind: false
+          handle_rotate_direction: positive_clockwise_from_robot
+        '6':
+          name: rec_using-the-reference-image-for-overall-proportion_20260610_162811_304962_a16a279d
+          path: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_162811_304962_a16a279d/model.urdf
+          bounding_box: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_162811_304962_a16a279d/bounding_box.json
+          handle_bounding: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_162811_304962_a16a279d/handle_bounding.json
+          actor_scale: 1.0
+          actor_yaw_offset: 1.5707963267948966
+          actor_position_offset:
+          - 0.0
+          - 0.0
+          - 0.0
+          robot_y_offset: 0.18
+          door_motion_sign_multiplier: -1.0
+          door_body_name: door_panel
+          handle_body_name: 条形把手
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_actuation_joint
+          generated_variant: push_right
+          handle_side: right
+          handle_was_behind: true
+          handle_rotate_direction: positive_counterclockwise_from_robot
+        '7':
+          name: rec_using-the-reference-image-for-overall-proportion_20260610_164520_357064_c5d683a7
+          path: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_164520_357064_c5d683a7/model.urdf
+          bounding_box: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_164520_357064_c5d683a7/bounding_box.json
+          handle_bounding: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_164520_357064_c5d683a7/handle_bounding.json
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.0
+          - 0.0
+          - 0.0
+          robot_y_offset: 0.18
+          door_motion_sign_multiplier: 1.0
+          door_body_name: door_panel
+          handle_body_name: 条形把手
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_actuation_joint
+          generated_variant: push_left
+          handle_side: left
+          handle_was_behind: false
+          handle_rotate_direction: positive_clockwise_from_robot
+        '8':
+          name: rec_using-the-reference-image-for-overall-proportion_20260610_170120_408501_5b935599
+          path: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_170120_408501_5b935599/model.urdf
+          bounding_box: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_170120_408501_5b935599/bounding_box.json
+          handle_bounding: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_170120_408501_5b935599/handle_bounding.json
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.0
+          - 0.0
+          - 0.0
+          robot_y_offset: 0.18
+          door_motion_sign_multiplier: 1.0
+          door_body_name: door_panel
+          handle_body_name: 条形把手
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_actuation_joint
+          generated_variant: push_left
+          handle_side: left
+          handle_was_behind: false
+          handle_rotate_direction: positive_clockwise_from_robot
+        '9':
+          name: rec_using-the-reference-image-for-overall-proportion_20260610_172041_424808_f575df48
+          path: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_172041_424808_f575df48/model.urdf
+          bounding_box: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_172041_424808_f575df48/bounding_box.json
+          handle_bounding: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_172041_424808_f575df48/handle_bounding.json
+          actor_scale: 1.0
+          actor_yaw_offset: 1.5707963267948966
+          actor_position_offset:
+          - 0.0
+          - 0.0
+          - 0.0
+          robot_y_offset: 0.18
+          door_motion_sign_multiplier: -1.0
+          door_body_name: door_panel
+          handle_body_name: 条形把手
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_actuation_joint
+          generated_variant: push_right
+          handle_side: right
+          handle_was_behind: true
+          handle_rotate_direction: positive_counterclockwise_from_robot
+        '10':
+          name: rec_using-the-reference-image-for-overall-proportion_20260610_174114_489374_ac1983e4
+          path: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_174114_489374_ac1983e4/model.urdf
+          bounding_box: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_174114_489374_ac1983e4/bounding_box.json
+          handle_bounding: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_174114_489374_ac1983e4/handle_bounding.json
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.0
+          - 0.0
+          - 0.0
+          robot_y_offset: 0.18
+          door_motion_sign_multiplier: 1.0
+          door_body_name: door_panel
+          handle_body_name: 条形把手
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_actuation_joint
+          generated_variant: push_left
+          handle_side: left
+          handle_was_behind: false
+          handle_rotate_direction: positive_clockwise_from_robot
+        '11':
+          name: rec_using-the-reference-image-for-overall-proportion_20260610_175935_501250_42de7943
+          path: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_175935_501250_42de7943/model.urdf
+          bounding_box: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_175935_501250_42de7943/bounding_box.json
+          handle_bounding: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_175935_501250_42de7943/handle_bounding.json
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.0
+          - 0.0
+          - 0.0
+          robot_y_offset: 0.18
+          door_motion_sign_multiplier: 1.0
+          door_body_name: door_panel
+          handle_body_name: 条形把手
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_actuation_joint
+          generated_variant: push_left
+          handle_side: left
+          handle_was_behind: false
+          handle_rotate_direction: positive_clockwise_from_robot
+        '12':
+          name: rec_using-the-reference-image-for-overall-proportion_20260610_181135_558218_95e44f9a
+          path: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_181135_558218_95e44f9a/model.urdf
+          bounding_box: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_181135_558218_95e44f9a/bounding_box.json
+          handle_bounding: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_181135_558218_95e44f9a/handle_bounding.json
+          actor_scale: 1.0
+          actor_yaw_offset: 1.5707963267948966
+          actor_position_offset:
+          - 0.0
+          - 0.0
+          - 0.0
+          robot_y_offset: 0.18
+          door_motion_sign_multiplier: -1.0
+          door_body_name: door_panel
+          handle_body_name: 圆形把手
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_actuation_joint
+          generated_variant: push_right
+          handle_side: right
+          handle_was_behind: true
+          handle_rotate_direction: positive_clockwise_from_robot
+        '13':
+          name: rec_using-the-reference-image-for-overall-proportion_20260610_183953_600529_809002ad
+          path: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_183953_600529_809002ad/model.urdf
+          bounding_box: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_183953_600529_809002ad/bounding_box.json
+          handle_bounding: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_183953_600529_809002ad/handle_bounding.json
+          actor_scale: 1.0
+          actor_yaw_offset: 1.5707963267948966
+          actor_position_offset:
+          - 0.0
+          - 0.0
+          - 0.0
+          robot_y_offset: 0.18
+          door_motion_sign_multiplier: -1.0
+          door_body_name: door_panel
+          handle_body_name: 条形把手
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_actuation_joint
+          generated_variant: push_right
+          handle_side: right
+          handle_was_behind: true
+          handle_rotate_direction: positive_counterclockwise_from_robot
+        '14':
+          name: rec_using-the-reference-image-for-overall-proportion_20260610_185617_636160_746172d9
+          path: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_185617_636160_746172d9/model.urdf
+          bounding_box: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_185617_636160_746172d9/bounding_box.json
+          handle_bounding: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_185617_636160_746172d9/handle_bounding.json
+          actor_scale: 1.0
+          actor_yaw_offset: 1.5707963267948966
+          actor_position_offset:
+          - 0.0
+          - 0.0
+          - 0.0
+          robot_y_offset: 0.18
+          door_motion_sign_multiplier: -1.0
+          door_body_name: door_panel
+          handle_body_name: 条形把手
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_actuation_joint
+          generated_variant: push_right
+          handle_side: right
+          handle_was_behind: true
+          handle_rotate_direction: positive_counterclockwise_from_robot
+        '15':
+          name: rec_using-the-reference-image-for-overall-proportion_20260610_191608_644365_483217f8
+          path: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_191608_644365_483217f8/model.urdf
+          bounding_box: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_191608_644365_483217f8/bounding_box.json
+          handle_bounding: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_191608_644365_483217f8/handle_bounding.json
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.0
+          - 0.0
+          - 0.0
+          robot_y_offset: 0.18
+          door_motion_sign_multiplier: 1.0
+          door_body_name: door_panel
+          handle_body_name: 条形把手
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_actuation_joint
+          generated_variant: push_left
+          handle_side: left
+          handle_was_behind: false
+          handle_rotate_direction: positive_clockwise_from_robot
+        '16':
+          name: rec_using-the-reference-image-for-overall-proportion_20260610_193220_721835_ab3c271a
+          path: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_193220_721835_ab3c271a/model.urdf
+          bounding_box: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_193220_721835_ab3c271a/bounding_box.json
+          handle_bounding: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_193220_721835_ab3c271a/handle_bounding.json
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.0
+          - 0.0
+          - 0.0
+          robot_y_offset: 0.18
+          door_motion_sign_multiplier: 1.0
+          door_body_name: door_panel
+          handle_body_name: 条形把手
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_actuation_joint
+          generated_variant: push_left
+          handle_side: left
+          handle_was_behind: false
+          handle_rotate_direction: positive_clockwise_from_robot
+        '17':
+          name: rec_using-the-reference-image-for-overall-proportion_20260610_194505_694187_5b0d4e43
+          path: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_194505_694187_5b0d4e43/model.urdf
+          bounding_box: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_194505_694187_5b0d4e43/bounding_box.json
+          handle_bounding: door_set/record_materialization/rec_using-the-reference-image-for-overall-proportion_20260610_194505_694187_5b0d4e43/handle_bounding.json
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.0
+          - 0.0
+          - 0.0
+          robot_y_offset: 0.18
+          door_motion_sign_multiplier: 1.0
+          door_body_name: door_panel
+          handle_body_name: 条形把手
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_actuation_joint
+          generated_variant: push_left
+          handle_side: left
+          handle_was_behind: false
+          handle_rotate_direction: positive_clockwise_from_robot
+        '18':
+          name: rec_using-the-two-reference-images-for-overall-propo_20260606_194613_147497_7dd53baf
+          path: door_set/record_materialization/rec_using-the-two-reference-images-for-overall-propo_20260606_194613_147497_7dd53baf/model.urdf
+          bounding_box: door_set/record_materialization/rec_using-the-two-reference-images-for-overall-propo_20260606_194613_147497_7dd53baf/bounding_box.json
+          handle_bounding: door_set/record_materialization/rec_using-the-two-reference-images-for-overall-propo_20260606_194613_147497_7dd53baf/handle_bounding.json
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.0
+          - 0.0
+          - 0.0
+          robot_y_offset: 0.18
+          door_motion_sign_multiplier: -1.0
+          door_body_name: door_panel
+          handle_body_name: 条形把手
+          door_dof_name: door_hinge_joint
+          handle_dof_name: handle_spindle_joint
+          generated_variant: push_left
+          handle_side: left
+          handle_was_behind: false
+          handle_rotate_direction: positive_clockwise_from_robot

@@ -1,0 +1,1774 @@
+<robot name="single_leaf_hinged_door">
+  <material name="dark_brown_stained_wood">
+    <color rgba="0.19 0.095 0.05 1" />
+    </material>
+  <material name="glossier_molded_wood">
+    <color rgba="0.125 0.058 0.032 1" />
+    </material>
+  <material name="raised_panel_stain">
+    <color rgba="0.23 0.12 0.065 1" />
+    </material>
+  <material name="vertical_dark_grain">
+    <color rgba="0.105 0.052 0.03 1" />
+    </material>
+  <material name="vertical_subtle_grain">
+    <color rgba="0.28 0.15 0.085 1" />
+    </material>
+  <material name="trim_shadow">
+    <color rgba="0.045 0.023 0.014 1" />
+    </material>
+  <material name="polished_brass">
+    <color rgba="0.86 0.58 0.2 1" />
+    </material>
+  <material name="dark_bronze_hinge">
+    <color rgba="0.45 0.25 0.08 1" />
+    </material>
+  <material name="dark_screw_recess">
+    <color rgba="0.07 0.045 0.028 1" />
+    </material>
+  <link name="fixed_frame">
+    <visual name="left_jamb">
+      <origin xyz="-0.47 -0.0125 1.1" rpy="0 0 0" />
+      <geometry>
+        <box size="0.09 0.085 2.2" />
+        </geometry>
+      <material name="dark_brown_stained_wood">
+        <color rgba="0.19 0.095 0.05 1" />
+        </material>
+      </visual>
+    <visual name="right_jamb">
+      <origin xyz="0.47 -0.0125 1.1" rpy="0 0 0" />
+      <geometry>
+        <box size="0.09 0.085 2.2" />
+        </geometry>
+      <material name="dark_brown_stained_wood">
+        <color rgba="0.19 0.095 0.05 1" />
+        </material>
+      </visual>
+    <visual name="header">
+      <origin xyz="0 -0.0125 2.15" rpy="0 0 0" />
+      <geometry>
+        <box size="1.03 0.085 0.1" />
+        </geometry>
+      <material name="dark_brown_stained_wood">
+        <color rgba="0.19 0.095 0.05 1" />
+        </material>
+      </visual>
+    <visual name="threshold_sill">
+      <origin xyz="0 -0.0125 0.01" rpy="0 0 0" />
+      <geometry>
+        <box size="0.87 0.07 0.02" />
+        </geometry>
+      <material name="glossier_molded_wood">
+        <color rgba="0.125 0.058 0.032 1" />
+        </material>
+      </visual>
+    <visual name="left_door_stop">
+      <origin xyz="-0.416 -0.033 1.055" rpy="0 0 0" />
+      <geometry>
+        <box size="0.018 0.01 2.03" />
+        </geometry>
+      <material name="glossier_molded_wood">
+        <color rgba="0.125 0.058 0.032 1" />
+        </material>
+      </visual>
+    <visual name="right_door_stop">
+      <origin xyz="0.416 -0.033 1.055" rpy="0 0 0" />
+      <geometry>
+        <box size="0.018 0.01 2.03" />
+        </geometry>
+      <material name="glossier_molded_wood">
+        <color rgba="0.125 0.058 0.032 1" />
+        </material>
+      </visual>
+    <visual name="header_door_stop">
+      <origin xyz="0 -0.033 2.088" rpy="0 0 0" />
+      <geometry>
+        <box size="0.85 0.01 0.018" />
+        </geometry>
+      <material name="glossier_molded_wood">
+        <color rgba="0.125 0.058 0.032 1" />
+        </material>
+      </visual>
+    <visual name="left_casing_outer">
+      <origin xyz="-0.545 0.041 1.1275" rpy="0 0 0" />
+      <geometry>
+        <box size="0.062 0.026 2.255" />
+        </geometry>
+      <material name="glossier_molded_wood">
+        <color rgba="0.125 0.058 0.032 1" />
+        </material>
+      </visual>
+    <visual name="left_outer_shadow_bead">
+      <origin xyz="-0.574 0.052 1.1275" rpy="0 0 0" />
+      <geometry>
+        <box size="0.014 0.034 2.255" />
+        </geometry>
+      <material name="trim_shadow">
+        <color rgba="0.045 0.023 0.014 1" />
+        </material>
+      </visual>
+    <visual name="left_inner_round_bead">
+      <origin xyz="-0.522 0.058 1.1175" rpy="0 0 0" />
+      <geometry>
+        <box size="0.011 0.038 2.235" />
+        </geometry>
+      <material name="dark_brown_stained_wood">
+        <color rgba="0.19 0.095 0.05 1" />
+        </material>
+      </visual>
+    <visual name="left_fine_casing_line">
+      <origin xyz="-0.513 0.064 1.1075" rpy="0 0 0" />
+      <geometry>
+        <box size="0.01 0.043 2.215" />
+        </geometry>
+      <material name="glossier_molded_wood">
+        <color rgba="0.125 0.058 0.032 1" />
+        </material>
+      </visual>
+    <visual name="right_casing_outer">
+      <origin xyz="0.545 0.041 1.1275" rpy="0 0 0" />
+      <geometry>
+        <box size="0.062 0.026 2.255" />
+        </geometry>
+      <material name="glossier_molded_wood">
+        <color rgba="0.125 0.058 0.032 1" />
+        </material>
+      </visual>
+    <visual name="right_outer_shadow_bead">
+      <origin xyz="0.574 0.052 1.1275" rpy="0 0 0" />
+      <geometry>
+        <box size="0.014 0.034 2.255" />
+        </geometry>
+      <material name="trim_shadow">
+        <color rgba="0.045 0.023 0.014 1" />
+        </material>
+      </visual>
+    <visual name="right_inner_round_bead">
+      <origin xyz="0.522 0.058 1.1175" rpy="0 0 0" />
+      <geometry>
+        <box size="0.011 0.038 2.235" />
+        </geometry>
+      <material name="dark_brown_stained_wood">
+        <color rgba="0.19 0.095 0.05 1" />
+        </material>
+      </visual>
+    <visual name="right_fine_casing_line">
+      <origin xyz="0.513 0.064 1.1075" rpy="0 0 0" />
+      <geometry>
+        <box size="0.01 0.043 2.215" />
+        </geometry>
+      <material name="glossier_molded_wood">
+        <color rgba="0.125 0.058 0.032 1" />
+        </material>
+      </visual>
+    <visual name="header_casing_outer">
+      <origin xyz="0 0.041 2.231" rpy="0 0 0" />
+      <geometry>
+        <box size="1.174 0.026 0.064" />
+        </geometry>
+      <material name="glossier_molded_wood">
+        <color rgba="0.125 0.058 0.032 1" />
+        </material>
+      </visual>
+    <visual name="header_top_shadow_bead">
+      <origin xyz="0 0.052 2.269" rpy="0 0 0" />
+      <geometry>
+        <box size="1.174 0.034 0.012" />
+        </geometry>
+      <material name="trim_shadow">
+        <color rgba="0.045 0.023 0.014 1" />
+        </material>
+      </visual>
+    <visual name="header_inner_round_bead">
+      <origin xyz="0 0.058 2.205" rpy="0 0 0" />
+      <geometry>
+        <box size="1.104 0.038 0.011" />
+        </geometry>
+      <material name="dark_brown_stained_wood">
+        <color rgba="0.19 0.095 0.05 1" />
+        </material>
+      </visual>
+    <visual name="header_fine_casing_line">
+      <origin xyz="0 0.064 2.19" rpy="0 0 0" />
+      <geometry>
+        <box size="1.078 0.043 0.006" />
+        </geometry>
+      <material name="glossier_molded_wood">
+        <color rgba="0.125 0.058 0.032 1" />
+        </material>
+      </visual>
+    <visual name="jamb_vertical_grain_0">
+      <origin xyz="-0.492 0.03 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0022 0.002 2.12" />
+        </geometry>
+      <material name="vertical_dark_grain">
+        <color rgba="0.105 0.052 0.03 1" />
+        </material>
+      </visual>
+    <visual name="jamb_vertical_grain_1">
+      <origin xyz="-0.478 0.03 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0022 0.002 2.12" />
+        </geometry>
+      <material name="vertical_subtle_grain">
+        <color rgba="0.28 0.15 0.085 1" />
+        </material>
+      </visual>
+    <visual name="jamb_vertical_grain_2">
+      <origin xyz="-0.462 0.03 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0022 0.002 2.12" />
+        </geometry>
+      <material name="vertical_dark_grain">
+        <color rgba="0.105 0.052 0.03 1" />
+        </material>
+      </visual>
+    <visual name="jamb_vertical_grain_3">
+      <origin xyz="-0.447 0.03 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0022 0.002 2.12" />
+        </geometry>
+      <material name="vertical_subtle_grain">
+        <color rgba="0.28 0.15 0.085 1" />
+        </material>
+      </visual>
+    <visual name="jamb_vertical_grain_4">
+      <origin xyz="0.447 0.03 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0022 0.002 2.12" />
+        </geometry>
+      <material name="vertical_dark_grain">
+        <color rgba="0.105 0.052 0.03 1" />
+        </material>
+      </visual>
+    <visual name="jamb_vertical_grain_5">
+      <origin xyz="0.462 0.03 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0022 0.002 2.12" />
+        </geometry>
+      <material name="vertical_subtle_grain">
+        <color rgba="0.28 0.15 0.085 1" />
+        </material>
+      </visual>
+    <visual name="jamb_vertical_grain_6">
+      <origin xyz="0.478 0.03 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0022 0.002 2.12" />
+        </geometry>
+      <material name="vertical_dark_grain">
+        <color rgba="0.105 0.052 0.03 1" />
+        </material>
+      </visual>
+    <visual name="jamb_vertical_grain_7">
+      <origin xyz="0.492 0.03 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0022 0.002 2.12" />
+        </geometry>
+      <material name="vertical_subtle_grain">
+        <color rgba="0.28 0.15 0.085 1" />
+        </material>
+      </visual>
+    <visual name="strike_plate">
+      <origin xyz="0.424 0.004 0.955" rpy="0 0 0" />
+      <geometry>
+        <box size="0.003 0.035 0.118" />
+        </geometry>
+      <material name="polished_brass">
+        <color rgba="0.86 0.58 0.2 1" />
+        </material>
+      </visual>
+    <visual name="strike_latch_pocket">
+      <origin xyz="0.4242 0.005 0.955" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0032 0.019 0.044" />
+        </geometry>
+      <material name="trim_shadow">
+        <color rgba="0.045 0.023 0.014 1" />
+        </material>
+      </visual>
+    <visual name="strike_screw_0">
+      <origin xyz="0.422 0.004 0.905" rpy="0 1.5708 0" />
+      <geometry>
+        <cylinder radius="0.004" length="0.002" />
+        </geometry>
+      <material name="dark_screw_recess">
+        <color rgba="0.07 0.045 0.028 1" />
+        </material>
+      </visual>
+    <visual name="strike_screw_1">
+      <origin xyz="0.422 0.004 1.005" rpy="0 1.5708 0" />
+      <geometry>
+        <cylinder radius="0.004" length="0.002" />
+        </geometry>
+      <material name="dark_screw_recess">
+        <color rgba="0.07 0.045 0.028 1" />
+        </material>
+      </visual>
+    <visual name="hinge_leaf_frame_0">
+      <origin xyz="-0.451 0.0285 1.765" rpy="0 0 0" />
+      <geometry>
+        <box size="0.044 0.004 0.135" />
+        </geometry>
+      <material name="dark_bronze_hinge">
+        <color rgba="0.45 0.25 0.08 1" />
+        </material>
+      </visual>
+    <visual name="hinge_pin_0">
+      <origin xyz="-0.425 0.03 1.765" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.004" length="0.147" />
+        </geometry>
+      <material name="polished_brass">
+        <color rgba="0.86 0.58 0.2 1" />
+        </material>
+      </visual>
+    <visual name="hinge_pin_cap_0">
+      <origin xyz="-0.425 0.03 1.8405" rpy="0 0 0" />
+      <geometry>
+        <sphere radius="0.0052" />
+        </geometry>
+      <material name="polished_brass">
+        <color rgba="0.86 0.58 0.2 1" />
+        </material>
+      </visual>
+    <visual name="hinge_frame_screw_0_0">
+      <origin xyz="-0.454 0.031 1.725" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0047" length="0.002" />
+        </geometry>
+      <material name="dark_screw_recess">
+        <color rgba="0.07 0.045 0.028 1" />
+        </material>
+      </visual>
+    <visual name="hinge_frame_screw_0_1">
+      <origin xyz="-0.454 0.031 1.805" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0047" length="0.002" />
+        </geometry>
+      <material name="dark_screw_recess">
+        <color rgba="0.07 0.045 0.028 1" />
+        </material>
+      </visual>
+    <visual name="hinge_leaf_frame_1">
+      <origin xyz="-0.451 0.0285 1.055" rpy="0 0 0" />
+      <geometry>
+        <box size="0.044 0.004 0.135" />
+        </geometry>
+      <material name="dark_bronze_hinge">
+        <color rgba="0.45 0.25 0.08 1" />
+        </material>
+      </visual>
+    <visual name="hinge_pin_1">
+      <origin xyz="-0.425 0.03 1.055" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.004" length="0.147" />
+        </geometry>
+      <material name="polished_brass">
+        <color rgba="0.86 0.58 0.2 1" />
+        </material>
+      </visual>
+    <visual name="hinge_pin_cap_1">
+      <origin xyz="-0.425 0.03 1.1305" rpy="0 0 0" />
+      <geometry>
+        <sphere radius="0.0052" />
+        </geometry>
+      <material name="polished_brass">
+        <color rgba="0.86 0.58 0.2 1" />
+        </material>
+      </visual>
+    <visual name="hinge_frame_screw_1_0">
+      <origin xyz="-0.454 0.031 1.015" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0047" length="0.002" />
+        </geometry>
+      <material name="dark_screw_recess">
+        <color rgba="0.07 0.045 0.028 1" />
+        </material>
+      </visual>
+    <visual name="hinge_frame_screw_1_1">
+      <origin xyz="-0.454 0.031 1.095" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0047" length="0.002" />
+        </geometry>
+      <material name="dark_screw_recess">
+        <color rgba="0.07 0.045 0.028 1" />
+        </material>
+      </visual>
+    <visual name="hinge_leaf_frame_2">
+      <origin xyz="-0.451 0.0285 0.345" rpy="0 0 0" />
+      <geometry>
+        <box size="0.044 0.004 0.135" />
+        </geometry>
+      <material name="dark_bronze_hinge">
+        <color rgba="0.45 0.25 0.08 1" />
+        </material>
+      </visual>
+    <visual name="hinge_pin_2">
+      <origin xyz="-0.425 0.03 0.345" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.004" length="0.147" />
+        </geometry>
+      <material name="polished_brass">
+        <color rgba="0.86 0.58 0.2 1" />
+        </material>
+      </visual>
+    <visual name="hinge_pin_cap_2">
+      <origin xyz="-0.425 0.03 0.4205" rpy="0 0 0" />
+      <geometry>
+        <sphere radius="0.0052" />
+        </geometry>
+      <material name="polished_brass">
+        <color rgba="0.86 0.58 0.2 1" />
+        </material>
+      </visual>
+    <visual name="hinge_frame_screw_2_0">
+      <origin xyz="-0.454 0.031 0.305" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0047" length="0.002" />
+        </geometry>
+      <material name="dark_screw_recess">
+        <color rgba="0.07 0.045 0.028 1" />
+        </material>
+      </visual>
+    <visual name="hinge_frame_screw_2_1">
+      <origin xyz="-0.454 0.031 0.385" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0047" length="0.002" />
+        </geometry>
+      <material name="dark_screw_recess">
+        <color rgba="0.07 0.045 0.028 1" />
+        </material>
+      </visual>
+    <collision name="left_jamb">
+      <origin xyz="-0.47 -0.0125 1.1" rpy="0 0 0" />
+      <geometry>
+        <box size="0.09 0.085 2.2" />
+        </geometry>
+      </collision>
+    <collision name="right_jamb">
+      <origin xyz="0.47 -0.0125 1.1" rpy="0 0 0" />
+      <geometry>
+        <box size="0.09 0.085 2.2" />
+        </geometry>
+      </collision>
+    <collision name="header">
+      <origin xyz="0 -0.0125 2.15" rpy="0 0 0" />
+      <geometry>
+        <box size="1.03 0.085 0.1" />
+        </geometry>
+      </collision>
+    <collision name="threshold_sill">
+      <origin xyz="0 -0.0125 0.01" rpy="0 0 0" />
+      <geometry>
+        <box size="0.87 0.07 0.02" />
+        </geometry>
+      </collision>
+    <collision name="left_door_stop">
+      <origin xyz="-0.416 -0.033 1.055" rpy="0 0 0" />
+      <geometry>
+        <box size="0.018 0.01 2.03" />
+        </geometry>
+      </collision>
+    <collision name="right_door_stop">
+      <origin xyz="0.416 -0.033 1.055" rpy="0 0 0" />
+      <geometry>
+        <box size="0.018 0.01 2.03" />
+        </geometry>
+      </collision>
+    <collision name="header_door_stop">
+      <origin xyz="0 -0.033 2.088" rpy="0 0 0" />
+      <geometry>
+        <box size="0.85 0.01 0.018" />
+        </geometry>
+      </collision>
+    <collision name="left_casing_outer">
+      <origin xyz="-0.545 0.041 1.1275" rpy="0 0 0" />
+      <geometry>
+        <box size="0.062 0.026 2.255" />
+        </geometry>
+      </collision>
+    <collision name="left_outer_shadow_bead">
+      <origin xyz="-0.574 0.052 1.1275" rpy="0 0 0" />
+      <geometry>
+        <box size="0.014 0.034 2.255" />
+        </geometry>
+      </collision>
+    <collision name="left_inner_round_bead">
+      <origin xyz="-0.522 0.058 1.1175" rpy="0 0 0" />
+      <geometry>
+        <box size="0.011 0.038 2.235" />
+        </geometry>
+      </collision>
+    <collision name="left_fine_casing_line">
+      <origin xyz="-0.513 0.064 1.1075" rpy="0 0 0" />
+      <geometry>
+        <box size="0.01 0.043 2.215" />
+        </geometry>
+      </collision>
+    <collision name="right_casing_outer">
+      <origin xyz="0.545 0.041 1.1275" rpy="0 0 0" />
+      <geometry>
+        <box size="0.062 0.026 2.255" />
+        </geometry>
+      </collision>
+    <collision name="right_outer_shadow_bead">
+      <origin xyz="0.574 0.052 1.1275" rpy="0 0 0" />
+      <geometry>
+        <box size="0.014 0.034 2.255" />
+        </geometry>
+      </collision>
+    <collision name="right_inner_round_bead">
+      <origin xyz="0.522 0.058 1.1175" rpy="0 0 0" />
+      <geometry>
+        <box size="0.011 0.038 2.235" />
+        </geometry>
+      </collision>
+    <collision name="right_fine_casing_line">
+      <origin xyz="0.513 0.064 1.1075" rpy="0 0 0" />
+      <geometry>
+        <box size="0.01 0.043 2.215" />
+        </geometry>
+      </collision>
+    <collision name="header_casing_outer">
+      <origin xyz="0 0.041 2.231" rpy="0 0 0" />
+      <geometry>
+        <box size="1.174 0.026 0.064" />
+        </geometry>
+      </collision>
+    <collision name="header_top_shadow_bead">
+      <origin xyz="0 0.052 2.269" rpy="0 0 0" />
+      <geometry>
+        <box size="1.174 0.034 0.012" />
+        </geometry>
+      </collision>
+    <collision name="header_inner_round_bead">
+      <origin xyz="0 0.058 2.205" rpy="0 0 0" />
+      <geometry>
+        <box size="1.104 0.038 0.011" />
+        </geometry>
+      </collision>
+    <collision name="header_fine_casing_line">
+      <origin xyz="0 0.064 2.19" rpy="0 0 0" />
+      <geometry>
+        <box size="1.078 0.043 0.006" />
+        </geometry>
+      </collision>
+    <collision name="jamb_vertical_grain_0">
+      <origin xyz="-0.492 0.03 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0022 0.002 2.12" />
+        </geometry>
+      </collision>
+    <collision name="jamb_vertical_grain_1">
+      <origin xyz="-0.478 0.03 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0022 0.002 2.12" />
+        </geometry>
+      </collision>
+    <collision name="jamb_vertical_grain_2">
+      <origin xyz="-0.462 0.03 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0022 0.002 2.12" />
+        </geometry>
+      </collision>
+    <collision name="jamb_vertical_grain_3">
+      <origin xyz="-0.447 0.03 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0022 0.002 2.12" />
+        </geometry>
+      </collision>
+    <collision name="jamb_vertical_grain_4">
+      <origin xyz="0.447 0.03 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0022 0.002 2.12" />
+        </geometry>
+      </collision>
+    <collision name="jamb_vertical_grain_5">
+      <origin xyz="0.462 0.03 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0022 0.002 2.12" />
+        </geometry>
+      </collision>
+    <collision name="jamb_vertical_grain_6">
+      <origin xyz="0.478 0.03 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0022 0.002 2.12" />
+        </geometry>
+      </collision>
+    <collision name="jamb_vertical_grain_7">
+      <origin xyz="0.492 0.03 1.06" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0022 0.002 2.12" />
+        </geometry>
+      </collision>
+    <collision name="strike_plate">
+      <origin xyz="0.424 0.004 0.955" rpy="0 0 0" />
+      <geometry>
+        <box size="0.003 0.035 0.118" />
+        </geometry>
+      </collision>
+    <collision name="strike_latch_pocket">
+      <origin xyz="0.4242 0.005 0.955" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0032 0.019 0.044" />
+        </geometry>
+      </collision>
+    <collision name="strike_screw_0">
+      <origin xyz="0.422 0.004 0.905" rpy="0 1.5708 0" />
+      <geometry>
+        <cylinder radius="0.004" length="0.002" />
+        </geometry>
+      </collision>
+    <collision name="strike_screw_1">
+      <origin xyz="0.422 0.004 1.005" rpy="0 1.5708 0" />
+      <geometry>
+        <cylinder radius="0.004" length="0.002" />
+        </geometry>
+      </collision>
+    <collision name="hinge_leaf_frame_0">
+      <origin xyz="-0.451 0.0285 1.765" rpy="0 0 0" />
+      <geometry>
+        <box size="0.044 0.004 0.135" />
+        </geometry>
+      </collision>
+    <collision name="hinge_pin_0">
+      <origin xyz="-0.425 0.03 1.765" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.004" length="0.147" />
+        </geometry>
+      </collision>
+    <collision name="hinge_pin_cap_0">
+      <origin xyz="-0.425 0.03 1.8405" rpy="0 0 0" />
+      <geometry>
+        <sphere radius="0.0052" />
+        </geometry>
+      </collision>
+    <collision name="hinge_frame_screw_0_0">
+      <origin xyz="-0.454 0.031 1.725" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0047" length="0.002" />
+        </geometry>
+      </collision>
+    <collision name="hinge_frame_screw_0_1">
+      <origin xyz="-0.454 0.031 1.805" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0047" length="0.002" />
+        </geometry>
+      </collision>
+    <collision name="hinge_leaf_frame_1">
+      <origin xyz="-0.451 0.0285 1.055" rpy="0 0 0" />
+      <geometry>
+        <box size="0.044 0.004 0.135" />
+        </geometry>
+      </collision>
+    <collision name="hinge_pin_1">
+      <origin xyz="-0.425 0.03 1.055" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.004" length="0.147" />
+        </geometry>
+      </collision>
+    <collision name="hinge_pin_cap_1">
+      <origin xyz="-0.425 0.03 1.1305" rpy="0 0 0" />
+      <geometry>
+        <sphere radius="0.0052" />
+        </geometry>
+      </collision>
+    <collision name="hinge_frame_screw_1_0">
+      <origin xyz="-0.454 0.031 1.015" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0047" length="0.002" />
+        </geometry>
+      </collision>
+    <collision name="hinge_frame_screw_1_1">
+      <origin xyz="-0.454 0.031 1.095" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0047" length="0.002" />
+        </geometry>
+      </collision>
+    <collision name="hinge_leaf_frame_2">
+      <origin xyz="-0.451 0.0285 0.345" rpy="0 0 0" />
+      <geometry>
+        <box size="0.044 0.004 0.135" />
+        </geometry>
+      </collision>
+    <collision name="hinge_pin_2">
+      <origin xyz="-0.425 0.03 0.345" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.004" length="0.147" />
+        </geometry>
+      </collision>
+    <collision name="hinge_pin_cap_2">
+      <origin xyz="-0.425 0.03 0.4205" rpy="0 0 0" />
+      <geometry>
+        <sphere radius="0.0052" />
+        </geometry>
+      </collision>
+    <collision name="hinge_frame_screw_2_0">
+      <origin xyz="-0.454 0.031 0.305" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0047" length="0.002" />
+        </geometry>
+      </collision>
+    <collision name="hinge_frame_screw_2_1">
+      <origin xyz="-0.454 0.031 0.385" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0047" length="0.002" />
+        </geometry>
+      </collision>
+    </link>
+  <link name="door_panel">
+    <visual name="slab_core">
+      <origin xyz="0.426 -0.026 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.84 0.044 2.05" />
+        </geometry>
+      <material name="dark_brown_stained_wood">
+        <color rgba="0.19 0.095 0.05 1" />
+        </material>
+      </visual>
+    <visual name="door_latch_edge_strip">
+      <origin xyz="0.843 -0.026 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.006 0.046 2.05" />
+        </geometry>
+      <material name="glossier_molded_wood">
+        <color rgba="0.125 0.058 0.032 1" />
+        </material>
+      </visual>
+    <visual name="upper_recess_shadow">
+      <origin xyz="0.426 -0.0028 1.839" rpy="0 0 0" />
+      <geometry>
+        <box size="0.648 0.003 0.014" />
+        </geometry>
+      <material name="trim_shadow">
+        <color rgba="0.045 0.023 0.014 1" />
+        </material>
+      </visual>
+    <visual name="lower_recess_shadow">
+      <origin xyz="0.426 -0.0028 0.276" rpy="0 0 0" />
+      <geometry>
+        <box size="0.648 0.003 0.014" />
+        </geometry>
+      <material name="trim_shadow">
+        <color rgba="0.045 0.023 0.014 1" />
+        </material>
+      </visual>
+    <visual name="left_recess_shadow">
+      <origin xyz="0.102 -0.0028 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.014 0.003 1.563" />
+        </geometry>
+      <material name="trim_shadow">
+        <color rgba="0.045 0.023 0.014 1" />
+        </material>
+      </visual>
+    <visual name="right_recess_shadow">
+      <origin xyz="0.75 -0.0028 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.014 0.003 1.563" />
+        </geometry>
+      <material name="trim_shadow">
+        <color rgba="0.045 0.023 0.014 1" />
+        </material>
+      </visual>
+    <visual name="inner_molding_left">
+      <origin xyz="0.115 0 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.026 0.008 1.537" />
+        </geometry>
+      <material name="glossier_molded_wood">
+        <color rgba="0.125 0.058 0.032 1" />
+        </material>
+      </visual>
+    <visual name="inner_molding_right">
+      <origin xyz="0.737 0 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.026 0.008 1.537" />
+        </geometry>
+      <material name="glossier_molded_wood">
+        <color rgba="0.125 0.058 0.032 1" />
+        </material>
+      </visual>
+    <visual name="inner_molding_top">
+      <origin xyz="0.426 0 1.826" rpy="0 0 0" />
+      <geometry>
+        <box size="0.622 0.008 0.026" />
+        </geometry>
+      <material name="glossier_molded_wood">
+        <color rgba="0.125 0.058 0.032 1" />
+        </material>
+      </visual>
+    <visual name="inner_molding_bottom">
+      <origin xyz="0.426 0 0.289" rpy="0 0 0" />
+      <geometry>
+        <box size="0.622 0.008 0.026" />
+        </geometry>
+      <material name="glossier_molded_wood">
+        <color rgba="0.125 0.058 0.032 1" />
+        </material>
+      </visual>
+    <visual name="bright_bevel_left">
+      <origin xyz="0.131 0.0025 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.008 0.01 1.497" />
+        </geometry>
+      <material name="raised_panel_stain">
+        <color rgba="0.23 0.12 0.065 1" />
+        </material>
+      </visual>
+    <visual name="bright_bevel_right">
+      <origin xyz="0.721 0.0025 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.008 0.01 1.497" />
+        </geometry>
+      <material name="raised_panel_stain">
+        <color rgba="0.23 0.12 0.065 1" />
+        </material>
+      </visual>
+    <visual name="bright_bevel_top">
+      <origin xyz="0.426 0.0025 1.81" rpy="0 0 0" />
+      <geometry>
+        <box size="0.582 0.01 0.008" />
+        </geometry>
+      <material name="raised_panel_stain">
+        <color rgba="0.23 0.12 0.065 1" />
+        </material>
+      </visual>
+    <visual name="bright_bevel_bottom">
+      <origin xyz="0.426 0.0025 0.305" rpy="0 0 0" />
+      <geometry>
+        <box size="0.582 0.01 0.008" />
+        </geometry>
+      <material name="raised_panel_stain">
+        <color rgba="0.23 0.12 0.065 1" />
+        </material>
+      </visual>
+    <visual name="raised_center_panel">
+      <origin xyz="0.426 -0.002 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.57 0.006 1.485" />
+        </geometry>
+      <material name="raised_panel_stain">
+        <color rgba="0.23 0.12 0.065 1" />
+        </material>
+      </visual>
+    <visual name="slightly_proud_panel_field">
+      <origin xyz="0.426 0.002 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.53 0.002 1.435" />
+        </geometry>
+      <material name="raised_panel_stain">
+        <color rgba="0.23 0.12 0.065 1" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_0">
+      <origin xyz="0.041 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0028 0.0015 1.96" />
+        </geometry>
+      <material name="vertical_subtle_grain">
+        <color rgba="0.28 0.15 0.085 1" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_1">
+      <origin xyz="0.0776667 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0016 0.0015 1.96" />
+        </geometry>
+      <material name="vertical_dark_grain">
+        <color rgba="0.105 0.052 0.03 1" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_2">
+      <origin xyz="0.114333 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0016 0.0015 1.96" />
+        </geometry>
+      <material name="vertical_subtle_grain">
+        <color rgba="0.28 0.15 0.085 1" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_3">
+      <origin xyz="0.151 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0028 0.0015 1.96" />
+        </geometry>
+      <material name="vertical_dark_grain">
+        <color rgba="0.105 0.052 0.03 1" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_4">
+      <origin xyz="0.187667 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0016 0.0015 1.96" />
+        </geometry>
+      <material name="vertical_subtle_grain">
+        <color rgba="0.28 0.15 0.085 1" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_5">
+      <origin xyz="0.224333 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0016 0.0015 1.96" />
+        </geometry>
+      <material name="vertical_dark_grain">
+        <color rgba="0.105 0.052 0.03 1" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_6">
+      <origin xyz="0.261 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0028 0.0015 1.96" />
+        </geometry>
+      <material name="vertical_subtle_grain">
+        <color rgba="0.28 0.15 0.085 1" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_7">
+      <origin xyz="0.297667 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0016 0.0015 1.96" />
+        </geometry>
+      <material name="vertical_dark_grain">
+        <color rgba="0.105 0.052 0.03 1" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_8">
+      <origin xyz="0.334333 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0016 0.0015 1.96" />
+        </geometry>
+      <material name="vertical_subtle_grain">
+        <color rgba="0.28 0.15 0.085 1" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_9">
+      <origin xyz="0.371 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0028 0.0015 1.96" />
+        </geometry>
+      <material name="vertical_dark_grain">
+        <color rgba="0.105 0.052 0.03 1" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_10">
+      <origin xyz="0.407667 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0016 0.0015 1.96" />
+        </geometry>
+      <material name="vertical_subtle_grain">
+        <color rgba="0.28 0.15 0.085 1" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_11">
+      <origin xyz="0.444333 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0016 0.0015 1.96" />
+        </geometry>
+      <material name="vertical_dark_grain">
+        <color rgba="0.105 0.052 0.03 1" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_12">
+      <origin xyz="0.481 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0028 0.0015 1.96" />
+        </geometry>
+      <material name="vertical_subtle_grain">
+        <color rgba="0.28 0.15 0.085 1" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_13">
+      <origin xyz="0.517667 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0016 0.0015 1.96" />
+        </geometry>
+      <material name="vertical_dark_grain">
+        <color rgba="0.105 0.052 0.03 1" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_14">
+      <origin xyz="0.554333 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0016 0.0015 1.96" />
+        </geometry>
+      <material name="vertical_subtle_grain">
+        <color rgba="0.28 0.15 0.085 1" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_15">
+      <origin xyz="0.591 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0028 0.0015 1.96" />
+        </geometry>
+      <material name="vertical_dark_grain">
+        <color rgba="0.105 0.052 0.03 1" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_16">
+      <origin xyz="0.627667 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0016 0.0015 1.96" />
+        </geometry>
+      <material name="vertical_subtle_grain">
+        <color rgba="0.28 0.15 0.085 1" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_17">
+      <origin xyz="0.664333 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0016 0.0015 1.96" />
+        </geometry>
+      <material name="vertical_dark_grain">
+        <color rgba="0.105 0.052 0.03 1" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_18">
+      <origin xyz="0.701 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0028 0.0015 1.96" />
+        </geometry>
+      <material name="vertical_subtle_grain">
+        <color rgba="0.28 0.15 0.085 1" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_19">
+      <origin xyz="0.737667 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0016 0.0015 1.96" />
+        </geometry>
+      <material name="vertical_dark_grain">
+        <color rgba="0.105 0.052 0.03 1" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_20">
+      <origin xyz="0.774333 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0016 0.0015 1.96" />
+        </geometry>
+      <material name="vertical_subtle_grain">
+        <color rgba="0.28 0.15 0.085 1" />
+        </material>
+      </visual>
+    <visual name="door_vertical_grain_21">
+      <origin xyz="0.811 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0028 0.0015 1.96" />
+        </geometry>
+      <material name="vertical_dark_grain">
+        <color rgba="0.105 0.052 0.03 1" />
+        </material>
+      </visual>
+    <visual name="panel_vertical_grain_0">
+      <origin xyz="0.171 0.0028 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0014 0.0018 1.385" />
+        </geometry>
+      <material name="vertical_subtle_grain">
+        <color rgba="0.28 0.15 0.085 1" />
+        </material>
+      </visual>
+    <visual name="panel_vertical_grain_1">
+      <origin xyz="0.217364 0.0028 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0014 0.0018 1.385" />
+        </geometry>
+      <material name="vertical_dark_grain">
+        <color rgba="0.105 0.052 0.03 1" />
+        </material>
+      </visual>
+    <visual name="panel_vertical_grain_2">
+      <origin xyz="0.263727 0.0028 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0014 0.0018 1.385" />
+        </geometry>
+      <material name="vertical_subtle_grain">
+        <color rgba="0.28 0.15 0.085 1" />
+        </material>
+      </visual>
+    <visual name="panel_vertical_grain_3">
+      <origin xyz="0.310091 0.0028 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0014 0.0018 1.385" />
+        </geometry>
+      <material name="vertical_dark_grain">
+        <color rgba="0.105 0.052 0.03 1" />
+        </material>
+      </visual>
+    <visual name="panel_vertical_grain_4">
+      <origin xyz="0.356455 0.0028 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0014 0.0018 1.385" />
+        </geometry>
+      <material name="vertical_subtle_grain">
+        <color rgba="0.28 0.15 0.085 1" />
+        </material>
+      </visual>
+    <visual name="panel_vertical_grain_5">
+      <origin xyz="0.402818 0.0028 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0014 0.0018 1.385" />
+        </geometry>
+      <material name="vertical_dark_grain">
+        <color rgba="0.105 0.052 0.03 1" />
+        </material>
+      </visual>
+    <visual name="panel_vertical_grain_6">
+      <origin xyz="0.449182 0.0028 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0014 0.0018 1.385" />
+        </geometry>
+      <material name="vertical_subtle_grain">
+        <color rgba="0.28 0.15 0.085 1" />
+        </material>
+      </visual>
+    <visual name="panel_vertical_grain_7">
+      <origin xyz="0.495545 0.0028 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0014 0.0018 1.385" />
+        </geometry>
+      <material name="vertical_dark_grain">
+        <color rgba="0.105 0.052 0.03 1" />
+        </material>
+      </visual>
+    <visual name="panel_vertical_grain_8">
+      <origin xyz="0.541909 0.0028 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0014 0.0018 1.385" />
+        </geometry>
+      <material name="vertical_subtle_grain">
+        <color rgba="0.28 0.15 0.085 1" />
+        </material>
+      </visual>
+    <visual name="panel_vertical_grain_9">
+      <origin xyz="0.588273 0.0028 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0014 0.0018 1.385" />
+        </geometry>
+      <material name="vertical_dark_grain">
+        <color rgba="0.105 0.052 0.03 1" />
+        </material>
+      </visual>
+    <visual name="panel_vertical_grain_10">
+      <origin xyz="0.634636 0.0028 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0014 0.0018 1.385" />
+        </geometry>
+      <material name="vertical_subtle_grain">
+        <color rgba="0.28 0.15 0.085 1" />
+        </material>
+      </visual>
+    <visual name="panel_vertical_grain_11">
+      <origin xyz="0.681 0.0028 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0014 0.0018 1.385" />
+        </geometry>
+      <material name="vertical_dark_grain">
+        <color rgba="0.105 0.052 0.03 1" />
+        </material>
+      </visual>
+    <visual name="handle_back_plate">
+      <origin xyz="0.711 -0.005 0.972" rpy="0 0 0" />
+      <geometry>
+        <box size="0.068 0.006 0.188" />
+        </geometry>
+      <material name="polished_brass">
+        <color rgba="0.86 0.58 0.2 1" />
+        </material>
+      </visual>
+    <visual name="lever_rosette">
+      <origin xyz="0.711 0.005 0.99" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.031" length="0.006" />
+        </geometry>
+      <material name="polished_brass">
+        <color rgba="0.86 0.58 0.2 1" />
+        </material>
+      </visual>
+    <visual name="lock_cylinder">
+      <origin xyz="0.711 0.006 0.855" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.022" length="0.008" />
+        </geometry>
+      <material name="polished_brass">
+        <color rgba="0.86 0.58 0.2 1" />
+        </material>
+      </visual>
+    <visual name="lock_keyway_shadow">
+      <origin xyz="0.711 0.011 0.855" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.015" length="0.009" />
+        </geometry>
+      <material name="glossier_molded_wood">
+        <color rgba="0.125 0.058 0.032 1" />
+        </material>
+      </visual>
+    <visual name="back_plate_screw_0">
+      <origin xyz="0.711 -0.001 1.054" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.004" length="0.002" />
+        </geometry>
+      <material name="dark_screw_recess">
+        <color rgba="0.07 0.045 0.028 1" />
+        </material>
+      </visual>
+    <visual name="back_plate_screw_1">
+      <origin xyz="0.711 -0.001 0.886" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.004" length="0.002" />
+        </geometry>
+      <material name="dark_screw_recess">
+        <color rgba="0.07 0.045 0.028 1" />
+        </material>
+      </visual>
+    <visual name="hinge_leaf_panel_0">
+      <origin xyz="0.024 -0.002 1.74" rpy="0 0 0" />
+      <geometry>
+        <box size="0.04 0.004 0.135" />
+        </geometry>
+      <material name="dark_bronze_hinge">
+        <color rgba="0.45 0.25 0.08 1" />
+        </material>
+      </visual>
+    <visual name="hinge_panel_screw_0_0">
+      <origin xyz="0.027 0.001 1.7" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0047" length="0.002" />
+        </geometry>
+      <material name="dark_screw_recess">
+        <color rgba="0.07 0.045 0.028 1" />
+        </material>
+      </visual>
+    <visual name="hinge_panel_screw_0_1">
+      <origin xyz="0.027 0.001 1.78" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0047" length="0.002" />
+        </geometry>
+      <material name="dark_screw_recess">
+        <color rgba="0.07 0.045 0.028 1" />
+        </material>
+      </visual>
+    <visual name="hinge_leaf_panel_1">
+      <origin xyz="0.024 -0.002 1.03" rpy="0 0 0" />
+      <geometry>
+        <box size="0.04 0.004 0.135" />
+        </geometry>
+      <material name="dark_bronze_hinge">
+        <color rgba="0.45 0.25 0.08 1" />
+        </material>
+      </visual>
+    <visual name="hinge_panel_screw_1_0">
+      <origin xyz="0.027 0.001 0.99" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0047" length="0.002" />
+        </geometry>
+      <material name="dark_screw_recess">
+        <color rgba="0.07 0.045 0.028 1" />
+        </material>
+      </visual>
+    <visual name="hinge_panel_screw_1_1">
+      <origin xyz="0.027 0.001 1.07" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0047" length="0.002" />
+        </geometry>
+      <material name="dark_screw_recess">
+        <color rgba="0.07 0.045 0.028 1" />
+        </material>
+      </visual>
+    <visual name="hinge_leaf_panel_2">
+      <origin xyz="0.024 -0.002 0.32" rpy="0 0 0" />
+      <geometry>
+        <box size="0.04 0.004 0.135" />
+        </geometry>
+      <material name="dark_bronze_hinge">
+        <color rgba="0.45 0.25 0.08 1" />
+        </material>
+      </visual>
+    <visual name="hinge_panel_screw_2_0">
+      <origin xyz="0.027 0.001 0.28" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0047" length="0.002" />
+        </geometry>
+      <material name="dark_screw_recess">
+        <color rgba="0.07 0.045 0.028 1" />
+        </material>
+      </visual>
+    <visual name="hinge_panel_screw_2_1">
+      <origin xyz="0.027 0.001 0.36" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0047" length="0.002" />
+        </geometry>
+      <material name="dark_screw_recess">
+        <color rgba="0.07 0.045 0.028 1" />
+        </material>
+      </visual>
+    <collision name="slab_core">
+      <origin xyz="0.426 -0.026 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.84 0.044 2.05" />
+        </geometry>
+      </collision>
+    <collision name="door_latch_edge_strip">
+      <origin xyz="0.843 -0.026 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.006 0.046 2.05" />
+        </geometry>
+      </collision>
+    <collision name="upper_recess_shadow">
+      <origin xyz="0.426 -0.0028 1.839" rpy="0 0 0" />
+      <geometry>
+        <box size="0.648 0.003 0.014" />
+        </geometry>
+      </collision>
+    <collision name="lower_recess_shadow">
+      <origin xyz="0.426 -0.0028 0.276" rpy="0 0 0" />
+      <geometry>
+        <box size="0.648 0.003 0.014" />
+        </geometry>
+      </collision>
+    <collision name="left_recess_shadow">
+      <origin xyz="0.102 -0.0028 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.014 0.003 1.563" />
+        </geometry>
+      </collision>
+    <collision name="right_recess_shadow">
+      <origin xyz="0.75 -0.0028 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.014 0.003 1.563" />
+        </geometry>
+      </collision>
+    <collision name="inner_molding_left">
+      <origin xyz="0.115 0 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.026 0.008 1.537" />
+        </geometry>
+      </collision>
+    <collision name="inner_molding_right">
+      <origin xyz="0.737 0 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.026 0.008 1.537" />
+        </geometry>
+      </collision>
+    <collision name="inner_molding_top">
+      <origin xyz="0.426 0 1.826" rpy="0 0 0" />
+      <geometry>
+        <box size="0.622 0.008 0.026" />
+        </geometry>
+      </collision>
+    <collision name="inner_molding_bottom">
+      <origin xyz="0.426 0 0.289" rpy="0 0 0" />
+      <geometry>
+        <box size="0.622 0.008 0.026" />
+        </geometry>
+      </collision>
+    <collision name="bright_bevel_left">
+      <origin xyz="0.131 0.0025 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.008 0.01 1.497" />
+        </geometry>
+      </collision>
+    <collision name="bright_bevel_right">
+      <origin xyz="0.721 0.0025 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.008 0.01 1.497" />
+        </geometry>
+      </collision>
+    <collision name="bright_bevel_top">
+      <origin xyz="0.426 0.0025 1.81" rpy="0 0 0" />
+      <geometry>
+        <box size="0.582 0.01 0.008" />
+        </geometry>
+      </collision>
+    <collision name="bright_bevel_bottom">
+      <origin xyz="0.426 0.0025 0.305" rpy="0 0 0" />
+      <geometry>
+        <box size="0.582 0.01 0.008" />
+        </geometry>
+      </collision>
+    <collision name="raised_center_panel">
+      <origin xyz="0.426 -0.002 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.57 0.006 1.485" />
+        </geometry>
+      </collision>
+    <collision name="slightly_proud_panel_field">
+      <origin xyz="0.426 0.002 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.53 0.002 1.435" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_0">
+      <origin xyz="0.041 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0028 0.0015 1.96" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_1">
+      <origin xyz="0.0776667 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0016 0.0015 1.96" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_2">
+      <origin xyz="0.114333 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0016 0.0015 1.96" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_3">
+      <origin xyz="0.151 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0028 0.0015 1.96" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_4">
+      <origin xyz="0.187667 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0016 0.0015 1.96" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_5">
+      <origin xyz="0.224333 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0016 0.0015 1.96" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_6">
+      <origin xyz="0.261 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0028 0.0015 1.96" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_7">
+      <origin xyz="0.297667 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0016 0.0015 1.96" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_8">
+      <origin xyz="0.334333 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0016 0.0015 1.96" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_9">
+      <origin xyz="0.371 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0028 0.0015 1.96" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_10">
+      <origin xyz="0.407667 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0016 0.0015 1.96" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_11">
+      <origin xyz="0.444333 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0016 0.0015 1.96" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_12">
+      <origin xyz="0.481 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0028 0.0015 1.96" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_13">
+      <origin xyz="0.517667 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0016 0.0015 1.96" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_14">
+      <origin xyz="0.554333 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0016 0.0015 1.96" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_15">
+      <origin xyz="0.591 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0028 0.0015 1.96" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_16">
+      <origin xyz="0.627667 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0016 0.0015 1.96" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_17">
+      <origin xyz="0.664333 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0016 0.0015 1.96" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_18">
+      <origin xyz="0.701 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0028 0.0015 1.96" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_19">
+      <origin xyz="0.737667 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0016 0.0015 1.96" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_20">
+      <origin xyz="0.774333 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0016 0.0015 1.96" />
+        </geometry>
+      </collision>
+    <collision name="door_vertical_grain_21">
+      <origin xyz="0.811 -0.0038 1.025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0028 0.0015 1.96" />
+        </geometry>
+      </collision>
+    <collision name="panel_vertical_grain_0">
+      <origin xyz="0.171 0.0028 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0014 0.0018 1.385" />
+        </geometry>
+      </collision>
+    <collision name="panel_vertical_grain_1">
+      <origin xyz="0.217364 0.0028 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0014 0.0018 1.385" />
+        </geometry>
+      </collision>
+    <collision name="panel_vertical_grain_2">
+      <origin xyz="0.263727 0.0028 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0014 0.0018 1.385" />
+        </geometry>
+      </collision>
+    <collision name="panel_vertical_grain_3">
+      <origin xyz="0.310091 0.0028 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0014 0.0018 1.385" />
+        </geometry>
+      </collision>
+    <collision name="panel_vertical_grain_4">
+      <origin xyz="0.356455 0.0028 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0014 0.0018 1.385" />
+        </geometry>
+      </collision>
+    <collision name="panel_vertical_grain_5">
+      <origin xyz="0.402818 0.0028 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0014 0.0018 1.385" />
+        </geometry>
+      </collision>
+    <collision name="panel_vertical_grain_6">
+      <origin xyz="0.449182 0.0028 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0014 0.0018 1.385" />
+        </geometry>
+      </collision>
+    <collision name="panel_vertical_grain_7">
+      <origin xyz="0.495545 0.0028 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0014 0.0018 1.385" />
+        </geometry>
+      </collision>
+    <collision name="panel_vertical_grain_8">
+      <origin xyz="0.541909 0.0028 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0014 0.0018 1.385" />
+        </geometry>
+      </collision>
+    <collision name="panel_vertical_grain_9">
+      <origin xyz="0.588273 0.0028 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0014 0.0018 1.385" />
+        </geometry>
+      </collision>
+    <collision name="panel_vertical_grain_10">
+      <origin xyz="0.634636 0.0028 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0014 0.0018 1.385" />
+        </geometry>
+      </collision>
+    <collision name="panel_vertical_grain_11">
+      <origin xyz="0.681 0.0028 1.0575" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0014 0.0018 1.385" />
+        </geometry>
+      </collision>
+    <collision name="handle_back_plate">
+      <origin xyz="0.711 -0.005 0.972" rpy="0 0 0" />
+      <geometry>
+        <box size="0.068 0.006 0.188" />
+        </geometry>
+      </collision>
+    <collision name="lever_rosette">
+      <origin xyz="0.711 0.005 0.99" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.031" length="0.006" />
+        </geometry>
+      </collision>
+    <collision name="lock_cylinder">
+      <origin xyz="0.711 0.006 0.855" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.022" length="0.008" />
+        </geometry>
+      </collision>
+    <collision name="lock_keyway_shadow">
+      <origin xyz="0.711 0.011 0.855" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.015" length="0.009" />
+        </geometry>
+      </collision>
+    <collision name="back_plate_screw_0">
+      <origin xyz="0.711 -0.001 1.054" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.004" length="0.002" />
+        </geometry>
+      </collision>
+    <collision name="back_plate_screw_1">
+      <origin xyz="0.711 -0.001 0.886" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.004" length="0.002" />
+        </geometry>
+      </collision>
+    <collision name="hinge_leaf_panel_0">
+      <origin xyz="0.024 -0.002 1.74" rpy="0 0 0" />
+      <geometry>
+        <box size="0.04 0.004 0.135" />
+        </geometry>
+      </collision>
+    <collision name="hinge_panel_screw_0_0">
+      <origin xyz="0.027 0.001 1.7" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0047" length="0.002" />
+        </geometry>
+      </collision>
+    <collision name="hinge_panel_screw_0_1">
+      <origin xyz="0.027 0.001 1.78" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0047" length="0.002" />
+        </geometry>
+      </collision>
+    <collision name="hinge_leaf_panel_1">
+      <origin xyz="0.024 -0.002 1.03" rpy="0 0 0" />
+      <geometry>
+        <box size="0.04 0.004 0.135" />
+        </geometry>
+      </collision>
+    <collision name="hinge_panel_screw_1_0">
+      <origin xyz="0.027 0.001 0.99" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0047" length="0.002" />
+        </geometry>
+      </collision>
+    <collision name="hinge_panel_screw_1_1">
+      <origin xyz="0.027 0.001 1.07" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0047" length="0.002" />
+        </geometry>
+      </collision>
+    <collision name="hinge_leaf_panel_2">
+      <origin xyz="0.024 -0.002 0.32" rpy="0 0 0" />
+      <geometry>
+        <box size="0.04 0.004 0.135" />
+        </geometry>
+      </collision>
+    <collision name="hinge_panel_screw_2_0">
+      <origin xyz="0.027 0.001 0.28" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0047" length="0.002" />
+        </geometry>
+      </collision>
+    <collision name="hinge_panel_screw_2_1">
+      <origin xyz="0.027 0.001 0.36" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.0047" length="0.002" />
+        </geometry>
+      </collision>
+    </link>
+  <link name="条形把手">
+    <visual name="lever_collar">
+      <origin xyz="0 0 0" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.018" length="0.014" />
+        </geometry>
+      <material name="polished_brass">
+        <color rgba="0.86 0.58 0.2 1" />
+        </material>
+      </visual>
+    <visual name="rounded_lever_boss">
+      <origin xyz="-0.01 0.013 0" rpy="0 0 0" />
+      <geometry>
+        <sphere radius="0.014" />
+        </geometry>
+      <material name="polished_brass">
+        <color rgba="0.86 0.58 0.2 1" />
+        </material>
+      </visual>
+    <visual name="lever_bar">
+      <origin xyz="-0.082 0.006 0" rpy="0 1.5708 0" />
+      <geometry>
+        <cylinder radius="0.0075" length="0.145" />
+        </geometry>
+      <material name="polished_brass">
+        <color rgba="0.86 0.58 0.2 1" />
+        </material>
+      </visual>
+    <visual name="rounded_lever_tip">
+      <origin xyz="-0.155 0.006 0" rpy="0 0 0" />
+      <geometry>
+        <sphere radius="0.0088" />
+        </geometry>
+      <material name="polished_brass">
+        <color rgba="0.86 0.58 0.2 1" />
+        </material>
+      </visual>
+    <collision name="lever_collar">
+      <origin xyz="0 0 0" rpy="-1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.018" length="0.014" />
+        </geometry>
+      </collision>
+    <collision name="rounded_lever_boss">
+      <origin xyz="-0.01 0.013 0" rpy="0 0 0" />
+      <geometry>
+        <sphere radius="0.014" />
+        </geometry>
+      </collision>
+    <collision name="lever_bar">
+      <origin xyz="-0.082 0.006 0" rpy="0 1.5708 0" />
+      <geometry>
+        <cylinder radius="0.0075" length="0.145" />
+        </geometry>
+      </collision>
+    <collision name="rounded_lever_tip">
+      <origin xyz="-0.155 0.006 0" rpy="0 0 0" />
+      <geometry>
+        <sphere radius="0.0088" />
+        </geometry>
+      </collision>
+    </link>
+  <joint name="door_hinge_joint" type="revolute">
+    <origin xyz="-0.425 0.03 0.025" rpy="0 0 0" />
+    <parent link="fixed_frame" />
+    <child link="door_panel" />
+    <axis xyz="0 0 1" />
+    <limit effort="40" velocity="1.2" lower="0" upper="1.8326" />
+    </joint>
+  <joint name="handle_actuation_joint" type="revolute">
+    <origin xyz="0.711 0.015 0.99" rpy="0 0 0" />
+    <parent link="door_panel" />
+    <child link="条形把手" />
+    <axis xyz="0 -1 0" />
+    <limit effort="1.5" velocity="4" lower="0" upper="0.610865" />
+    </joint>
+  </robot>
