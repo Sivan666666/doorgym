@@ -316,6 +316,13 @@ env:
           handle_body_name: 条形把手
           door_dof_name: door_hinge_joint
           handle_dof_name: handle_actuation_joint
+          handle_dof_upper_override: 1.5707963267948966
+          handle_unlock_angle: 0.6981317007977318
+          controller_overrides:
+            handle_joint_friction: 0.3
+            handle_joint_damping: 0.3
+            handle_spring_stiffness: 0.3
+            handle_spring_damping: 0.3
           generated_variant: push_right
           handle_side: right
           handle_was_behind: true

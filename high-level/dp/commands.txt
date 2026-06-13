@@ -277,3 +277,25 @@ python high-level/dp/eval/eval_door_policy_success.py \
 # RGB+mask 旧格式：录制/转换/play/eval 都要加 --rgb。
 # 如果用 50Hz 旧数据训练出来的 checkpoint，play/eval 也应该把 --dp_fps 设回 50，
 # 否则 action chunk 的时间尺度会变慢一倍。
+
+
+## 10. Float IK: left-push 指定生成门调试
+
+# 这扇门的把手阻力不为 0 时比较难扭开；下面命令显式忽略 door cfg 里的 controller_overrides，
+# 并把 handle friction/damping/spring 全部设为 0，当前可稳定打开。
+conda run --no-capture-output -n b1z1 python high-level/float_ik/isaacgym_float_ik_b1z1_basearn_push_door_parallel_left.py \
+    --door_cfg high-level/experiments/isaacgym/b1z1_opendoor_record_materialization.yaml \
+    --door_name rec_using-the-reference-image-for-overall-proportion_20260610_185617_636160_746172d9 \
+    --flip_door_motion_sign \
+    --num_envs 1 \
+    --steps 2650 \
+    --door_use_urdf_rgba \
+    --seed 123456 \
+    --no_ikpush_env_randomization \
+    --ignore_door_controller_overrides \
+    --handle_joint_friction 0.0 \
+    --handle_joint_damping 0.0 \
+    --handle_spring_stiffness 0.0 \
+    --handle_spring_damping 0.0 \
+    --no_show_camera_images \
+    --no_draw_camera_axes

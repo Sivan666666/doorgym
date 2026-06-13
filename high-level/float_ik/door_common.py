@@ -587,7 +587,11 @@ def load_door_assets(gym, sim, args):
         door_body_index = body_names.index(door_body_name) if door_body_name else max(0, len(body_names) - 2)
         dof_props = gym.get_asset_dof_properties(door_asset)
         if len(dof_props["upper"]) >= 2:
-            dof_props["upper"][1] = min(float(dof_props["upper"][1]), math.pi / 4)
+            handle_upper_override = spec.get("handle_dof_upper_override")
+            if handle_upper_override is not None:
+                dof_props["upper"][1] = float(handle_upper_override)
+            else:
+                dof_props["upper"][1] = min(float(dof_props["upper"][1]), math.pi / 4)
         lower = np.asarray(dof_props["lower"], dtype=np.float32)
         upper = np.asarray(dof_props["upper"], dtype=np.float32)
 
@@ -598,7 +602,12 @@ def load_door_assets(gym, sim, args):
 
         handle_goal_offset = actor_scale * np.asarray(handle_bounding["goal_pos"], dtype=np.float32)
         handle_range = max(1.0e-6, float(upper[1] - lower[1]) if len(upper) >= 2 else 1.0)
-        handle_unlock_threshold = args.handle_unlock_ratio * handle_range
+        handle_unlock_angle = spec.get("handle_unlock_angle")
+        handle_unlock_threshold = (
+            float(handle_unlock_angle)
+            if handle_unlock_angle is not None
+            else args.handle_unlock_ratio * handle_range
+        )
         print("door_dofs:", dof_names)
         print("door_bodies:", body_names)
 
@@ -653,17 +662,20 @@ def apply_door_runtime_overrides(args, door):
     base_motion_sign = float(getattr(args, "_door_motion_sign_before_asset", args.door_motion_sign))
     args._door_motion_sign_before_asset = base_motion_sign
     args.door_motion_sign = base_motion_sign * float(door.door_motion_sign_multiplier)
+    if bool(getattr(args, "flip_door_motion_sign", False)):
+        args.door_motion_sign *= -1.0
     adjusted_controller_values = {}
-    for name, multiplier in door.spec.get("controller_multipliers", {}).items():
-        if not hasattr(args, name):
-            raise ValueError(f"Door {door.spec.get('name', '')!r} cannot multiply unknown controller arg {name!r}")
-        setattr(args, name, float(getattr(args, name)) * float(multiplier))
-        adjusted_controller_values[name] = float(getattr(args, name))
-    for name, value in door.spec.get("controller_overrides", {}).items():
-        if not hasattr(args, name):
-            raise ValueError(f"Door {door.spec.get('name', '')!r} cannot override unknown controller arg {name!r}")
-        setattr(args, name, value)
-        adjusted_controller_values[name] = value
+    if not bool(getattr(args, "ignore_door_controller_overrides", False)):
+        for name, multiplier in door.spec.get("controller_multipliers", {}).items():
+            if not hasattr(args, name):
+                raise ValueError(f"Door {door.spec.get('name', '')!r} cannot multiply unknown controller arg {name!r}")
+            setattr(args, name, float(getattr(args, name)) * float(multiplier))
+            adjusted_controller_values[name] = float(getattr(args, name))
+        for name, value in door.spec.get("controller_overrides", {}).items():
+            if not hasattr(args, name):
+                raise ValueError(f"Door {door.spec.get('name', '')!r} cannot override unknown controller arg {name!r}")
+            setattr(args, name, value)
+            adjusted_controller_values[name] = value
     for metadata_attr in ("ikpush_randomization_json", "ikpull_randomization_json"):
         raw_metadata = getattr(args, metadata_attr, "")
         if not raw_metadata or not adjusted_controller_values:
@@ -676,11 +688,19 @@ def apply_door_runtime_overrides(args, door):
 
 
 def robot_y_for_door(args, handle_bounding, door=None):
+    alignment = str(getattr(args, "robot_y_alignment", "handle")).lower()
+    robot_y_offset = float(door.robot_y_offset) if door is not None else 0.0
+    if alignment in ("door_center", "door", "center"):
+        if door is None:
+            return float(args.robot_y) + float(args.door_y)
+        _, _, world_min_y, world_max_y = door_world_xy_bounds_from_bbox(args, door)
+        return float(args.robot_y) + 0.5 * (world_min_y + world_max_y)
+    if alignment not in ("handle", "handle_center"):
+        raise ValueError(f"Unsupported --robot_y_alignment={alignment!r}; expected handle or door_center")
     handle_center_y = 0.5 * (
         float(handle_bounding["handle_min"][1]) + float(handle_bounding["handle_max"][1])
     )
     actor_scale = float(door.actor_scale) if door is not None else float(args.door_actor_scale)
-    robot_y_offset = float(door.robot_y_offset) if door is not None else 0.0
     handle_center_world_y = args.door_y - actor_scale * handle_center_y
     return args.robot_y + handle_center_world_y + robot_y_offset
 
@@ -704,13 +724,22 @@ def configure_door_actor_dofs(gym, env, door_actor, door, args):
     if n >= 2:
         door_dof_props["damping"][1] = args.handle_joint_damping
         door_dof_props["friction"][1] = args.handle_joint_friction
-        door_dof_props["upper"][1] = min(float(door_dof_props["upper"][1]), math.pi / 4)
+        handle_upper_override = door.spec.get("handle_dof_upper_override")
+        if handle_upper_override is not None:
+            door_dof_props["upper"][1] = float(handle_upper_override)
+        else:
+            door_dof_props["upper"][1] = min(float(door_dof_props["upper"][1]), math.pi / 4)
     gym.set_actor_dof_properties(env, door_actor, door_dof_props)
 
     door.dof_lower = np.asarray(door_dof_props["lower"], dtype=np.float32).copy()
     door.dof_upper = np.asarray(door_dof_props["upper"], dtype=np.float32).copy()
     handle_range = max(1.0e-6, float(door.dof_upper[1] - door.dof_lower[1]) if len(door.dof_upper) >= 2 else 1.0)
-    door.handle_unlock_threshold = args.handle_unlock_ratio * handle_range
+    handle_unlock_angle = door.spec.get("handle_unlock_angle")
+    door.handle_unlock_threshold = (
+        float(handle_unlock_angle)
+        if handle_unlock_angle is not None
+        else args.handle_unlock_ratio * handle_range
+    )
 
 
 def door_side_walls_enabled(args):

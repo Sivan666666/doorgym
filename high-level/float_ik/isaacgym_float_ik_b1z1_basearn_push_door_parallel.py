@@ -112,6 +112,16 @@ def parse_args():
             },
             {"name": "--door_actor_scale", "type": float, "default": 1.2},
             {
+                "name": "--flip_door_motion_sign",
+                "action": "store_true",
+                "help": "Multiply the selected door hinge/open direction by -1 at runtime without editing the door cfg.",
+            },
+            {
+                "name": "--ignore_door_controller_overrides",
+                "action": "store_true",
+                "help": "Do not apply per-door controller_multipliers/controller_overrides from the door cfg; command-line values win.",
+            },
+            {
                 "name": "--door_use_urdf_rgba",
                 "action": "store_true",
                 "help": "Use URDF <material><color rgba=...> for door visuals instead of mesh/MTL materials.",
@@ -130,6 +140,12 @@ def parse_args():
             {"name": "--door_wall_y_offset", "type": float, "default": 0.0},
             {"name": "--robot_x", "type": float, "default": 4.1},
             {"name": "--robot_y", "type": float, "default": 0.0},
+            {
+                "name": "--robot_y_alignment",
+                "type": str,
+                "default": "handle",
+                "help": "How to place the robot in Y relative to each door: handle or door_center.",
+            },
             {"name": "--robot_z", "type": float, "default": 0.60},
             {"name": "--robot_yaw", "type": float, "default": math.pi},
             {"name": "--robot_front_offset", "type": float, "default": 0.55},
@@ -163,6 +179,7 @@ def parse_args():
             {"name": "--handle_rotate_right_distance", "type": float, "default": 0.03},
             {"name": "--handle_rotate_down_distance", "type": float, "default": 0.03},
             {"name": "--handle_rotate_angle", "type": float, "default": 1.05},
+            {"name": "--handle_rotate_direction_sign", "type": float, "default": -1.0},
             {"name": "--door_push_distance", "type": float, "default": 1.10},
             {"name": "--no_ikpush_env_randomization", "action": "store_true"},
             {"name": "--ikpush_door_x_rand", "type": float, "default": 0.03},
@@ -257,6 +274,10 @@ def parse_args():
             {"name": "--no_draw_ik_target", "dest": "draw_ik_target", "action": "store_false"},
             {"name": "--draw_camera_axes", "dest": "draw_camera_axes", "action": "store_true", "default": True},
             {"name": "--no_draw_camera_axes", "dest": "draw_camera_axes", "action": "store_false"},
+            {"name": "--draw_scripted_trajectory", "dest": "draw_scripted_trajectory", "action": "store_true", "default": False},
+            {"name": "--no_draw_scripted_trajectory", "dest": "draw_scripted_trajectory", "action": "store_false"},
+            {"name": "--trajectory_point_radius", "type": float, "default": 0.018},
+            {"name": "--trajectory_point_samples", "type": int, "default": 16},
             {"name": "--enable_wrist_camera", "dest": "enable_wrist_camera", "action": "store_true", "default": True},
             {"name": "--no_enable_wrist_camera", "dest": "enable_wrist_camera", "action": "store_false"},
             {"name": "--enable_front_camera", "dest": "enable_front_camera", "action": "store_true", "default": True},
@@ -986,7 +1007,12 @@ def trajectory_targets(
             target_pos = lerp(traj["grasp"], traj["rotate"], t)
             target_quat = None if args.ik_position_only else base_ik.quat_multiply(
                 traj["goal_quat"],
-                quat_from_angle_axis(-t * args.handle_rotate_angle, np.array([1.0, 0.0, 0.0], dtype=np.float32)),
+                quat_from_angle_axis(
+                    float(args.handle_rotate_direction_sign)
+                    * t
+                    * float(args.handle_rotate_angle),
+                    np.array([1.0, 0.0, 0.0], dtype=np.float32),
+                ),
             )
             gripper = gripper_closed
             phase = "rotate_handle"
@@ -995,7 +1021,11 @@ def trajectory_targets(
             base_t = smoothstep((step - rotate_end + 1) / max(1.0, args.door_push_steps * args.base_push_time_scale))
             turned_quat = base_ik.quat_multiply(
                 traj["goal_quat"],
-                quat_from_angle_axis(-args.handle_rotate_angle, np.array([1.0, 0.0, 0.0], dtype=np.float32)),
+                quat_from_angle_axis(
+                    float(args.handle_rotate_direction_sign)
+                    * float(args.handle_rotate_angle),
+                    np.array([1.0, 0.0, 0.0], dtype=np.float32),
+                ),
             )
             if "handle_contact_offset_local" not in traj:
                 traj["handle_contact_offset_local"] = quat_apply(
@@ -1136,6 +1166,47 @@ def trajectory_targets(
         else base_ik.normalize_quat(np.asarray(target_quat, dtype=np.float32)).astype(np.float32)
     )
     return phase, base_xy, yaw, target_pos, target_quat, gripper, handle_goal
+
+
+def draw_scripted_trajectory(gym, viewer, env, traj, args, current_target_pos=None):
+    if not bool(getattr(args, "draw_scripted_trajectory", False)):
+        return
+    keys = ("pregrasp", "grasp", "rotate", "push")
+    if not all(key in traj for key in keys):
+        return
+
+    radius = max(0.004, float(getattr(args, "trajectory_point_radius", 0.018)))
+    samples = max(2, int(getattr(args, "trajectory_point_samples", 16)))
+    green_sphere = gymutil.WireframeSphereGeometry(
+        radius=radius,
+        num_lats=8,
+        num_lons=8,
+        color=(0.0, 1.0, 0.2),
+        color2=(0.0, 0.7, 0.2),
+    )
+    red_sphere = gymutil.WireframeSphereGeometry(
+        radius=radius * 1.35,
+        num_lats=8,
+        num_lons=8,
+        color=(1.0, 0.0, 0.0),
+        color2=(1.0, 0.0, 0.0),
+    )
+
+    points = [np.asarray(traj[key], dtype=np.float32) for key in keys]
+    for a, b in zip(points[:-1], points[1:]):
+        for i in range(samples):
+            u = i / max(1, samples - 1)
+            pos = lerp(a, b, u)
+            gymutil.draw_lines(green_sphere, gym, viewer, env, base_ik.transform_from_arrays(pos))
+
+    if current_target_pos is not None:
+        gymutil.draw_lines(
+            red_sphere,
+            gym,
+            viewer,
+            env,
+            base_ik.transform_from_arrays(np.asarray(current_target_pos, dtype=np.float32)),
+        )
 
 
 setup_viewer = dc.setup_viewer
@@ -1279,7 +1350,9 @@ def run_demo(
         gym.fetch_results(sim, True)
 
         need_camera_render = bool(camera_handles and (args.show_camera_images or args.record_dp_dataset))
-        if viewer is not None and need_camera_render and (args.draw_ik_target or args.draw_camera_axes):
+        if viewer is not None and need_camera_render and (
+            args.draw_ik_target or args.draw_camera_axes or args.draw_scripted_trajectory
+        ):
             # Clear viewer-only debug lines before camera rendering so depth/RGB tensors stay clean.
             gym.clear_lines(viewer)
         if viewer is not None or need_camera_render:
@@ -1317,10 +1390,12 @@ def run_demo(
             prev_dp_action = np.asarray(single_record_state.last_dp_action, dtype=np.float32).copy()
 
         if viewer is not None:
-            if args.draw_ik_target or args.draw_camera_axes:
+            if args.draw_ik_target or args.draw_camera_axes or args.draw_scripted_trajectory:
                 gym.clear_lines(viewer)
             if args.draw_camera_axes:
                 draw_low_level_camera_axes(gym, viewer, env, arm_actor, actor_handles, args)
+            if args.draw_scripted_trajectory:
+                draw_scripted_trajectory(gym, viewer, env, traj, args, target_pos)
             if args.draw_ik_target:
                 if phase in ("return_home", "hold_home"):
                     saved_target_pos_np = ik_state.target_pos_np
@@ -1568,7 +1643,9 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
             dp_controller is not None and dc.float_dp_policy_update_due(step, args, dt)
         )
         if dp_policy_update_due:
-            if viewer is not None and (args.draw_ik_target or args.draw_camera_axes):
+            if viewer is not None and (
+                args.draw_ik_target or args.draw_camera_axes or args.draw_scripted_trajectory
+            ):
                 # Clear viewer-only debug lines before camera rendering so policy observations stay clean.
                 gym.clear_lines(viewer)
             gym.step_graphics(sim)
@@ -1722,7 +1799,9 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
             and any(st.camera_handles and dc.float_dp_record_frame_due(st, dt) for st in env_states)
         )
         need_camera_render = bool(any(st.camera_handles for st in env_states) and (args.show_camera_images or record_camera_due))
-        if viewer is not None and need_camera_render and (args.draw_ik_target or args.draw_camera_axes):
+        if viewer is not None and need_camera_render and (
+            args.draw_ik_target or args.draw_camera_axes or args.draw_scripted_trajectory
+        ):
             # Clear viewer-only debug lines before camera rendering so depth/RGB tensors stay clean.
             gym.clear_lines(viewer)
         if viewer is not None or need_camera_render:
@@ -1756,11 +1835,13 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
             st.prev_yaw = float(st.traj.get("yaw", st.yaw_start))
 
         if viewer is not None:
-            if args.draw_ik_target or args.draw_camera_axes:
+            if args.draw_ik_target or args.draw_camera_axes or args.draw_scripted_trajectory:
                 gym.clear_lines(viewer)
             for st in env_states[: min(4, len(env_states))]:
                 if args.draw_camera_axes:
                     draw_low_level_camera_axes(gym, viewer, st.env, st.arm_actor, st.actor_handles, st.args)
+                if args.draw_scripted_trajectory:
+                    draw_scripted_trajectory(gym, viewer, st.env, st.traj, st.args, st.last_target_pos)
                 if args.draw_ik_target:
                     if st.last_phase in ("return_home", "hold_home") and st.last_target_pos is not None:
                         saved_target_pos_np = st.ik_state.target_pos_np

@@ -14,8 +14,15 @@ BASE_SCRIPT = SCRIPT_DIR / "isaacgym_float_ik_b1z1_basearn_push_door_parallel.py
 
 def main() -> None:
     defaults = [
+        "--robot_y_alignment",
+        "door_center",
         "--handle_rotate_right_distance",
-        "-0.03",
+        "-0.04",
+        "--handle_rotate_down_distance",
+        "0.06",
+        "--handle_rotate_direction_sign",
+        "1.0",
+        "--draw_scripted_trajectory",
     ]
     sys.argv = [sys.argv[0], *defaults, *sys.argv[1:]]
     spec = importlib.util.spec_from_file_location("ikpush_parallel_right_base", BASE_SCRIPT)

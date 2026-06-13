@@ -1232,7 +1232,7 @@
     <parent link="door_panel" />
     <child link="条形把手" />
     <axis xyz="0 -1 0" />
-    <limit effort="3" velocity="2" lower="0" upper="0.523599" />
+    <limit effort="3" velocity="2" lower="0" upper="1.5707963267948966" />
     </joint>
   <joint name="lock_cylinder_mount" type="fixed">
     <origin xyz="0.756 -0.024 0.835" rpy="0 0 0" />
