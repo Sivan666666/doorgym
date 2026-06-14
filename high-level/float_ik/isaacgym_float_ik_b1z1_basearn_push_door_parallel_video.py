@@ -12,9 +12,12 @@ from __future__ import annotations
 import json
 import math
 import colorsys
+import copy
+import shutil
 import sys
 import tempfile
 import time
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -32,6 +35,11 @@ HIGH_LEVEL_ROOT = SCRIPT_DIR.parents[0]
 REPO_ROOT = HIGH_LEVEL_ROOT.parents[0]
 
 import door_common as dc
+
+try:
+    import isaacgym_a2w_ik_push_door_parallel as a2w_ik
+except ImportError:
+    a2w_ik = None
 
 base_ik = dc.base_ik
 gymapi = dc.gymapi
@@ -82,6 +90,450 @@ DP_PHASE_NAMES = [
 DP_PHASE_ID = {name: idx for idx, name in enumerate(DP_PHASE_NAMES)}
 IKPUSH_STATE_VERSION = "zero_leg_dof_pos_prev_action_v1"
 sorted_asset_entries = dc.sorted_asset_entries
+G1_DEFAULT_JOINT_ANGLES = {
+    "left_hip_yaw_joint": 0.0,
+    "left_hip_roll_joint": 0.0,
+    "left_hip_pitch_joint": -0.1,
+    "left_knee_joint": 0.3,
+    "left_ankle_pitch_joint": -0.2,
+    "left_ankle_roll_joint": 0.0,
+    "right_hip_yaw_joint": 0.0,
+    "right_hip_roll_joint": 0.0,
+    "right_hip_pitch_joint": -0.1,
+    "right_knee_joint": 0.3,
+    "right_ankle_pitch_joint": -0.2,
+    "right_ankle_roll_joint": 0.0,
+    "torso_joint": 0.0,
+    "waist_yaw_joint": 0.0,
+    "waist_roll_joint": 0.0,
+    "waist_pitch_joint": 0.0,
+    "left_shoulder_pitch_joint": 0.0,
+    "left_shoulder_roll_joint": 0.0,
+    "left_shoulder_yaw_joint": 0.0,
+    "left_elbow_joint": 0.0,
+    "left_wrist_roll_joint": 0.0,
+    "left_wrist_pitch_joint": 0.0,
+    "left_wrist_yaw_joint": 0.0,
+    "right_shoulder_pitch_joint": 0.0,
+    "right_shoulder_roll_joint": 0.0,
+    "right_shoulder_yaw_joint": 0.0,
+    "right_elbow_joint": 0.0,
+    "right_wrist_roll_joint": 0.0,
+    "right_wrist_pitch_joint": 0.0,
+    "right_wrist_yaw_joint": 0.0,
+}
+
+G1_RIGHT_ARM_IK_DOF_NAMES = {
+    "right_shoulder_pitch_joint",
+    "right_shoulder_roll_joint",
+    "right_shoulder_yaw_joint",
+    "right_elbow_joint",
+    "right_wrist_roll_joint",
+    "right_wrist_pitch_joint",
+    "right_wrist_yaw_joint",
+}
+
+ROBOT_BODY_DEFAULT_DOOR_PREFER = {
+    "g1": "rec_using-the-reference-image-for-overall-proportion_20260610_152759_469492_cdfe437e",
+    "unitree_g1": "rec_using-the-reference-image-for-overall-proportion_20260610_152759_469492_cdfe437e",
+    "g1_right_arm": "rec_using-the-reference-image-for-overall-proportion_20260610_152759_469492_cdfe437e",
+    "scout_z1": "rec_using-the-reference-image-for-overall-proportion_20260610_193220_721835_ab3c271a",
+    "scout_ugv_z1": "rec_using-the-reference-image-for-overall-proportion_20260610_193220_721835_ab3c271a",
+    "ugv_z1": "rec_using-the-reference-image-for-overall-proportion_20260610_193220_721835_ab3c271a",
+    "scout": "rec_using-the-reference-image-for-overall-proportion_20260610_193220_721835_ab3c271a",
+    "scout_mini_z1": "rec_using-the-reference-image-for-overall-proportion_20260610_193220_721835_ab3c271a",
+    "a2w_z1": "rec_using-the-reference-image-for-overall-proportion_20260610_161038_309387_2dbe2f90",
+    "a2wz1": "rec_using-the-reference-image-for-overall-proportion_20260610_161038_309387_2dbe2f90",
+    "a2w": "rec_using-the-reference-image-for-overall-proportion_20260610_161038_309387_2dbe2f90",
+}
+
+
+def is_g1_robot_body(args) -> bool:
+    return str(getattr(args, "robot_body", "b1z1")).lower() in ("g1", "unitree_g1", "g1_right_arm")
+
+
+def is_scout_robot_body_name(robot_body: str) -> bool:
+    return str(robot_body).lower() in ("scout_ugv_z1", "scout_z1", "ugv_z1", "scout", "scout_mini_z1")
+
+
+def is_a2w_robot_body_name(robot_body: str) -> bool:
+    return str(robot_body).lower() in ("a2w_z1", "a2wz1", "a2w")
+
+
+def indent_xml(elem, level=0):
+    i = "\n" + level * "  "
+    if len(elem):
+        if not elem.text or not elem.text.strip():
+            elem.text = i + "  "
+        for child in elem:
+            indent_xml(child, level + 1)
+        if not child.tail or not child.tail.strip():
+            child.tail = i
+    if level and (not elem.tail or not elem.tail.strip()):
+        elem.tail = i
+
+
+def scout_package_mesh_path(package_root: Path, filename: str) -> Path:
+    prefix = "package://scout_description/"
+    if filename.startswith(prefix):
+        return package_root / filename[len(prefix):]
+    if filename.startswith("package://"):
+        return package_root / "meshes" / Path(filename).name
+    path = Path(filename)
+    if path.is_absolute():
+        return path
+    candidate = package_root / path
+    if candidate.exists():
+        return candidate
+    return package_root / "meshes" / path.name
+
+
+def parse_origin_xyz_rpy(origin_elem):
+    if origin_elem is None:
+        return np.zeros(3, dtype=np.float64), np.zeros(3, dtype=np.float64)
+    xyz = np.fromstring(origin_elem.get("xyz", "0 0 0"), sep=" ", dtype=np.float64)
+    rpy = np.fromstring(origin_elem.get("rpy", "0 0 0"), sep=" ", dtype=np.float64)
+    if xyz.size != 3:
+        xyz = np.zeros(3, dtype=np.float64)
+    if rpy.size != 3:
+        rpy = np.zeros(3, dtype=np.float64)
+    return xyz, rpy
+
+
+def rpy_matrix(rpy):
+    roll, pitch, yaw = [float(v) for v in rpy]
+    cr, sr = math.cos(roll), math.sin(roll)
+    cp, sp = math.cos(pitch), math.sin(pitch)
+    cy, sy = math.cos(yaw), math.sin(yaw)
+    rx = np.array([[1.0, 0.0, 0.0], [0.0, cr, -sr], [0.0, sr, cr]], dtype=np.float64)
+    ry = np.array([[cp, 0.0, sp], [0.0, 1.0, 0.0], [-sp, 0.0, cp]], dtype=np.float64)
+    rz = np.array([[cy, -sy, 0.0], [sy, cy, 0.0], [0.0, 0.0, 1.0]], dtype=np.float64)
+    return rz @ ry @ rx
+
+
+def axis_angle_matrix(axis, angle):
+    axis = np.asarray(axis, dtype=np.float64)
+    norm = float(np.linalg.norm(axis))
+    if norm < 1.0e-12:
+        return np.eye(3, dtype=np.float64)
+    x, y, z = axis / norm
+    c = math.cos(float(angle))
+    s = math.sin(float(angle))
+    one_c = 1.0 - c
+    return np.array(
+        [
+            [c + x * x * one_c, x * y * one_c - z * s, x * z * one_c + y * s],
+            [y * x * one_c + z * s, c + y * y * one_c, y * z * one_c - x * s],
+            [z * x * one_c - y * s, z * y * one_c + x * s, c + z * z * one_c],
+        ],
+        dtype=np.float64,
+    )
+
+
+def transform_matrix(xyz, rpy):
+    mat = np.eye(4, dtype=np.float64)
+    mat[:3, :3] = rpy_matrix(rpy)
+    mat[:3, 3] = np.asarray(xyz, dtype=np.float64)
+    return mat
+
+
+def matrix_to_xyz_rpy(mat):
+    rot = np.asarray(mat[:3, :3], dtype=np.float64)
+    sy = max(-1.0, min(1.0, float(-rot[2, 0])))
+    pitch = math.asin(sy)
+    cp = math.cos(pitch)
+    if abs(cp) > 1.0e-8:
+        roll = math.atan2(rot[2, 1], rot[2, 2])
+        yaw = math.atan2(rot[1, 0], rot[0, 0])
+    else:
+        roll = 0.0
+        yaw = math.atan2(-rot[0, 1], rot[1, 1])
+    return np.asarray(mat[:3, 3], dtype=np.float64), np.array([roll, pitch, yaw], dtype=np.float64)
+
+
+def origin_from_matrix(mat):
+    xyz, rpy = matrix_to_xyz_rpy(mat)
+    origin = ET.Element("origin")
+    origin.set("xyz", " ".join(f"{float(v):.9g}" for v in xyz))
+    origin.set("rpy", " ".join(f"{float(v):.9g}" for v in rpy))
+    return origin
+
+
+def flatten_visual_urdf(root: ET.Element, root_link_name: str, robot_name: str, default_joint_angles=None) -> ET.Element:
+    default_joint_angles = default_joint_angles or {}
+    parent_joints = {}
+    for joint in root.findall("joint"):
+        parent = joint.find("parent")
+        child = joint.find("child")
+        if parent is None or child is None:
+            continue
+        parent_name = parent.get("link")
+        child_name = child.get("link")
+        if not parent_name or not child_name:
+            continue
+        xyz, rpy = parse_origin_xyz_rpy(joint.find("origin"))
+        parent_to_child = transform_matrix(xyz, rpy)
+        joint_type = joint.get("type", "fixed")
+        if joint_type in ("revolute", "continuous", "prismatic"):
+            angle = float(default_joint_angles.get(joint.get("name", ""), 0.0))
+            if joint_type == "prismatic":
+                axis_elem = joint.find("axis")
+                axis = np.fromstring(axis_elem.get("xyz", "1 0 0") if axis_elem is not None else "1 0 0", sep=" ")
+                if axis.size != 3:
+                    axis = np.array([1.0, 0.0, 0.0], dtype=np.float64)
+                parent_to_child[:3, 3] += axis * angle
+            else:
+                axis_elem = joint.find("axis")
+                axis = np.fromstring(axis_elem.get("xyz", "1 0 0") if axis_elem is not None else "1 0 0", sep=" ")
+                if axis.size != 3:
+                    axis = np.array([1.0, 0.0, 0.0], dtype=np.float64)
+                joint_rot = np.eye(4, dtype=np.float64)
+                joint_rot[:3, :3] = axis_angle_matrix(axis, angle)
+                parent_to_child = parent_to_child @ joint_rot
+        parent_joints[child_name] = (parent_name, parent_to_child)
+
+    link_tf_cache = {root_link_name: np.eye(4, dtype=np.float64)}
+
+    def link_to_root(link_name):
+        if link_name in link_tf_cache:
+            return link_tf_cache[link_name]
+        parent_name, parent_to_child = parent_joints.get(link_name, (root_link_name, np.eye(4, dtype=np.float64)))
+        tf = link_to_root(parent_name) @ parent_to_child
+        link_tf_cache[link_name] = tf
+        return tf
+
+    flat_root = ET.Element("robot", {"name": robot_name})
+    flat_link = ET.SubElement(flat_root, "link", {"name": "base_link"})
+    inertial = ET.SubElement(flat_link, "inertial")
+    ET.SubElement(inertial, "mass", {"value": "1.0"})
+    ET.SubElement(inertial, "origin", {"xyz": "0 0 0", "rpy": "0 0 0"})
+    ET.SubElement(
+        inertial,
+        "inertia",
+        {"ixx": "0.1", "ixy": "0", "ixz": "0", "iyy": "0.1", "iyz": "0", "izz": "0.1"},
+    )
+
+    for link in root.findall("link"):
+        link_name = link.get("name", root_link_name)
+        root_to_link = link_to_root(link_name)
+        for visual in link.findall("visual"):
+            flat_visual = copy.deepcopy(visual)
+            old_origin = flat_visual.find("origin")
+            old_xyz, old_rpy = parse_origin_xyz_rpy(old_origin)
+            root_to_visual = root_to_link @ transform_matrix(old_xyz, old_rpy)
+            if old_origin is not None:
+                flat_visual.remove(old_origin)
+            flat_visual.insert(0, origin_from_matrix(root_to_visual))
+            flat_link.append(flat_visual)
+    return flat_root
+
+
+def flatten_scout_visual_urdf(root: ET.Element) -> ET.Element:
+    return flatten_visual_urdf(root, "base_link", "scout_mini_visual_flat")
+
+
+def build_scout_base_asset_root(args, temp_root: Path) -> tuple[Path, str]:
+    package_root = Path(args.scout_asset_root).expanduser().resolve()
+    source_urdf = package_root / args.scout_urdf_file
+    if not source_urdf.exists():
+        raise FileNotFoundError(f"Scout URDF not found: {source_urdf}")
+
+    out_root = Path(temp_root) / "scout_ugv_z1_split_assets"
+    out_urdf = out_root / "urdf" / "scout_mini_base_visual_flat.urdf"
+    out_mesh_dir = out_root / "meshes"
+    out_urdf.parent.mkdir(parents=True, exist_ok=True)
+    out_mesh_dir.mkdir(parents=True, exist_ok=True)
+
+    root = ET.parse(source_urdf).getroot()
+    for mesh in root.iter("mesh"):
+        filename = mesh.get("filename")
+        if not filename:
+            continue
+        src = scout_package_mesh_path(package_root, filename).resolve()
+        if not src.exists():
+            raise FileNotFoundError(f"Scout mesh referenced by {source_urdf} not found: {src}")
+        dst = out_mesh_dir / src.name
+        if not dst.exists():
+            shutil.copy2(src, dst)
+        mesh.set("filename", f"../meshes/{src.name}")
+
+    # The base actor is only a kinematic visual body in this float-IK video
+    # script. Flatten Scout's articulated wheel links into one visual link so
+    # the existing float-base pose setter can move it like the B1 base actor.
+    root = flatten_scout_visual_urdf(root)
+
+    indent_xml(root)
+    ET.ElementTree(root).write(out_urdf, encoding="utf-8", xml_declaration=True)
+    return out_root, "urdf/scout_mini_base_visual_flat.urdf"
+
+
+def build_g1_body_asset_root(args, temp_root: Path) -> tuple[Path, str]:
+    package_root = Path(args.g1_asset_root).expanduser().resolve()
+    source_urdf = package_root / args.g1_urdf_file
+    if not source_urdf.exists():
+        raise FileNotFoundError(f"G1 URDF not found: {source_urdf}")
+
+    out_root = Path(temp_root) / "g1_z1_split_assets"
+    out_urdf = out_root / "urdf" / "g1_body_visual_flat.urdf"
+    out_mesh_dir = out_root / "meshes"
+    out_urdf.parent.mkdir(parents=True, exist_ok=True)
+    out_mesh_dir.mkdir(parents=True, exist_ok=True)
+
+    root = ET.parse(source_urdf).getroot()
+    for mesh in root.iter("mesh"):
+        filename = mesh.get("filename")
+        if not filename:
+            continue
+        src = scout_package_mesh_path(package_root, filename).resolve()
+        if not src.exists():
+            raise FileNotFoundError(f"G1 mesh referenced by {source_urdf} not found: {src}")
+        dst = out_mesh_dir / src.name
+        if not dst.exists():
+            shutil.copy2(src, dst)
+        mesh.set("filename", f"../meshes/{src.name}")
+
+    root = flatten_visual_urdf(
+        root,
+        root_link_name=str(getattr(args, "g1_root_link", "pelvis")),
+        robot_name="g1_visual_flat",
+        default_joint_angles=G1_DEFAULT_JOINT_ANGLES,
+    )
+
+    indent_xml(root)
+    ET.ElementTree(root).write(out_urdf, encoding="utf-8", xml_declaration=True)
+    return out_root, "urdf/g1_body_visual_flat.urdf"
+
+
+def build_a2w_video_asset_root(args, temp_root: Path) -> tuple[Path, str, str]:
+    if a2w_ik is None:
+        raise RuntimeError("A2W video body requires isaacgym_a2w_ik_push_door_parallel.py to be importable.")
+    split_root, base_file, arm_file = a2w_ik.build_a2wz1_split_asset_root(
+        args.a2wz1_asset_root,
+        args.a2wz1_asset_file,
+        temp_root,
+    )
+    base_urdf = Path(split_root) / base_file
+    root = ET.parse(base_urdf).getroot()
+    flat_root = flatten_visual_urdf(
+        root,
+        root_link_name="base_link",
+        robot_name="a2w_base_visual_flat",
+        default_joint_angles=getattr(a2w_ik, "A2W_DEFAULT_LEG_POS", {}),
+    )
+    flat_file = "urdf/a2w_base_visual_flat.urdf"
+    flat_urdf = Path(split_root) / flat_file
+    indent_xml(flat_root)
+    ET.ElementTree(flat_root).write(flat_urdf, encoding="utf-8", xml_declaration=True)
+    print(f"Built A2W video visual base asset: {flat_urdf}", flush=True)
+    return Path(split_root), flat_file, arm_file
+
+
+def load_video_robot_assets(gym, sim, args, temp_root: Path):
+    robot_body = str(getattr(args, "robot_body", "b1z1")).lower()
+    if robot_body in ("b1z1", "b1", "b1z1_base"):
+        return base_ik.load_robot_assets(gym, sim, args, temp_root)
+    supported_bodies = (
+        "a2w",
+        "a2w_z1",
+        "a2wz1",
+        "scout_z1",
+        "scout_ugv_z1",
+        "ugv_z1",
+        "scout",
+        "scout_mini_z1",
+        "g1",
+        "unitree_g1",
+        "g1_right_arm",
+        "g1_z1",
+        "g1_visual_z1",
+    )
+    if robot_body not in supported_bodies:
+        raise ValueError(
+            f"Unsupported --robot_body={args.robot_body!r}; expected b1z1, scout_z1, a2w_z1, or g1"
+        )
+
+    if robot_body in ("g1", "unitree_g1", "g1_right_arm"):
+        g1_root = Path(args.g1_asset_root).expanduser().resolve()
+        g1_file = str(args.g1_urdf_file)
+        if not (g1_root / g1_file).exists():
+            raise FileNotFoundError(f"G1 URDF not found: {g1_root / g1_file}")
+        g1_asset = base_ik.load_asset_with_visual_flip(
+            gym,
+            sim,
+            g1_root,
+            g1_file,
+            args,
+            bool(getattr(args, "g1_flip_visual_attachments", False)),
+            "Unitree G1 articulated right-arm actor",
+        )
+        return None, g1_asset
+
+    if is_a2w_robot_body_name(robot_body):
+        base_root, base_file, arm_file = build_a2w_video_asset_root(args, temp_root)
+        base_flip_visual_attachments = False
+        base_label = "A2W base visual actor"
+    elif robot_body in ("g1_z1", "g1_visual_z1"):
+        base_root, base_file = build_g1_body_asset_root(args, temp_root)
+        base_flip_visual_attachments = bool(getattr(args, "g1_flip_visual_attachments", False))
+        base_label = "Unitree G1 body visual actor"
+    else:
+        base_root, base_file = build_scout_base_asset_root(args, temp_root)
+        base_flip_visual_attachments = not bool(getattr(args, "no_scout_flip_visual_attachments", False))
+        if bool(getattr(args, "scout_flip_visual_attachments", False)):
+            base_flip_visual_attachments = True
+        base_label = "Scout Mini UGV base visual actor"
+    base_asset = base_ik.load_asset_with_visual_flip(
+        gym,
+        sim,
+        base_root,
+        base_file,
+        args,
+        base_flip_visual_attachments,
+        base_label,
+    )
+
+    if is_a2w_robot_body_name(robot_body):
+        split_root = base_root
+    else:
+        b1_asset_root = Path(args.asset_root).expanduser().resolve()
+        split_root, _b1_base_file, arm_file = base_ik.build_split_asset_root(
+            b1_asset_root,
+            args.asset_file,
+            temp_root,
+            align_arm_gripper_collisions=not bool(getattr(args, "disable_arm_visual_flip", False)),
+        )
+    arm_asset = base_ik.load_asset_with_visual_flip(
+        gym,
+        sim,
+        split_root,
+        arm_file,
+        args,
+        not bool(getattr(args, "disable_arm_visual_flip", False)),
+        "Z1 arm actor",
+    )
+    return base_asset, arm_asset
+
+
+def apply_g1_default_dof_pose(args, dof_names, dof_states, dof_positions, lower, upper, defaults):
+    if not is_g1_robot_body(args):
+        return
+    applied = []
+    for idx, name in enumerate(dof_names):
+        if name not in G1_DEFAULT_JOINT_ANGLES:
+            continue
+        value = float(G1_DEFAULT_JOINT_ANGLES[name])
+        value = float(np.clip(value, float(lower[idx]), float(upper[idx])))
+        defaults[idx] = value
+        dof_states["pos"][idx] = value
+        dof_positions[idx] = value
+        applied.append(name)
+    print(
+        "G1 right-arm mode: using Unitree G1 articulated actor; "
+        f"ee_link={args.ik_ee_link}, controlled_joints={', '.join(sorted(base_ik.ARM_IK_DOF_NAMES))}",
+        flush=True,
+    )
+    if applied:
+        print(f"G1 default pose applied to {len(applied)} DOFs.", flush=True)
 
 
 def parse_args():
@@ -92,6 +544,61 @@ def parse_args():
         custom_parameters=[
             {"name": "--asset_root", "type": str, "default": str(base_ik.DEFAULT_ASSET_ROOT)},
             {"name": "--asset_file", "type": str, "default": base_ik.DEFAULT_ASSET_FILE},
+            {
+                "name": "--robot_body",
+                "type": str,
+                "default": "b1z1",
+                "help": "Robot body to use: b1z1, scout_z1, a2w_z1, or g1. For g1, the built-in right arm is used instead of Z1.",
+            },
+            {
+                "name": "--a2wz1_asset_root",
+                "type": str,
+                "default": str(HIGH_LEVEL_ROOT / "data" / "asset" / "a2wz1"),
+                "help": "Root of the built A2W+Z1 asset used by --robot_body a2w_z1.",
+            },
+            {"name": "--a2wz1_asset_file", "type": str, "default": "urdf/a2wz1.urdf"},
+            {
+                "name": "--scout_asset_root",
+                "type": str,
+                "default": "/home/sivan/whole_body/ugv_gazebo_sim/scout/scout_description",
+                "help": "Root of the scout_description package used by --robot_body scout_ugv_z1.",
+            },
+            {"name": "--scout_urdf_file", "type": str, "default": "urdf/scout_mini.urdf"},
+            {
+                "name": "--scout_flip_visual_attachments",
+                "action": "store_true",
+                "help": "Set AssetOptions.flip_visual_attachments=True for the Scout Mini base actor.",
+            },
+            {
+                "name": "--no_scout_flip_visual_attachments",
+                "action": "store_true",
+                "help": "Disable Scout Mini visual attachment flipping for debugging raw URDF import.",
+            },
+            {
+                "name": "--g1_asset_root",
+                "type": str,
+                "default": "/home/sivan/whole_body/unitree_rl_gym/resources/robots/g1_description",
+                "help": "Root of the Unitree G1 description package used by --robot_body g1.",
+            },
+            {"name": "--g1_urdf_file", "type": str, "default": "g1_29dof.urdf"},
+            {"name": "--g1_root_link", "type": str, "default": "pelvis"},
+            {"name": "--g1_ee_link", "type": str, "default": "right_rubber_hand"},
+            {
+                "name": "--g1_right_arm_ik_joints",
+                "type": str,
+                "default": ",".join(sorted(G1_RIGHT_ARM_IK_DOF_NAMES)),
+                "help": "Comma-separated G1 right-arm joints used by IK when --robot_body g1.",
+            },
+            {
+                "name": "--g1_use_orientation_ik",
+                "action": "store_true",
+                "help": "Use full pose IK for G1. By default G1 right-arm IK is position-only.",
+            },
+            {
+                "name": "--g1_flip_visual_attachments",
+                "action": "store_true",
+                "help": "Set AssetOptions.flip_visual_attachments=True for the flattened Unitree G1 body visual actor.",
+            },
             {"name": "--rl_device", "type": str, "default": "cuda:0"},
             {"name": "--num_envs", "type": int, "default": 1024},
             {"name": "--steps", "type": int, "default": 2405},
@@ -112,6 +619,17 @@ def parse_args():
                 "default": 0,
                 "help": "Max unique door assets for diverse selection; <=0 uses min(num_envs, available doors).",
             },
+            {
+                "name": "--door_exclude_names",
+                "type": str,
+                "default": "",
+                "help": "Comma-separated extra door asset names to skip during bulk door selection.",
+            },
+            {
+                "name": "--allow_unsafe_door_assets",
+                "action": "store_true",
+                "help": "Allow known unsafe door assets that may crash Isaac Gym mesh cooking.",
+            },
             {"name": "--door_actor_scale", "type": float, "default": 1.2},
             {"name": "--door_x", "type": float, "default": 2.5},
             {"name": "--door_y", "type": float, "default": 0.0},
@@ -124,9 +642,50 @@ def parse_args():
             {"name": "--door_wall_gap", "type": float, "default": 0.0},
             {"name": "--door_wall_x_offset", "type": float, "default": 0.0},
             {"name": "--door_wall_y_offset", "type": float, "default": 0.0},
+            {
+                "name": "--door_use_urdf_rgba",
+                "action": "store_true",
+                "help": "Color generated door links from URDF rgba values instead of mesh materials.",
+            },
             {"name": "--robot_x", "type": float, "default": 4.1},
             {"name": "--robot_y", "type": float, "default": 0.0},
+            {
+                "name": "--robot_y_alignment",
+                "type": str,
+                "default": "auto",
+                "help": "How to place the robot in Y relative to each door: auto, handle, door_center, or door_y. Auto centers generated rec_ doors and keeps legacy doors on door_y.",
+            },
             {"name": "--robot_z", "type": float, "default": 0.60},
+            {
+                "name": "--scout_robot_z",
+                "type": float,
+                "default": 0.22,
+                "help": "Default base height for --robot_body scout_ugv_z1 when --robot_z is not explicitly set.",
+            },
+            {
+                "name": "--a2w_robot_z",
+                "type": float,
+                "default": 0.60,
+                "help": "Default base height for --robot_body a2w_z1 when --robot_z is not explicitly set.",
+            },
+            {
+                "name": "--g1_robot_z",
+                "type": float,
+                "default": 0.80,
+                "help": "Default pelvis/root height for --robot_body g1 when --robot_z is not explicitly set.",
+            },
+            {
+                "name": "--g1_robot_front_offset",
+                "type": float,
+                "default": 0.35,
+                "help": "Default front offset for --robot_body g1 when --robot_front_offset is not explicitly set.",
+            },
+            {
+                "name": "--g1_stop_distance",
+                "type": float,
+                "default": 0.10,
+                "help": "Default stop distance for --robot_body g1 when --stop_distance is not explicitly set.",
+            },
             {"name": "--robot_yaw", "type": float, "default": math.pi},
             {"name": "--robot_front_offset", "type": float, "default": 0.55},
             {"name": "--robot_rear_offset", "type": float, "default": 0.65},
@@ -326,6 +885,12 @@ def parse_args():
             {"name": "--video_output_height", "type": int, "default": 0},
             {"name": "--video_open_trigger_deg", "type": float, "default": 5.0},
             {"name": "--video_transition_start_step", "type": int, "default": -1},
+            {
+                "name": "--video_transition_fallback_step",
+                "type": int,
+                "default": -1,
+                "help": "Optional backup step that starts the overview camera pullback even if env0 door has not opened.",
+            },
             {"name": "--video_transition_steps", "type": int, "default": 1200},
             {"name": "--video_initial_height", "type": float, "default": 1.8},
             {"name": "--video_start_robot_x_offset", "type": float, "default": 0.8},
@@ -344,6 +909,60 @@ def parse_args():
     # gymutil's wrapper does not preserve default=True for store_true custom args,
     # so keep these visualization helpers on by default and let --no_* flags opt out.
     argv = set(sys.argv[1:])
+    robot_body = str(getattr(args, "robot_body", "b1z1")).lower()
+    robot_z_was_set = any(token == "--robot_z" or token.startswith("--robot_z=") for token in sys.argv[1:])
+    if is_scout_robot_body_name(robot_body) and not robot_z_was_set:
+        args.robot_z = float(getattr(args, "scout_robot_z", 0.22))
+    elif is_a2w_robot_body_name(robot_body) and not robot_z_was_set:
+        args.robot_z = float(getattr(args, "a2w_robot_z", 0.60))
+    elif is_g1_robot_body(args) and not robot_z_was_set:
+        args.robot_z = float(getattr(args, "g1_robot_z", 0.80))
+    video_start_y_was_set = any(
+        token == "--video_start_y_offset" or token.startswith("--video_start_y_offset=")
+        for token in sys.argv[1:]
+    )
+    if is_scout_robot_body_name(robot_body) and not video_start_y_was_set:
+        args.video_start_y_offset = 0.0
+
+    door_prefer_was_set = any(
+        token == "--door_prefer_name" or token.startswith("--door_prefer_name=") for token in sys.argv[1:]
+    )
+    if (
+        not door_prefer_was_set
+        and not str(getattr(args, "door_name", "") or "")
+        and int(getattr(args, "door_index", -1)) < 0
+    ):
+        preferred = ROBOT_BODY_DEFAULT_DOOR_PREFER.get(robot_body)
+        if preferred:
+            args.door_prefer_name = preferred
+            print(
+                f"Robot body {robot_body!r} uses default env0 preferred door: {args.door_prefer_name}",
+                flush=True,
+            )
+    if is_g1_robot_body(args):
+        robot_front_offset_was_set = any(
+            token == "--robot_front_offset" or token.startswith("--robot_front_offset=") for token in sys.argv[1:]
+        )
+        stop_distance_was_set = any(
+            token == "--stop_distance" or token.startswith("--stop_distance=") for token in sys.argv[1:]
+        )
+        if not robot_front_offset_was_set:
+            args.robot_front_offset = float(getattr(args, "g1_robot_front_offset", 0.35))
+        if not stop_distance_was_set:
+            args.stop_distance = float(getattr(args, "g1_stop_distance", 0.10))
+        ik_ee_was_set = any(token == "--ik_ee_link" or token.startswith("--ik_ee_link=") for token in sys.argv[1:])
+        if not ik_ee_was_set:
+            args.ik_ee_link = str(getattr(args, "g1_ee_link", "right_rubber_hand"))
+        if not bool(getattr(args, "g1_use_orientation_ik", False)):
+            args.ik_position_only = True
+        g1_ik_joints = [
+            part.strip()
+            for part in str(getattr(args, "g1_right_arm_ik_joints", "")).replace(";", ",").split(",")
+            if part.strip()
+        ]
+        if not g1_ik_joints:
+            raise ValueError("--g1_right_arm_ik_joints must select at least one joint for --robot_body g1.")
+        base_ik.ARM_IK_DOF_NAMES = set(g1_ik_joints)
     default_true_flags = (
         ("draw_ik_target", "--draw_ik_target", "--no_draw_ik_target"),
         ("draw_camera_axes", "--draw_camera_axes", "--no_draw_camera_axes"),
@@ -544,7 +1163,9 @@ def sample_env_value(rng, args, attr, half_attr, lower=None, upper=None):
 
 
 def colorful_wall_rgb(env_index, args):
-    hue = (float(env_index) * 0.618033988749895) % 1.0
+    seed = int(getattr(args, "seed", 0))
+    base_hue = (float(seed % 1000003) * 0.618033988749895 + 0.17320508075688773) % 1.0
+    hue = (base_hue + float(env_index) * 0.618033988749895) % 1.0
     saturation = min(1.0, max(0.0, float(getattr(args, "video_wall_color_saturation", 0.62))))
     value = min(1.0, max(0.0, float(getattr(args, "video_wall_color_value", 0.88))))
     return colorsys.hsv_to_rgb(hue, saturation, value)
@@ -607,6 +1228,38 @@ def make_env_args(args, env_index):
     return env_args
 
 
+def normalize_video_door_layout(door, args, env_index=0):
+    """Make mixed door assets face the same way in overview videos.
+
+    Legacy PartNet numeric URDFs already contain a fixed internal visual
+    rotation, so their actor yaw must stay on the normal controller value.  Only
+    their bbox used for video walls is authored in the other horizontal axis; add
+    a bbox-only +90 deg offset so walls use the visible door width.
+    """
+    family = dc.door_asset_family(door)
+    if family == "partnet_numeric":
+        door.spec = dict(door.spec)
+        door.spec["wall_opening_axis_override"] = "y"
+        door.spec["bounds_yaw_offset_override"] = math.pi / 2.0
+        door.spec["video_layout_family"] = family
+        door.spec["video_layout_actor_yaw"] = float(door.actor_yaw)
+    elif family in ("record_materialization", "wc4"):
+        door.spec = dict(door.spec)
+        door.spec["wall_opening_axis_override"] = "y"
+        door.spec.pop("bounds_yaw_offset_override", None)
+        door.spec["video_layout_family"] = family
+        door.spec["video_layout_actor_yaw"] = float(door.actor_yaw)
+    if int(env_index) < 4:
+        print(
+            f"video_door_layout env={env_index} door={door.spec.get('name')} "
+            f"family={family} actor_yaw={float(door.actor_yaw):.3f} "
+            f"wall_axis={door.spec.get('wall_opening_axis_override', '')} "
+            f"bounds_yaw_offset={float(door.spec.get('bounds_yaw_offset_override', 0.0) or 0.0):.3f}",
+            flush=True,
+        )
+    return door
+
+
 set_robot_base_pose = dc.set_robot_base_pose
 compute_base_push_target = dc.compute_base_push_target
 get_body_pose = dc.get_body_pose
@@ -617,7 +1270,6 @@ draw_local_camera_axes = dc.draw_local_camera_axes
 draw_low_level_camera_axes = dc.draw_low_level_camera_axes
 make_camera_properties = dc.make_camera_properties
 attach_camera_to_actor_body = dc.attach_camera_to_actor_body
-create_low_level_cameras = dc.create_low_level_cameras
 camera_image_to_array = dc.camera_image_to_array
 camera_color_to_rgb = dc.camera_color_to_rgb
 show_camera_handle_images = dc.show_camera_handle_images
@@ -646,6 +1298,54 @@ apply_float_dp_action = dc.apply_float_dp_action
 make_float_dp_policy_log_record = dc.make_float_dp_policy_log_record
 print_float_dp_policy_log_record = dc.print_float_dp_policy_log_record
 make_float_replay_snapshot = dc.make_float_replay_snapshot
+
+
+def create_low_level_cameras(gym, env, arm_actor, actor_handles, args):
+    if not is_g1_robot_body(args):
+        return dc.create_low_level_cameras(gym, env, arm_actor, actor_handles, args)
+
+    cameras = {}
+    if args.enable_wrist_camera:
+        wrist_rot = list(dc.DEFAULT_WRIST_CAMERA_CFG["rotation"])
+        wrist_rot[2] -= float(args.wrist_camera_down_tilt)
+        wrist_camera = None
+        for link_name in (str(getattr(args, "g1_ee_link", "right_rubber_hand")), "right_wrist_yaw_link"):
+            wrist_camera = attach_camera_to_actor_body(
+                gym, env, arm_actor, link_name, dc.DEFAULT_WRIST_CAMERA_CFG, wrist_rot, args=args
+            )
+            if wrist_camera is not None:
+                print(f"G1 wrist camera attached to {link_name}: handle={wrist_camera}", flush=True)
+                break
+        if wrist_camera is None:
+            print("⚠️📷 G1 wrist camera sensor creation failed.", flush=True)
+        else:
+            cameras["wrist"] = wrist_camera
+
+    if args.enable_front_camera:
+        front_rot = [
+            math.radians(float(args.front_camera_yaw_deg)),
+            math.radians(float(args.front_camera_pitch_deg)),
+            math.radians(float(args.front_camera_roll_deg)),
+        ]
+        front_camera = None
+        for link_name in ("head_link", "torso_link", "pelvis"):
+            front_camera = attach_camera_to_actor_body(
+                gym, env, arm_actor, link_name, dc.DEFAULT_FRONT_CAMERA_CFG, front_rot, args=args
+            )
+            if front_camera is not None:
+                print(f"G1 front camera attached to {link_name}: handle={front_camera}", flush=True)
+                break
+        if front_camera is None:
+            print("⚠️📷 G1 front camera sensor creation failed.", flush=True)
+        else:
+            cameras["front"] = front_camera
+
+    if args.show_camera_images:
+        if cv2 is None:
+            print("⚠️📷 cv2 is not available; camera image windows are disabled.", flush=True)
+        elif not cameras:
+            print("⚠️📷 No G1 camera sensors were created; camera image windows are disabled.", flush=True)
+    return cameras
 
 
 def scalar_to_str(value):
@@ -1044,6 +1744,16 @@ def trajectory_targets(
             )
             gripper = gripper_closed
             phase = "rotate_handle"
+        elif is_g1_robot_body(args):
+            target_pos = traj["rotate"].copy()
+            target_quat = None if args.ik_position_only else base_ik.quat_multiply(
+                traj["goal_quat"],
+                quat_from_angle_axis(-args.handle_rotate_angle, np.array([1.0, 0.0, 0.0], dtype=np.float32)),
+            )
+            base_xy = base_stop.copy()
+            yaw = yaw_start
+            gripper = gripper_closed
+            phase = "push_door"
         elif step < push_end:
             t = smoothstep((step - rotate_end + 1) / max(1, args.door_push_steps))
             base_t = smoothstep((step - rotate_end + 1) / max(1.0, args.door_push_steps * args.base_push_time_scale))
@@ -1498,6 +2208,7 @@ def create_parallel_env_states(
         door_template = door_templates[env_index % len(door_templates)]
         door = clone_door_runtime(door_template)
         env_args = make_env_args(args, env_index)
+        normalize_video_door_layout(door, env_args, env_index=env_index)
         env, arm_actor, actor_handles, door_actor, _ = create_parallel_env_actors(
             gym,
             sim,
@@ -1609,6 +2320,22 @@ class OverviewVideoRecorder:
 
     def _env_door_focus_world(self, st, z=0.8):
         origin = vec3_to_np(self.gym.get_env_origin(st.env))
+        alignment = str(getattr(st.args, "robot_y_alignment", "auto")).lower()
+        use_generated_center = False
+        if alignment in ("auto", "generated_auto", "record_materialization_auto"):
+            door_name = str(st.door.spec.get("name", ""))
+            door_path = str(st.door.spec.get("path", ""))
+            use_generated_center = door_name.startswith("rec_") or "record_materialization" in door_path
+        if alignment in ("door_center", "door", "center") or use_generated_center:
+            world_min_x, world_max_x, world_min_y, world_max_y = dc.door_world_xy_bounds_from_bbox(st.args, st.door)
+            return origin + np.array(
+                [
+                    0.5 * (world_min_x + world_max_x) + 0.3,
+                    0.5 * (world_min_y + world_max_y),
+                    float(z),
+                ],
+                dtype=np.float32,
+            )
         return origin + np.array([float(st.args.door_x) + 0.3, float(st.args.door_y), float(z)], dtype=np.float32)
 
     def _compute_camera_anchors(self):
@@ -1664,6 +2391,11 @@ class OverviewVideoRecorder:
         explicit_start = int(getattr(self.args, "video_transition_start_step", -1))
         if self.trigger_step is None and explicit_start >= 0 and step >= explicit_start:
             self.trigger_step = int(step)
+            print(f"Overview camera transition started by explicit step={step}", flush=True)
+        fallback_start = int(getattr(self.args, "video_transition_fallback_step", -1))
+        if self.trigger_step is None and fallback_start >= 0 and step >= fallback_start:
+            self.trigger_step = int(step)
+            print(f"Overview camera transition started by fallback step={step}", flush=True)
         if self.trigger_step is None:
             door_pos = self.env_states[0].last_door_pos
             door_deg = 0.0
@@ -2041,14 +2773,15 @@ def main():
     plane_params.normal = gymapi.Vec3(0.0, 0.0, 1.0)
     gym.add_ground(sim, plane_params)
 
-    with tempfile.TemporaryDirectory(prefix="b1z1_float_ik_door_assets_") as temp_dir:
-        base_asset, arm_asset = base_ik.load_robot_assets(gym, sim, args, Path(temp_dir))
+    with tempfile.TemporaryDirectory(prefix="float_ik_video_assets_") as temp_dir:
+        base_asset, arm_asset = load_video_robot_assets(gym, sim, args, Path(temp_dir))
         door_templates = load_door_assets(gym, sim, args)
         if base_asset is not None:
             base_ik.print_collision_summary(gym, base_asset, "base visual actor", verbose=args.print_collision_summary)
         base_ik.print_collision_summary(gym, arm_asset, "arm articulated actor", verbose=args.print_collision_summary)
         dof_data = base_ik.configure_dofs(gym, arm_asset, args)
         dof_names, dof_props, dof_states, dof_positions, lower, upper, defaults, speeds, selected = dof_data
+        apply_g1_default_dof_pose(args, dof_names, dof_states, dof_positions, lower, upper, defaults)
         if "jointGripper" in dof_names:
             dof_states["pos"][dof_names.index("jointGripper")] = args.gripper_open
             dof_positions[dof_names.index("jointGripper")] = args.gripper_open

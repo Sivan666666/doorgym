@@ -44,12 +44,49 @@ DEFAULT_DOOR_ASSET_NAMES = (
     "99655039960006",
     "wc4",
 )
+DEFAULT_UNSAFE_DOOR_ASSET_NAMES = (
+    # This asset can segfault PhysX convex cooking in Isaac Gym after VHACD:
+    # Cooking::cookConvexMesh: user-provided convex mesh descriptor is invalid.
+    "99690419960003",
+)
+
+
+def _unsafe_door_asset_names(args=None):
+    names = set(DEFAULT_UNSAFE_DOOR_ASSET_NAMES)
+    extra = str(getattr(args, "door_exclude_names", "") or "").strip()
+    if extra:
+        names.update(name.strip() for name in extra.split(",") if name.strip())
+    allow_unsafe = bool(getattr(args, "allow_unsafe_door_assets", False))
+    return set() if allow_unsafe else names
+
+
+def _filter_unsafe_door_entries(entries, args=None):
+    unsafe = _unsafe_door_asset_names(args)
+    if not unsafe:
+        return list(entries)
+    kept = []
+    skipped = []
+    for entry in entries:
+        name = str(entry[1].get("name", ""))
+        if name in unsafe:
+            skipped.append(name)
+        else:
+            kept.append(entry)
+    if skipped:
+        skipped_names = ", ".join(sorted(set(skipped)))
+        print(f"Skipping unsafe door asset(s): {skipped_names}", flush=True)
+    return kept
 
 
 def _reorder_preferred_door(entries, preferred_name):
     if not preferred_name:
         return list(entries)
     preferred = [entry for entry in entries if entry[1].get("name") == preferred_name]
+    if not preferred:
+        print(
+            f"Warning: preferred door {preferred_name!r} was not found; keeping configured door order.",
+            flush=True,
+        )
     others = [entry for entry in entries if entry[1].get("name") != preferred_name]
     return preferred + others
 
@@ -122,6 +159,26 @@ PI05_CURRENT_STATE10_NAMES = [
     "ee_qw",
     "gripper",
 ]
+
+
+def door_asset_family(door):
+    name = str(door.spec.get("name", ""))
+    path = str(door.spec.get("path", ""))
+    if name == "wc4" or "/wc4/" in f"/{path}/" or path.startswith("wc4/"):
+        return "wc4"
+    if name.startswith("rec_") or "record_materialization" in path:
+        return "record_materialization"
+    return "partnet_numeric"
+
+
+def door_wall_opening_axis(door):
+    override = str(door.spec.get("wall_opening_axis_override", "") or "").strip().lower()
+    if override in ("x", "y"):
+        return override
+    # PartNet numeric doors are authored with their panel width along local X
+    # and no yaw offset, so the wall opening must be measured along world X.
+    # wc4 and generated rec_ doors are yaw-rotated so their opening spans world Y.
+    return "x" if door_asset_family(door) == "partnet_numeric" else "y"
 B1Z1_DEFAULT_DOF_POS = np.asarray(
     [
         -0.2,
@@ -401,6 +458,7 @@ def load_door_specs(args):
             raise RuntimeError(f"--door_index={args.door_index} out of range for {len(specs)} doors")
         selected_entries = [specs[args.door_index]]
     else:
+        specs = _filter_unsafe_door_entries(specs, args)
         selection = str(getattr(args, "door_selection", "default")).strip().lower()
         preferred_name = str(getattr(args, "door_prefer_name", "") or "")
         max_unique = int(getattr(args, "door_max_unique_assets", 0) or 0)
@@ -432,6 +490,7 @@ def load_door_specs(args):
                 selected_entries.extend((idx, spec) for idx, spec in specs if spec.get("name") == name)
             if not selected_entries:
                 selected_entries = specs
+            selected_entries = _reorder_preferred_door(selected_entries, preferred_name)
     if not selected_entries:
         raise RuntimeError(f"No door assets found in {cfg_path}")
 
@@ -689,14 +748,28 @@ def apply_door_runtime_overrides(args, door):
 
 def robot_y_for_door(args, handle_bounding, door=None):
     alignment = str(getattr(args, "robot_y_alignment", "handle")).lower()
+    if alignment in ("auto", "generated_auto", "record_materialization_auto"):
+        if door is not None:
+            door_name = str(door.spec.get("name", ""))
+            door_path = str(door.spec.get("path", ""))
+            if door_name.startswith("rec_") or "record_materialization" in door_path:
+                alignment = "door_center"
+            else:
+                alignment = "door_y"
+        else:
+            alignment = "door_y"
     robot_y_offset = float(door.robot_y_offset) if door is not None else 0.0
+    if alignment in ("door_y", "spawn_center", "centerline", "center_line"):
+        return float(args.robot_y) + float(args.door_y)
     if alignment in ("door_center", "door", "center"):
         if door is None:
             return float(args.robot_y) + float(args.door_y)
         _, _, world_min_y, world_max_y = door_world_xy_bounds_from_bbox(args, door)
         return float(args.robot_y) + 0.5 * (world_min_y + world_max_y)
     if alignment not in ("handle", "handle_center"):
-        raise ValueError(f"Unsupported --robot_y_alignment={alignment!r}; expected handle or door_center")
+        raise ValueError(
+            f"Unsupported --robot_y_alignment={alignment!r}; expected auto, handle, door_center, or door_y"
+        )
     handle_center_y = 0.5 * (
         float(handle_bounding["handle_min"][1]) + float(handle_bounding["handle_max"][1])
     )
@@ -746,12 +819,16 @@ def door_side_walls_enabled(args):
     return not bool(getattr(args, "no_door_side_walls", False))
 
 
-def create_door_side_wall_asset(gym, sim, args):
-    dims = (
-        max(1.0e-3, float(getattr(args, "door_wall_thickness", 0.08))),
-        max(1.0e-3, float(getattr(args, "door_wall_side_width", 1.0))),
-        max(1.0e-3, float(getattr(args, "door_wall_height", 2.2))),
-    )
+def create_door_side_wall_asset(gym, sim, args, opening_axis="y"):
+    thickness = max(1.0e-3, float(getattr(args, "door_wall_thickness", 0.08)))
+    side_width = max(1.0e-3, float(getattr(args, "door_wall_side_width", 1.0)))
+    height = max(1.0e-3, float(getattr(args, "door_wall_height", 2.2)))
+    if str(opening_axis).lower() == "x":
+        # The two side wall blocks sit to the left/right of the door in world X.
+        dims = (side_width, thickness, height)
+    else:
+        # The two side wall blocks sit to the left/right of the door in world Y.
+        dims = (thickness, side_width, height)
     cache_key = (id(sim), tuple(round(v, 5) for v in dims))
     if cache_key in _DOOR_SIDE_WALL_ASSET_CACHE:
         return _DOOR_SIDE_WALL_ASSET_CACHE[cache_key]
@@ -798,7 +875,7 @@ def door_world_xy_bounds_from_bbox(args, door):
     origin_x = float(args.door_x + actor_offset[0])
     origin_y = float(args.door_y + actor_offset[1])
     scale = float(door.actor_scale)
-    yaw = float(door.actor_yaw)
+    yaw = float(door.actor_yaw) + float(door.spec.get("bounds_yaw_offset_override", 0.0) or 0.0)
     c = math.cos(yaw)
     s = math.sin(yaw)
     min_x = float(door.bounding["min"][0])
@@ -819,22 +896,29 @@ def create_door_side_walls(gym, sim, env, door, args, env_index=0):
     if not door_side_walls_enabled(args):
         return []
 
-    wall_asset = create_door_side_wall_asset(gym, sim, args)
+    opening_axis = door_wall_opening_axis(door)
+    wall_asset = create_door_side_wall_asset(gym, sim, args, opening_axis=opening_axis)
     side_width = max(1.0e-3, float(getattr(args, "door_wall_side_width", 1.0)))
     height = max(1.0e-3, float(getattr(args, "door_wall_height", 2.2)))
     opening_width = float(getattr(args, "door_wall_opening_width", 0.0))
     world_min_x, world_max_x, world_min_y, world_max_y = door_world_xy_bounds_from_bbox(args, door)
-    opening_center_y = 0.5 * (world_min_y + world_max_y)
+    opening_min = world_min_x if opening_axis == "x" else world_min_y
+    opening_max = world_max_x if opening_axis == "x" else world_max_y
+    opening_center = 0.5 * (opening_min + opening_max)
     if opening_width <= 0.0:
         clearance = max(0.0, float(getattr(args, "door_wall_opening_clearance", 0.0)))
-        opening_width = (world_max_y - world_min_y) + 2.0 * clearance
+        opening_width = (opening_max - opening_min) + 2.0 * clearance
     opening_width = max(1.0e-3, opening_width)
     gap = max(0.0, float(getattr(args, "door_wall_gap", 0.0)))
 
-    x = 0.5 * (world_min_x + world_max_x) + float(getattr(args, "door_wall_x_offset", 0.0))
-    y_center = opening_center_y + float(getattr(args, "door_wall_y_offset", 0.0))
+    center_x = 0.5 * (world_min_x + world_max_x) + float(getattr(args, "door_wall_x_offset", 0.0))
+    center_y = 0.5 * (world_min_y + world_max_y) + float(getattr(args, "door_wall_y_offset", 0.0))
+    if opening_axis == "x":
+        center_x = opening_center + float(getattr(args, "door_wall_x_offset", 0.0))
+    else:
+        center_y = opening_center + float(getattr(args, "door_wall_y_offset", 0.0))
     z = float(getattr(args, "door_z_offset", 0.0)) + 0.5 * height
-    y_offsets = (
+    side_offsets = (
         -0.5 * opening_width - gap - 0.5 * side_width,
         0.5 * opening_width + gap + 0.5 * side_width,
     )
@@ -845,9 +929,12 @@ def create_door_side_walls(gym, sim, env, door, args, env_index=0):
     )
 
     actors = []
-    for side_name, y_offset in (("left", y_offsets[0]), ("right", y_offsets[1])):
+    for side_name, side_offset in (("left", side_offsets[0]), ("right", side_offsets[1])):
         pose = gymapi.Transform()
-        pose.p = gymapi.Vec3(x, y_center + y_offset, z)
+        if opening_axis == "x":
+            pose.p = gymapi.Vec3(center_x + side_offset, center_y, z)
+        else:
+            pose.p = gymapi.Vec3(center_x, center_y + side_offset, z)
         pose.r = gymapi.Quat(0.0, 0.0, 0.0, 1.0)
         actor = gym.create_actor(
             env,
@@ -863,6 +950,14 @@ def create_door_side_walls(gym, sim, env, door, args, env_index=0):
         except Exception:
             pass
         actors.append(actor)
+    if int(env_index) < 4:
+        print(
+            "door_side_walls "
+            f"env={env_index} door={door.spec.get('name')} family={door_asset_family(door)} "
+            f"axis={opening_axis} opening_width={opening_width:.3f} "
+            f"center=({center_x:.3f},{center_y:.3f})",
+            flush=True,
+        )
     return actors
 
 
