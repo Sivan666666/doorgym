@@ -917,6 +917,8 @@ def create_door_side_walls(gym, sim, env, door, args, env_index=0):
         center_x = opening_center + float(getattr(args, "door_wall_x_offset", 0.0))
     else:
         center_y = opening_center + float(getattr(args, "door_wall_y_offset", 0.0))
+    if door_asset_family(door) == "wc4":
+        center_x = float(args.door_x) + float(getattr(args, "door_wall_x_offset", 0.0))
     z = float(getattr(args, "door_z_offset", 0.0)) + 0.5 * height
     side_offsets = (
         -0.5 * opening_width - gap - 0.5 * side_width,
