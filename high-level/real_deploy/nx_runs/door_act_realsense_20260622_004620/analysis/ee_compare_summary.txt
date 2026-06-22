@@ -1,0 +1,47 @@
+NX action rows: 1640, steps 0..1639
+Expert ep0 rows: 500, expert episodes in root: 50, all expert rows: 25000
+Action names: vx, yaw, ee_x, ee_y, ee_z, ee_qx, ee_qy, ee_qz, ee_qw, gripper
+
+First frame NX vs expert episode_000000:
+  vx      : nx= 0.092352, expert= 0.000000, diff=+0.092352
+  vyaw    : nx= 0.000000, expert= 0.000000, diff=+0.000000
+  ee_x    : nx= 0.343980, expert= 0.345443, diff=-0.001463
+  ee_y    : nx= 0.001422, expert= 0.001399, diff=+0.000022
+  ee_z    : nx= 0.319526, expert= 0.318904, diff=+0.000622
+  qx      : nx= 0.000820, expert= 0.001310, diff=-0.000490
+  qy      : nx=-0.017414, expert=-0.019189, diff=+0.001774
+  qz      : nx= 0.002010, expert= 0.002707, diff=-0.000698
+  qw      : nx= 0.999846, expert= 0.999811, diff=+0.000035
+  gripper : nx=-1.573768, expert=-1.570796, diff=-0.002972
+
+Same-index diff over first 500 frames (NX - expert ep0):
+  vx      : mean=-0.077095, mae=0.101096, p95_abs=0.318949, max_abs=0.355576
+  vyaw    : mean=+0.000000, mae=0.000000, p95_abs=0.000000, max_abs=0.000000
+  ee_x    : mean=+0.104766, mae=0.195433, p95_abs=0.561967, max_abs=0.805823
+  ee_y    : mean=-0.156051, mae=0.179701, p95_abs=0.682616, max_abs=0.692253
+  ee_z    : mean=-0.027730, mae=0.057416, p95_abs=0.139054, max_abs=0.194721
+  qx      : mean=+0.047826, mae=0.133777, p95_abs=0.400284, max_abs=0.449714
+  qy      : mean=+0.000651, mae=0.010878, p95_abs=0.060420, max_abs=0.075776
+  qz      : mean=-0.061339, mae=0.063809, p95_abs=0.440283, max_abs=0.499062
+  qw      : mean=+0.043032, mae=0.050080, p95_abs=0.183338, max_abs=0.243971
+  gripper : mean=+0.143066, mae=0.518840, p95_abs=1.072666, max_abs=1.202059
+
+NX sent action range vs all expert distribution range:
+  vx      : NX[min,mean,max]=[-0.0025,+0.0516,+0.3081]  EXP[p01,p50,p99]=[+0.0000,+0.0704,+0.3701] range=[+0.0000,+0.3704]
+  vyaw    : NX[min,mean,max]=[+0.0000,+0.0000,+0.0000]  EXP[p01,p50,p99]=[+0.0000,+0.0000,+0.0000] range=[-0.0000,+0.0000]
+  ee_x    : NX[min,mean,max]=[+0.3369,+0.6808,+0.8130]  EXP[p01,p50,p99]=[+0.0216,+0.5641,+0.9801] range=[-0.0384,+1.0036]
+  ee_y    : NX[min,mean,max]=[-0.2431,-0.1623,+0.0033]  EXP[p01,p50,p99]=[-0.2579,-0.0006,+0.5377] range=[-0.2918,+0.5907]
+  ee_z    : NX[min,mean,max]=[+0.3186,+0.4165,+0.4674]  EXP[p01,p50,p99]=[+0.3182,+0.4408,+0.6059] range=[+0.3178,+0.7544]
+  qx      : NX[min,mean,max]=[-0.5099,-0.2128,+0.0043]  EXP[p01,p50,p99]=[-0.6355,-0.0940,+0.0008] range=[-0.6899,+0.0018]
+  qy      : NX[min,mean,max]=[-0.0177,-0.0030,+0.0029]  EXP[p01,p50,p99]=[-0.1727,-0.0000,+0.0527] range=[-0.2613,+0.0940]
+  qz      : NX[min,mean,max]=[-0.0046,+0.0034,+0.0366]  EXP[p01,p50,p99]=[-0.0015,+0.0000,+0.6298] range=[-0.0171,+0.8107]
+  qw      : NX[min,mean,max]=[+0.8598,+0.9605,+1.0000]  EXP[p01,p50,p99]=[+0.5541,+0.9919,+1.0000] range=[+0.4011,+1.0000]
+  gripper : NX[min,mean,max]=[-1.5772,-0.9933,-0.3310]  EXP[p01,p50,p99]=[-1.5708,-1.5708,-0.3142] range=[-1.5708,-0.3142]
+
+Z1 bridge act_state rows: 44881, ik_ok ratio=0.135 (6069/44881)
+Z1 final actual/state EE: (+0.0834, +0.0000, +0.1900), gripper=-1.5707
+NX first sent EE: (+0.3440, +0.0014, +0.3195), gripper=-1.5738
+NX last sent EE: (+0.7900, -0.1994, +0.4264), gripper=-0.3684
+Offset first sent - final real EE: dx=+0.2605, dy=+0.0014, dz=+0.1295
+
+Interpretation: NX ACT output matches scripted/expert action coordinates, but Z1 bridge actual EE is in a different/offset frame, causing IK target jumps/rejections.

@@ -114,6 +114,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint", required=True, type=str, help="Door policy checkpoint (.pt manifest or directory).")
     parser.add_argument("--yaml", "--door_cfg", dest="door_cfg", required=True, type=str, help="Door YAML config.")
     parser.add_argument("--mode", choices=["ikpush", "ikpull", "push", "pull"], default="ikpush")
+    parser.add_argument(
+        "--robot_body",
+        "--robot",
+        dest="robot_body",
+        choices=["b1z1", "a2wz1"],
+        default="b1z1",
+        help="Robot play script to evaluate. a2wz1 currently supports --mode ikpush.",
+    )
     parser.add_argument("--num_envs", type=int, default=16, help="Number of envs per play run.")
     parser.add_argument("--total_trials", type=int, default=64, help="Total policy-controlled attempts to run.")
     parser.add_argument(
@@ -340,6 +348,8 @@ def build_play_command(args: argparse.Namespace, batch_envs: int, batch_idx: int
         str(PLAY_SCRIPT),
         "--mode",
         args.mode,
+        "--robot_body",
+        args.robot_body,
         "--checkpoint",
         str(checkpoint),
         "--num_envs",
@@ -498,7 +508,7 @@ def main() -> None:
 
     safe_print(
         f"Door policy success eval: checkpoint={resolve_path(args.checkpoint)} door_cfg={resolve_path(args.door_cfg)}\n"
-        f"mode={args.mode} num_envs={args.num_envs} total_trials={args.total_trials} "
+        f"mode={args.mode} robot_body={args.robot_body} num_envs={args.num_envs} total_trials={args.total_trials} "
         f"steps={args.steps} threshold={args.pass_open_angle_deg}deg metric={metric} "
         f"vision_mode={'rgb' if args.rgb else ('depth_only' if args.depth_only else 'depth')} "
         f"dp_action_horizon={args.dp_action_horizon} dp_fps={args.dp_fps:g} "
@@ -570,6 +580,7 @@ def main() -> None:
         "checkpoint": str(resolve_path(args.checkpoint)),
         "door_cfg": str(resolve_path(args.door_cfg)),
         "mode": args.mode,
+        "robot_body": args.robot_body,
         "num_envs": int(args.num_envs),
         "total_trials": int(args.total_trials),
         "parallel_batches": int(args.parallel_batches),

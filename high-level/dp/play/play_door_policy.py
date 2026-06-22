@@ -151,6 +151,14 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Play a trained Door LeRobot policy in the door asset scene.")
     parser.add_argument("--checkpoint", type=str, required=True)
     parser.add_argument("--mode", choices=["ikpush", "ikpull", "pull", "push"], default="ikpush")
+    parser.add_argument(
+        "--robot_body",
+        "--robot",
+        dest="robot_body",
+        choices=["b1z1", "a2wz1"],
+        default="b1z1",
+        help="Robot play script to run. a2wz1 currently supports --mode ikpush.",
+    )
     parser.add_argument("--num_envs", type=int, default=1)
     parser.add_argument("--steps", type=int, default=None)
     parser.add_argument("--rl_device", type=str, default="cuda:0")
@@ -237,7 +245,11 @@ def main():
             warmstart_raw_path = (Path.cwd() / warmstart_raw_path).resolve()
     else:
         warmstart_raw_path = None
-    if args.mode == "ikpush":
+    if args.robot_body == "a2wz1":
+        if args.mode != "ikpush":
+            raise ValueError("--robot_body a2wz1 currently supports only --mode ikpush.")
+        script = HIGH_LEVEL_ROOT / "float_ik" / "isaacgym_float_ik_a2w_basearn_push_door_parallel.py"
+    elif args.mode == "ikpush":
         script = HIGH_LEVEL_ROOT / "float_ik" / "isaacgym_float_ik_b1z1_basearn_push_door_parallel.py"
     elif args.mode == "ikpull":
         script = HIGH_LEVEL_ROOT / "float_ik" / "isaacgym_float_ik_b1z1_basearn_pull_door_parallel.py"
@@ -248,7 +260,9 @@ def main():
     dp_log_path = args.dp_log_path
     if dp_log_path is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        dp_log_path = str(HIGH_LEVEL_ROOT / "logs" / "door-policy-play" / f"{args.mode}_{timestamp}.jsonl")
+        dp_log_path = str(
+            HIGH_LEVEL_ROOT / "logs" / "door-policy-play" / f"{args.robot_body}_{args.mode}_{timestamp}.jsonl"
+        )
 
     cmd = [
         sys.executable,
