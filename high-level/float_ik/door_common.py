@@ -32,6 +32,7 @@ DEFAULT_DOOR_CFG = HIGH_LEVEL_ROOT / "data" / "cfg" / "b1z1_opendoor.yaml"
 from dp.depth_camera_aug import (
     DEPTH_CAMERA_RESOLUTION,
     apply_depth_noise,
+    configure_depth_noise_for_env,
     depth_aug_metadata_from_args,
     depth_aug_custom_parameters,
     depth_noise_config_from_args,
@@ -132,14 +133,17 @@ def _select_diverse_door_entries(entries, max_count, preferred_name=""):
 DEFAULT_WRIST_CAMERA_CFG = {
     "horizontal_fov": 69,
     "resolution": DEPTH_CAMERA_RESOLUTION,
-    "position": [0.0955, 0.22, -0.03175],
-    "rotation": [-1.57, 0.0, -0.87],
+    # link06 local frame: X points along the gripper, Y is lateral, Z is up.
+    # Center the camera over the gripper instead of mounting it to the side.
+    "position": [0.093, -0.031, 0.22],
+    # Euler ZYX angles in degrees, i.e. yaw, pitch, roll.
+    "rotation_deg": [0.0, 60.0, 0.0],
 }
 DEFAULT_FRONT_CAMERA_CFG = {
     "horizontal_fov": 69,
     "resolution": DEPTH_CAMERA_RESOLUTION,
-    "position": [0.425, 0.04, 0.12],
-    "rotation": [0.0, 0.0, 0.0],
+    "position": [0.29, 0.031, 0.165],
+    "rotation_deg": [0.0, -45.0, 0.0],
 }
 _DOOR_SIDE_WALL_ASSET_CACHE = {}
 
@@ -147,9 +151,22 @@ DP_NUM_DOFS = 19
 DP_NUM_ACTIONS = 18
 FLOAT_DP_STATE_MODE_FULL = "full"
 FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10 = "pi05_current_state10"
+FLOAT_DP_STATE_MODE_PI05_LAST_COMMAND_STATE10 = "pi05_last_command_state10"
 PI05_CURRENT_STATE10_NAMES = [
     "vx",
     "yaw_rate",
+    "ee_x",
+    "ee_y",
+    "ee_z",
+    "ee_qx",
+    "ee_qy",
+    "ee_qz",
+    "ee_qw",
+    "gripper",
+]
+PI05_LAST_COMMAND_STATE10_NAMES = [
+    "last_command_vx",
+    "last_command_vyaw",
     "ee_x",
     "ee_y",
     "ee_z",
@@ -175,10 +192,22 @@ def door_wall_opening_axis(door):
     override = str(door.spec.get("wall_opening_axis_override", "") or "").strip().lower()
     if override in ("x", "y"):
         return override
-    # PartNet numeric doors are authored with their panel width along local X
-    # and no yaw offset, so the wall opening must be measured along world X.
-    # wc4 and generated rec_ doors are yaw-rotated so their opening spans world Y.
-    return "x" if door_asset_family(door) == "partnet_numeric" else "y"
+    # In the push-door scenes, side walls should sit to the left/right of the
+    # door corridor in world Y.  Legacy PartNet numeric doors keep their visual
+    # actor yaw, but their bbox needs a wall-only yaw offset; see
+    # door_wall_bounds_yaw_offset().
+    return "y"
+
+
+def door_wall_bounds_yaw_offset(door):
+    override = door.spec.get("bounds_yaw_offset_override")
+    if override is not None:
+        return float(override)
+    if door_asset_family(door) == "partnet_numeric":
+        return math.pi / 2.0
+    return 0.0
+
+
 B1Z1_DEFAULT_DOF_POS = np.asarray(
     [
         -0.2,
@@ -747,7 +776,32 @@ def apply_door_runtime_overrides(args, door):
 
 
 def robot_y_for_door(args, handle_bounding, door=None):
-    alignment = str(getattr(args, "robot_y_alignment", "handle")).lower()
+    alignment = str(getattr(args, "robot_y_alignment", "handle")).strip().lower()
+    explicit_alignment_y = None
+    if door is not None:
+        explicit_alignment_y = door.spec.get("robot_alignment_y_offset")
+        alignment_handle = door.spec.get("robot_alignment_handle")
+        if explicit_alignment_y is None and isinstance(alignment_handle, dict):
+            center_after_yaw = alignment_handle.get("center_after_yaw")
+            if isinstance(center_after_yaw, (list, tuple)) and len(center_after_yaw) >= 2:
+                explicit_alignment_y = center_after_yaw[1]
+    if explicit_alignment_y is not None and alignment in (
+        "auto",
+        "generated_auto",
+        "record_materialization_auto",
+        "handle",
+        "handle_center",
+    ):
+        actor_offset_y = float(door.actor_position_offset[1])
+        # The explicit offset is an absolute asset-local target that has
+        # already been rotated by actor_yaw. Adding the legacy robot_y_offset
+        # here would move the robot away from the selected handle.
+        return (
+            float(args.robot_y)
+            + float(args.door_y)
+            + actor_offset_y
+            + float(door.actor_scale) * float(explicit_alignment_y)
+        )
     if alignment in ("auto", "generated_auto", "record_materialization_auto"):
         if door is not None:
             door_name = str(door.spec.get("name", ""))
@@ -870,12 +924,14 @@ def create_door_side_wall_asset(gym, sim, args, opening_axis="y"):
     return asset
 
 
-def door_world_xy_bounds_from_bbox(args, door):
+def door_world_xy_bounds_from_bbox(args, door, bounds_yaw_offset=None):
     actor_offset = door.actor_position_offset
     origin_x = float(args.door_x + actor_offset[0])
     origin_y = float(args.door_y + actor_offset[1])
     scale = float(door.actor_scale)
-    yaw = float(door.actor_yaw) + float(door.spec.get("bounds_yaw_offset_override", 0.0) or 0.0)
+    if bounds_yaw_offset is None:
+        bounds_yaw_offset = float(door.spec.get("bounds_yaw_offset_override", 0.0) or 0.0)
+    yaw = float(door.actor_yaw) + float(bounds_yaw_offset)
     c = math.cos(yaw)
     s = math.sin(yaw)
     min_x = float(door.bounding["min"][0])
@@ -901,7 +957,11 @@ def create_door_side_walls(gym, sim, env, door, args, env_index=0):
     side_width = max(1.0e-3, float(getattr(args, "door_wall_side_width", 1.0)))
     height = max(1.0e-3, float(getattr(args, "door_wall_height", 2.2)))
     opening_width = float(getattr(args, "door_wall_opening_width", 0.0))
-    world_min_x, world_max_x, world_min_y, world_max_y = door_world_xy_bounds_from_bbox(args, door)
+    world_min_x, world_max_x, world_min_y, world_max_y = door_world_xy_bounds_from_bbox(
+        args,
+        door,
+        bounds_yaw_offset=door_wall_bounds_yaw_offset(door),
+    )
     opening_min = world_min_x if opening_axis == "x" else world_min_y
     opening_max = world_max_x if opening_axis == "x" else world_max_y
     opening_center = 0.5 * (opening_min + opening_max)
@@ -1017,10 +1077,12 @@ def create_parallel_env_actors(
     env_index,
     envs_per_row,
 ):
+    env_spacing = max(1.0e-3, float(getattr(args, "env_spacing", 5.0)))
+    env_half_spacing = 0.5 * env_spacing
     env = gym.create_env(
         sim,
-        gymapi.Vec3(-2.5, -2.5, 0.0),
-        gymapi.Vec3(2.5, 2.5, 2.5),
+        gymapi.Vec3(-env_half_spacing, -env_half_spacing, 0.0),
+        gymapi.Vec3(env_half_spacing, env_half_spacing, max(2.5, env_spacing)),
         int(envs_per_row),
     )
     apply_door_runtime_overrides(args, door)
@@ -1081,6 +1143,11 @@ def seed_for_env(args, env_index):
     return int(seq.generate_state(1, dtype=np.uint32)[0])
 
 
+def cli_flag_was_set(args, flag):
+    explicit_flags = getattr(args, "_explicit_cli_flags", set())
+    return any(token == flag or str(token).startswith(f"{flag}=") for token in explicit_flags)
+
+
 def sample_with_half_range(rng, center, half_range, lower=None, upper=None):
     value = float(center)
     half_range = abs(float(half_range))
@@ -1091,6 +1158,19 @@ def sample_with_half_range(rng, center, half_range, lower=None, upper=None):
             value -= float(rng.uniform(0.0, half_range))
         else:
             value += float(rng.uniform(-half_range, half_range))
+    if lower is not None:
+        value = max(float(lower), value)
+    if upper is not None:
+        value = min(float(upper), value)
+    return value
+
+
+def sample_with_offset_range(rng, center, min_offset, max_offset, lower=None, upper=None):
+    min_offset = float(min_offset)
+    max_offset = float(max_offset)
+    if max_offset < min_offset:
+        min_offset, max_offset = max_offset, min_offset
+    value = float(center) + float(rng.uniform(min_offset, max_offset))
     if lower is not None:
         value = max(float(lower), value)
     if upper is not None:
@@ -1118,6 +1198,56 @@ def compute_base_walk_targets(args, door):
     walk_dist = max(0.0, front_to_door - args.stop_distance)
     base_stop = base_start + heading * walk_dist
     return yaw_start, heading, base_start, base_stop
+
+
+def configure_dynamic_walk_steps(args, base_start, base_stop, env_index=None):
+    distance = float(np.linalg.norm(np.asarray(base_stop, dtype=np.float32) - np.asarray(base_start, dtype=np.float32)))
+    sim_dt = max(1.0e-6, float(getattr(args, "sim_dt", 1.0 / 50.0)))
+    min_speed = max(1.0e-6, float(getattr(args, "walk_min_speed", 0.20)))
+    original_steps = int(getattr(args, "walk_steps", 0))
+    enabled = not bool(getattr(args, "no_dynamic_walk_steps", False)) and not cli_flag_was_set(args, "--walk_steps")
+
+    if enabled:
+        if distance <= 1.0e-6:
+            walk_steps = 0
+        else:
+            walk_steps = max(1, int(math.floor(distance / (min_speed * sim_dt))))
+        args.walk_steps = int(walk_steps)
+    else:
+        walk_steps = original_steps
+
+    effective_speed = 0.0
+    if int(walk_steps) > 0:
+        effective_speed = distance / (float(walk_steps) * sim_dt)
+
+    metadata_attr = "ikpush_randomization_json"
+    raw_metadata = getattr(args, metadata_attr, "")
+    if raw_metadata:
+        try:
+            metadata = json.loads(raw_metadata)
+            metadata.update(
+                {
+                    "dynamic_walk_steps": bool(enabled),
+                    "walk_distance": distance,
+                    "walk_min_speed": min_speed,
+                    "walk_steps": int(walk_steps),
+                    "walk_effective_speed": effective_speed,
+                }
+            )
+            setattr(args, metadata_attr, json.dumps(metadata, sort_keys=True))
+        except Exception:
+            pass
+
+    if env_index is None or int(env_index) < 4:
+        env_desc = "single" if env_index is None else int(env_index)
+        print(
+            f"dynamic_walk env={env_desc} enabled={bool(enabled)} "
+            f"distance={distance:.3f}m min_speed={min_speed:.3f}m/s "
+            f"steps={int(walk_steps)} effective_speed={effective_speed:.3f}m/s",
+            flush=True,
+        )
+
+    return int(walk_steps)
 
 
 def compute_base_push_target(args, base_stop, heading):
@@ -1776,9 +1906,31 @@ def monitor_base_door_collision(gym, step, st):
 
 
 
+def camera_rotation_radians_from_cfg(camera_cfg):
+    if "rotation_deg" in camera_cfg:
+        return [math.radians(float(value)) for value in camera_cfg.get("rotation_deg", [0.0, 0.0, 0.0])]
+    return list(camera_cfg.get("rotation", [0.0, 0.0, 0.0]))
+
+
+def wrist_camera_rotation_radians_from_args(args):
+    return [
+        math.radians(float(args.wrist_camera_yaw_deg)),
+        math.radians(float(args.wrist_camera_pitch_deg)),
+        math.radians(float(args.wrist_camera_roll_deg)),
+    ]
+
+
+def front_camera_rotation_radians_from_args(args):
+    return [
+        math.radians(float(args.front_camera_yaw_deg)),
+        math.radians(float(args.front_camera_pitch_deg)),
+        math.radians(float(args.front_camera_roll_deg)),
+    ]
+
+
 def local_camera_pose_from_cfg(camera_cfg, local_rot_override=None):
     local_pos = np.asarray(camera_cfg.get("position", [0.0, 0.0, 0.0]), dtype=np.float32)
-    local_rot = list(camera_cfg.get("rotation", [0.0, 0.0, 0.0]))
+    local_rot = camera_rotation_radians_from_cfg(camera_cfg)
     if local_rot_override is not None:
         local_rot = list(local_rot_override)
     local_quat = gym_quat_to_np(gymapi.Quat.from_euler_zyx(*local_rot))
@@ -1821,8 +1973,7 @@ def draw_local_camera_axes(gym, viewer, env, actor, body_name, local_pos, local_
 
 
 def draw_low_level_camera_axes(gym, viewer, env, arm_actor, actor_handles, args):
-    wrist_rot = list(DEFAULT_WRIST_CAMERA_CFG["rotation"])
-    wrist_rot[2] -= float(args.wrist_camera_down_tilt)
+    wrist_rot = wrist_camera_rotation_radians_from_args(args)
     wrist_pos, wrist_quat = local_camera_pose_from_cfg(DEFAULT_WRIST_CAMERA_CFG, wrist_rot)
     draw_local_camera_axes(
         gym,
@@ -1836,11 +1987,7 @@ def draw_low_level_camera_axes(gym, viewer, env, arm_actor, actor_handles, args)
         args.camera_axis_thickness,
     )
 
-    front_rot = [
-        math.radians(float(args.front_camera_yaw_deg)),
-        math.radians(float(args.front_camera_pitch_deg)),
-        math.radians(float(args.front_camera_roll_deg)),
-    ]
+    front_rot = front_camera_rotation_radians_from_args(args)
     front_pos, front_quat = local_camera_pose_from_cfg(DEFAULT_FRONT_CAMERA_CFG, front_rot)
     base_actor = actor_handles[0] if len(actor_handles) > 1 else arm_actor
     if not draw_local_camera_axes(
@@ -1881,7 +2028,7 @@ def attach_camera_to_actor_body(gym, env, actor, body_name, camera_cfg, local_ro
     if body_handle < 0:
         return None
     local_pos = np.asarray(camera_cfg.get("position", [0.0, 0.0, 0.0]), dtype=np.float32)
-    local_rot = list(camera_cfg.get("rotation", [0.0, 0.0, 0.0]))
+    local_rot = camera_rotation_radians_from_cfg(camera_cfg)
     if local_rot_override is not None:
         local_rot = list(local_rot_override)
     if args is not None:
@@ -1902,8 +2049,7 @@ def attach_camera_to_actor_body(gym, env, actor, body_name, camera_cfg, local_ro
 def create_low_level_cameras(gym, env, arm_actor, actor_handles, args):
     cameras = {}
     if args.enable_wrist_camera:
-        wrist_rot = list(DEFAULT_WRIST_CAMERA_CFG["rotation"])
-        wrist_rot[2] -= float(args.wrist_camera_down_tilt)
+        wrist_rot = wrist_camera_rotation_radians_from_args(args)
         wrist_camera = attach_camera_to_actor_body(
             gym, env, arm_actor, "link06", DEFAULT_WRIST_CAMERA_CFG, wrist_rot, args=args
         )
@@ -1914,11 +2060,7 @@ def create_low_level_cameras(gym, env, arm_actor, actor_handles, args):
             print(f"Wrist camera sensor enabled: handle={wrist_camera}")
 
     if args.enable_front_camera:
-        front_rot = [
-            math.radians(float(args.front_camera_yaw_deg)),
-            math.radians(float(args.front_camera_pitch_deg)),
-            math.radians(float(args.front_camera_roll_deg)),
-        ]
+        front_rot = front_camera_rotation_radians_from_args(args)
         base_actor = actor_handles[0] if len(actor_handles) > 1 else arm_actor
         front_camera = attach_camera_to_actor_body(
             gym, env, base_actor, "trunk", DEFAULT_FRONT_CAMERA_CFG, front_rot, args=args
@@ -2512,12 +2654,21 @@ def normalize_float_dp_state_mode(mode):
         "pi0.5_current_state10": FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10,
         "pi05_current_10": FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10,
         "current_state10": FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10,
+        "pi0.5_last_command_state10": FLOAT_DP_STATE_MODE_PI05_LAST_COMMAND_STATE10,
+        "pi05_last_command_10": FLOAT_DP_STATE_MODE_PI05_LAST_COMMAND_STATE10,
+        "last_command_state10": FLOAT_DP_STATE_MODE_PI05_LAST_COMMAND_STATE10,
     }
     mode = aliases.get(mode, mode)
-    if mode not in (FLOAT_DP_STATE_MODE_FULL, FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10):
+    supported_modes = (
+        FLOAT_DP_STATE_MODE_FULL,
+        FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10,
+        FLOAT_DP_STATE_MODE_PI05_LAST_COMMAND_STATE10,
+    )
+    if mode not in supported_modes:
         raise ValueError(
             f"Unsupported --dp_record_state_mode={mode!r}; expected "
-            f"{FLOAT_DP_STATE_MODE_FULL!r} or {FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10!r}."
+            + ", ".join(repr(value) for value in supported_modes)
+            + "."
         )
     return mode
 
@@ -2526,12 +2677,16 @@ def float_dp_state_feature_names(args, phase_names, make_state_feature_names_fn)
     state_mode = normalize_float_dp_state_mode(getattr(args, "dp_record_state_mode", FLOAT_DP_STATE_MODE_FULL))
     if state_mode == FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10:
         return list(PI05_CURRENT_STATE10_NAMES)
+    if state_mode == FLOAT_DP_STATE_MODE_PI05_LAST_COMMAND_STATE10:
+        return list(PI05_LAST_COMMAND_STATE10_NAMES)
     return make_state_feature_names_fn(DP_NUM_DOFS, DP_NUM_ACTIONS, phase_names)
 
 
 def float_dp_state_mode_from_feature_names(state_feature_names):
     if list(state_feature_names or []) == PI05_CURRENT_STATE10_NAMES:
         return FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10
+    if list(state_feature_names or []) == PI05_LAST_COMMAND_STATE10_NAMES:
+        return FLOAT_DP_STATE_MODE_PI05_LAST_COMMAND_STATE10
     return FLOAT_DP_STATE_MODE_FULL
 
 
@@ -2541,6 +2696,24 @@ def make_pi05_current_state10(vx, yaw_rate, ee_pos, ee_quat, base_xy, base_z, ya
     return np.concatenate(
         [
             np.asarray([vx, yaw_rate], dtype=np.float32),
+            ee_pos_base.reshape(3),
+            ee_quat_base.reshape(4),
+            np.asarray([gripper], dtype=np.float32),
+        ],
+        axis=0,
+    ).astype(np.float32)
+
+
+def make_pi05_last_command_state10(last_dp_action, ee_pos, ee_quat, base_xy, base_z, yaw, gripper):
+    last_command = np.zeros(2, dtype=np.float32)
+    if last_dp_action is not None:
+        values = np.asarray(last_dp_action, dtype=np.float32).reshape(-1)
+        last_command[: min(2, values.shape[0])] = values[:2]
+    ee_pos_base = world_pos_to_base(ee_pos, base_xy, base_z, yaw)
+    ee_quat_base = world_quat_to_base(base_ik.normalize_quat(ee_quat), yaw)
+    return np.concatenate(
+        [
+            last_command,
             ee_pos_base.reshape(3),
             ee_quat_base.reshape(4),
             np.asarray([gripper], dtype=np.float32),
@@ -2567,6 +2740,16 @@ def make_float_dp_observation_state(
     state_mode = normalize_float_dp_state_mode(state_mode)
     if state_mode == FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10:
         return make_pi05_current_state10(vx, yaw_rate, ee_pos, ee_quat, base_xy, base_z, yaw, gripper)
+    if state_mode == FLOAT_DP_STATE_MODE_PI05_LAST_COMMAND_STATE10:
+        return make_pi05_last_command_state10(
+            last_dp_action,
+            ee_pos,
+            ee_quat,
+            base_xy,
+            base_z,
+            yaw,
+            gripper,
+        )
     return make_float_dp_state(
         dof_names,
         dof_pos,
@@ -2864,7 +3047,11 @@ def make_float_dp_recorder(
         "state_source": (
             "current_vx_yaw_rate_ee_base_gripper"
             if state_mode == FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10
-            else "full_float_ik_state_with_previous_action"
+            else (
+                "last_command_vx_vyaw_ee_base_gripper"
+                if state_mode == FLOAT_DP_STATE_MODE_PI05_LAST_COMMAND_STATE10
+                else "full_float_ik_state_with_previous_action"
+            )
         ),
         "state_normalized": False,
         "pi05_state_action_aligned": state_mode == FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10,
@@ -2909,6 +3096,7 @@ def make_float_dp_recorder(
         "door_pull_distance",
         "door_joint_friction",
         "door_joint_damping",
+        "door_open_resistance",
         "handle_joint_friction",
         "handle_joint_damping",
         "handle_spring_stiffness",
@@ -3244,11 +3432,12 @@ def finish_float_dp_recorders(env_states, args):
         collision_detected = bool(getattr(st, "base_door_collision_detected", False))
         valid_success = bool(st.dp_record_success) and not collision_detected
         if valid_success and st.dp_recorder.frame_count > 0:
+            recorded_frames = st.dp_recorder.frame_count
             st.dp_recorder.save_episode()
             saved += 1
             print(
                 f"Finished raw Door DP recording env={st.index}: saved_successful=1/1 "
-                f"frames={st.dp_recorder.frame_count}",
+                f"frames={recorded_frames}",
                 flush=True,
             )
         elif st.dp_recorder.frame_count == 0:

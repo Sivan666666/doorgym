@@ -17,6 +17,7 @@ try:
         apply_door_dp_state_preprocess,
         fit_door_dp_action_preprocess,
         fit_door_dp_state_preprocess,
+        image_to_three_channel_uint8,
         lerobot_image_keys_for_vision_mode,
         make_door_dp_sanitize_config,
         normalize_vision_mode,
@@ -34,6 +35,7 @@ except ImportError:
         apply_door_dp_state_preprocess,
         fit_door_dp_action_preprocess,
         fit_door_dp_state_preprocess,
+        image_to_three_channel_uint8,
         lerobot_image_keys_for_vision_mode,
         make_door_dp_sanitize_config,
         normalize_vision_mode,
@@ -605,12 +607,12 @@ def main():
         for i in range(n):
             recorder.add_frame(
                 states[i],
-                wrist_first[i],
-                wrist_second[i],
+                image_to_three_channel_uint8(wrist_first[i]),
+                image_to_three_channel_uint8(wrist_second[i]),
                 actions[i],
                 int(subtasks[i]),
-                front_mask_rgb=front_first[i],
-                front_second_rgb=front_second[i],
+                front_mask_rgb=image_to_three_channel_uint8(front_first[i]),
+                front_second_rgb=image_to_three_channel_uint8(front_second[i]),
             )
         recorder.save_episode()
         print(f"Converted {payload['path_name']}: {n} frames task={task!r} ({ep_idx + 1}/{len(files)})", flush=True)

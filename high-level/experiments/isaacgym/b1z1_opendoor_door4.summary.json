@@ -1,0 +1,266 @@
+[
+  {
+    "name": "rec_using-the-reference-image-for-proportions-and-la_20260614_161003_946126_175e0acb",
+    "src": "/home/sivan/Downloads/door4/rec_using-the-reference-image-for-proportions-and-la_20260614_161003_946126_175e0acb",
+    "dst": "/home/sivan/whole_body/visual_whole_body/high-level/data/asset/door_set/door4/rec_using-the-reference-image-for-proportions-and-la_20260614_161003_946126_175e0acb",
+    "status": "ok",
+    "variant": "push_right",
+    "door_dof_name": "frame_to_carousel",
+    "handle_dof_name": "frame_to_left_door",
+    "door_body_name": "carousel",
+    "handle_body_name": "left_door",
+    "door_axis": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "handle_axis": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "actor_yaw_offset": -1.5707963267948966,
+    "door_motion_sign_multiplier": -1.0,
+    "handle_center_world": [
+      -1.42,
+      -0.09,
+      1.41
+    ],
+    "handle_side": "right",
+    "handle_was_behind": false,
+    "handle_front_delta_before_yaw_fix": -0.09000001742550386,
+    "handle_front_delta_after_yaw_fix": -0.09000001742550386,
+    "handle_side_delta_after_yaw_fix": 1.420000010858831,
+    "handle_center_after_yaw": [
+      -0.09,
+      1.42,
+      1.41
+    ],
+    "door_center_after_yaw": [
+      0.0,
+      -0.0,
+      1.46
+    ],
+    "handle_axis_after_yaw": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "handle_rotate_direction": "unknown",
+    "runtime_mapping": "first_two_dofs",
+    "robot_alignment_y_offset": 1.42,
+    "robot_alignment_handle": {
+      "link_name": "right_door",
+      "visual_name": "pull_handle",
+      "center": [
+        1.42,
+        -0.09,
+        1.41
+      ],
+      "center_after_yaw": [
+        0.09,
+        1.42,
+        1.41
+      ]
+    },
+    "warnings": []
+  },
+  {
+    "name": "rec_using-the-reference-image-for-proportions-and-la_20260614_165138_133775_990254ae",
+    "src": "/home/sivan/Downloads/door4/rec_using-the-reference-image-for-proportions-and-la_20260614_165138_133775_990254ae",
+    "dst": "/home/sivan/whole_body/visual_whole_body/high-level/data/asset/door_set/door4/rec_using-the-reference-image-for-proportions-and-la_20260614_165138_133775_990254ae",
+    "status": "ok",
+    "variant": "push_right",
+    "door_dof_name": "frame_to_carousel",
+    "handle_dof_name": "left_side_hinge",
+    "door_body_name": "carousel",
+    "handle_body_name": "left_side_door",
+    "door_axis": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "handle_axis": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "actor_yaw_offset": -1.5707963267948966,
+    "door_motion_sign_multiplier": -1.0,
+    "handle_center_world": [
+      -1.0475,
+      -0.82,
+      1.2125
+    ],
+    "handle_side": "right",
+    "handle_was_behind": false,
+    "handle_front_delta_before_yaw_fix": -0.8200000000000046,
+    "handle_front_delta_after_yaw_fix": -0.8200000000000046,
+    "handle_side_delta_after_yaw_fix": 1.0475000000000043,
+    "handle_center_after_yaw": [
+      -0.82,
+      1.0475,
+      1.2125
+    ],
+    "door_center_after_yaw": [
+      0.0,
+      -0.0,
+      1.15
+    ],
+    "handle_axis_after_yaw": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "handle_rotate_direction": "unknown",
+    "runtime_mapping": "first_two_dofs",
+    "robot_alignment_y_offset": 1.0474999999999999,
+    "robot_alignment_handle": {
+      "link_name": "right_side_door",
+      "visual_name": "pull_handle",
+      "center": [
+        1.0475,
+        -0.838,
+        1.2125
+      ],
+      "center_after_yaw": [
+        0.838,
+        1.0475,
+        1.2125
+      ]
+    },
+    "warnings": []
+  },
+  {
+    "name": "rec_using-the-reference-image-for-proportions-and-la_20260614_170543_731089_ad5086d7",
+    "src": "/home/sivan/Downloads/door4/rec_using-the-reference-image-for-proportions-and-la_20260614_170543_731089_ad5086d7",
+    "dst": "/home/sivan/whole_body/visual_whole_body/high-level/data/asset/door_set/door4/rec_using-the-reference-image-for-proportions-and-la_20260614_170543_731089_ad5086d7",
+    "status": "ok",
+    "variant": "push_right",
+    "door_dof_name": "left_leaf_slide",
+    "handle_dof_name": "left_side_hinge",
+    "door_body_name": "left_sliding_leaf",
+    "handle_body_name": "left_side_door",
+    "door_axis": [
+      -1.0,
+      0.0,
+      0.0
+    ],
+    "handle_axis": [
+      0.0,
+      0.0,
+      -1.0
+    ],
+    "actor_yaw_offset": -1.5707963267948966,
+    "door_motion_sign_multiplier": -1.0,
+    "handle_center_world": [
+      -2.916816,
+      -0.0475,
+      1.1
+    ],
+    "handle_side": "right",
+    "handle_was_behind": false,
+    "handle_front_delta_before_yaw_fix": -0.01250000000000017,
+    "handle_front_delta_after_yaw_fix": -0.01250000000000017,
+    "handle_side_delta_after_yaw_fix": 2.2000155976232385,
+    "handle_center_after_yaw": [
+      -0.0475,
+      2.916816,
+      1.1
+    ],
+    "door_center_after_yaw": [
+      -0.035,
+      0.7168,
+      1.076
+    ],
+    "handle_axis_after_yaw": [
+      0.0,
+      0.0,
+      -1.0
+    ],
+    "handle_rotate_direction": "unknown",
+    "runtime_mapping": "first_two_dofs",
+    "robot_alignment_y_offset": 2.13,
+    "robot_alignment_handle": {
+      "link_name": "right_side_door",
+      "visual_name": "handle_bar",
+      "center": [
+        2.13,
+        -0.096,
+        1.07
+      ],
+      "center_after_yaw": [
+        0.096,
+        2.13,
+        1.07
+      ]
+    },
+    "warnings": []
+  },
+  {
+    "name": "rec_using-the-reference-image-for-proportions-and-la_20260614_172226_550431_9e89d2b1",
+    "src": "/home/sivan/Downloads/door4/rec_using-the-reference-image-for-proportions-and-la_20260614_172226_550431_9e89d2b1",
+    "dst": "/home/sivan/whole_body/visual_whole_body/high-level/data/asset/door_set/door4/rec_using-the-reference-image-for-proportions-and-la_20260614_172226_550431_9e89d2b1",
+    "status": "ok",
+    "variant": "push_right",
+    "door_dof_name": "frame_to_left_side_door",
+    "handle_dof_name": "frame_to_left_sliding_leaf",
+    "door_body_name": "left_side_door",
+    "handle_body_name": "left_sliding_leaf",
+    "door_axis": [
+      0.0,
+      0.0,
+      -1.0
+    ],
+    "handle_axis": [
+      -1.0,
+      0.0,
+      0.0
+    ],
+    "actor_yaw_offset": 1.5707963267948966,
+    "door_motion_sign_multiplier": 1.0,
+    "handle_center_world": [
+      -0.2575,
+      0.0,
+      1.135
+    ],
+    "handle_side": "right",
+    "handle_was_behind": true,
+    "handle_front_delta_before_yaw_fix": 0.1420000000000001,
+    "handle_front_delta_after_yaw_fix": -0.14199999999999988,
+    "handle_side_delta_after_yaw_fix": 2.1175,
+    "handle_center_after_yaw": [
+      -0.0,
+      -0.2575,
+      1.135
+    ],
+    "door_center_after_yaw": [
+      0.142,
+      -2.375,
+      1.135
+    ],
+    "handle_axis_after_yaw": [
+      -0.0,
+      -1.0,
+      0.0
+    ],
+    "handle_rotate_direction": "unknown",
+    "runtime_mapping": "first_two_dofs",
+    "robot_alignment_y_offset": 2.05,
+    "robot_alignment_handle": {
+      "link_name": "left_side_door",
+      "visual_name": "pull_handle",
+      "center": [
+        -2.05,
+        -0.188,
+        1.135
+      ],
+      "center_after_yaw": [
+        -0.188,
+        2.05,
+        1.135
+      ]
+    },
+    "warnings": []
+  }
+]

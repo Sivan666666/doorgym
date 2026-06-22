@@ -12,30 +12,40 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .act.configuration_act import ACTConfig as ACTConfig
-from .diffusion.configuration_diffusion import DiffusionConfig as DiffusionConfig
-from .groot.configuration_groot import GrootConfig as GrootConfig
-from .pi0.configuration_pi0 import PI0Config as PI0Config
-from .pi0_fast.configuration_pi0_fast import PI0FastConfig as PI0FastConfig
-from .pi05.configuration_pi05 import PI05Config as PI05Config
-from .smolvla.configuration_smolvla import SmolVLAConfig as SmolVLAConfig
-from .smolvla.processor_smolvla import SmolVLANewLineProcessor
-from .tdmpc.configuration_tdmpc import TDMPCConfig as TDMPCConfig
-from .vqbet.configuration_vqbet import VQBeTConfig as VQBeTConfig
-from .wall_x.configuration_wall_x import WallXConfig as WallXConfig
-from .xvla.configuration_xvla import XVLAConfig as XVLAConfig
+import os
 
-__all__ = [
-    "ACTConfig",
-    "DiffusionConfig",
-    "PI0Config",
-    "PI05Config",
-    "PI0FastConfig",
-    "SmolVLAConfig",
-    "SARMConfig",
-    "TDMPCConfig",
-    "VQBeTConfig",
-    "GrootConfig",
-    "XVLAConfig",
-    "WallXConfig",
-]
+if os.environ.get("LEROBOT_MINIMAL_ACT_IMPORTS") == "1":
+    # Jetson deployment path for Door ACT inference: importing every policy here
+    # pulls optional large dependencies (diffusers/transformers/etc.) that are not
+    # needed to instantiate ACTPolicy from a local checkpoint.
+    from .act.configuration_act import ACTConfig as ACTConfig
+
+    __all__ = ["ACTConfig"]
+else:
+    from .act.configuration_act import ACTConfig as ACTConfig
+    from .diffusion.configuration_diffusion import DiffusionConfig as DiffusionConfig
+    from .groot.configuration_groot import GrootConfig as GrootConfig
+    from .pi0.configuration_pi0 import PI0Config as PI0Config
+    from .pi0_fast.configuration_pi0_fast import PI0FastConfig as PI0FastConfig
+    from .pi05.configuration_pi05 import PI05Config as PI05Config
+    from .smolvla.configuration_smolvla import SmolVLAConfig as SmolVLAConfig
+    from .smolvla.processor_smolvla import SmolVLANewLineProcessor
+    from .tdmpc.configuration_tdmpc import TDMPCConfig as TDMPCConfig
+    from .vqbet.configuration_vqbet import VQBeTConfig as VQBeTConfig
+    from .wall_x.configuration_wall_x import WallXConfig as WallXConfig
+    from .xvla.configuration_xvla import XVLAConfig as XVLAConfig
+
+    __all__ = [
+        "ACTConfig",
+        "DiffusionConfig",
+        "PI0Config",
+        "PI05Config",
+        "PI0FastConfig",
+        "SmolVLAConfig",
+        "SARMConfig",
+        "TDMPCConfig",
+        "VQBeTConfig",
+        "GrootConfig",
+        "XVLAConfig",
+        "WallXConfig",
+    ]

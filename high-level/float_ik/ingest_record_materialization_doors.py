@@ -34,6 +34,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--actor_scale", type=float, default=1.0)
     parser.add_argument("--actor_yaw_offset", type=float, default=-math.pi / 2.0)
     parser.add_argument("--robot_y_offset", type=float, default=0.18)
+    parser.add_argument(
+        "--runtime_mapping",
+        choices=("lever", "first_two_dofs"),
+        default="lever",
+        help="Map a standard lever door, or map the first two movable joints for visualization-only multi-DOF entrances.",
+    )
+    parser.add_argument(
+        "--load_block",
+        type=str,
+        default="record_materialization",
+        help="Name of the generated trainAssets/load_block section.",
+    )
     parser.add_argument("--summary", type=str, default="")
     return parser.parse_args()
 
@@ -245,6 +257,51 @@ def collect_link_points(
     return np.concatenate(all_points, axis=0), warnings
 
 
+def collect_named_handle_centers(
+    root: ET.Element,
+    transforms: dict[str, np.ndarray],
+) -> list[dict]:
+    centers = []
+    for link in root.findall("link"):
+        link_name = str(link.get("name", ""))
+        link_tf = transforms.get(link_name, np.eye(4, dtype=np.float64))
+        for visual in link.findall("visual"):
+            visual_name = str(visual.get("name", "")).lower()
+            if "handle" not in visual_name:
+                continue
+            if any(token in visual_name for token in ("mount", "standoff")):
+                continue
+            center = transform_points(
+                link_tf @ tf_from_origin(visual.find("origin")),
+                np.zeros((1, 3), dtype=np.float64),
+            )[0]
+            centers.append(
+                {
+                    "link_name": link_name,
+                    "visual_name": visual_name,
+                    "center": center,
+                }
+            )
+    return centers
+
+
+def select_rightmost_handle(
+    root: ET.Element,
+    transforms: dict[str, np.ndarray],
+    actor_yaw_offset: float,
+) -> dict | None:
+    centers = collect_named_handle_centers(root, transforms)
+    if not centers:
+        return None
+    actor_yaw = math.pi + float(actor_yaw_offset)
+    for item in centers:
+        item["center_after_yaw"] = transform_points(
+            yaw_matrix(actor_yaw),
+            item["center"].reshape(1, 3),
+        )[0]
+    return max(centers, key=lambda item: float(item["center_after_yaw"][1]))
+
+
 def bbox_dict(points: np.ndarray) -> dict:
     if points.size == 0:
         raise ValueError("empty points for bbox")
@@ -291,6 +348,23 @@ def choose_handle_joint(root: ET.Element, door_joint: ET.Element | None) -> ET.E
         if any(hint in text for hint in HANDLE_NAME_HINTS):
             return joint
     return joints[0] if joints else None
+
+
+def choose_runtime_joints(root: ET.Element, runtime_mapping: str) -> tuple[ET.Element | None, ET.Element | None]:
+    if runtime_mapping == "first_two_dofs":
+        joints = sorted(
+            (
+                joint
+                for joint in root.findall("joint")
+                if joint.get("type") in ("revolute", "continuous", "prismatic")
+            ),
+            key=lambda joint: str(joint.get("name", "")),
+        )
+        if len(joints) < 2:
+            return None, None
+        return joints[0], joints[1]
+    door_joint = choose_door_joint(root)
+    return door_joint, choose_handle_joint(root, door_joint)
 
 
 def choose_actor_yaw_and_classify(
@@ -371,10 +445,11 @@ def analyze_and_write(src_urdf: Path, dst_dir: Path, args: argparse.Namespace) -
     all_points, warnings = collect_link_points(root, src_dir, world=True, transforms=transforms)
     if all_points.size == 0:
         raise RuntimeError("no supported geometry points found")
-    door_joint = choose_door_joint(root)
-    handle_joint = choose_handle_joint(root, door_joint)
+    door_joint, handle_joint = choose_runtime_joints(root, args.runtime_mapping)
     if door_joint is None or handle_joint is None:
-        raise RuntimeError("missing door or handle revolute joint")
+        raise RuntimeError(
+            f"runtime_mapping={args.runtime_mapping!r} requires two compatible movable joints"
+        )
 
     door_link = child_link(door_joint)
     handle_link = child_link(handle_joint)
@@ -403,6 +478,23 @@ def analyze_and_write(src_urdf: Path, dst_dir: Path, args: argparse.Namespace) -
         handle_center_world,
         door_points_world,
     )
+    rightmost_handle = select_rightmost_handle(
+        root,
+        transforms,
+        float(classification["actor_yaw_offset"]),
+    )
+    if rightmost_handle is None:
+        warnings.append("no named handle visual found; robot alignment falls back to generated handle target")
+        robot_alignment_y_offset = float(classification["handle_center_after_yaw"][1])
+        robot_alignment_handle = None
+    else:
+        robot_alignment_y_offset = float(rightmost_handle["center_after_yaw"][1])
+        robot_alignment_handle = {
+            "link_name": rightmost_handle["link_name"],
+            "visual_name": rightmost_handle["visual_name"],
+            "center": rightmost_handle["center"].round(6).tolist(),
+            "center_after_yaw": rightmost_handle["center_after_yaw"].round(6).tolist(),
+        }
 
     bounding = bbox_dict(all_points)
     handle_bounding = {
@@ -434,6 +526,9 @@ def analyze_and_write(src_urdf: Path, dst_dir: Path, args: argparse.Namespace) -
         "door_center_after_yaw": classification["door_center_after_yaw"],
         "handle_axis_after_yaw": classification["handle_axis_after_yaw"],
         "handle_rotate_direction": classification["handle_rotate_direction"],
+        "runtime_mapping": str(args.runtime_mapping),
+        "robot_alignment_y_offset": robot_alignment_y_offset,
+        "robot_alignment_handle": robot_alignment_handle,
         "warnings": sorted(set(warnings)),
     }
 
@@ -460,14 +555,18 @@ def make_cfg(entries: list[dict], args: argparse.Namespace) -> dict:
             "handle_side": item["handle_side"],
             "handle_was_behind": bool(item["handle_was_behind"]),
             "handle_rotate_direction": item["handle_rotate_direction"],
+            "runtime_mapping": item["runtime_mapping"],
+            "robot_alignment_y_offset": float(item["robot_alignment_y_offset"]),
+            "robot_alignment_handle": item["robot_alignment_handle"],
         }
+    load_block = str(args.load_block)
     return {
         "env": {
             "asset": {
                 "assetRoot": "data/asset",
                 "assetFileDoor": "",
-                "load_block": "record_materialization",
-                "trainAssets": {"record_materialization": block},
+                "load_block": load_block,
+                "trainAssets": {load_block: block},
             }
         }
     }

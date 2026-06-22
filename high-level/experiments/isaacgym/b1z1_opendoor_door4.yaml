@@ -1,0 +1,143 @@
+env:
+  asset:
+    assetRoot: data/asset
+    assetFileDoor: ''
+    load_block: door4
+    trainAssets:
+      door4:
+        '0':
+          name: rec_using-the-reference-image-for-proportions-and-la_20260614_161003_946126_175e0acb
+          path: door_set/door4/rec_using-the-reference-image-for-proportions-and-la_20260614_161003_946126_175e0acb/model.urdf
+          bounding_box: door_set/door4/rec_using-the-reference-image-for-proportions-and-la_20260614_161003_946126_175e0acb/bounding_box.json
+          handle_bounding: door_set/door4/rec_using-the-reference-image-for-proportions-and-la_20260614_161003_946126_175e0acb/handle_bounding.json
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.0
+          - 0.0
+          - 0.0
+          robot_y_offset: 0.18
+          door_motion_sign_multiplier: -1.0
+          door_body_name: carousel
+          handle_body_name: left_door
+          door_dof_name: frame_to_carousel
+          handle_dof_name: frame_to_left_door
+          generated_variant: push_right
+          handle_side: right
+          handle_was_behind: false
+          handle_rotate_direction: unknown
+          runtime_mapping: first_two_dofs
+          robot_alignment_y_offset: 1.42
+          robot_alignment_handle:
+            link_name: right_door
+            visual_name: pull_handle
+            center:
+            - 1.42
+            - -0.09
+            - 1.41
+            center_after_yaw:
+            - 0.09
+            - 1.42
+            - 1.41
+        '1':
+          name: rec_using-the-reference-image-for-proportions-and-la_20260614_165138_133775_990254ae
+          path: door_set/door4/rec_using-the-reference-image-for-proportions-and-la_20260614_165138_133775_990254ae/model.urdf
+          bounding_box: door_set/door4/rec_using-the-reference-image-for-proportions-and-la_20260614_165138_133775_990254ae/bounding_box.json
+          handle_bounding: door_set/door4/rec_using-the-reference-image-for-proportions-and-la_20260614_165138_133775_990254ae/handle_bounding.json
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.0
+          - 0.0
+          - 0.0
+          robot_y_offset: 0.18
+          door_motion_sign_multiplier: -1.0
+          door_body_name: carousel
+          handle_body_name: left_side_door
+          door_dof_name: frame_to_carousel
+          handle_dof_name: left_side_hinge
+          generated_variant: push_right
+          handle_side: right
+          handle_was_behind: false
+          handle_rotate_direction: unknown
+          runtime_mapping: first_two_dofs
+          robot_alignment_y_offset: 1.0474999999999999
+          robot_alignment_handle:
+            link_name: right_side_door
+            visual_name: pull_handle
+            center:
+            - 1.0475
+            - -0.838
+            - 1.2125
+            center_after_yaw:
+            - 0.838
+            - 1.0475
+            - 1.2125
+        '2':
+          name: rec_using-the-reference-image-for-proportions-and-la_20260614_170543_731089_ad5086d7
+          path: door_set/door4/rec_using-the-reference-image-for-proportions-and-la_20260614_170543_731089_ad5086d7/model.urdf
+          bounding_box: door_set/door4/rec_using-the-reference-image-for-proportions-and-la_20260614_170543_731089_ad5086d7/bounding_box.json
+          handle_bounding: door_set/door4/rec_using-the-reference-image-for-proportions-and-la_20260614_170543_731089_ad5086d7/handle_bounding.json
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset:
+          - 0.0
+          - 0.0
+          - 0.0
+          robot_y_offset: 0.18
+          door_motion_sign_multiplier: -1.0
+          door_body_name: left_sliding_leaf
+          handle_body_name: left_side_door
+          door_dof_name: left_leaf_slide
+          handle_dof_name: left_side_hinge
+          generated_variant: push_right
+          handle_side: right
+          handle_was_behind: false
+          handle_rotate_direction: unknown
+          runtime_mapping: first_two_dofs
+          robot_alignment_y_offset: 2.13
+          robot_alignment_handle:
+            link_name: right_side_door
+            visual_name: handle_bar
+            center:
+            - 2.13
+            - -0.096
+            - 1.07
+            center_after_yaw:
+            - 0.096
+            - 2.13
+            - 1.07
+        '3':
+          name: rec_using-the-reference-image-for-proportions-and-la_20260614_172226_550431_9e89d2b1
+          path: door_set/door4/rec_using-the-reference-image-for-proportions-and-la_20260614_172226_550431_9e89d2b1/model.urdf
+          bounding_box: door_set/door4/rec_using-the-reference-image-for-proportions-and-la_20260614_172226_550431_9e89d2b1/bounding_box.json
+          handle_bounding: door_set/door4/rec_using-the-reference-image-for-proportions-and-la_20260614_172226_550431_9e89d2b1/handle_bounding.json
+          actor_scale: 1.0
+          actor_yaw_offset: 1.5707963267948966
+          actor_position_offset:
+          - 0.0
+          - 0.0
+          - 0.0
+          robot_y_offset: 0.18
+          door_motion_sign_multiplier: 1.0
+          door_body_name: left_side_door
+          handle_body_name: left_sliding_leaf
+          door_dof_name: frame_to_left_side_door
+          handle_dof_name: frame_to_left_sliding_leaf
+          generated_variant: push_right
+          handle_side: right
+          handle_was_behind: true
+          handle_rotate_direction: unknown
+          runtime_mapping: first_two_dofs
+          robot_alignment_y_offset: 2.05
+          robot_alignment_handle:
+            link_name: left_side_door
+            visual_name: pull_handle
+            center:
+            - -2.05
+            - -0.188
+            - 1.135
+            center_after_yaw:
+            - -0.188
+            - 2.05
+            - 1.135

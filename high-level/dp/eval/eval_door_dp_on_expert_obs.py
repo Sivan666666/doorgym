@@ -26,6 +26,7 @@ if str(DP_ROOT) not in sys.path:
 from door_dp_common import (  # noqa: E402
     ACTION_NAMES,
     DoorDPPolicyController,
+    image_to_three_channel_uint8,
     normalize_vision_mode,
     raw_image_keys_for_vision_mode,
 )
@@ -249,8 +250,8 @@ def episode_memory_mb(episode: dict[str, np.ndarray]) -> float:
 
 def make_controller_item(controller: DoorDPPolicyController, state: np.ndarray, episode, image_keys: list[str], idx: int):
     if controller.vision_mode == "depth_only":
-        wrist_depth = episode[image_keys[0]][idx].astype(np.uint8)
-        front_depth = episode[image_keys[1]][idx].astype(np.uint8)
+        wrist_depth = image_to_three_channel_uint8(episode[image_keys[0]][idx])
+        front_depth = image_to_three_channel_uint8(episode[image_keys[1]][idx])
         dummy_mask = np.zeros_like(wrist_depth)
         return controller._make_item(state.astype(np.float32), dummy_mask, wrist_depth, None, front_depth)
     return controller._make_item(
@@ -317,8 +318,8 @@ def reset_controller_on_expert_window(controller: DoorDPPolicyController, data, 
     first = max(0, int(step) - controller.obs_horizon + 1)
     for idx in range(first, int(step) + 1):
         if controller.vision_mode == "depth_only":
-            wrist_depth = data[image_keys[0]][idx].astype(np.uint8)
-            front_depth = data[image_keys[1]][idx].astype(np.uint8)
+            wrist_depth = image_to_three_channel_uint8(data[image_keys[0]][idx])
+            front_depth = image_to_three_channel_uint8(data[image_keys[1]][idx])
             controller.append_observation(
                 data["state"][idx].astype(np.float32),
                 np.zeros_like(wrist_depth),

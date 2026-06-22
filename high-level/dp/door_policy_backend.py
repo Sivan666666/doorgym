@@ -128,9 +128,9 @@ def import_lerobot_policy_modules():
 
 def import_lerobot_act_modules():
     _ensure_hf_cache_env()
+    os.environ.setdefault("LEROBOT_MINIMAL_ACT_IMPORTS", "1")
     try:
         from lerobot.configs.types import FeatureType, NormalizationMode, PolicyFeature
-        from lerobot.datasets.lerobot_dataset import LeRobotDataset
         from lerobot.policies.act.configuration_act import ACTConfig
         from lerobot.policies.act.modeling_act import ACTPolicy
     except Exception as exc:
@@ -142,7 +142,6 @@ def import_lerobot_act_modules():
         "FeatureType": FeatureType,
         "NormalizationMode": NormalizationMode,
         "PolicyFeature": PolicyFeature,
-        "LeRobotDataset": LeRobotDataset,
         "ACTConfig": ACTConfig,
         "ACTPolicy": ACTPolicy,
     }
@@ -400,7 +399,7 @@ def _image_to_chw_float(x: Any, *, required: bool = True) -> torch.Tensor:
         return torch.zeros(3, IMAGE_HEIGHT, IMAGE_WIDTH, dtype=torch.float32)
 
     if isinstance(x, torch.Tensor):
-        tensor = x.detach().cpu()
+        tensor = x.detach()
         if tensor.ndim == 2:
             tensor = tensor.unsqueeze(0).repeat(3, 1, 1)
         elif tensor.ndim == 3 and tensor.shape[0] in (1, 3):
@@ -409,8 +408,9 @@ def _image_to_chw_float(x: Any, *, required: bool = True) -> torch.Tensor:
             tensor = tensor.permute(2, 0, 1)
         else:
             raise ValueError(f"Unsupported image tensor shape: {tuple(tensor.shape)}")
+        integer_input = not tensor.is_floating_point()
         tensor = tensor.to(torch.float32)
-        if tensor.max().item() > 1.5:
+        if integer_input or tensor.max().item() > 1.5:
             tensor = tensor / 255.0
     else:
         arr = _as_numpy(x)
@@ -1592,6 +1592,18 @@ class LeRobotActDoorPolicyBackend:
             cfg["device"] = str(device)
         if action_horizon is not None:
             cfg["action_horizon"] = int(action_horizon)
+        pretrained_backbone_weights = cfg.get("pretrained_backbone_weights")
+        # In deployment/offline inference we immediately strict-load the trained
+        # ACT safetensors, so initializing the torchvision backbone from its
+        # ImageNet URL is unnecessary and can make Jetson startup depend on
+        # internet/cache state.
+        if str(os.environ.get("DOOR_ACT_DISABLE_BACKBONE_PRETRAINED", "1")).lower() not in (
+            "0",
+            "false",
+            "no",
+        ):
+            pretrained_backbone_weights = None
+
         config = make_lerobot_act_config(
             state_dim=int(cfg["state_dim"]),
             action_dim=int(cfg["action_dim"]),
@@ -1601,7 +1613,7 @@ class LeRobotActDoorPolicyBackend:
             device=cfg.get("device", "cpu"),
             normalization_mapping=cfg.get("normalization_mapping"),
             vision_backbone=cfg.get("vision_backbone", "resnet18"),
-            pretrained_backbone_weights=cfg.get("pretrained_backbone_weights"),
+            pretrained_backbone_weights=pretrained_backbone_weights,
             replace_final_stride_with_dilation=bool(cfg.get("replace_final_stride_with_dilation", False)),
             freeze_vision_backbone=cfg.get("freeze_vision_backbone"),
             dinov2_image_size=int(cfg.get("dinov2_image_size", 224)),

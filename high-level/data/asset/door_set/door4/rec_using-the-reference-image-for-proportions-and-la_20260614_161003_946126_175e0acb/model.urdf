@@ -1,0 +1,505 @@
+<robot name="standalone_revolving_glass_entrance">
+  <material name="warm_brushed_bronze">
+    <color rgba="0.78 0.55 0.3 1" />
+    </material>
+  <material name="shadow_bronze_gasket">
+    <color rgba="0.23 0.16 0.1 1" />
+    </material>
+  <material name="slightly_blue_transparent_glass">
+    <color rgba="0.55 0.84 1 0.34" />
+    </material>
+  <link name="central_frame">
+    <visual name="floor_disk">
+      <origin xyz="0 0 0.04" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="1.18" length="0.08" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="threshold_ring">
+      <origin xyz="0 0 0.085" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="assets/meshes/threshold_ring.obj" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="canopy_disk">
+      <origin xyz="0 0 2.92" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="1.18" length="0.16" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="canopy_ring">
+      <origin xyz="0 0 2.85" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="assets/meshes/canopy_outer_ring.obj" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="canopy_underside_shadow">
+      <origin xyz="0 0 2.84" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="assets/meshes/canopy_inner_shadow_ring.obj" />
+        </geometry>
+      <material name="shadow_bronze_gasket">
+        <color rgba="0.23 0.16 0.1 1" />
+        </material>
+      </visual>
+    <visual name="right_curved_glass">
+      <geometry>
+        <mesh filename="assets/meshes/right_curved_glass.obj" />
+        </geometry>
+      <material name="slightly_blue_transparent_glass">
+        <color rgba="0.55 0.84 1 0.34" />
+        </material>
+      </visual>
+    <visual name="left_curved_glass">
+      <geometry>
+        <mesh filename="assets/meshes/left_curved_glass.obj" />
+        </geometry>
+      <material name="slightly_blue_transparent_glass">
+        <color rgba="0.55 0.84 1 0.34" />
+        </material>
+      </visual>
+    <visual name="perimeter_post_0">
+      <origin xyz="0.379642 -1.04306 1.46" rpy="0 0 -1.22173" />
+      <geometry>
+        <box size="0.07 0.07 2.8" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="perimeter_post_1">
+      <origin xyz="1.11 0 1.46" rpy="0 0 0" />
+      <geometry>
+        <box size="0.07 0.07 2.8" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="perimeter_post_2">
+      <origin xyz="0.379642 1.04306 1.46" rpy="0 0 1.22173" />
+      <geometry>
+        <box size="0.07 0.07 2.8" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="perimeter_post_3">
+      <origin xyz="-0.379642 1.04306 1.46" rpy="0 0 1.91986" />
+      <geometry>
+        <box size="0.07 0.07 2.8" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="perimeter_post_4">
+      <origin xyz="-1.11 1.35936e-16 1.46" rpy="0 0 3.14159" />
+      <geometry>
+        <box size="0.07 0.07 2.8" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="perimeter_post_5">
+      <origin xyz="-0.379642 -1.04306 1.46" rpy="0 0 4.36332" />
+      <geometry>
+        <box size="0.07 0.07 2.8" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="left_frame_outer_jamb">
+      <origin xyz="-2.25 -0.02 1.46" rpy="0 0 0" />
+      <geometry>
+        <box size="0.08 0.1 2.76" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="left_frame_inner_jamb">
+      <origin xyz="-1.2 -0.02 1.46" rpy="0 0 0" />
+      <geometry>
+        <box size="0.08 0.1 2.76" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="left_frame_header">
+      <origin xyz="-1.725 -0.02 2.79" rpy="0 0 0" />
+      <geometry>
+        <box size="1.13 0.1 0.1" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="left_frame_sill">
+      <origin xyz="-1.725 -0.02 0.04" rpy="0 0 0" />
+      <geometry>
+        <box size="1.13 0.1 0.08" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="right_frame_outer_jamb">
+      <origin xyz="2.25 -0.02 1.46" rpy="0 0 0" />
+      <geometry>
+        <box size="0.08 0.1 2.76" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="right_frame_inner_jamb">
+      <origin xyz="1.2 -0.02 1.46" rpy="0 0 0" />
+      <geometry>
+        <box size="0.08 0.1 2.76" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="right_frame_header">
+      <origin xyz="1.725 -0.02 2.79" rpy="0 0 0" />
+      <geometry>
+        <box size="1.13 0.1 0.1" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="right_frame_sill">
+      <origin xyz="1.725 -0.02 0.04" rpy="0 0 0" />
+      <geometry>
+        <box size="1.13 0.1 0.08" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    </link>
+  <link name="carousel">
+    <visual name="central_shaft">
+      <origin xyz="0 0 1.46" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.16" length="2.76" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="leaf_0_glass">
+      <origin xyz="0.545089 0.225783 1.435" rpy="0 0 0.392699" />
+      <geometry>
+        <box size="0.86 0.02 2.55" />
+        </geometry>
+      <material name="slightly_blue_transparent_glass">
+        <color rgba="0.55 0.84 1 0.34" />
+        </material>
+      </visual>
+    <visual name="leaf_0_inner_clamp">
+      <origin xyz="0.170918 0.0707964 1.435" rpy="0 0 0.392699" />
+      <geometry>
+        <box size="0.09 0.045 2.57" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="leaf_0_outer_cap">
+      <origin xyz="0.92388 0.382683 1.435" rpy="0 0 0.392699" />
+      <geometry>
+        <box size="0.04 0.045 2.55" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="leaf_0_bottom_rail">
+      <origin xyz="0.545089 0.225783 0.21" rpy="0 0 0.392699" />
+      <geometry>
+        <box size="0.86 0.035 0.045" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="leaf_0_top_rail">
+      <origin xyz="0.545089 0.225783 2.69" rpy="0 0 0.392699" />
+      <geometry>
+        <box size="0.86 0.035 0.045" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="leaf_1_glass">
+      <origin xyz="-0.225783 0.545089 1.435" rpy="0 0 1.9635" />
+      <geometry>
+        <box size="0.86 0.02 2.55" />
+        </geometry>
+      <material name="slightly_blue_transparent_glass">
+        <color rgba="0.55 0.84 1 0.34" />
+        </material>
+      </visual>
+    <visual name="leaf_1_inner_clamp">
+      <origin xyz="-0.0707964 0.170918 1.435" rpy="0 0 1.9635" />
+      <geometry>
+        <box size="0.09 0.045 2.57" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="leaf_1_outer_cap">
+      <origin xyz="-0.382683 0.92388 1.435" rpy="0 0 1.9635" />
+      <geometry>
+        <box size="0.04 0.045 2.55" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="leaf_1_bottom_rail">
+      <origin xyz="-0.225783 0.545089 0.21" rpy="0 0 1.9635" />
+      <geometry>
+        <box size="0.86 0.035 0.045" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="leaf_1_top_rail">
+      <origin xyz="-0.225783 0.545089 2.69" rpy="0 0 1.9635" />
+      <geometry>
+        <box size="0.86 0.035 0.045" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="leaf_2_glass">
+      <origin xyz="-0.545089 -0.225783 1.435" rpy="0 0 3.53429" />
+      <geometry>
+        <box size="0.86 0.02 2.55" />
+        </geometry>
+      <material name="slightly_blue_transparent_glass">
+        <color rgba="0.55 0.84 1 0.34" />
+        </material>
+      </visual>
+    <visual name="leaf_2_inner_clamp">
+      <origin xyz="-0.170918 -0.0707964 1.435" rpy="0 0 3.53429" />
+      <geometry>
+        <box size="0.09 0.045 2.57" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="leaf_2_outer_cap">
+      <origin xyz="-0.92388 -0.382683 1.435" rpy="0 0 3.53429" />
+      <geometry>
+        <box size="0.04 0.045 2.55" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="leaf_2_bottom_rail">
+      <origin xyz="-0.545089 -0.225783 0.21" rpy="0 0 3.53429" />
+      <geometry>
+        <box size="0.86 0.035 0.045" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="leaf_2_top_rail">
+      <origin xyz="-0.545089 -0.225783 2.69" rpy="0 0 3.53429" />
+      <geometry>
+        <box size="0.86 0.035 0.045" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="leaf_3_glass">
+      <origin xyz="0.225783 -0.545089 1.435" rpy="0 0 5.10509" />
+      <geometry>
+        <box size="0.86 0.02 2.55" />
+        </geometry>
+      <material name="slightly_blue_transparent_glass">
+        <color rgba="0.55 0.84 1 0.34" />
+        </material>
+      </visual>
+    <visual name="leaf_3_inner_clamp">
+      <origin xyz="0.0707964 -0.170918 1.435" rpy="0 0 5.10509" />
+      <geometry>
+        <box size="0.09 0.045 2.57" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="leaf_3_outer_cap">
+      <origin xyz="0.382683 -0.92388 1.435" rpy="0 0 5.10509" />
+      <geometry>
+        <box size="0.04 0.045 2.55" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="leaf_3_bottom_rail">
+      <origin xyz="0.225783 -0.545089 0.21" rpy="0 0 5.10509" />
+      <geometry>
+        <box size="0.86 0.035 0.045" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="leaf_3_top_rail">
+      <origin xyz="0.225783 -0.545089 2.69" rpy="0 0 5.10509" />
+      <geometry>
+        <box size="0.86 0.035 0.045" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    </link>
+  <link name="left_door">
+    <visual name="glass_panel">
+      <origin xyz="0.505 0 1.33" rpy="0 0 0" />
+      <geometry>
+        <box size="0.93 0.018 2.58" />
+        </geometry>
+      <material name="slightly_blue_transparent_glass">
+        <color rgba="0.55 0.84 1 0.34" />
+        </material>
+      </visual>
+    <visual name="hinge_strip">
+      <origin xyz="0.02 0 1.33" rpy="0 0 0" />
+      <geometry>
+        <box size="0.04 0.035 2.66" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="pull_handle">
+      <origin xyz="0.79 -0.07 1.33" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.02" length="1.42" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="handle_mount_0">
+      <origin xyz="0.79 -0.035 0.78" rpy="0 0 0" />
+      <geometry>
+        <box size="0.06 0.085 0.05" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="handle_mount_1">
+      <origin xyz="0.79 -0.035 1.88" rpy="0 0 0" />
+      <geometry>
+        <box size="0.06 0.085 0.05" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    </link>
+  <link name="right_door">
+    <visual name="glass_panel">
+      <origin xyz="-0.505 0 1.33" rpy="0 0 0" />
+      <geometry>
+        <box size="0.93 0.018 2.58" />
+        </geometry>
+      <material name="slightly_blue_transparent_glass">
+        <color rgba="0.55 0.84 1 0.34" />
+        </material>
+      </visual>
+    <visual name="hinge_strip">
+      <origin xyz="-0.02 0 1.33" rpy="0 0 0" />
+      <geometry>
+        <box size="0.04 0.035 2.66" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="pull_handle">
+      <origin xyz="-0.79 -0.07 1.33" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.02" length="1.42" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="handle_mount_0">
+      <origin xyz="-0.79 -0.035 0.78" rpy="0 0 0" />
+      <geometry>
+        <box size="0.06 0.085 0.05" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    <visual name="handle_mount_1">
+      <origin xyz="-0.79 -0.035 1.88" rpy="0 0 0" />
+      <geometry>
+        <box size="0.06 0.085 0.05" />
+        </geometry>
+      <material name="warm_brushed_bronze">
+        <color rgba="0.78 0.55 0.3 1" />
+        </material>
+      </visual>
+    </link>
+  <joint name="frame_to_carousel" type="continuous">
+    <parent link="central_frame" />
+    <child link="carousel" />
+    <axis xyz="0 0 1" />
+    <limit effort="35" velocity="1.2" />
+    </joint>
+  <joint name="frame_to_left_door" type="revolute">
+    <origin xyz="-2.21 -0.02 0.08" rpy="0 0 0" />
+    <parent link="central_frame" />
+    <child link="left_door" />
+    <axis xyz="0 0 1" />
+    <limit effort="12" velocity="0.8" lower="0" upper="1.25" />
+    </joint>
+  <joint name="frame_to_right_door" type="revolute">
+    <origin xyz="2.21 -0.02 0.08" rpy="0 0 0" />
+    <parent link="central_frame" />
+    <child link="right_door" />
+    <axis xyz="0 0 -1" />
+    <limit effort="12" velocity="0.8" lower="0" upper="1.25" />
+    </joint>
+  </robot>

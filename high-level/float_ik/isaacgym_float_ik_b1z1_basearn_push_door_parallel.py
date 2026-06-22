@@ -162,14 +162,16 @@ def parse_args():
             },
             {"name": "--push_base_yaw_delta", "type": float, "default": 0.0},
             {"name": "--walk_steps", "type": int, "default": 260},
+            {"name": "--walk_min_speed", "type": float, "default": 0.20},
+            {"name": "--no_dynamic_walk_steps", "action": "store_true"},
             {"name": "--initial_hold_steps", "type": int, "default": 150},
             {"name": "--initial_hold_move_steps", "type": int, "default": 100},
-            {"name": "--grasp_steps", "type": int, "default": 150},
-            {"name": "--grasp_hold_steps", "type": int, "default": 5},
-            {"name": "--gripper_close_steps", "type": int, "default": 100},
-            {"name": "--handle_rotate_steps", "type": int, "default": 300},
-            {"name": "--door_push_steps", "type": int, "default": 1080},
-            {"name": "--return_home_steps", "type": int, "default": 360},
+            {"name": "--grasp_steps", "type": int, "default": 50},
+            {"name": "--grasp_hold_steps", "type": int, "default": 0},
+            {"name": "--gripper_close_steps", "type": int, "default": 50},
+            {"name": "--handle_rotate_steps", "type": int, "default": 100},
+            {"name": "--door_push_steps", "type": int, "default": 300},
+            {"name": "--return_home_steps", "type": int, "default": 150},
             {"name": "--return_home_target_chase_alpha", "type": float, "default": 0.08},
             {"name": "--hold_steps", "type": int, "default": 300},
             {"name": "--pregrasp_offset", "type": float, "default": 0.15},
@@ -184,8 +186,12 @@ def parse_args():
             {"name": "--no_ikpush_env_randomization", "action": "store_true"},
             {"name": "--ikpush_door_x_rand", "type": float, "default": 0.03},
             {"name": "--ikpush_door_y_rand", "type": float, "default": 0.03},
+            {"name": "--ikpush_door_wall_x_offset_rand", "type": float, "default": 0.03},
             {"name": "--ikpush_robot_x_rand", "type": float, "default": 0.03},
+            {"name": "--ikpush_robot_x_rand_min", "type": float, "default": -0.70},
+            {"name": "--ikpush_robot_x_rand_max", "type": float, "default": 0.0},
             {"name": "--ikpush_robot_y_rand", "type": float, "default": 0.04},
+            {"name": "--ikpush_robot_z_rand", "type": float, "default": 0.03},
             {"name": "--ikpush_robot_yaw_rand", "type": float, "default": 0.03},
             {"name": "--ikpush_pregrasp_offset_rand", "type": float, "default": 0.025},
             {"name": "--ikpush_grasp_x_offset_rand", "type": float, "default": 0.012},
@@ -302,9 +308,11 @@ def parse_args():
             {"name": "--camera_display_interval", "type": int, "default": 1},
             {"name": "--camera_axis_scale", "type": float, "default": 0.10},
             {"name": "--camera_axis_thickness", "type": float, "default": 0.004},
-            {"name": "--wrist_camera_down_tilt", "type": float, "default": 0.20},
+            {"name": "--wrist_camera_yaw_deg", "type": float, "default": -90.0},
+            {"name": "--wrist_camera_pitch_deg", "type": float, "default": 0.0},
+            {"name": "--wrist_camera_roll_deg", "type": float, "default": -60.0},
             {"name": "--front_camera_yaw_deg", "type": float, "default": 0.0},
-            {"name": "--front_camera_pitch_deg", "type": float, "default": -30.0},
+            {"name": "--front_camera_pitch_deg", "type": float, "default": -45.0},
             {"name": "--front_camera_roll_deg", "type": float, "default": 0.0},
             *dc.depth_aug_custom_parameters(),
             {"name": "--record_dp_dataset", "action": "store_true"},
@@ -479,6 +487,7 @@ clone_door_runtime = dc.clone_door_runtime
 resolve_seed = dc.resolve_seed
 seed_for_env = dc.seed_for_env
 sample_with_half_range = dc.sample_with_half_range
+sample_with_offset_range = dc.sample_with_offset_range
 
 
 IKPUSH_DEFAULT_ENV_RANGES = {
@@ -499,6 +508,7 @@ IKPUSH_ARG_FLAGS = {
     "grasp_z_offset": "--grasp_z_offset",
     "door_push_distance": "--door_push_distance",
     "handle_rotate_angle": "--handle_rotate_angle",
+    "door_wall_x_offset": "--door_wall_x_offset",
     "door_joint_friction": "--door_joint_friction",
     "door_joint_damping": "--door_joint_damping",
     "handle_joint_friction": "--handle_joint_friction",
@@ -548,6 +558,31 @@ def make_env_args(args, env_index):
         setattr(env_args, attr, value)
         sampled[attr] = value
 
+    def set_sampled_offset_range(attr, min_attr, max_attr, legacy_half_attr=None, lower=None, upper=None):
+        base_value = getattr(args, attr)
+        use_legacy_half_range = (
+            legacy_half_attr is not None
+            and dc.cli_flag_was_set(args, f"--{legacy_half_attr}")
+            and not dc.cli_flag_was_set(args, f"--{min_attr}")
+            and not dc.cli_flag_was_set(args, f"--{max_attr}")
+        )
+        if enabled:
+            if use_legacy_half_range:
+                value = sample_env_value(rng, args, attr, legacy_half_attr, lower=lower, upper=upper)
+            else:
+                value = sample_with_offset_range(
+                    rng,
+                    base_value,
+                    getattr(args, min_attr),
+                    getattr(args, max_attr),
+                    lower=lower,
+                    upper=upper,
+                )
+        else:
+            value = float(base_value)
+        setattr(env_args, attr, value)
+        sampled[attr] = value
+
     def set_fixed(attr):
         value = float(getattr(args, attr))
         setattr(env_args, attr, value)
@@ -555,8 +590,15 @@ def make_env_args(args, env_index):
 
     set_sampled("door_x", "ikpush_door_x_rand")
     set_sampled("door_y", "ikpush_door_y_rand")
-    set_sampled("robot_x", "ikpush_robot_x_rand")
+    set_sampled("door_wall_x_offset", "ikpush_door_wall_x_offset_rand")
+    set_sampled_offset_range(
+        "robot_x",
+        "ikpush_robot_x_rand_min",
+        "ikpush_robot_x_rand_max",
+        legacy_half_attr="ikpush_robot_x_rand",
+    )
     set_sampled("robot_y", "ikpush_robot_y_rand")
+    set_sampled("robot_z", "ikpush_robot_z_rand")
     set_sampled("robot_yaw", "ikpush_robot_yaw_rand")
     set_fixed("pregrasp_offset")
     set_fixed("grasp_x_offset")
@@ -569,6 +611,12 @@ def make_env_args(args, env_index):
     set_sampled("handle_joint_damping", "ikpush_handle_joint_damping_rand", lower=0.0)
     set_sampled("handle_spring_stiffness", "ikpush_handle_spring_stiffness_rand", lower=0.0)
     set_sampled("handle_spring_damping", "ikpush_handle_spring_damping_rand", lower=0.0)
+
+    depth_noise_selected = dc.configure_depth_noise_for_env(env_args)
+    sampled["depth_noise_selection_mode"] = str(env_args.depth_noise_selection_mode)
+    sampled["depth_noise_env_probability"] = float(env_args.depth_noise_env_probability)
+    sampled["depth_noise_selected_env_count"] = int(env_args.depth_noise_selected_env_count)
+    sampled["depth_noise_env_selected"] = bool(depth_noise_selected)
 
     env_args.ikpush_randomization_json = json.dumps(sampled, sort_keys=True)
     return env_args
@@ -1236,6 +1284,7 @@ def run_demo(
         dof_positions[gripper_idx] = args.gripper_open
 
     yaw_start, heading, base_start, base_stop = dc.compute_base_walk_targets(args, door)
+    dc.configure_dynamic_walk_steps(args, base_start, base_stop)
     base_push = compute_base_push_target(args, base_stop, heading)
     yaw_push = yaw_start + args.push_base_yaw_delta
     traj = {"base_xy": base_start.copy()}
@@ -1330,7 +1379,7 @@ def run_demo(
             alpha = float(traj.get("return_home_alpha", 0.0))
             dof_positions[:] = lerp(traj["return_home_start_dofs"], home_positions, alpha)
             ik_state.last_pos_error = 0.0
-        elif phase == "hold_home":
+        elif phase in ("walk", "hold_home"):
             dof_positions[:] = home_positions
             ik_state.last_pos_error = 0.0
         else:
@@ -1471,6 +1520,7 @@ def initialize_parallel_env_state(
         )
 
     yaw_start, heading, base_start, base_stop = dc.compute_base_walk_targets(args, door)
+    dc.configure_dynamic_walk_steps(args, base_start, base_stop, env_index=index)
     base_push = compute_base_push_target(args, base_stop, heading)
     return ParallelEnvState(
         index=int(index),
@@ -1754,7 +1804,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                 alpha = float(st.traj.get("return_home_alpha", 0.0))
                 st.dof_positions[:] = lerp(st.traj["return_home_start_dofs"], st.home_positions, alpha)
                 st.ik_state.last_pos_error = 0.0
-            elif phase == "hold_home":
+            elif phase in ("walk", "hold_home"):
                 st.dof_positions[:] = st.home_positions
                 st.ik_state.last_pos_error = 0.0
             else:
@@ -1765,7 +1815,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
         gym.refresh_jacobian_tensors(sim)
 
         for st in env_states:
-            if st.last_phase not in ("return_home", "hold_home"):
+            if st.last_phase not in ("walk", "return_home", "hold_home"):
                 update_arm_ik_targets_for_env(
                     gym,
                     st.env,

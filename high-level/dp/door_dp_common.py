@@ -103,6 +103,28 @@ def lerobot_image_keys_for_vision_mode(vision_mode):
     return DEPTH_LEROBOT_IMAGE_KEYS
 
 
+def depth_image_to_single_channel_uint8(image):
+    """Store colorized depth without three identical channel copies."""
+    array = np.asarray(image, dtype=np.uint8)
+    if array.ndim == 2:
+        return np.ascontiguousarray(array)
+    if array.ndim == 3 and array.shape[-1] in (1, 3, 4):
+        return np.ascontiguousarray(array[..., 0])
+    raise ValueError(f"Expected a 2D or HWC depth image, got shape={array.shape}.")
+
+
+def image_to_three_channel_uint8(image):
+    """Expand compact single-channel raw depth for RGB image consumers."""
+    array = np.asarray(image, dtype=np.uint8)
+    if array.ndim == 2:
+        return np.repeat(array[..., None], 3, axis=-1)
+    if array.ndim == 3 and array.shape[-1] == 1:
+        return np.repeat(array, 3, axis=-1)
+    if array.ndim == 3 and array.shape[-1] >= 3:
+        return np.ascontiguousarray(array[..., :3])
+    raise ValueError(f"Expected a 2D or HWC image, got shape={array.shape}.")
+
+
 class DoorDPJsonlLogger:
     def __init__(self, path):
         self.path = Path(path)
@@ -151,7 +173,7 @@ def _state_angle_feature_indices(state_names):
     indices = []
     for idx, name in enumerate(state_names):
         lowered = str(name).lower()
-        if any(skip in lowered for skip in ("vel", "rate", "ang_vel", "last_low_action")):
+        if any(skip in lowered for skip in ("vel", "rate", "ang_vel", "command", "last_low_action")):
             continue
         if any(token in lowered for token in ("roll", "pitch", "yaw")):
             indices.append(idx)
@@ -162,7 +184,7 @@ def _near_zero_rate_feature_indices(feature_names):
     indices = []
     for idx, name in enumerate(feature_names):
         lowered = str(name).lower()
-        if lowered in ("yaw", "yaw_rate", "base_yaw_rate"):
+        if lowered in ("yaw", "yaw_rate", "base_yaw_rate", "vyaw", "last_command_vyaw"):
             indices.append(idx)
             continue
         if any(token in lowered for token in ("yaw_rate", "ang_vel", "angular_vel")):
@@ -919,6 +941,8 @@ class RawDoorDPRecorder:
             "image_height": IMAGE_HEIGHT,
             "format": "door_dp_raw_npz_v1",
         }
+        if self.vision_mode == "depth_only":
+            sidecar["depth_storage_channels"] = 1
         if self.vision_mode != "depth":
             sidecar["vision_mode"] = self.vision_mode
         for key in DATASET_METADATA_KEYS:
@@ -949,8 +973,8 @@ class RawDoorDPRecorder:
         self.frames["state"].append(np.asarray(state, dtype=np.float32).copy())
         self.frames["action"].append(np.asarray(action, dtype=np.float32).copy())
         if self.vision_mode == "depth_only":
-            self.frames[self.image_keys[0]].append(np.asarray(wrist_second_rgb, dtype=np.uint8).copy())
-            self.frames[self.image_keys[1]].append(np.asarray(front_second_rgb, dtype=np.uint8).copy())
+            self.frames[self.image_keys[0]].append(depth_image_to_single_channel_uint8(wrist_second_rgb))
+            self.frames[self.image_keys[1]].append(depth_image_to_single_channel_uint8(front_second_rgb))
         else:
             self.frames[self.image_keys[0]].append(np.asarray(wrist_mask_rgb, dtype=np.uint8).copy())
             self.frames[self.image_keys[1]].append(np.asarray(wrist_second_rgb, dtype=np.uint8).copy())
@@ -980,9 +1004,9 @@ class RawDoorDPRecorder:
             return
         out = self._next_episode_path()
         payload = {
-            "state": np.stack(self.frames["state"], axis=0).astype(np.float32),
-            "action": np.stack(self.frames["action"], axis=0).astype(np.float32),
-            "subtask_index": np.stack(self.frames["subtask_index"], axis=0).astype(np.int64),
+            "state": np.stack(self.frames["state"], axis=0).astype(np.float32, copy=False),
+            "action": np.stack(self.frames["action"], axis=0).astype(np.float32, copy=False),
+            "subtask_index": np.stack(self.frames["subtask_index"], axis=0).astype(np.int64, copy=False),
             "task": np.asarray(self.task),
             "fps": np.asarray(self.fps, dtype=np.int64),
             "state_feature_names": np.asarray(self.state_feature_names, dtype=object),
@@ -990,21 +1014,29 @@ class RawDoorDPRecorder:
         }
         if self.vision_mode != "depth":
             payload["vision_mode"] = np.asarray(self.vision_mode)
+        if self.vision_mode == "depth_only":
+            payload["depth_storage_channels"] = np.asarray(1, dtype=np.int64)
         for key in self.image_keys:
-            payload[key] = np.stack(self.frames[key], axis=0).astype(np.uint8)
+            payload[key] = np.stack(self.frames[key], axis=0).astype(np.uint8, copy=False)
         for key, value in self.metadata.items():
             if key not in payload:
                 payload[key] = np.asarray(value)
         for key, values in self.frames.items():
             if key in payload or not values or len(values) != self.frame_count:
                 continue
-            payload[key] = np.stack(values, axis=0).astype(np.float32)
+            payload[key] = np.stack(values, axis=0).astype(np.float32, copy=False)
         np.savez_compressed(out, **payload)
         self.episode_count += 1
         print(f"Saved raw Door DP episode: {out}")
+        self._clear_frames()
 
     def finalize(self):
-        pass
+        self._clear_frames()
+
+    def _clear_frames(self):
+        for values in self.frames.values():
+            values.clear()
+        self.frame_count = 0
 
 
 def import_lerobot_or_raise():

@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "record_id": "rec_using-the-reference-image-for-proportions-and-la_20260614_165138_133775_990254ae",
+  "status": "success",
+  "urdf_path": "model.urdf",
+  "warnings": [],
+  "checks_run": [
+    "compile_visual"
+  ],
+  "overlap_allowances": [],
+  "metrics": {
+    "compile_level": "visual",
+    "validation_level": "none",
+    "fingerprint_inputs": {
+      "model_py_sha256": "6fd9f329bf5fc27dd5fd18e8fa619726a6c26ca176f3816d8f8cf52ad22f3cc4",
+      "sdk_fingerprint": null
+    },
+    "materialization_fingerprint": "9fecb91b93f6e068d1ff468f4f167d053205260f6c9990dec3f5ab5ee6a85a1a",
+    "model_py_mtime_ns": 1781457048957301689,
+    "model_py_size_bytes": 21573,
+    "materialization_status": "available",
+    "visual_mesh_bytes": 61452,
+    "visual_mesh_file_count": 4,
+    "compile_elapsed_seconds": 0.0052952319965697825
+  },
+  "signal_bundle": {
+    "status": "success",
+    "summary": "status=success failures=0 warnings=0 notes=0\nCompile passed cleanly.",
+    "signals": []
+  }
+}

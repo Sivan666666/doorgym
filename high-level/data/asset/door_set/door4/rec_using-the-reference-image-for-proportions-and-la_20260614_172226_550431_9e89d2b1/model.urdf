@@ -1,0 +1,458 @@
+<robot name="automatic_sliding_glass_entrance">
+  <material name="dark_gray_powder_coated_metal">
+    <color rgba="0.08 0.085 0.09 1" />
+    </material>
+  <material name="slightly_blue_gray_transparent_glass">
+    <color rgba="0.55 0.78 0.88 0.34" />
+    </material>
+  <material name="black_sensor_plastic">
+    <color rgba="0.005 0.005 0.006 1" />
+    </material>
+  <link name="frame">
+    <visual name="top_rail">
+      <origin xyz="0 0 3" rpy="0 0 0" />
+      <geometry>
+        <box size="6 0.18 0.1" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    <visual name="bottom_threshold">
+      <origin xyz="0 0 0.04" rpy="0 0 0" />
+      <geometry>
+        <box size="6 0.22 0.08" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    <visual name="left_outer_post">
+      <origin xyz="-2.95 0 1.525" rpy="0 0 0" />
+      <geometry>
+        <box size="0.1 0.18 3.05" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    <visual name="right_outer_post">
+      <origin xyz="2.95 0 1.525" rpy="0 0 0" />
+      <geometry>
+        <box size="0.1 0.18 3.05" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    <visual name="left_jamb">
+      <origin xyz="-1.8 0 1.515" rpy="0 0 0" />
+      <geometry>
+        <box size="0.1 0.18 2.95" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    <visual name="right_jamb">
+      <origin xyz="1.8 0 1.515" rpy="0 0 0" />
+      <geometry>
+        <box size="0.1 0.18 2.95" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    <visual name="transom_header_rail">
+      <origin xyz="0 0 2.24" rpy="0 0 0" />
+      <geometry>
+        <box size="6 0.18 0.1" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    <visual name="central_header_track">
+      <origin xyz="0 -0.01 2.175" rpy="0 0 0" />
+      <geometry>
+        <box size="3.7 0.24 0.07" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    <visual name="central_lower_track">
+      <origin xyz="0 -0.01 0.105" rpy="0 0 0" />
+      <geometry>
+        <box size="3.7 0.18 0.05" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    <visual name="center_transom_mullion">
+      <origin xyz="0 0 2.625" rpy="0 0 0" />
+      <geometry>
+        <box size="0.075 0.18 0.76" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    <visual name="left_hinge_backplate">
+      <origin xyz="-2.9 -0.08 1.135" rpy="0 0 0" />
+      <geometry>
+        <box size="0.07 0.06 1.95" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    <visual name="right_hinge_backplate">
+      <origin xyz="2.9 -0.08 1.135" rpy="0 0 0" />
+      <geometry>
+        <box size="0.07 0.06 1.95" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    <visual name="left_transom_glass">
+      <origin xyz="-2.375 0 2.615" rpy="0 0 0" />
+      <geometry>
+        <box size="1.1 0.016 0.71" />
+        </geometry>
+      <material name="slightly_blue_gray_transparent_glass">
+        <color rgba="0.55 0.78 0.88 0.34" />
+        </material>
+      </visual>
+    <visual name="center_transom_glass">
+      <origin xyz="0 0 2.615" rpy="0 0 0" />
+      <geometry>
+        <box size="3.56 0.016 0.71" />
+        </geometry>
+      <material name="slightly_blue_gray_transparent_glass">
+        <color rgba="0.55 0.78 0.88 0.34" />
+        </material>
+      </visual>
+    <visual name="right_transom_glass">
+      <origin xyz="2.375 0 2.615" rpy="0 0 0" />
+      <geometry>
+        <box size="1.1 0.016 0.71" />
+        </geometry>
+      <material name="slightly_blue_gray_transparent_glass">
+        <color rgba="0.55 0.78 0.88 0.34" />
+        </material>
+      </visual>
+    </link>
+  <link name="left_sliding_leaf">
+    <visual name="glass_panel">
+      <geometry>
+        <box size="1.38 0.018 2.03" />
+        </geometry>
+      <material name="slightly_blue_gray_transparent_glass">
+        <color rgba="0.55 0.78 0.88 0.34" />
+        </material>
+      </visual>
+    <visual name="top_rail">
+      <origin xyz="0 0 1.0275" rpy="0 0 0" />
+      <geometry>
+        <box size="1.46 0.06 0.055" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    <visual name="bottom_rail">
+      <origin xyz="0 0 -1.0275" rpy="0 0 0" />
+      <geometry>
+        <box size="1.46 0.06 0.055" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    <visual name="outer_stile">
+      <origin xyz="-0.7025 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.055 0.06 2.11" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    <visual name="meeting_stile">
+      <origin xyz="0.7025 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.055 0.06 2.11" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    <visual name="brush_seal">
+      <origin xyz="0.724 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.018 0.07 1.95" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    </link>
+  <link name="right_sliding_leaf">
+    <visual name="glass_panel">
+      <geometry>
+        <box size="1.38 0.018 2.03" />
+        </geometry>
+      <material name="slightly_blue_gray_transparent_glass">
+        <color rgba="0.55 0.78 0.88 0.34" />
+        </material>
+      </visual>
+    <visual name="top_rail">
+      <origin xyz="0 0 1.0275" rpy="0 0 0" />
+      <geometry>
+        <box size="1.46 0.06 0.055" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    <visual name="bottom_rail">
+      <origin xyz="0 0 -1.0275" rpy="0 0 0" />
+      <geometry>
+        <box size="1.46 0.06 0.055" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    <visual name="outer_stile">
+      <origin xyz="0.7025 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.055 0.06 2.11" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    <visual name="meeting_stile">
+      <origin xyz="-0.7025 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.055 0.06 2.11" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    <visual name="brush_seal">
+      <origin xyz="-0.724 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.018 0.07 1.95" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    </link>
+  <link name="left_side_door">
+    <visual name="glass_panel">
+      <origin xyz="0.525 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.965 0.018 2.025" />
+        </geometry>
+      <material name="slightly_blue_gray_transparent_glass">
+        <color rgba="0.55 0.78 0.88 0.34" />
+        </material>
+      </visual>
+    <visual name="hinge_stile">
+      <origin xyz="0.0275 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.055 0.06 2.11" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    <visual name="latch_stile">
+      <origin xyz="1.0225 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.055 0.06 2.11" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    <visual name="top_rail">
+      <origin xyz="0.525 0 1.0275" rpy="0 0 0" />
+      <geometry>
+        <box size="1.05 0.06 0.055" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    <visual name="bottom_rail">
+      <origin xyz="0.525 0 -1.0275" rpy="0 0 0" />
+      <geometry>
+        <box size="1.05 0.06 0.055" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    <visual name="pull_handle">
+      <origin xyz="0.85 -0.078 0" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.016" length="0.82" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    <visual name="handle_upper_standoff">
+      <origin xyz="0.85 -0.043 0.3" rpy="0 0 0" />
+      <geometry>
+        <box size="0.055 0.075 0.04" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    <visual name="handle_lower_standoff">
+      <origin xyz="0.85 -0.043 -0.3" rpy="0 0 0" />
+      <geometry>
+        <box size="0.055 0.075 0.04" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    </link>
+  <link name="right_side_door">
+    <visual name="glass_panel">
+      <origin xyz="-0.525 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.965 0.018 2.025" />
+        </geometry>
+      <material name="slightly_blue_gray_transparent_glass">
+        <color rgba="0.55 0.78 0.88 0.34" />
+        </material>
+      </visual>
+    <visual name="hinge_stile">
+      <origin xyz="-0.0275 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.055 0.06 2.11" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    <visual name="latch_stile">
+      <origin xyz="-1.0225 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.055 0.06 2.11" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    <visual name="top_rail">
+      <origin xyz="-0.525 0 1.0275" rpy="0 0 0" />
+      <geometry>
+        <box size="1.05 0.06 0.055" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    <visual name="bottom_rail">
+      <origin xyz="-0.525 0 -1.0275" rpy="0 0 0" />
+      <geometry>
+        <box size="1.05 0.06 0.055" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    <visual name="pull_handle">
+      <origin xyz="-0.85 -0.078 0" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.016" length="0.82" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    <visual name="handle_upper_standoff">
+      <origin xyz="-0.85 -0.043 0.3" rpy="0 0 0" />
+      <geometry>
+        <box size="0.055 0.075 0.04" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    <visual name="handle_lower_standoff">
+      <origin xyz="-0.85 -0.043 -0.3" rpy="0 0 0" />
+      <geometry>
+        <box size="0.055 0.075 0.04" />
+        </geometry>
+      <material name="dark_gray_powder_coated_metal">
+        <color rgba="0.08 0.085 0.09 1" />
+        </material>
+      </visual>
+    </link>
+  <link name="sensor">
+    <visual name="sensor_box">
+      <geometry>
+        <box size="0.38 0.08 0.07" />
+        </geometry>
+      <material name="black_sensor_plastic">
+        <color rgba="0.005 0.005 0.006 1" />
+        </material>
+      </visual>
+    <visual name="sensor_lens">
+      <origin xyz="0 -0.045 -0.003" rpy="0 0 0" />
+      <geometry>
+        <box size="0.18 0.01 0.03" />
+        </geometry>
+      <material name="slightly_blue_gray_transparent_glass">
+        <color rgba="0.55 0.78 0.88 0.34" />
+        </material>
+      </visual>
+    </link>
+  <joint name="frame_to_left_sliding_leaf" type="prismatic">
+    <origin xyz="-0.94 0 1.135" rpy="0 0 0" />
+    <parent link="frame" />
+    <child link="left_sliding_leaf" />
+    <axis xyz="-1 0 0" />
+    <limit effort="180" velocity="0.45" lower="-0.2" upper="0.07" />
+    </joint>
+  <joint name="frame_to_right_sliding_leaf" type="prismatic">
+    <origin xyz="0.94 0 1.135" rpy="0 0 0" />
+    <parent link="frame" />
+    <child link="right_sliding_leaf" />
+    <axis xyz="1 0 0" />
+    <limit effort="180" velocity="0.45" lower="-0.2" upper="0.07" />
+    </joint>
+  <joint name="frame_to_left_side_door" type="revolute">
+    <origin xyz="-2.9 -0.11 1.135" rpy="0 0 0" />
+    <parent link="frame" />
+    <child link="left_side_door" />
+    <axis xyz="0 0 -1" />
+    <limit effort="35" velocity="1" lower="-0.38" upper="0.7" />
+    </joint>
+  <joint name="frame_to_right_side_door" type="revolute">
+    <origin xyz="2.9 -0.11 1.135" rpy="0 0 0" />
+    <parent link="frame" />
+    <child link="right_side_door" />
+    <axis xyz="0 0 1" />
+    <limit effort="35" velocity="1" lower="-0.38" upper="0.7" />
+    </joint>
+  <joint name="frame_to_sensor" type="fixed">
+    <origin xyz="0 -0.13 2.295" rpy="0 0 0" />
+    <parent link="frame" />
+    <child link="sensor" />
+    </joint>
+  </robot>

@@ -1,0 +1,537 @@
+<robot name="automatic_glass_entrance">
+  <material name="champagne_aluminum">
+    <color rgba="0.78 0.69 0.52 1" />
+    </material>
+  <material name="blue_gray_transparent_glass">
+    <color rgba="0.58 0.78 0.92 0.34" />
+    </material>
+  <material name="dark_center_gasket">
+    <color rgba="0.05 0.055 0.055 1" />
+    </material>
+  <material name="black_sensor_module">
+    <color rgba="0.035 0.036 0.04 1" />
+    </material>
+  <material name="sensor_lens_glass">
+    <color rgba="0.14 0.18 0.2 0.86" />
+    </material>
+  <link name="frame">
+    <visual name="lower_threshold">
+      <origin xyz="0 0 0.05" rpy="0 0 0" />
+      <geometry>
+        <box size="6.1 0.14 0.1" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="top_header">
+      <origin xyz="0 0 2.18" rpy="0 0 0" />
+      <geometry>
+        <box size="6.1 0.14 0.16" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="outer_top_rail">
+      <origin xyz="0 0 3.15" rpy="0 0 0" />
+      <geometry>
+        <box size="6.1 0.14 0.1" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="left_outer_jamb">
+      <origin xyz="-3 0 1.6" rpy="0 0 0" />
+      <geometry>
+        <box size="0.1 0.14 3.2" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="left_center_jamb">
+      <origin xyz="-1.9 0 1.6" rpy="0 0 0" />
+      <geometry>
+        <box size="0.1 0.14 3.2" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="right_center_jamb">
+      <origin xyz="1.9 0 1.6" rpy="0 0 0" />
+      <geometry>
+        <box size="0.1 0.14 3.2" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="right_outer_jamb">
+      <origin xyz="3 0 1.6" rpy="0 0 0" />
+      <geometry>
+        <box size="0.1 0.14 3.2" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="lower_track_rail">
+      <origin xyz="0 -0.036 0.118" rpy="0 0 0" />
+      <geometry>
+        <box size="3.76 0.1 0.036" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="upper_track_rail">
+      <origin xyz="0 -0.036 2.076" rpy="0 0 0" />
+      <geometry>
+        <box size="3.76 0.11 0.048" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="center_meeting_guide">
+      <origin xyz="0 -0.036 0.18" rpy="0 0 0" />
+      <geometry>
+        <box size="0.07 0.095 0.16" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="upper_meeting_guide">
+      <origin xyz="0 -0.036 2.035" rpy="0 0 0" />
+      <geometry>
+        <box size="0.07 0.095 0.13" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="transom_mullion_0">
+      <origin xyz="-1.9 0 2.68" rpy="0 0 0" />
+      <geometry>
+        <box size="0.08 0.1288 0.89" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="center_transom_mullion">
+      <origin xyz="0 0 2.68" rpy="0 0 0" />
+      <geometry>
+        <box size="0.08 0.1288 0.89" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="transom_mullion_1">
+      <origin xyz="1.9 0 2.68" rpy="0 0 0" />
+      <geometry>
+        <box size="0.08 0.1288 0.89" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="transom_glass_0">
+      <origin xyz="-2.45 -0.004 2.68" rpy="0 0 0" />
+      <geometry>
+        <box size="1.05 0.018 0.8" />
+        </geometry>
+      <material name="blue_gray_transparent_glass">
+        <color rgba="0.58 0.78 0.92 0.34" />
+        </material>
+      </visual>
+    <visual name="transom_glass_1">
+      <origin xyz="-0.95 -0.004 2.68" rpy="0 0 0" />
+      <geometry>
+        <box size="1.9 0.018 0.8" />
+        </geometry>
+      <material name="blue_gray_transparent_glass">
+        <color rgba="0.58 0.78 0.92 0.34" />
+        </material>
+      </visual>
+    <visual name="transom_glass_2">
+      <origin xyz="0.95 -0.004 2.68" rpy="0 0 0" />
+      <geometry>
+        <box size="1.9 0.018 0.8" />
+        </geometry>
+      <material name="blue_gray_transparent_glass">
+        <color rgba="0.58 0.78 0.92 0.34" />
+        </material>
+      </visual>
+    <visual name="transom_glass_3">
+      <origin xyz="2.45 -0.004 2.68" rpy="0 0 0" />
+      <geometry>
+        <box size="1.05 0.018 0.8" />
+        </geometry>
+      <material name="blue_gray_transparent_glass">
+        <color rgba="0.58 0.78 0.92 0.34" />
+        </material>
+      </visual>
+    <visual name="sensor_module">
+      <origin xyz="0 -0.096 2.17" rpy="0 0 0" />
+      <geometry>
+        <box size="0.28 0.052 0.07" />
+        </geometry>
+      <material name="black_sensor_module">
+        <color rgba="0.035 0.036 0.04 1" />
+        </material>
+      </visual>
+    <visual name="sensor_lens">
+      <origin xyz="0 -0.124 2.17" rpy="0 0 0" />
+      <geometry>
+        <box size="0.135 0.012 0.03" />
+        </geometry>
+      <material name="sensor_lens_glass">
+        <color rgba="0.14 0.18 0.2 0.86" />
+        </material>
+      </visual>
+    </link>
+  <link name="left_sliding_leaf">
+    <visual name="top_rail">
+      <origin xyz="0 0 0.908" rpy="0 0 0" />
+      <geometry>
+        <box size="1.28 0.06 0.064" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="bottom_rail">
+      <origin xyz="0 0 -0.908" rpy="0 0 0" />
+      <geometry>
+        <box size="1.28 0.06 0.064" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="outer_stile">
+      <origin xyz="-0.608 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.064 0.06 1.88" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="meeting_stile">
+      <origin xyz="0.608 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0768 0.06 1.88" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="center_seal">
+      <origin xyz="0.622 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.018 0.0624 1.8608" />
+        </geometry>
+      <material name="dark_center_gasket">
+        <color rgba="0.05 0.055 0.055 1" />
+        </material>
+      </visual>
+    <visual name="glass_panel">
+      <geometry>
+        <box size="1.18 0.018 1.782" />
+        </geometry>
+      <material name="blue_gray_transparent_glass">
+        <color rgba="0.58 0.78 0.92 0.34" />
+        </material>
+      </visual>
+    </link>
+  <link name="right_sliding_leaf">
+    <visual name="top_rail">
+      <origin xyz="0 0 0.908" rpy="0 0 0" />
+      <geometry>
+        <box size="1.28 0.06 0.064" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="bottom_rail">
+      <origin xyz="0 0 -0.908" rpy="0 0 0" />
+      <geometry>
+        <box size="1.28 0.06 0.064" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="outer_stile">
+      <origin xyz="0.608 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.064 0.06 1.88" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="meeting_stile">
+      <origin xyz="-0.608 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0768 0.06 1.88" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="center_seal">
+      <origin xyz="-0.622 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.018 0.0624 1.8608" />
+        </geometry>
+      <material name="dark_center_gasket">
+        <color rgba="0.05 0.055 0.055 1" />
+        </material>
+      </visual>
+    <visual name="glass_panel">
+      <geometry>
+        <box size="1.18 0.018 1.782" />
+        </geometry>
+      <material name="blue_gray_transparent_glass">
+        <color rgba="0.58 0.78 0.92 0.34" />
+        </material>
+      </visual>
+    </link>
+  <link name="left_side_door">
+    <visual name="top_rail">
+      <origin xyz="0.488 0 0.97" rpy="0 0 0" />
+      <geometry>
+        <box size="0.976 0.055 0.06" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="bottom_rail">
+      <origin xyz="0.488 0 -0.97" rpy="0 0 0" />
+      <geometry>
+        <box size="0.976 0.055 0.06" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="hinge_stile">
+      <origin xyz="0.03 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.06 0.055 2" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="latch_stile">
+      <origin xyz="0.946 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.06 0.055 2" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="glass_panel">
+      <origin xyz="0.488 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.882 0.0187 1.906" />
+        </geometry>
+      <material name="blue_gray_transparent_glass">
+        <color rgba="0.58 0.78 0.92 0.34" />
+        </material>
+      </visual>
+    <visual name="handle_bar">
+      <origin xyz="0.796 -0.056 -0.03" rpy="0 0 0" />
+      <geometry>
+        <box size="0.035 0.035 0.62" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="handle_mount_0">
+      <origin xyz="0.796 -0.03 -0.28" rpy="0 0 0" />
+      <geometry>
+        <box size="0.09 0.045 0.04" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="handle_mount_1">
+      <origin xyz="0.796 -0.03 0.22" rpy="0 0 0" />
+      <geometry>
+        <box size="0.09 0.045 0.04" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="hinge_barrel_0">
+      <origin xyz="0 0 -0.58" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.024" length="0.3" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="hinge_barrel_1">
+      <geometry>
+        <cylinder radius="0.024" length="0.3" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="hinge_barrel_2">
+      <origin xyz="0 0 0.58" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.024" length="0.3" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    </link>
+  <link name="right_side_door">
+    <visual name="top_rail">
+      <origin xyz="-0.488 0 0.97" rpy="0 0 0" />
+      <geometry>
+        <box size="0.976 0.055 0.06" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="bottom_rail">
+      <origin xyz="-0.488 0 -0.97" rpy="0 0 0" />
+      <geometry>
+        <box size="0.976 0.055 0.06" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="hinge_stile">
+      <origin xyz="-0.03 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.06 0.055 2" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="latch_stile">
+      <origin xyz="-0.946 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.06 0.055 2" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="glass_panel">
+      <origin xyz="-0.488 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.882 0.0187 1.906" />
+        </geometry>
+      <material name="blue_gray_transparent_glass">
+        <color rgba="0.58 0.78 0.92 0.34" />
+        </material>
+      </visual>
+    <visual name="handle_bar">
+      <origin xyz="-0.796 -0.056 -0.03" rpy="0 0 0" />
+      <geometry>
+        <box size="0.035 0.035 0.62" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="handle_mount_0">
+      <origin xyz="-0.796 -0.03 -0.28" rpy="0 0 0" />
+      <geometry>
+        <box size="0.09 0.045 0.04" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="handle_mount_1">
+      <origin xyz="-0.796 -0.03 0.22" rpy="0 0 0" />
+      <geometry>
+        <box size="0.09 0.045 0.04" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="hinge_barrel_0">
+      <origin xyz="0 0 -0.58" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.024" length="0.3" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="hinge_barrel_1">
+      <geometry>
+        <cylinder radius="0.024" length="0.3" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    <visual name="hinge_barrel_2">
+      <origin xyz="0 0 0.58" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.024" length="0.3" />
+        </geometry>
+      <material name="champagne_aluminum">
+        <color rgba="0.78 0.69 0.52 1" />
+        </material>
+      </visual>
+    </link>
+  <joint name="left_leaf_slide" type="prismatic">
+    <origin xyz="-0.72 -0.035 1.076" rpy="0 0 0" />
+    <parent link="frame" />
+    <child link="left_sliding_leaf" />
+    <axis xyz="-1 0 0" />
+    <limit effort="90" velocity="0.55" lower="-0.07" upper="0.45" />
+    </joint>
+  <joint name="right_leaf_slide" type="prismatic">
+    <origin xyz="0.72 -0.035 1.076" rpy="0 0 0" />
+    <parent link="frame" />
+    <child link="right_sliding_leaf" />
+    <axis xyz="1 0 0" />
+    <limit effort="90" velocity="0.55" lower="-0.07" upper="0.45" />
+    </joint>
+  <joint name="left_side_hinge" type="revolute">
+    <origin xyz="-2.926 -0.04 1.1" rpy="0 0 0" />
+    <parent link="frame" />
+    <child link="left_side_door" />
+    <axis xyz="0 0 -1" />
+    <limit effort="35" velocity="1.2" lower="0" upper="1.25" />
+    </joint>
+  <joint name="right_side_hinge" type="revolute">
+    <origin xyz="2.926 -0.04 1.1" rpy="0 0 0" />
+    <parent link="frame" />
+    <child link="right_side_door" />
+    <axis xyz="0 0 1" />
+    <limit effort="35" velocity="1.2" lower="0" upper="1.25" />
+    </joint>
+  </robot>

@@ -47,6 +47,8 @@ IsaacGymEnvs/
 !/high-level/data/asset/door_set/wc4/
 !/high-level/data/asset/door_set/record_materialization/
 !/high-level/data/asset/door_set/record_materialization/**/*
+!/high-level/data/asset/door_set/door4/
+!/high-level/data/asset/door_set/door4/**/*
 
 # Node artifact files
 node_modules/

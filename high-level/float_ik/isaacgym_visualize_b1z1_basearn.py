@@ -963,7 +963,18 @@ def configure_mode_defaults(args):
         print("IK mode: disabling base pose demo so the world target stays fixed relative to the arm.")
 
 
-def setup_ik_controller(gym, sim, env, actor, asset, dof_names, lower, upper, args):
+def setup_ik_controller(
+    gym,
+    sim,
+    env,
+    actor,
+    asset,
+    dof_names,
+    lower,
+    upper,
+    args,
+    prepare_sim=True,
+):
     if not ik_requested(args):
         return None
 
@@ -973,7 +984,8 @@ def setup_ik_controller(gym, sim, env, actor, asset, dof_names, lower, upper, ar
     except ImportError as exc:
         raise RuntimeError("IK mode needs PyTorch and isaacgym.gymtorch in the active env") from exc
 
-    gym.prepare_sim(sim)
+    if prepare_sim:
+        gym.prepare_sim(sim)
     jacobian = gymtorch.wrap_tensor(gym.acquire_jacobian_tensor(sim, ARM_ACTOR_NAME))
     rb_states = gymtorch.wrap_tensor(gym.acquire_rigid_body_state_tensor(sim))
     dof_state_tensor = gymtorch.wrap_tensor(gym.acquire_dof_state_tensor(sim))

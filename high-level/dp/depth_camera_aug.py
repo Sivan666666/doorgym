@@ -17,7 +17,8 @@ DEPTH_CAMERA_RESOLUTION = [DEPTH_IMAGE_WIDTH, DEPTH_IMAGE_HEIGHT]
 @dataclass(frozen=True)
 class DepthNoiseConfig:
     enabled: bool = False
-    noise_prob: float = 0.35
+    noise_prob: float = 0.50
+    env_selected: bool | None = None
     gaussian_std_m: float = 0.005
     gaussian_distance_factor: float = 0.05
     edge_noise_prob: float = 0.10
@@ -34,7 +35,12 @@ class DepthNoiseConfig:
 def add_depth_aug_args(parser: Any) -> None:
     parser.add_argument("--enable_depth_noise", dest="enable_depth_noise", action="store_true", default=False)
     parser.add_argument("--no_enable_depth_noise", dest="enable_depth_noise", action="store_false")
-    parser.add_argument("--depth_noise_prob", type=float, default=0.35)
+    parser.add_argument(
+        "--depth_noise_prob",
+        type=float,
+        default=0.50,
+        help="Fraction of envs assigned persistent depth noise; selected envs apply noise to every frame.",
+    )
     parser.add_argument("--depth_gaussian_std_m", type=float, default=0.005)
     parser.add_argument("--depth_edge_noise_prob", type=float, default=0.10)
     parser.add_argument("--depth_hole_noise_prob", type=float, default=0.01)
@@ -49,7 +55,12 @@ def depth_aug_custom_parameters() -> list[dict[str, Any]]:
     return [
         {"name": "--enable_depth_noise", "dest": "enable_depth_noise", "action": "store_true", "default": False},
         {"name": "--no_enable_depth_noise", "dest": "enable_depth_noise", "action": "store_false"},
-        {"name": "--depth_noise_prob", "type": float, "default": 0.35},
+        {
+            "name": "--depth_noise_prob",
+            "type": float,
+            "default": 0.50,
+            "help": "Fraction of envs assigned persistent depth noise; selected envs apply noise to every frame.",
+        },
         {"name": "--depth_gaussian_std_m", "type": float, "default": 0.005},
         {"name": "--depth_edge_noise_prob", "type": float, "default": 0.10},
         {"name": "--depth_hole_noise_prob", "type": float, "default": 0.01},
@@ -68,7 +79,7 @@ def add_depth_aug_command_args(cmd: list[str], args: Any) -> None:
         cmd.append("--no_enable_depth_noise")
     cmd += [
         "--depth_noise_prob",
-        str(float(getattr(args, "depth_noise_prob", 0.35))),
+        str(float(getattr(args, "depth_noise_prob", 0.50))),
         "--depth_gaussian_std_m",
         str(float(getattr(args, "depth_gaussian_std_m", 0.005))),
         "--depth_edge_noise_prob",
@@ -90,10 +101,46 @@ def add_depth_aug_command_args(cmd: list[str], args: Any) -> None:
     ]
 
 
+def configure_depth_noise_for_env(args: Any) -> bool:
+    if hasattr(args, "depth_noise_env_selected"):
+        return bool(getattr(args, "depth_noise_env_selected"))
+
+    requested = bool(getattr(args, "enable_depth_noise", False))
+    probability = min(1.0, max(0.0, float(getattr(args, "depth_noise_prob", 0.50))))
+    num_envs = max(1, int(getattr(args, "num_envs", 1)))
+    env_index = min(num_envs - 1, max(0, int(getattr(args, "parallel_env_id", 0))))
+
+    selected_count = int(math.floor(probability * num_envs + 0.5))
+    if requested and probability > 0.0 and selected_count == 0:
+        selected_count = 1
+    if not requested:
+        selected_count = 0
+    selected_count = min(num_envs, max(0, selected_count))
+
+    selected = False
+    selected_env_ids: list[int] = []
+    if requested and selected_count > 0:
+        seed = int(getattr(args, "seed", 0)) & 0xFFFFFFFF
+        selection_rng = np.random.default_rng(np.random.SeedSequence([seed, 0xD3E7A5]))
+        selected_env_ids = sorted(
+            int(value)
+            for value in selection_rng.choice(num_envs, size=selected_count, replace=False).tolist()
+        )
+        selected = env_index in selected_env_ids
+
+    args.depth_noise_env_selected = bool(selected)
+    args.depth_noise_env_probability = float(probability)
+    args.depth_noise_selected_env_count = int(selected_count)
+    args.depth_noise_selection_mode = "fixed_env_subset"
+    return bool(selected)
+
+
 def depth_noise_config_from_args(args: Any) -> DepthNoiseConfig:
+    env_selected = configure_depth_noise_for_env(args)
     return DepthNoiseConfig(
         enabled=bool(getattr(args, "enable_depth_noise", False)),
-        noise_prob=float(getattr(args, "depth_noise_prob", 0.35)),
+        noise_prob=float(getattr(args, "depth_noise_prob", 0.50)),
+        env_selected=bool(env_selected),
         gaussian_std_m=float(getattr(args, "depth_gaussian_std_m", 0.005)),
         edge_noise_prob=float(getattr(args, "depth_edge_noise_prob", 0.10)),
         hole_noise_prob=float(getattr(args, "depth_hole_noise_prob", 0.01)),
@@ -109,8 +156,16 @@ def depth_aug_metadata_from_args(args: Any) -> dict[str, Any]:
         "image_width": DEPTH_IMAGE_WIDTH,
         "image_height": DEPTH_IMAGE_HEIGHT,
         "depth_noise_enabled": bool(cfg.enabled),
+        "depth_noise_selection": {
+            "mode": str(getattr(args, "depth_noise_selection_mode", "fixed_env_subset")),
+            "env_probability": float(getattr(args, "depth_noise_env_probability", cfg.noise_prob)),
+            "env_selected": bool(cfg.env_selected),
+            "selected_env_count": int(getattr(args, "depth_noise_selected_env_count", 0)),
+            "num_envs": int(getattr(args, "num_envs", 1)),
+        },
         "depth_noise_config": {
             "noise_prob": float(cfg.noise_prob),
+            "noise_prob_semantics": "fixed_env_fraction",
             "gaussian_std_m": float(cfg.gaussian_std_m),
             "gaussian_distance_factor": float(cfg.gaussian_distance_factor),
             "edge_noise_prob": float(cfg.edge_noise_prob),
@@ -180,6 +235,8 @@ def apply_depth_noise(depth_m: Any, rng: Any, cfg: DepthNoiseConfig | Mapping[st
     cfg = _config_from_mapping(cfg)
     if not cfg.enabled or cfg.noise_prob <= 0.0:
         return depth_m
+    if cfg.env_selected is False:
+        return depth_m
     if _is_torch_tensor(depth_m):
         return _apply_depth_noise_torch(depth_m, cfg, valid_mask)
     return _apply_depth_noise_numpy(depth_m, rng, cfg, valid_mask)
@@ -187,7 +244,9 @@ def apply_depth_noise(depth_m: Any, rng: Any, cfg: DepthNoiseConfig | Mapping[st
 
 def _apply_depth_noise_numpy(depth_m: Any, rng: Any, cfg: DepthNoiseConfig, valid_mask: Any = None):
     depth = np.asarray(depth_m, dtype=np.float32).copy()
-    if (rng.random() if rng is not None and hasattr(rng, "random") else np.random.random()) >= cfg.noise_prob:
+    if cfg.env_selected is None and (
+        rng.random() if rng is not None and hasattr(rng, "random") else np.random.random()
+    ) >= cfg.noise_prob:
         return depth
     valid = np.isfinite(depth) & (depth >= cfg.near_clip_m) & (depth <= cfg.far_clip_m)
     if valid_mask is not None:
@@ -240,13 +299,20 @@ def _dilate_bool_numpy(mask: np.ndarray, kernel_size: int) -> np.ndarray:
 def _apply_depth_noise_torch(depth_m: Any, cfg: DepthNoiseConfig, valid_mask: Any = None):
     torch, F = _torch_modules()
     depth = depth_m.clone()
-    if depth.ndim >= 3:
-        apply_shape = (*depth.shape[:-2], 1, 1)
+    if cfg.env_selected is None:
+        if depth.ndim >= 3:
+            apply_shape = (*depth.shape[:-2], 1, 1)
+        else:
+            apply_shape = (1,) * depth.ndim
+        apply_sample = torch.rand(apply_shape, device=depth.device) < float(cfg.noise_prob)
+        if not bool(torch.any(apply_sample).detach().cpu().item()):
+            return depth
     else:
-        apply_shape = (1,) * depth.ndim
-    apply_sample = torch.rand(apply_shape, device=depth.device) < float(cfg.noise_prob)
-    if not bool(torch.any(apply_sample).detach().cpu().item()):
-        return depth
+        apply_sample = torch.ones(
+            (*depth.shape[:-2], 1, 1) if depth.ndim >= 3 else (1,) * depth.ndim,
+            dtype=torch.bool,
+            device=depth.device,
+        )
     valid = torch.isfinite(depth) & (depth >= float(cfg.near_clip_m)) & (depth <= float(cfg.far_clip_m))
     valid = valid & apply_sample
     if valid_mask is not None:

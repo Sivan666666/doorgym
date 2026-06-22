@@ -1,0 +1,169 @@
+{
+  "wrist_ts": 12165.936151497925,
+  "front_ts": 12165.946579202126,
+  "dt_ms": 11.875860998770804,
+  "device_timestamp_dt_ms": 10.427704200992594,
+  "backend": "realsense_async",
+  "worker_mode": "process",
+  "single_duplicate": false,
+  "wrist": {
+    "serial": "261222075130",
+    "name": "wrist",
+    "timestamp_s": 12165.936151497925,
+    "arrival_s": 12165.995279626,
+    "age_ms": 34.767391998684616,
+    "frame_count": 181,
+    "depth_scale": 0.0010000000474974513,
+    "filters": true,
+    "depth_inpaint_mode": "rgb_guided",
+    "spatial_magnitude": 2,
+    "worker_mode": "process",
+    "align_depth_to": "color",
+    "crop": {
+      "left": 60,
+      "right": 30,
+      "top": 30,
+      "bottom": 30
+    },
+    "crop_shape_hw": [
+      420,
+      550
+    ],
+    "output_shape_hw": [
+      480,
+      640
+    ],
+    "depth_clip_m": [
+      0.2,
+      1.5
+    ],
+    "device": {
+      "name": "Intel RealSense D435I",
+      "serial": "261222075130",
+      "firmware": "5.15.1.55",
+      "usb": "3.2",
+      "physical_port": "/sys/devices/platform/bus@0/3610000.usb/usb2/2-1/2-1.2/2-1.2:1.0/video4linux/video12",
+      "product_line": "D400"
+    },
+    "depth_min_m": 0.00011425781849538907,
+    "depth_max_m": 4.761000156402588,
+    "depth_mean_m": 0.47202038764953613,
+    "error": "",
+    "inpaint": {
+      "input_invalid_pct": 67.41558441558442,
+      "fillable_pct": 56.0961038961039,
+      "filled_pct": 56.0961038961039,
+      "remaining_invalid_pct": 11.319480519480521
+    }
+  },
+  "front": {
+    "serial": "261222075566",
+    "name": "front",
+    "timestamp_s": 12165.946579202126,
+    "arrival_s": 12166.007155487,
+    "age_ms": 27.603692000411684,
+    "frame_count": 141,
+    "depth_scale": 0.0010000000474974513,
+    "filters": true,
+    "depth_inpaint_mode": "rgb_guided",
+    "spatial_magnitude": 2,
+    "worker_mode": "process",
+    "align_depth_to": "color",
+    "crop": {
+      "left": 60,
+      "right": 30,
+      "top": 30,
+      "bottom": 30
+    },
+    "crop_shape_hw": [
+      420,
+      550
+    ],
+    "output_shape_hw": [
+      480,
+      640
+    ],
+    "depth_clip_m": [
+      0.2,
+      1.5
+    ],
+    "device": {
+      "name": "Intel RealSense D435I",
+      "serial": "261222075566",
+      "firmware": "5.15.1.55",
+      "usb": "3.2",
+      "physical_port": "/sys/devices/platform/bus@0/3610000.usb/usb2/2-1/2-1.1/2-1.1:1.0/video4linux/video1",
+      "product_line": "D400"
+    },
+    "depth_min_m": 0.0003955078427679837,
+    "depth_max_m": 10.585000038146973,
+    "depth_mean_m": 2.44954776763916,
+    "error": "",
+    "inpaint": {
+      "input_invalid_pct": 37.25454545454546,
+      "fillable_pct": 33.883116883116884,
+      "filled_pct": 33.883116883116884,
+      "remaining_invalid_pct": 3.3714285714285737
+    }
+  },
+  "resolution": [
+    640,
+    480
+  ],
+  "fps": 30,
+  "align_depth_to": "color",
+  "crop": {
+    "left": 60,
+    "right": 30,
+    "top": 30,
+    "bottom": 30
+  },
+  "depth_clip_m": [
+    0.2,
+    1.5
+  ],
+  "spatial_magnitude": 2,
+  "depth_inpaint_mode": "rgb_guided",
+  "inpaint": {
+    "mode": "rgb_guided",
+    "batch_size": 2,
+    "input_shape_hw": [
+      420,
+      550
+    ],
+    "output_shape_hw": [
+      480,
+      640
+    ],
+    "max_distance_px": 64.0,
+    "iterations": 2,
+    "rgb_sigma": 0.1,
+    "processing_downsample": 4,
+    "propagation_steps": 16,
+    "mask_prep_ms": 1.7710040010570083,
+    "prep_ms": 13.26582799993048,
+    "gpu_ms": 235.33268699975451,
+    "postprocess_ms": 21.04356400013785,
+    "total_ms": 271.47871700071846,
+    "timing": {
+      "samples": 1,
+      "p50_ms": 271.47871700071846,
+      "p95_ms": 271.47871700071846,
+      "max_ms": 271.47871700071846
+    },
+    "per_camera": {
+      "wrist": {
+        "input_invalid_pct": 67.41558441558442,
+        "fillable_pct": 56.0961038961039,
+        "filled_pct": 56.0961038961039,
+        "remaining_invalid_pct": 11.319480519480521
+      },
+      "front": {
+        "input_invalid_pct": 37.25454545454546,
+        "fillable_pct": 33.883116883116884,
+        "filled_pct": 33.883116883116884,
+        "remaining_invalid_pct": 3.3714285714285737
+      }
+    }
+  }
+}

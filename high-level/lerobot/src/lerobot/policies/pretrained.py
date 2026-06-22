@@ -19,7 +19,7 @@ import os
 from importlib.resources import files
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TypedDict, TypeVar
+from typing import Any, TypedDict, TypeVar
 
 import packaging
 import safetensors
@@ -31,8 +31,17 @@ from torch import Tensor, nn
 from typing_extensions import Unpack
 
 from lerobot.configs.policies import PreTrainedConfig
-from lerobot.configs.train import TrainPipelineConfig
-from lerobot.policies.utils import log_model_loading_keys
+if os.environ.get("LEROBOT_MINIMAL_ACT_IMPORTS") == "1":
+    TrainPipelineConfig = Any
+
+    def log_model_loading_keys(missing_keys: list[str], unexpected_keys: list[str]) -> None:
+        if missing_keys:
+            logging.warning(f"Missing key(s) when loading model: {missing_keys}")
+        if unexpected_keys:
+            logging.warning(f"Unexpected key(s) when loading model: {unexpected_keys}")
+else:
+    from lerobot.configs.train import TrainPipelineConfig
+    from lerobot.policies.utils import log_model_loading_keys
 from lerobot.utils.hub import HubMixin
 
 T = TypeVar("T", bound="PreTrainedPolicy")

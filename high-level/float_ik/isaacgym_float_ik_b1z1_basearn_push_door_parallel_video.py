@@ -13,6 +13,7 @@ import json
 import math
 import colorsys
 import copy
+import re
 import shutil
 import sys
 import tempfile
@@ -133,6 +134,72 @@ G1_RIGHT_ARM_IK_DOF_NAMES = {
     "right_wrist_yaw_joint",
 }
 
+B1_FULL_BODY_ASSET_ROOT = HIGH_LEVEL_ROOT / "data" / "asset" / "b1z1-col"
+B1_FULL_BODY_ASSET_FILE = "urdf/b1z1.urdf"
+B1_BODY_VISUAL_LINKS = {
+    "base",
+    "trunk",
+    "imu_link",
+    "FR_hip",
+    "FR_thigh",
+    "FR_calf",
+    "FR_foot",
+    "FL_hip",
+    "FL_thigh",
+    "FL_calf",
+    "FL_foot",
+    "RR_hip",
+    "RR_thigh",
+    "RR_calf",
+    "RR_foot",
+    "RL_hip",
+    "RL_thigh",
+    "RL_calf",
+    "RL_foot",
+}
+B1_LEG_DOF_NAMES = [
+    "FR_hip_joint",
+    "FR_thigh_joint",
+    "FR_calf_joint",
+    "FL_hip_joint",
+    "FL_thigh_joint",
+    "FL_calf_joint",
+    "RR_hip_joint",
+    "RR_thigh_joint",
+    "RR_calf_joint",
+    "RL_hip_joint",
+    "RL_thigh_joint",
+    "RL_calf_joint",
+]
+B1_DEFAULT_LEG_JOINT_ANGLES = {
+    name: float(B1Z1_DEFAULT_DOF_POS[idx])
+    for idx, name in enumerate(B1_LEG_DOF_NAMES)
+}
+
+SCRIPTED_TRAJECTORY_STEP_FIELDS = (
+    "walk_steps",
+    "initial_hold_steps",
+    "initial_hold_move_steps",
+    "grasp_steps",
+    "grasp_hold_steps",
+    "gripper_close_steps",
+    "handle_rotate_steps",
+    "door_push_steps",
+    "return_home_steps",
+    "hold_steps",
+    "gripper_loosen_steps",
+)
+SCRIPTED_TRAJECTORY_PHASE_FIELDS = (
+    "walk_steps",
+    "initial_hold_steps",
+    "grasp_steps",
+    "grasp_hold_steps",
+    "gripper_close_steps",
+    "handle_rotate_steps",
+    "door_push_steps",
+    "return_home_steps",
+)
+
 ROBOT_BODY_DEFAULT_DOOR_PREFER = {
     "g1": "rec_using-the-reference-image-for-overall-proportion_20260610_152759_469492_cdfe437e",
     "unitree_g1": "rec_using-the-reference-image-for-overall-proportion_20260610_152759_469492_cdfe437e",
@@ -146,6 +213,11 @@ ROBOT_BODY_DEFAULT_DOOR_PREFER = {
     "a2wz1": "rec_using-the-reference-image-for-overall-proportion_20260610_161038_309387_2dbe2f90",
     "a2w": "rec_using-the-reference-image-for-overall-proportion_20260610_161038_309387_2dbe2f90",
 }
+DOOR_CFG_DEFAULT_PREFER = {
+    "b1z1_opendoor_door4.yaml": (
+        "rec_using-the-reference-image-for-proportions-and-la_20260614_161003_946126_175e0acb"
+    ),
+}
 
 
 def is_g1_robot_body(args) -> bool:
@@ -158,6 +230,61 @@ def is_scout_robot_body_name(robot_body: str) -> bool:
 
 def is_a2w_robot_body_name(robot_body: str) -> bool:
     return str(robot_body).lower() in ("a2w_z1", "a2wz1", "a2w")
+
+
+def apply_scripted_trajectory_speed_scale(args, explicit_cli_flags):
+    speed_scale = float(getattr(args, "scripted_trajectory_speed_scale", 1.0))
+    if speed_scale <= 0.0:
+        raise ValueError("--scripted_trajectory_speed_scale must be greater than 0.")
+    if abs(speed_scale - 1.0) <= 1.0e-6:
+        return
+
+    changes = []
+    for field in SCRIPTED_TRAJECTORY_STEP_FIELDS:
+        old_value = int(getattr(args, field))
+        new_value = max(1, int(round(old_value / speed_scale)))
+        setattr(args, field, new_value)
+        changes.append(f"{field}:{old_value}->{new_value}")
+
+    args.initial_hold_move_steps = min(
+        int(args.initial_hold_move_steps),
+        int(args.initial_hold_steps),
+    )
+    phase_steps = sum(int(getattr(args, field)) for field in SCRIPTED_TRAJECTORY_PHASE_FIELDS)
+    steps_was_set = any(
+        token == "--steps" or str(token).startswith("--steps=")
+        for token in explicit_cli_flags
+    )
+    if not steps_was_set:
+        old_steps = int(args.steps)
+        args.steps = phase_steps
+        changes.append(f"steps:{old_steps}->{args.steps}")
+
+    print(
+        f"Scripted trajectory speed={speed_scale:.3g}x: " + ", ".join(changes),
+        flush=True,
+    )
+
+
+def configure_visual_entrance_placement(args, door, env_index):
+    if str(door.spec.get("runtime_mapping", "")) != "first_two_dofs":
+        return
+    _world_min_x, world_max_x, _world_min_y, _world_max_y = dc.door_world_xy_bounds_from_bbox(args, door)
+    robot_y = dc.robot_y_for_door(args, door.handle_bounding, door)
+    start_clearance = max(0.0, float(getattr(args, "entrance_robot_start_clearance", 1.0)))
+    stop_clearance = max(0.0, float(getattr(args, "entrance_robot_stop_clearance", 0.20)))
+    args.robot_x = float(world_max_x) + float(args.robot_front_offset) + start_clearance
+    args.stop_distance = max(0.0, float(world_max_x) + stop_clearance - float(args.door_x))
+    args.pass_through_door = False
+    args.push_base_distance = 0.0
+    if int(env_index) < 4:
+        print(
+            f"visual_entrance_placement env={env_index} door={door.spec.get('name')} "
+            f"world_max_x={world_max_x:.3f} robot_x={float(args.robot_x):.3f} "
+            f"robot_y={robot_y:.3f} rightmost_handle={door.spec.get('robot_alignment_handle')} "
+            f"stop_distance={float(args.stop_distance):.3f}",
+            flush=True,
+        )
 
 
 def indent_xml(elem, level=0):
@@ -189,14 +316,16 @@ def scout_package_mesh_path(package_root: Path, filename: str) -> Path:
 
 
 def parse_origin_xyz_rpy(origin_elem):
+    def parse_vector(text):
+        values = re.findall(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?", str(text))
+        if len(values) < 3:
+            return np.zeros(3, dtype=np.float64)
+        return np.asarray([float(value) for value in values[:3]], dtype=np.float64)
+
     if origin_elem is None:
         return np.zeros(3, dtype=np.float64), np.zeros(3, dtype=np.float64)
-    xyz = np.fromstring(origin_elem.get("xyz", "0 0 0"), sep=" ", dtype=np.float64)
-    rpy = np.fromstring(origin_elem.get("rpy", "0 0 0"), sep=" ", dtype=np.float64)
-    if xyz.size != 3:
-        xyz = np.zeros(3, dtype=np.float64)
-    if rpy.size != 3:
-        rpy = np.zeros(3, dtype=np.float64)
+    xyz = parse_vector(origin_elem.get("xyz", "0 0 0"))
+    rpy = parse_vector(origin_elem.get("rpy", "0 0 0"))
     return xyz, rpy
 
 
@@ -259,8 +388,15 @@ def origin_from_matrix(mat):
     return origin
 
 
-def flatten_visual_urdf(root: ET.Element, root_link_name: str, robot_name: str, default_joint_angles=None) -> ET.Element:
+def flatten_visual_urdf(
+    root: ET.Element,
+    root_link_name: str,
+    robot_name: str,
+    default_joint_angles=None,
+    keep_links=None,
+) -> ET.Element:
     default_joint_angles = default_joint_angles or {}
+    keep_links = None if keep_links is None else set(keep_links)
     parent_joints = {}
     for joint in root.findall("joint"):
         parent = joint.find("parent")
@@ -315,6 +451,8 @@ def flatten_visual_urdf(root: ET.Element, root_link_name: str, robot_name: str, 
 
     for link in root.findall("link"):
         link_name = link.get("name", root_link_name)
+        if keep_links is not None and link_name not in keep_links:
+            continue
         root_to_link = link_to_root(link_name)
         for visual in link.findall("visual"):
             flat_visual = copy.deepcopy(visual)
@@ -330,6 +468,31 @@ def flatten_visual_urdf(root: ET.Element, root_link_name: str, robot_name: str, 
 
 def flatten_scout_visual_urdf(root: ET.Element) -> ET.Element:
     return flatten_visual_urdf(root, "base_link", "scout_mini_visual_flat")
+
+
+def build_b1_full_body_visual_asset_root(args, temp_root: Path) -> tuple[Path, str]:
+    source_root = Path(args.b1_full_body_asset_root).expanduser().resolve()
+    source_urdf = source_root / args.b1_full_body_asset_file
+    if not source_urdf.exists():
+        raise FileNotFoundError(f"B1 full-body URDF not found: {source_urdf}")
+
+    out_root = Path(temp_root) / "b1_full_body_visual_assets"
+    out_urdf = out_root / "urdf" / "b1_full_body_visual_flat.urdf"
+    out_urdf.parent.mkdir(parents=True, exist_ok=True)
+    base_ik.populate_mesh_dir(source_root / "meshes", out_root / "meshes")
+
+    root = ET.parse(source_urdf).getroot()
+    flat_root = flatten_visual_urdf(
+        root,
+        root_link_name="base",
+        robot_name="b1_full_body_visual_flat",
+        default_joint_angles=B1_DEFAULT_LEG_JOINT_ANGLES,
+        keep_links=B1_BODY_VISUAL_LINKS,
+    )
+    indent_xml(flat_root)
+    ET.ElementTree(flat_root).write(out_urdf, encoding="utf-8", xml_declaration=True)
+    print(f"Built B1 full-body video visual asset: {out_urdf}", flush=True)
+    return out_root, "urdf/b1_full_body_visual_flat.urdf"
 
 
 def build_scout_base_asset_root(args, temp_root: Path) -> tuple[Path, str]:
@@ -431,7 +594,33 @@ def build_a2w_video_asset_root(args, temp_root: Path) -> tuple[Path, str, str]:
 def load_video_robot_assets(gym, sim, args, temp_root: Path):
     robot_body = str(getattr(args, "robot_body", "b1z1")).lower()
     if robot_body in ("b1z1", "b1", "b1z1_base"):
-        return base_ik.load_robot_assets(gym, sim, args, temp_root)
+        base_root, base_file = build_b1_full_body_visual_asset_root(args, temp_root)
+        base_asset = base_ik.load_asset_with_visual_flip(
+            gym,
+            sim,
+            base_root,
+            base_file,
+            args,
+            False,
+            "B1 full-body visual actor",
+        )
+        source_asset_root = Path(args.asset_root).expanduser().resolve()
+        split_root, _base_file, arm_file = base_ik.build_split_asset_root(
+            source_asset_root,
+            args.asset_file,
+            temp_root,
+            align_arm_gripper_collisions=not bool(getattr(args, "disable_arm_visual_flip", False)),
+        )
+        arm_asset = base_ik.load_asset_with_visual_flip(
+            gym,
+            sim,
+            split_root,
+            arm_file,
+            args,
+            not bool(getattr(args, "disable_arm_visual_flip", False)),
+            "Z1 arm actor",
+        )
+        return base_asset, arm_asset
     supported_bodies = (
         "a2w",
         "a2w_z1",
@@ -545,6 +734,17 @@ def parse_args():
             {"name": "--asset_root", "type": str, "default": str(base_ik.DEFAULT_ASSET_ROOT)},
             {"name": "--asset_file", "type": str, "default": base_ik.DEFAULT_ASSET_FILE},
             {
+                "name": "--b1_full_body_asset_root",
+                "type": str,
+                "default": str(B1_FULL_BODY_ASSET_ROOT),
+                "help": "Source asset used to build the video-only complete B1 visual actor.",
+            },
+            {
+                "name": "--b1_full_body_asset_file",
+                "type": str,
+                "default": B1_FULL_BODY_ASSET_FILE,
+            },
+            {
                 "name": "--robot_body",
                 "type": str,
                 "default": "b1z1",
@@ -601,6 +801,12 @@ def parse_args():
             },
             {"name": "--rl_device", "type": str, "default": "cuda:0"},
             {"name": "--num_envs", "type": int, "default": 1024},
+            {
+                "name": "--env_spacing",
+                "type": float,
+                "default": 5.0,
+                "help": "Center-to-center spacing of parallel environments.",
+            },
             {"name": "--steps", "type": int, "default": 2405},
             {"name": "--seed", "type": int, "default": -1},
             {"name": "--door_cfg", "type": str, "default": str(DEFAULT_DOOR_CFG)},
@@ -653,9 +859,15 @@ def parse_args():
                 "name": "--robot_y_alignment",
                 "type": str,
                 "default": "auto",
-                "help": "How to place the robot in Y relative to each door: auto, handle, door_center, or door_y. Auto centers generated rec_ doors and keeps legacy doors on door_y.",
+                "help": "How to place the robot in Y relative to each door: auto, handle, door_center, or door_y. Auto uses an asset's explicit handle alignment when available, otherwise centers generated rec_ doors and keeps legacy doors on door_y.",
             },
             {"name": "--robot_z", "type": float, "default": 0.60},
+            {
+                "name": "--b1_robot_z",
+                "type": float,
+                "default": 0.50,
+                "help": "Default B1 root height for --robot_body b1z1 when --robot_z is not explicitly set.",
+            },
             {
                 "name": "--scout_robot_z",
                 "type": float,
@@ -690,6 +902,8 @@ def parse_args():
             {"name": "--robot_front_offset", "type": float, "default": 0.55},
             {"name": "--robot_rear_offset", "type": float, "default": 0.65},
             {"name": "--stop_distance", "type": float, "default": 0.25},
+            {"name": "--entrance_robot_start_clearance", "type": float, "default": 1.0},
+            {"name": "--entrance_robot_stop_clearance", "type": float, "default": 0.20},
             {"name": "--push_base_distance", "type": float, "default": 0.35},
             {"name": "--base_push_time_scale", "type": float, "default": 1.35},
             {"name": "--door_pass_clearance", "type": float, "default": 0.55},
@@ -701,16 +915,24 @@ def parse_args():
             },
             {"name": "--push_base_yaw_delta", "type": float, "default": 0.0},
             {"name": "--walk_steps", "type": int, "default": 260},
+            {"name": "--walk_min_speed", "type": float, "default": 0.20},
+            {"name": "--no_dynamic_walk_steps", "action": "store_true"},
             {"name": "--initial_hold_steps", "type": int, "default": 150},
             {"name": "--initial_hold_move_steps", "type": int, "default": 100},
-            {"name": "--grasp_steps", "type": int, "default": 150},
-            {"name": "--grasp_hold_steps", "type": int, "default": 5},
-            {"name": "--gripper_close_steps", "type": int, "default": 100},
-            {"name": "--handle_rotate_steps", "type": int, "default": 300},
-            {"name": "--door_push_steps", "type": int, "default": 1080},
-            {"name": "--return_home_steps", "type": int, "default": 360},
+            {"name": "--grasp_steps", "type": int, "default": 50},
+            {"name": "--grasp_hold_steps", "type": int, "default": 0},
+            {"name": "--gripper_close_steps", "type": int, "default": 50},
+            {"name": "--handle_rotate_steps", "type": int, "default": 100},
+            {"name": "--door_push_steps", "type": int, "default": 300},
+            {"name": "--return_home_steps", "type": int, "default": 150},
             {"name": "--return_home_target_chase_alpha", "type": float, "default": 0.08},
             {"name": "--hold_steps", "type": int, "default": 300},
+            {
+                "name": "--scripted_trajectory_speed_scale",
+                "type": float,
+                "default": 1.0,
+                "help": "Scripted trajectory speed multiplier. For example, 1.5 or 2.0 shortens all phase durations while preserving their endpoints.",
+            },
             {"name": "--pregrasp_offset", "type": float, "default": 0.15},
             {"name": "--grasp_offset", "type": float, "default": 0.0},
             {"name": "--grasp_x_offset", "type": float, "default": -0.03},
@@ -722,8 +944,12 @@ def parse_args():
             {"name": "--no_ikpush_env_randomization", "action": "store_true"},
             {"name": "--ikpush_door_x_rand", "type": float, "default": 0.03},
             {"name": "--ikpush_door_y_rand", "type": float, "default": 0.03},
+            {"name": "--ikpush_door_wall_x_offset_rand", "type": float, "default": 0.03},
             {"name": "--ikpush_robot_x_rand", "type": float, "default": 0.03},
+            {"name": "--ikpush_robot_x_rand_min", "type": float, "default": -0.70},
+            {"name": "--ikpush_robot_x_rand_max", "type": float, "default": 0.0},
             {"name": "--ikpush_robot_y_rand", "type": float, "default": 0.04},
+            {"name": "--ikpush_robot_z_rand", "type": float, "default": 0.03},
             {"name": "--ikpush_robot_yaw_rand", "type": float, "default": 0.03},
             {"name": "--ikpush_pregrasp_offset_rand", "type": float, "default": 0.025},
             {"name": "--ikpush_grasp_x_offset_rand", "type": float, "default": 0.012},
@@ -836,9 +1062,11 @@ def parse_args():
             {"name": "--camera_display_interval", "type": int, "default": 1},
             {"name": "--camera_axis_scale", "type": float, "default": 0.10},
             {"name": "--camera_axis_thickness", "type": float, "default": 0.004},
-            {"name": "--wrist_camera_down_tilt", "type": float, "default": 0.20},
+            {"name": "--wrist_camera_yaw_deg", "type": float, "default": -90.0},
+            {"name": "--wrist_camera_pitch_deg", "type": float, "default": 0.0},
+            {"name": "--wrist_camera_roll_deg", "type": float, "default": -60.0},
             {"name": "--front_camera_yaw_deg", "type": float, "default": 0.0},
-            {"name": "--front_camera_pitch_deg", "type": float, "default": -30.0},
+            {"name": "--front_camera_pitch_deg", "type": float, "default": -45.0},
             {"name": "--front_camera_roll_deg", "type": float, "default": 0.0},
             *dc.depth_aug_custom_parameters(),
             {"name": "--record_dp_dataset", "action": "store_true"},
@@ -910,20 +1138,19 @@ def parse_args():
     # so keep these visualization helpers on by default and let --no_* flags opt out.
     argv = set(sys.argv[1:])
     robot_body = str(getattr(args, "robot_body", "b1z1")).lower()
+    if Path(args.door_cfg).name == "b1z1_opendoor_door4.yaml" and not any(
+        token == "--env_spacing" or token.startswith("--env_spacing=") for token in sys.argv[1:]
+    ):
+        args.env_spacing = 10.0
     robot_z_was_set = any(token == "--robot_z" or token.startswith("--robot_z=") for token in sys.argv[1:])
-    if is_scout_robot_body_name(robot_body) and not robot_z_was_set:
+    if robot_body in ("b1z1", "b1", "b1z1_base") and not robot_z_was_set:
+        args.robot_z = float(getattr(args, "b1_robot_z", 0.50))
+    elif is_scout_robot_body_name(robot_body) and not robot_z_was_set:
         args.robot_z = float(getattr(args, "scout_robot_z", 0.22))
     elif is_a2w_robot_body_name(robot_body) and not robot_z_was_set:
         args.robot_z = float(getattr(args, "a2w_robot_z", 0.60))
     elif is_g1_robot_body(args) and not robot_z_was_set:
         args.robot_z = float(getattr(args, "g1_robot_z", 0.80))
-    video_start_y_was_set = any(
-        token == "--video_start_y_offset" or token.startswith("--video_start_y_offset=")
-        for token in sys.argv[1:]
-    )
-    if is_scout_robot_body_name(robot_body) and not video_start_y_was_set:
-        args.video_start_y_offset = 0.0
-
     door_prefer_was_set = any(
         token == "--door_prefer_name" or token.startswith("--door_prefer_name=") for token in sys.argv[1:]
     )
@@ -932,7 +1159,9 @@ def parse_args():
         and not str(getattr(args, "door_name", "") or "")
         and int(getattr(args, "door_index", -1)) < 0
     ):
-        preferred = ROBOT_BODY_DEFAULT_DOOR_PREFER.get(robot_body)
+        preferred = DOOR_CFG_DEFAULT_PREFER.get(Path(args.door_cfg).name)
+        if preferred is None:
+            preferred = ROBOT_BODY_DEFAULT_DOOR_PREFER.get(robot_body)
         if preferred:
             args.door_prefer_name = preferred
             print(
@@ -1054,6 +1283,7 @@ def parse_args():
     args.base_motion_period = 1.0
     args.door_motion_sign = -1.0
     args.pass_through_door = not bool(args.no_pass_through_door)
+    apply_scripted_trajectory_speed_scale(args, argv)
     return args
 
 
@@ -1117,6 +1347,7 @@ clone_door_runtime = dc.clone_door_runtime
 resolve_seed = dc.resolve_seed
 seed_for_env = dc.seed_for_env
 sample_with_half_range = dc.sample_with_half_range
+sample_with_offset_range = dc.sample_with_offset_range
 
 
 IKPUSH_DEFAULT_ENV_RANGES = {
@@ -1137,6 +1368,7 @@ IKPUSH_ARG_FLAGS = {
     "grasp_z_offset": "--grasp_z_offset",
     "door_push_distance": "--door_push_distance",
     "handle_rotate_angle": "--handle_rotate_angle",
+    "door_wall_x_offset": "--door_wall_x_offset",
     "door_joint_friction": "--door_joint_friction",
     "door_joint_damping": "--door_joint_damping",
     "handle_joint_friction": "--handle_joint_friction",
@@ -1195,6 +1427,31 @@ def make_env_args(args, env_index):
         setattr(env_args, attr, value)
         sampled[attr] = value
 
+    def set_sampled_offset_range(attr, min_attr, max_attr, legacy_half_attr=None, lower=None, upper=None):
+        base_value = getattr(args, attr)
+        use_legacy_half_range = (
+            legacy_half_attr is not None
+            and dc.cli_flag_was_set(args, f"--{legacy_half_attr}")
+            and not dc.cli_flag_was_set(args, f"--{min_attr}")
+            and not dc.cli_flag_was_set(args, f"--{max_attr}")
+        )
+        if enabled:
+            if use_legacy_half_range:
+                value = sample_env_value(rng, args, attr, legacy_half_attr, lower=lower, upper=upper)
+            else:
+                value = sample_with_offset_range(
+                    rng,
+                    base_value,
+                    getattr(args, min_attr),
+                    getattr(args, max_attr),
+                    lower=lower,
+                    upper=upper,
+                )
+        else:
+            value = float(base_value)
+        setattr(env_args, attr, value)
+        sampled[attr] = value
+
     def set_fixed(attr):
         value = float(getattr(args, attr))
         setattr(env_args, attr, value)
@@ -1202,8 +1459,15 @@ def make_env_args(args, env_index):
 
     set_sampled("door_x", "ikpush_door_x_rand")
     set_sampled("door_y", "ikpush_door_y_rand")
-    set_sampled("robot_x", "ikpush_robot_x_rand")
+    set_sampled("door_wall_x_offset", "ikpush_door_wall_x_offset_rand")
+    set_sampled_offset_range(
+        "robot_x",
+        "ikpush_robot_x_rand_min",
+        "ikpush_robot_x_rand_max",
+        legacy_half_attr="ikpush_robot_x_rand",
+    )
     set_sampled("robot_y", "ikpush_robot_y_rand")
+    set_sampled("robot_z", "ikpush_robot_z_rand")
     set_sampled("robot_yaw", "ikpush_robot_yaw_rand")
     set_fixed("pregrasp_offset")
     set_fixed("grasp_x_offset")
@@ -1223,6 +1487,12 @@ def make_env_args(args, env_index):
         env_args.door_wall_color_g = float(wall_g)
         env_args.door_wall_color_b = float(wall_b)
         sampled["door_wall_color_rgb"] = [float(wall_r), float(wall_g), float(wall_b)]
+
+    depth_noise_selected = dc.configure_depth_noise_for_env(env_args)
+    sampled["depth_noise_selection_mode"] = str(env_args.depth_noise_selection_mode)
+    sampled["depth_noise_env_probability"] = float(env_args.depth_noise_env_probability)
+    sampled["depth_noise_selected_env_count"] = int(env_args.depth_noise_selected_env_count)
+    sampled["depth_noise_env_selected"] = bool(depth_noise_selected)
 
     env_args.ikpush_randomization_json = json.dumps(sampled, sort_keys=True)
     return env_args
@@ -1306,8 +1576,7 @@ def create_low_level_cameras(gym, env, arm_actor, actor_handles, args):
 
     cameras = {}
     if args.enable_wrist_camera:
-        wrist_rot = list(dc.DEFAULT_WRIST_CAMERA_CFG["rotation"])
-        wrist_rot[2] -= float(args.wrist_camera_down_tilt)
+        wrist_rot = dc.wrist_camera_rotation_radians_from_args(args)
         wrist_camera = None
         for link_name in (str(getattr(args, "g1_ee_link", "right_rubber_hand")), "right_wrist_yaw_link"):
             wrist_camera = attach_camera_to_actor_body(
@@ -1929,6 +2198,7 @@ def run_demo(
         dof_positions[gripper_idx] = args.gripper_open
 
     yaw_start, heading, base_start, base_stop = dc.compute_base_walk_targets(args, door)
+    dc.configure_dynamic_walk_steps(args, base_start, base_stop)
     base_push = compute_base_push_target(args, base_stop, heading)
     yaw_push = yaw_start + args.push_base_yaw_delta
     traj = {"base_xy": base_start.copy()}
@@ -2023,7 +2293,7 @@ def run_demo(
             alpha = float(traj.get("return_home_alpha", 0.0))
             dof_positions[:] = lerp(traj["return_home_start_dofs"], home_positions, alpha)
             ik_state.last_pos_error = 0.0
-        elif phase == "hold_home":
+        elif phase in ("walk", "hold_home"):
             dof_positions[:] = home_positions
             ik_state.last_pos_error = 0.0
         else:
@@ -2160,6 +2430,7 @@ def initialize_parallel_env_state(
         )
 
     yaw_start, heading, base_start, base_stop = dc.compute_base_walk_targets(args, door)
+    dc.configure_dynamic_walk_steps(args, base_start, base_stop, env_index=index)
     base_push = compute_base_push_target(args, base_stop, heading)
     return ParallelEnvState(
         index=int(index),
@@ -2209,6 +2480,7 @@ def create_parallel_env_states(
         door = clone_door_runtime(door_template)
         env_args = make_env_args(args, env_index)
         normalize_video_door_layout(door, env_args, env_index=env_index)
+        configure_visual_entrance_placement(env_args, door, env_index)
         env, arm_actor, actor_handles, door_actor, _ = create_parallel_env_actors(
             gym,
             sim,
@@ -2223,14 +2495,35 @@ def create_parallel_env_states(
         )
         created.append((env_index, env_args, env, arm_actor, actor_handles, door, door_actor))
 
-    env_states = []
-    for env_index, env_args, env, arm_actor, actor_handles, door, door_actor in created:
+    camera_handles_by_env = {}
+    for env_index, env_args, env, arm_actor, actor_handles, _door, _door_actor in created:
         camera_handles = {}
         if (env_args.show_camera_images or env_args.record_dp_dataset or env_args.dp_policy_checkpoint) and (
             env_args.enable_wrist_camera or env_args.enable_front_camera
         ):
             camera_handles = create_low_level_cameras(gym, env, arm_actor, actor_handles, env_args)
-        ik_state = base_ik.setup_ik_controller(gym, sim, env, arm_actor, arm_asset, dof_names, lower, upper, env_args)
+        camera_handles_by_env[env_index] = camera_handles
+
+    # Isaac Gym must finalize the complete parallel scene once, after every
+    # environment and actor has been created. Re-preparing the growing scene
+    # once per environment can corrupt GPU PhysX state at large env counts.
+    gym.prepare_sim(sim)
+
+    env_states = []
+    for env_index, env_args, env, arm_actor, actor_handles, door, door_actor in created:
+        camera_handles = camera_handles_by_env[env_index]
+        ik_state = base_ik.setup_ik_controller(
+            gym,
+            sim,
+            env,
+            arm_actor,
+            arm_asset,
+            dof_names,
+            lower,
+            upper,
+            env_args,
+            prepare_sim=False,
+        )
         dp_recorder = None
         if env_args.record_dp_dataset and env_index in record_env_ids:
             dp_recorder = dc.make_float_dp_recorder(
@@ -2622,7 +2915,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                 alpha = float(st.traj.get("return_home_alpha", 0.0))
                 st.dof_positions[:] = lerp(st.traj["return_home_start_dofs"], st.home_positions, alpha)
                 st.ik_state.last_pos_error = 0.0
-            elif phase == "hold_home":
+            elif phase in ("walk", "hold_home"):
                 st.dof_positions[:] = st.home_positions
                 st.ik_state.last_pos_error = 0.0
             else:
@@ -2633,7 +2926,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
         gym.refresh_jacobian_tensors(sim)
 
         for st in env_states:
-            if st.last_phase not in ("return_home", "hold_home"):
+            if st.last_phase not in ("walk", "return_home", "hold_home"):
                 update_arm_ik_targets_for_env(
                     gym,
                     st.env,
