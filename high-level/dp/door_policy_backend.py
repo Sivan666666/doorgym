@@ -437,6 +437,55 @@ def _image_to_chw_float(x: Any, *, required: bool = True) -> torch.Tensor:
     return tensor.clamp(0.0, 1.0).contiguous()
 
 
+def _image_to_chw_float_device(
+    x: Any,
+    device: Union[str, torch.device],
+    *,
+    required: bool = True,
+) -> torch.Tensor:
+    """Convert an image on its destination device.
+
+    Real deployment images are uint8 numpy arrays. Keeping them uint8 for the
+    CPU-to-CUDA copy cuts transfer volume by 4x compared with first expanding
+    them to float32 on the CPU. Conversion and normalization then happen on the
+    GPU without changing the policy input values.
+    """
+    device = torch.device(device)
+    if isinstance(x, torch.Tensor):
+        return _image_to_chw_float(x, required=required).to(device)
+    if x is None:
+        if required:
+            raise ValueError("Missing required image.")
+        return torch.zeros(3, IMAGE_HEIGHT, IMAGE_WIDTH, dtype=torch.float32, device=device)
+
+    arr = _as_numpy(x)
+    if arr.ndim == 2:
+        chw = np.ascontiguousarray(arr[None, ...])
+    elif arr.ndim == 3 and arr.shape[0] in (1, 3) and arr.shape[-1] not in (1, 3):
+        chw = np.ascontiguousarray(arr)
+    elif arr.ndim == 3:
+        chw = np.ascontiguousarray(np.transpose(arr[..., :3], (2, 0, 1)))
+    else:
+        raise ValueError(f"Unsupported image array shape: {arr.shape}")
+
+    integer_input = np.issubdtype(chw.dtype, np.integer)
+    tensor = torch.from_numpy(chw).to(device)
+    tensor = tensor.to(torch.float32)
+    if integer_input:
+        tensor.div_(255.0)
+    elif tensor.max().item() > 1.5:
+        tensor.div_(255.0)
+    if tensor.shape[0] == 1:
+        tensor = tensor.repeat(3, 1, 1)
+    if tensor.shape[-2:] != (IMAGE_HEIGHT, IMAGE_WIDTH):
+        tensor = F.interpolate(
+            tensor.unsqueeze(0),
+            size=(IMAGE_HEIGHT, IMAGE_WIDTH),
+            mode="nearest",
+        ).squeeze(0)
+    return tensor.clamp_(0.0, 1.0).contiguous()
+
+
 def _image_from_frame(frame: Mapping[str, Any], key: str, *, required: bool) -> torch.Tensor:
     try:
         return _image_to_chw_float(_field(frame, key), required=required)
@@ -2300,13 +2349,13 @@ class DoorPolicyController:
             OBS_STATE: _tensor_to_device(state, self.device, torch.float32),
         }
         if self.vision_mode == "depth_only":
-            item[self.image_keys[0]] = _image_to_chw_float(second_rgb, required=True).to(self.device)
-            item[self.image_keys[1]] = _image_to_chw_float(front_second_rgb, required=True).to(self.device)
+            item[self.image_keys[0]] = _image_to_chw_float_device(second_rgb, self.device, required=True)
+            item[self.image_keys[1]] = _image_to_chw_float_device(front_second_rgb, self.device, required=True)
         else:
-            item[self.image_keys[0]] = _image_to_chw_float(mask_rgb, required=True).to(self.device)
-            item[self.image_keys[1]] = _image_to_chw_float(second_rgb, required=True).to(self.device)
-            item[self.image_keys[2]] = _image_to_chw_float(front_mask_rgb, required=True).to(self.device)
-            item[self.image_keys[3]] = _image_to_chw_float(front_second_rgb, required=True).to(self.device)
+            item[self.image_keys[0]] = _image_to_chw_float_device(mask_rgb, self.device, required=True)
+            item[self.image_keys[1]] = _image_to_chw_float_device(second_rgb, self.device, required=True)
+            item[self.image_keys[2]] = _image_to_chw_float_device(front_mask_rgb, self.device, required=True)
+            item[self.image_keys[3]] = _image_to_chw_float_device(front_second_rgb, self.device, required=True)
         return item
 
     def append_observation(

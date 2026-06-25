@@ -17,7 +17,7 @@ REPO_ROOT = HIGH_LEVEL_ROOT.parent
 if str(DP_ROOT) not in sys.path:
     sys.path.insert(0, str(DP_ROOT))
 
-from depth_camera_aug import add_depth_aug_args, add_depth_aug_command_args
+from depth_camera_aug import add_depth_aug_args, add_depth_aug_command_args, apply_depth_aug_config_defaults
 
 
 A2W_IKPUSH_SCRIPT = (
@@ -25,6 +25,8 @@ A2W_IKPUSH_SCRIPT = (
 )
 A2W_RAW_ROOT = HIGH_LEVEL_ROOT / "data" / "door_dp_raw" / "local_door_dp_a2w_state10"
 A2W_LEROBOT_REPO_ID = "local/door_a2w_state10"
+A2W_EE_ACTION10_NAMES = ["vx", "yaw", "ee_x", "ee_y", "ee_z", "ee_qx", "ee_qy", "ee_qz", "ee_qw", "gripper"]
+A2W_JOINT_ACTION9_NAMES = ["vx", "yaw", "joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "jointGripper"]
 
 
 def parse_args():
@@ -74,6 +76,18 @@ def parse_args():
         help="Safety cap on simulator launches for success-target and per-door quota modes.",
     )
     parser.add_argument("--raw_root", type=str, default=str(A2W_RAW_ROOT))
+    parser.add_argument(
+        "--state_action_mode",
+        choices=["ee_state10", "joint_state9"],
+        default="ee_state10",
+        help=(
+            "ee_state10 keeps the old 10D state/action schema "
+            "[last_command_vx, last_command_vyaw, EE pose, gripper] + EE target action. "
+            "joint_state9 records 9D state/action "
+            "[last_command_vx, last_command_vyaw, joint1..joint6, jointGripper] "
+            "and uses joint targets as actions."
+        ),
+    )
     parser.add_argument("--fps", type=int, default=25)
     parser.add_argument("--camera_fps", type=float, default=25.0)
     parser.add_argument("--camera_depth_clip_lower", type=float, default=0.2)
@@ -127,6 +141,38 @@ def script_for_mode(mode):
     if mode == "ikpush":
         return A2W_IKPUSH_SCRIPT, "push lever door open", True
     raise ValueError(mode)
+
+
+def dp_record_state_mode_for_schema(schema):
+    if schema == "joint_state9":
+        return "a2w_last_command_joint_state9"
+    if schema == "ee_state10":
+        return "pi05_last_command_state10"
+    raise ValueError(schema)
+
+
+def expected_action_names_for_schema(schema):
+    if schema == "joint_state9":
+        return list(A2W_JOINT_ACTION9_NAMES)
+    if schema == "ee_state10":
+        return list(A2W_EE_ACTION10_NAMES)
+    raise ValueError(schema)
+
+
+def assert_raw_root_schema_compatible(raw_root, schema):
+    sidecar_path = Path(raw_root) / "door_dp_feature_names.json"
+    if not sidecar_path.exists():
+        return
+    with sidecar_path.open("r", encoding="utf-8") as f:
+        sidecar = json.load(f)
+    existing_action = list(sidecar.get("action", []))
+    expected_action = expected_action_names_for_schema(schema)
+    if existing_action and existing_action != expected_action:
+        raise ValueError(
+            f"Existing raw_root {raw_root} has action schema {existing_action}, "
+            f"but --state_action_mode {schema} expects {expected_action}. "
+            "Please use a new --raw_root or remove the old raw data."
+        )
 
 
 def default_float_ik_scripted_args(mode):
@@ -393,7 +439,7 @@ def run_one(mode, rollout_idx, args):
             "--camera_depth_clip_far",
             str(args.camera_depth_clip_far),
             "--dp_record_state_mode",
-            "pi05_last_command_state10",
+            dp_record_state_mode_for_schema(args.state_action_mode),
         ]
         if args.rgb and args.depth_only:
             raise ValueError("--rgb and --depth_only are mutually exclusive.")
@@ -513,6 +559,7 @@ def record_until_target_successes(args, mode):
 
 def main():
     args = parse_args()
+    apply_depth_aug_config_defaults(args, sys.argv[1:])
     args.raw_root = str(Path(args.raw_root).expanduser().resolve())
     if args.num_episodes <= 0:
         raise ValueError("--num_episodes must be positive")
@@ -527,6 +574,7 @@ def main():
         args.steps = 1000
     if args.rgb:
         args.depth_only = False
+    assert_raw_root_schema_compatible(args.raw_root, args.state_action_mode)
 
     run_dir, terminal_log = write_run_metadata(args)
     _ = run_dir, terminal_log
@@ -540,7 +588,7 @@ def main():
     if args.record_all_envs:
         print(
             f"A2W ikpush recording target={args.num_episodes} successful episode(s), "
-            f"batch_size={args.num_envs} env(s); failed attempts are discarded.",
+            f"batch_size={args.num_envs} env(s), schema={args.state_action_mode}; failed attempts are discarded.",
             flush=True,
         )
     else:
@@ -581,12 +629,23 @@ def main():
         print(f"[quota] complete: {format_door_quota_counts(counts, door_names)}", flush=True)
     else:
         record_until_target_successes(args, modes[0])
+    if args.state_action_mode == "joint_state9":
+        schema_desc = (
+            "The raw observation.state/action are both 9D "
+            "[last_command_vx, last_command_vyaw, joint1..joint6, jointGripper]"
+        )
+        repo_hint = "local/door_a2w_joint_state9"
+    else:
+        schema_desc = (
+            "The raw observation.state is 10D "
+            "[last_command_vx, last_command_vyaw, current EE pose, gripper]"
+        )
+        repo_hint = A2W_LEROBOT_REPO_ID
     print(
         "\nDone. Only successful env rollouts were saved as raw episodes. "
-        "The raw observation.state is 10D "
-        "[last_command_vx, last_command_vyaw, current EE pose, gripper], so convert it once with:\n"
+        f"{schema_desc}, so convert it once with:\n"
         f"  python high-level/dp/convert_door_raw_to_lerobot.py --raw_root {args.raw_root} "
-        f"--root data/lerobot --repo_id {A2W_LEROBOT_REPO_ID}{' --rgb' if args.rgb else ''}",
+        f"--root data/lerobot --repo_id {repo_hint}{' --rgb' if args.rgb else ''}",
         flush=True,
     )
 

@@ -101,6 +101,7 @@ def main():
 
     action_frame = str(sidecar_data.get("action_frame", sidecar_data.get("action_pose_frame", "world"))).lower()
     controller_mode = str(sidecar_data.get("door_dp_mode", sidecar_data.get("controller_mode", "legacy")))
+    action_names = list(sidecar_data.get("action") or ACTION_NAMES)
     chunk_size = int(policy_config["chunk_size"])
     action_horizon = int(args.action_horizon if args.action_horizon is not None else policy_config["n_action_steps"])
 
@@ -109,8 +110,11 @@ def main():
     stats = merge_lerobot_processor_stats(dataset.stats, processor_stats)
     state_dim = _feature_dim_from_stats(stats, OBS_STATE)
     action_dim = _feature_dim_from_stats(stats, ACTION)
-    if action_dim != len(ACTION_NAMES):
-        raise ValueError(f"Door policy expects 10D actions, but dataset action_dim={action_dim}.")
+    if action_dim != len(action_names):
+        raise ValueError(
+            f"Door policy action_dim={action_dim} does not match dataset action_names={len(action_names)} "
+            f"from {sidecar_path}."
+        )
 
     backend = LeRobotActDoorPolicyBackend.create(
         stats=stats,
@@ -163,6 +167,7 @@ def main():
         "repo_id": args.repo_id,
         "state_dim": state_dim,
         "action_dim": action_dim,
+        "action_names": action_names,
         "vision_mode": vision_mode,
         "action_frame": action_frame,
         "ikpush_state_version": str(sidecar_data.get("ikpush_state_version", "legacy")),

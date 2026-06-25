@@ -1,0 +1,117 @@
+{
+  "script": "offline_realsense_filter_sweep.py",
+  "wrist_bag": "/tmp/d435_raw_scripted_20260624_154141/wrist_raw.bag",
+  "front_bag": "/tmp/d435_raw_scripted_20260624_154141/front_raw.bag",
+  "out_dir": "/tmp/d435_raw_scripted_20260624_154141/filter_sweep",
+  "align_to_color": true,
+  "output_resolution": [
+    640,
+    480
+  ],
+  "depth_clip_m": [
+    0.2,
+    1.5
+  ],
+  "crop": {
+    "left": 0,
+    "right": 0,
+    "top": 0,
+    "bottom": 0
+  },
+  "filter_params": {
+    "spatial_magnitude": 2,
+    "spatial_alpha": 0.75,
+    "spatial_smooth_delta": 50,
+    "spatial_holes_fill": 5,
+    "temporal_alpha": 0.75,
+    "temporal_smooth_delta": 1
+  },
+  "modes": [
+    {
+      "key": "A_no_filters",
+      "label": "A no filters",
+      "spatial": false,
+      "temporal": false,
+      "hole_filling": false
+    },
+    {
+      "key": "B_spatial_only",
+      "label": "B spatial only",
+      "spatial": true,
+      "temporal": false,
+      "hole_filling": false
+    },
+    {
+      "key": "C_spatial_temporal",
+      "label": "C spatial + temporal",
+      "spatial": true,
+      "temporal": true,
+      "hole_filling": false
+    },
+    {
+      "key": "D_spatial_hole_filling",
+      "label": "D spatial + hole filling",
+      "spatial": true,
+      "temporal": false,
+      "hole_filling": true
+    },
+    {
+      "key": "E_spatial_hole_filling_temporal",
+      "label": "E spatial + hole filling + temporal",
+      "spatial": true,
+      "temporal": true,
+      "hole_filling": true
+    }
+  ],
+  "videos": [
+    {
+      "mode": "A_no_filters",
+      "label": "A no filters",
+      "video": "/tmp/d435_raw_scripted_20260624_154141/filter_sweep/videos/A_no_filters_side_by_side.mp4",
+      "raw_frames_seen": 491,
+      "frames_written": 490,
+      "elapsed_s": 18.543644666671753
+    },
+    {
+      "mode": "B_spatial_only",
+      "label": "B spatial only",
+      "video": "/tmp/d435_raw_scripted_20260624_154141/filter_sweep/videos/B_spatial_only_side_by_side.mp4",
+      "raw_frames_seen": 491,
+      "frames_written": 490,
+      "elapsed_s": 30.98417329788208
+    },
+    {
+      "mode": "C_spatial_temporal",
+      "label": "C spatial + temporal",
+      "video": "/tmp/d435_raw_scripted_20260624_154141/filter_sweep/videos/C_spatial_temporal_side_by_side.mp4",
+      "raw_frames_seen": 491,
+      "frames_written": 490,
+      "elapsed_s": 30.959802389144897
+    },
+    {
+      "mode": "D_spatial_hole_filling",
+      "label": "D spatial + hole filling",
+      "video": "/tmp/d435_raw_scripted_20260624_154141/filter_sweep/videos/D_spatial_hole_filling_side_by_side.mp4",
+      "raw_frames_seen": 491,
+      "frames_written": 490,
+      "elapsed_s": 31.465134382247925
+    },
+    {
+      "mode": "E_spatial_hole_filling_temporal",
+      "label": "E spatial + hole filling + temporal",
+      "video": "/tmp/d435_raw_scripted_20260624_154141/filter_sweep/videos/E_spatial_hole_filling_temporal_side_by_side.mp4",
+      "raw_frames_seen": 491,
+      "frames_written": 490,
+      "elapsed_s": 31.700933694839478
+    }
+  ],
+  "snapshots": [
+    "/tmp/d435_raw_scripted_20260624_154141/filter_sweep/snapshots/filter_sweep_step_000000.png",
+    "/tmp/d435_raw_scripted_20260624_154141/filter_sweep/snapshots/filter_sweep_step_000030.png",
+    "/tmp/d435_raw_scripted_20260624_154141/filter_sweep/snapshots/filter_sweep_step_000060.png",
+    "/tmp/d435_raw_scripted_20260624_154141/filter_sweep/snapshots/filter_sweep_step_000120.png",
+    "/tmp/d435_raw_scripted_20260624_154141/filter_sweep/snapshots/filter_sweep_step_000240.png",
+    "/tmp/d435_raw_scripted_20260624_154141/filter_sweep/snapshots/filter_sweep_step_000360.png",
+    "/tmp/d435_raw_scripted_20260624_154141/filter_sweep/snapshots/filter_sweep_step_000480.png"
+  ]
+}

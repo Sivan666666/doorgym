@@ -43,13 +43,13 @@ DEFAULT_DOOR_ASSET_NAMES = (
     "wc4",
 )
 DEFAULT_WRIST_CAMERA_CFG = {
-    "horizontal_fov": 69,
+    "horizontal_fov": 55,
     "resolution": [640, 480],
     "position": [0.0955, 0.22, -0.03175],
     "rotation": [-1.57, 0.0, -0.87],
 }
 DEFAULT_FRONT_CAMERA_CFG = {
-    "horizontal_fov": 69,
+    "horizontal_fov": 55,
     "resolution": [640, 480],
     "position": [0.425, 0.04, 0.12],
     "rotation": [0.0, 0.0, 0.0],
@@ -107,6 +107,8 @@ A2W_ARM_LINKS = {
     "link04",
     "link05",
     "link06",
+    "wrist_up_mount",
+    "wrist_down_mount",
     "gripperStator",
     "ee_gripper_link",
     "gripperMover",
@@ -802,6 +804,24 @@ def parse_args():
             {"name": "--disable_self_collisions", "action": "store_true"},
             {"name": "--print_collision_summary", "action": "store_true"},
             {"name": "--log_interval", "type": int, "default": 60},
+            {
+                "name": "--debug_q_trace_path",
+                "type": str,
+                "default": "",
+                "help": "Optional JSONL path dumping phase, EE target/actual, and commanded/actual A2W/Z1 q each step.",
+            },
+            {
+                "name": "--debug_hold_target_base_xyz",
+                "type": str,
+                "default": "",
+                "help": "Optional comma-separated ACT/base-frame EE xyz target. During initial_hold, pregrasp is replaced with this target converted to world.",
+            },
+            {
+                "name": "--debug_hold_target_base_quat",
+                "type": str,
+                "default": "0,0,0,1",
+                "help": "Comma-separated ACT/base-frame EE xyzw quaternion used with --debug_hold_target_base_xyz.",
+            },
             {"name": "--draw_ik_target", "dest": "draw_ik_target", "action": "store_true", "default": True},
             {"name": "--no_draw_ik_target", "dest": "draw_ik_target", "action": "store_false"},
             {"name": "--draw_camera_axes", "dest": "draw_camera_axes", "action": "store_true", "default": True},
@@ -3231,6 +3251,26 @@ def trajectory_targets(
         target_quat = None if args.ik_position_only else ik_state.target_quat_np
     else:
         if "pregrasp" not in traj:
+            debug_target_base_raw = str(getattr(args, "debug_hold_target_base_xyz", "") or "").strip()
+            if debug_target_base_raw:
+                debug_target_base = np.asarray(
+                    [float(v) for v in debug_target_base_raw.replace(";", ",").split(",") if v.strip()],
+                    dtype=np.float32,
+                ).reshape(3)
+                debug_quat_base = base_ik.normalize_quat(
+                    np.asarray(
+                        [
+                            float(v)
+                            for v in str(getattr(args, "debug_hold_target_base_quat", "0,0,0,1"))
+                            .replace(";", ",")
+                            .split(",")
+                            if v.strip()
+                        ],
+                        dtype=np.float32,
+                    ).reshape(4)
+                )
+                pregrasp = base_pos_to_world(debug_target_base, base_stop, args.robot_z, yaw_start)
+                goal_quat = base_quat_to_world(debug_quat_base, yaw_start)
             traj["pregrasp"] = pregrasp.copy()
             traj["grasp"] = grasp.copy()
             traj["rotate"] = rotate_pos.copy()
@@ -4009,6 +4049,12 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
     dp_control_state = None
     dp_control_env_ids = []
     dp_control_env_id_set = set()
+    q_trace_file = None
+    if str(getattr(args, "debug_q_trace_path", "") or "").strip():
+        q_trace_path = Path(args.debug_q_trace_path).expanduser()
+        q_trace_path.parent.mkdir(parents=True, exist_ok=True)
+        q_trace_file = q_trace_path.open("w", encoding="utf-8")
+        print(f"Writing A2W/Z1 q trace to {q_trace_path}", flush=True)
     if args.dp_policy_checkpoint:
         if DoorDPPolicyController is None:
             raise RuntimeError("DP policy execution requires high-level/dp/door_dp_common.py and diffusers.")
@@ -4329,9 +4375,45 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
             st.ik_state.current_quat_np = ee_current_quat
             door_pos_record, door_vel_record = get_actor_dof_state(gym, st.env, st.door_actor)
             st.last_door_pos = door_pos_record
+            dof_pos_actual_for_trace = None
+            dof_vel_actual_for_trace = None
+            arm_pos_actual_for_trace = None
+            if q_trace_file is not None:
+                dof_pos_actual_for_trace, dof_vel_actual_for_trace = get_combined_robot_dof_state(gym, st)
+                arm_pos_actual_for_trace = dof_pos_actual_for_trace[len(st.base_dof_names):]
+                target_pos_arr = np.asarray(st.last_target_pos, dtype=np.float32).reshape(3)
+                actual_pos_arr = np.asarray(ee_current_pos, dtype=np.float32).reshape(3)
+                trace_record = {
+                    "step": int(step),
+                    "env_id": int(st.index),
+                    "phase": str(st.last_phase),
+                    "target_pos": target_pos_arr.astype(float).tolist(),
+                    "actual_ee_pos": actual_pos_arr.astype(float).tolist(),
+                    "target_quat": (
+                        []
+                        if st.last_target_quat is None
+                        else base_ik.normalize_quat(st.last_target_quat).astype(float).tolist()
+                    ),
+                    "actual_ee_quat": base_ik.normalize_quat(ee_current_quat).astype(float).tolist(),
+                    "pos_err": float(np.linalg.norm(actual_pos_arr - target_pos_arr)),
+                    "ik_pos_err": float(st.ik_state.last_pos_error),
+                    "arm_dof_names": list(st.arm_dof_names),
+                    "arm_q_cmd": np.asarray(st.dof_positions, dtype=np.float32).astype(float).tolist(),
+                    "arm_q_actual": np.asarray(arm_pos_actual_for_trace, dtype=np.float32).astype(float).tolist(),
+                    "arm_qd_actual": np.asarray(
+                        dof_vel_actual_for_trace[len(st.base_dof_names):], dtype=np.float32
+                    ).astype(float).tolist(),
+                    "gripper_target": float(st.last_gripper),
+                }
+                q_trace_file.write(json.dumps(trace_record, sort_keys=True) + "\n")
+                if step % 50 == 0:
+                    q_trace_file.flush()
             if st.dp_recorder is not None:
                 ee_pos, ee_quat = current_ee_pose_from_refreshed_tensors(st.ik_state)
-                dof_pos_actual, dof_vel_actual = get_combined_robot_dof_state(gym, st)
+                if dof_pos_actual_for_trace is None or dof_vel_actual_for_trace is None:
+                    dof_pos_actual, dof_vel_actual = get_combined_robot_dof_state(gym, st)
+                else:
+                    dof_pos_actual, dof_vel_actual = dof_pos_actual_for_trace, dof_vel_actual_for_trace
                 arm_pos_actual = dof_pos_actual[len(st.base_dof_names):]
                 gripper_actual = (
                     float(arm_pos_actual[gripper_idx])
@@ -4527,6 +4609,9 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
         st.dp_recorder.finalize()
     if total_recorders:
         print(f"Finished parallel raw Door DP recording: saved_successful={saved}/{total_recorders}", flush=True)
+    if q_trace_file is not None:
+        q_trace_file.flush()
+        q_trace_file.close()
     if dp_logger is not None:
         dp_logger.close()
 

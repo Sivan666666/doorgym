@@ -1,0 +1,45 @@
+{
+  "script": "offline_opencv_selected_k_video.py",
+  "wrist_bag": "/tmp/d435_raw_scripted_20260624_154141/wrist_raw.bag",
+  "front_bag": "/tmp/d435_raw_scripted_20260624_154141/front_raw.bag",
+  "base_C": "align(color) -> spatial_filter(holes_fill=0) -> temporal -> clip 0.2-1.5m -> u8",
+  "selected_policy": {
+    "wrist": {
+      "variant": "K1",
+      "fringe_px": 40
+    },
+    "front": {
+      "variant": "K2",
+      "fringe_px": 60
+    }
+  },
+  "component_mask": {
+    "small_max_area": 15000,
+    "small_max_span_px": 280,
+    "small_border_margin_px": -1
+  },
+  "video": "/tmp/d435_raw_scripted_20260624_154141/opencv_selected_k_full_video/selected_wristK1_frontK2_full.mp4",
+  "frames_written": 490,
+  "output_fps": 30.0,
+  "output_resolution": [
+    960,
+    836
+  ],
+  "wrist_stats": {
+    "frames": 490,
+    "black_px_mean": 63304.04081632653,
+    "mask_px_mean": 36867.27755102041,
+    "changed_px_mean": 26139.083673469388,
+    "mask_px_max": 94671,
+    "changed_px_max": 78234
+  },
+  "front_stats": {
+    "frames": 490,
+    "black_px_mean": 35272.92448979592,
+    "mask_px_mean": 35027.99183673469,
+    "changed_px_mean": 34447.19387755102,
+    "mask_px_max": 54236,
+    "changed_px_max": 54236
+  },
+  "elapsed_s": 73.53201389312744
+}

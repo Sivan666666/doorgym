@@ -43,6 +43,8 @@ DATASET_METADATA_KEYS = (
     "controller_mode",
     "state_format",
     "state_source",
+    "action_format",
+    "action_source",
     "state_normalized",
     "pi05_state_action_aligned",
     "state_preprocess",
@@ -73,6 +75,17 @@ ACTION_NAMES = [
     "ee_qz",
     "ee_qw",
     "gripper",
+]
+A2W_JOINT_ACTION_NAMES = [
+    "vx",
+    "yaw",
+    "joint1",
+    "joint2",
+    "joint3",
+    "joint4",
+    "joint5",
+    "joint6",
+    "jointGripper",
 ]
 
 
@@ -780,6 +793,7 @@ class DoorDPLeRobotRecorder:
         metadata=None,
         image_storage="video",
         video_codec="h264",
+        action_feature_names=None,
     ):
         from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
@@ -793,7 +807,7 @@ class DoorDPLeRobotRecorder:
             raise ValueError(f"Unsupported image_storage={image_storage!r}; expected 'video' or 'image'.")
         self.video_codec = str(video_codec)
         self.state_feature_names = list(state_feature_names)
-        self.action_names = list(ACTION_NAMES)
+        self.action_names = list(action_feature_names or ACTION_NAMES)
         self.metadata = dict(metadata or {})
         self.root.mkdir(parents=True, exist_ok=True)
         self.dataset_root = self.root / repo_id
@@ -910,14 +924,23 @@ class DoorDPLeRobotRecorder:
 
 
 class RawDoorDPRecorder:
-    def __init__(self, raw_root, fps, state_feature_names, task, metadata=None, vision_mode="depth"):
+    def __init__(
+        self,
+        raw_root,
+        fps,
+        state_feature_names,
+        task,
+        metadata=None,
+        vision_mode="depth",
+        action_feature_names=None,
+    ):
         self.raw_root = Path(raw_root)
         self.fps = int(fps)
         self.task = str(task)
         self.vision_mode = normalize_vision_mode(vision_mode)
         self.image_keys = raw_image_keys_for_vision_mode(self.vision_mode)
         self.state_feature_names = list(state_feature_names)
-        self.action_names = list(ACTION_NAMES)
+        self.action_names = list(action_feature_names or ACTION_NAMES)
         self.metadata = dict(metadata or {})
         self.raw_root.mkdir(parents=True, exist_ok=True)
         self.frames = {

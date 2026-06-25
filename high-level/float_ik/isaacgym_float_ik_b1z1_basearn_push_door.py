@@ -52,13 +52,13 @@ DEFAULT_DOOR_ASSET_NAMES = (
     "99655039960006",
 )
 DEFAULT_WRIST_CAMERA_CFG = {
-    "horizontal_fov": 69,
+    "horizontal_fov": 55,
     "resolution": DEPTH_CAMERA_RESOLUTION,
     "position": [0.0955, 0.22, -0.03175],
     "rotation": [-1.57, 0.0, -0.87],
 }
 DEFAULT_FRONT_CAMERA_CFG = {
-    "horizontal_fov": 69,
+    "horizontal_fov": 55,
     "resolution": DEPTH_CAMERA_RESOLUTION,
     "position": [0.425, 0.04, 0.12],
     "rotation": [0.0, 0.0, 0.0],

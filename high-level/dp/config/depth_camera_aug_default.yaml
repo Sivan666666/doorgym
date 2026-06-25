@@ -1,0 +1,50 @@
+# Shared default depth augmentation config for Door DP.
+#
+# Both the low-level simulation scripts, e.g.
+#   high-level/float_ik/isaacgym_float_ik_a2w_basearn_push_door_parallel.py
+# and recording wrappers, e.g.
+#   high-level/dp/record/record_door_dp_dataset_a2w_state10.py
+# read defaults from this file through high-level/dp/depth_camera_aug.py.
+#
+# Command-line flags still override these defaults for a single run.
+
+enable_depth_noise: false
+
+# Fraction of envs assigned persistent depth noise. Selected envs add noise to
+# every wrist/front depth frame; unselected envs never add noise.
+depth_noise_prob: 0.50
+
+# Metric depth noise.
+depth_gaussian_std_m: 0.005
+depth_gaussian_distance_factor: 0.05
+
+# Drop pixels around depth discontinuities.
+depth_edge_noise_prob: 0.10
+depth_edge_gradient_threshold_m: 0.05
+depth_edge_dilation_kernel_size: 3
+
+# Blocky missing-depth holes.
+depth_hole_noise_prob: 0.005
+# Min/max block size. The actual block size is sampled uniformly from
+# [depth_hole_block_size_min, depth_hole_block_size] each time hole noise is applied.
+depth_hole_block_size_min: 3
+depth_hole_block_size: 15
+# For selected hole blocks: probability of filling the block with far depth
+# (white after normalization). The remaining holes are filled with 0 depth
+# (black).
+depth_hole_white_prob: 0.50
+
+# Plain pixel dropout / salt-pepper corruption.
+depth_dropout_prob: 0.002
+depth_salt_pepper_prob: 0.002
+
+# Optional post-noise Gaussian blur, matching the NX RealSense debug setting.
+# This is applied after all other depth image noise. It is disabled by default.
+enable_depth_gaussian_blur: true
+depth_gaussian_blur_ksize: 15
+depth_gaussian_blur_sigma: 4.0
+
+# Optional camera pose jitter. This is separate from image-depth noise.
+enable_depth_camera_randomization: false
+depth_camera_pos_rand_m: 0.02
+depth_camera_rot_rand_deg: 5.0

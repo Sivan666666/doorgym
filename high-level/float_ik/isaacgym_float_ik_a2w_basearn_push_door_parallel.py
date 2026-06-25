@@ -216,6 +216,18 @@ def parse_args():
             {"name": "--grasp_offset", "type": float, "default": 0.0},
             {"name": "--grasp_x_offset", "type": float, "default": -0.03},
             {"name": "--grasp_z_offset", "type": float, "default": -0.03},
+            {
+                "name": "--wc4_pregrasp_z_offset",
+                "type": float,
+                "default": 0.0,
+                "help": "Extra Z offset applied only to the wc4 pregrasp point.",
+            },
+            {
+                "name": "--wc4_grasp_z_offset",
+                "type": float,
+                "default": 0.0,
+                "help": "Extra Z offset applied only to the wc4 grasp point; rotate/push points inherit it.",
+            },
             {"name": "--handle_rotate_right_distance", "type": float, "default": 0.03},
             {"name": "--handle_rotate_down_distance", "type": float, "default": 0.03},
             {"name": "--handle_rotate_angle", "type": float, "default": 1.05},
@@ -352,6 +364,8 @@ def parse_args():
             {"name": "--camera_depth_clip_far", "type": float, "default": 1.5},
             {"name": "--camera_display_scale", "type": int, "default": 1},
             {"name": "--camera_display_interval", "type": int, "default": 1},
+            {"name": "--dump_initial_depth_dir", "type": str, "default": ""},
+            {"name": "--dump_initial_depth_frames", "type": int, "default": 0},
             {"name": "--camera_axis_scale", "type": float, "default": 0.10},
             {"name": "--camera_axis_thickness", "type": float, "default": 0.004},
             {
@@ -472,6 +486,7 @@ def parse_args():
             raise ValueError("--dp_warmstart requires --dp_warmstart_raw_episode.")
         if int(args.dp_warmstart_step) < 0:
             raise ValueError("--dp_warmstart requires non-negative --dp_warmstart_step.")
+    dc.apply_depth_aug_config_defaults(args, sys.argv[1:])
     args._explicit_cli_flags = set(sys.argv[1:])
 
     if args.headless and args.show_camera_images:
@@ -743,6 +758,8 @@ def make_env_args(args, env_index):
     set_fixed("pregrasp_offset")
     set_fixed("grasp_x_offset")
     set_fixed("grasp_z_offset")
+    set_fixed("wc4_pregrasp_z_offset")
+    set_fixed("wc4_grasp_z_offset")
     set_fixed("handle_rotate_angle")
     set_fixed("door_push_distance")
     set_sampled("door_joint_friction", "ikpush_door_joint_friction_rand", lower=0.0)
@@ -965,6 +982,9 @@ world_quat_to_base = dc.world_quat_to_base
 base_quat_to_world = dc.base_quat_to_world
 make_float_dp_action = dc.make_float_dp_action
 apply_float_dp_action = dc.apply_float_dp_action
+apply_float_dp_joint_action9 = dc.apply_float_dp_joint_action9
+set_a2w_joint_targets_from_action = dc.set_a2w_joint_targets_from_action
+float_dp_action_is_a2w_joint9 = dc.float_dp_action_is_a2w_joint9
 make_float_dp_policy_log_record = dc.make_float_dp_policy_log_record
 print_float_dp_policy_log_record = dc.print_float_dp_policy_log_record
 make_float_replay_snapshot = dc.make_float_replay_snapshot
@@ -1259,8 +1279,12 @@ def trajectory_targets(
     grasp = handle_goal + approach_dir * args.grasp_offset
     pregrasp[0] += args.grasp_x_offset
     pregrasp[2] += args.grasp_z_offset
+    if dc.door_asset_family(door) == "wc4":
+        pregrasp[2] += float(getattr(args, "wc4_pregrasp_z_offset", 0.0))
     grasp[0] += args.grasp_x_offset
     grasp[2] += args.grasp_z_offset
+    if dc.door_asset_family(door) == "wc4":
+        grasp[2] += float(getattr(args, "wc4_grasp_z_offset", 0.0))
     goal_quat = forward_ee_quat(args, yaw_start)
 
     rotate_offset = np.zeros(3, dtype=np.float32)
@@ -1989,6 +2013,14 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
             f"sim_dt={dt:.4f}s stride={dp_policy_stride} policy_dt={dp_policy_dt:.4f}s",
             flush=True,
         )
+    dp_policy_action_names = (
+        list(getattr(dp_controller, "action_names", ACTION_NAMES or []))
+        if dp_controller is not None
+        else []
+    )
+    dp_policy_uses_joint_action = bool(float_dp_action_is_a2w_joint9(dp_policy_action_names))
+    if dp_policy_uses_joint_action:
+        print("Door DP policy action mode: A2W joint9 (vx, yaw, joint1..joint6, jointGripper).", flush=True)
 
     while step < max_steps:
         if not handle_viewer_pause(gym, sim, viewer):
@@ -2053,14 +2085,32 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                     ee_quat = getattr(st, "last_dp_ee_quat", None)
                     dp_state = getattr(st, "last_dp_state", None)
                     dp_action = np.asarray(st.last_dp_action, dtype=np.float32).copy()
-                base_xy, yaw, target_pos, target_quat, gripper = apply_float_dp_action(
-                    dp_action,
-                    base_xy_current,
-                    st.args.robot_z,
-                    yaw_current,
-                    dt,
-                    action_frame=getattr(dp_controller, "action_frame", "world"),
-                )
+                if dp_policy_uses_joint_action:
+                    base_xy, yaw, joint_targets = apply_float_dp_joint_action9(
+                        dp_action,
+                        base_xy_current,
+                        yaw_current,
+                        dt,
+                    )
+                    set_a2w_joint_targets_from_action(
+                        st.dof_positions,
+                        dof_names,
+                        joint_targets,
+                        st.ik_state.lower,
+                        st.ik_state.upper,
+                    )
+                    target_pos = np.asarray(ee_pos if ee_pos is not None else st.last_target_pos, dtype=np.float32)
+                    target_quat = None if ee_quat is None else np.asarray(ee_quat, dtype=np.float32)
+                    gripper = float(joint_targets.get("jointGripper", st.last_gripper))
+                else:
+                    base_xy, yaw, target_pos, target_quat, gripper = apply_float_dp_action(
+                        dp_action,
+                        base_xy_current,
+                        st.args.robot_z,
+                        yaw_current,
+                        dt,
+                        action_frame=getattr(dp_controller, "action_frame", "world"),
+                    )
                 st.traj["base_xy"] = np.asarray(base_xy, dtype=np.float32).copy()
                 st.traj["yaw"] = float(yaw)
                 door_pos_for_log, _door_vel_for_log = get_actor_dof_state(gym, st.env, st.door_actor)
@@ -2086,6 +2136,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                 ee_quat = None
                 door_pos_for_log = None
             st.last_phase = phase
+            st.dp_joint_action_active = bool(dp_action is not None and dp_policy_uses_joint_action)
             st.last_handle_goal = handle_goal
             st.last_target_pos = np.asarray(target_pos, dtype=np.float32).copy()
             st.last_target_quat = None if target_quat is None else np.asarray(target_quat, dtype=np.float32).copy()
@@ -2100,7 +2151,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                     ee_quat,
                     door_pos_for_log,
                     phase,
-                    action_names=ACTION_NAMES,
+                    action_names=dp_policy_action_names or ACTION_NAMES,
                 )
                 if dp_logger is not None:
                     dp_logger.write(dp_record)
@@ -2116,6 +2167,8 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
             elif phase in ("walk", "hold_home"):
                 st.dof_positions[:] = st.home_positions
                 st.ik_state.last_pos_error = 0.0
+            elif getattr(st, "dp_joint_action_active", False):
+                st.ik_state.last_pos_error = 0.0
             else:
                 set_ik_target(st.ik_state, target_pos, target_quat)
 
@@ -2125,22 +2178,25 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
 
         for st in env_states:
             if st.last_phase not in ("walk", "return_home", "hold_home"):
-                update_arm_ik_targets_for_env(
-                    gym,
-                    st.env,
-                    st.arm_actor,
-                    st.index,
-                    st.dof_positions,
-                    st.ik_state,
-                    st.args,
-                    num_arm_dofs,
-                )
-                if gripper_idx is not None:
-                    st.dof_positions[gripper_idx] = np.clip(
-                        st.last_gripper,
-                        st.ik_state.lower[gripper_idx].item(),
-                        st.ik_state.upper[gripper_idx].item(),
+                if getattr(st, "dp_joint_action_active", False):
+                    st.ik_state.last_pos_error = 0.0
+                else:
+                    update_arm_ik_targets_for_env(
+                        gym,
+                        st.env,
+                        st.arm_actor,
+                        st.index,
+                        st.dof_positions,
+                        st.ik_state,
+                        st.args,
+                        num_arm_dofs,
                     )
+                    if gripper_idx is not None:
+                        st.dof_positions[gripper_idx] = np.clip(
+                            st.last_gripper,
+                            st.ik_state.lower[gripper_idx].item(),
+                            st.ik_state.upper[gripper_idx].item(),
+                        )
             gym.set_actor_dof_position_targets(st.env, st.arm_actor, st.dof_positions)
 
             dc.enforce_locked_door_hinge(gym, st.env, st.door_actor, st.door, st.args)

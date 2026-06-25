@@ -31,6 +31,7 @@ BASE_FLOAT_IK_SCRIPT = SCRIPT_DIR / "isaacgym_visualize_b1z1_basearn.py"
 DEFAULT_DOOR_CFG = HIGH_LEVEL_ROOT / "data" / "cfg" / "b1z1_opendoor.yaml"
 from dp.depth_camera_aug import (
     DEPTH_CAMERA_RESOLUTION,
+    apply_depth_aug_config_defaults,
     apply_depth_noise,
     configure_depth_noise_for_env,
     depth_aug_metadata_from_args,
@@ -131,16 +132,16 @@ def _select_diverse_door_entries(entries, max_count, preferred_name=""):
             sampled.append(pool[idx])
     return preferred + sampled
 DEFAULT_WRIST_CAMERA_CFG = {
-    "horizontal_fov": 69,
+    "horizontal_fov": 55,
     "resolution": DEPTH_CAMERA_RESOLUTION,
     # link06 local frame: X points along the gripper, Y is lateral, Z is up.
     # Center the camera over the gripper instead of mounting it to the side.
-    "position": [0.093, -0.031, 0.22],
+    "position": [0.093, 0.031, 0.22],
     # Euler ZYX angles in degrees, i.e. yaw, pitch, roll.
     "rotation_deg": [0.0, 60.0, 0.0],
 }
 DEFAULT_FRONT_CAMERA_CFG = {
-    "horizontal_fov": 69,
+    "horizontal_fov": 55,
     "resolution": DEPTH_CAMERA_RESOLUTION,
     "position": [0.29, 0.031, 0.165],
     "rotation_deg": [0.0, -45.0, 0.0],
@@ -152,6 +153,38 @@ DP_NUM_ACTIONS = 18
 FLOAT_DP_STATE_MODE_FULL = "full"
 FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10 = "pi05_current_state10"
 FLOAT_DP_STATE_MODE_PI05_LAST_COMMAND_STATE10 = "pi05_last_command_state10"
+FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE9 = "a2w_last_command_joint_state9"
+FLOAT_DP_EE_ACTION10_NAMES = [
+    "vx",
+    "yaw",
+    "ee_x",
+    "ee_y",
+    "ee_z",
+    "ee_qx",
+    "ee_qy",
+    "ee_qz",
+    "ee_qw",
+    "gripper",
+]
+A2W_Z1_JOINT_NAMES = [
+    "joint1",
+    "joint2",
+    "joint3",
+    "joint4",
+    "joint5",
+    "joint6",
+    "jointGripper",
+]
+A2W_LAST_COMMAND_JOINT_STATE9_NAMES = [
+    "last_command_vx",
+    "last_command_vyaw",
+    *A2W_Z1_JOINT_NAMES,
+]
+A2W_JOINT_ACTION9_NAMES = [
+    "vx",
+    "yaw",
+    *A2W_Z1_JOINT_NAMES,
+]
 PI05_CURRENT_STATE10_NAMES = [
     "vx",
     "yaw_rate",
@@ -2372,6 +2405,68 @@ def capture_dp_camera_images_from_rendered(gym, sim, env, camera_handles, args):
     return images
 
 
+def _depth_rgb_to_u8(depth_rgb):
+    array = np.asarray(depth_rgb)
+    if array.ndim == 2:
+        return np.ascontiguousarray(array.astype(np.uint8, copy=False))
+    if array.ndim == 3 and array.shape[-1] >= 1:
+        return np.ascontiguousarray(array[..., 0].astype(np.uint8, copy=False))
+    raise ValueError(f"Expected depth image with shape HxW or HxWxC, got {array.shape}.")
+
+
+def maybe_dump_initial_depth_images(st, camera_images):
+    out_dir = str(getattr(st.args, "dump_initial_depth_dir", "") or "").strip()
+    max_frames = int(getattr(st.args, "dump_initial_depth_frames", 0) or 0)
+    if not out_dir or max_frames <= 0:
+        return
+    if cv2 is None:
+        raise RuntimeError("--dump_initial_depth_dir requires OpenCV/cv2 to write PNG files.")
+
+    frame_idx = int(getattr(st, "_initial_depth_dump_count", 0))
+    if frame_idx >= max_frames:
+        return
+
+    out_path = Path(out_dir).expanduser()
+    if not out_path.is_absolute():
+        out_path = (Path.cwd() / out_path).resolve()
+    out_path.mkdir(parents=True, exist_ok=True)
+
+    records = []
+    for prefix in ("wrist", "front"):
+        image = camera_images.get(f"{prefix}_masked_depth")
+        if image is None:
+            continue
+        depth_u8 = _depth_rgb_to_u8(image)
+        filename = f"env{int(st.index):02d}_frame{frame_idx:02d}_{prefix}_depth_u8.png"
+        file_path = out_path / filename
+        if not cv2.imwrite(str(file_path), depth_u8):
+            raise RuntimeError(f"Failed to write depth image: {file_path}")
+        records.append(
+            {
+                "env": int(st.index),
+                "frame": int(frame_idx),
+                "camera": prefix,
+                "path": str(file_path),
+                "shape": list(depth_u8.shape),
+                "nonzero_pixels": int(np.count_nonzero(depth_u8)),
+                "clip_lower_m": float(getattr(st.args, "camera_depth_clip_lower", 0.0)),
+                "clip_far_m": float(getattr(st.args, "camera_depth_clip_far", 0.0)),
+            }
+        )
+
+    if records:
+        manifest_path = out_path / "manifest.jsonl"
+        with manifest_path.open("a", encoding="utf-8") as f:
+            for record in records:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        print(
+            f"Dumped initial depth frame env={int(st.index)} frame={frame_idx} "
+            f"cameras={[record['camera'] for record in records]} to {out_path}",
+            flush=True,
+        )
+        st._initial_depth_dump_count = frame_idx + 1
+
+
 def dp_image_inputs_from_cpu_cameras(camera_images, args):
     if args.rgb:
         return (
@@ -2657,12 +2752,19 @@ def normalize_float_dp_state_mode(mode):
         "pi0.5_last_command_state10": FLOAT_DP_STATE_MODE_PI05_LAST_COMMAND_STATE10,
         "pi05_last_command_10": FLOAT_DP_STATE_MODE_PI05_LAST_COMMAND_STATE10,
         "last_command_state10": FLOAT_DP_STATE_MODE_PI05_LAST_COMMAND_STATE10,
+        "a2w_joint_state9": FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE9,
+        "a2w_joint9": FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE9,
+        "joint_state9": FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE9,
+        "joint9": FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE9,
+        "last_command_joint_state9": FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE9,
+        "a2w_last_command_joint9": FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE9,
     }
     mode = aliases.get(mode, mode)
     supported_modes = (
         FLOAT_DP_STATE_MODE_FULL,
         FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10,
         FLOAT_DP_STATE_MODE_PI05_LAST_COMMAND_STATE10,
+        FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE9,
     )
     if mode not in supported_modes:
         raise ValueError(
@@ -2679,6 +2781,8 @@ def float_dp_state_feature_names(args, phase_names, make_state_feature_names_fn)
         return list(PI05_CURRENT_STATE10_NAMES)
     if state_mode == FLOAT_DP_STATE_MODE_PI05_LAST_COMMAND_STATE10:
         return list(PI05_LAST_COMMAND_STATE10_NAMES)
+    if state_mode == FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE9:
+        return list(A2W_LAST_COMMAND_JOINT_STATE9_NAMES)
     return make_state_feature_names_fn(DP_NUM_DOFS, DP_NUM_ACTIONS, phase_names)
 
 
@@ -2687,7 +2791,42 @@ def float_dp_state_mode_from_feature_names(state_feature_names):
         return FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10
     if list(state_feature_names or []) == PI05_LAST_COMMAND_STATE10_NAMES:
         return FLOAT_DP_STATE_MODE_PI05_LAST_COMMAND_STATE10
+    if list(state_feature_names or []) == A2W_LAST_COMMAND_JOINT_STATE9_NAMES:
+        return FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE9
     return FLOAT_DP_STATE_MODE_FULL
+
+
+def float_dp_action_feature_names(args=None, state_mode=None):
+    if state_mode is None:
+        state_mode = normalize_float_dp_state_mode(getattr(args, "dp_record_state_mode", FLOAT_DP_STATE_MODE_FULL))
+    else:
+        state_mode = normalize_float_dp_state_mode(state_mode)
+    if state_mode == FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE9:
+        return list(A2W_JOINT_ACTION9_NAMES)
+    return list(FLOAT_DP_EE_ACTION10_NAMES)
+
+
+def float_dp_action_mode_from_feature_names(action_feature_names):
+    names = list(action_feature_names or [])
+    if names == A2W_JOINT_ACTION9_NAMES:
+        return "a2w_joint_action9"
+    return "ee_action10"
+
+
+def float_dp_action_is_a2w_joint9(action_feature_names):
+    return float_dp_action_mode_from_feature_names(action_feature_names) == "a2w_joint_action9"
+
+
+def a2w_joint_values_from_dofs(dof_names, dof_pos, joint_names=A2W_Z1_JOINT_NAMES):
+    dof_names = list(dof_names or [])
+    values = np.asarray(dof_pos, dtype=np.float32).reshape(-1)
+    name_to_idx = {str(name): int(idx) for idx, name in enumerate(dof_names)}
+    out = np.zeros(len(joint_names), dtype=np.float32)
+    for dst_idx, joint_name in enumerate(joint_names):
+        src_idx = name_to_idx.get(joint_name)
+        if src_idx is not None and src_idx < values.shape[0]:
+            out[dst_idx] = float(values[src_idx])
+    return out
 
 
 def make_pi05_current_state10(vx, yaw_rate, ee_pos, ee_quat, base_xy, base_z, yaw, gripper):
@@ -2722,6 +2861,20 @@ def make_pi05_last_command_state10(last_dp_action, ee_pos, ee_quat, base_xy, bas
     ).astype(np.float32)
 
 
+def make_a2w_last_command_joint_state9(last_dp_action, dof_names, dof_pos):
+    last_command = np.zeros(2, dtype=np.float32)
+    if last_dp_action is not None:
+        values = np.asarray(last_dp_action, dtype=np.float32).reshape(-1)
+        last_command[: min(2, values.shape[0])] = values[:2]
+    return np.concatenate(
+        [
+            last_command,
+            a2w_joint_values_from_dofs(dof_names, dof_pos),
+        ],
+        axis=0,
+    ).astype(np.float32)
+
+
 def make_float_dp_observation_state(
     dof_names,
     dof_pos,
@@ -2750,6 +2903,8 @@ def make_float_dp_observation_state(
             yaw,
             gripper,
         )
+    if state_mode == FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE9:
+        return make_a2w_last_command_joint_state9(last_dp_action, dof_names, dof_pos)
     return make_float_dp_state(
         dof_names,
         dof_pos,
@@ -2765,7 +2920,33 @@ def make_float_dp_observation_state(
     )
 
 
-def make_float_dp_action(vx, yaw_rate, target_pos, target_quat, gripper, base_xy, base_z, yaw):
+def make_float_dp_action(
+    vx,
+    yaw_rate,
+    target_pos,
+    target_quat,
+    gripper,
+    base_xy,
+    base_z,
+    yaw,
+    action_mode=None,
+    dof_names=None,
+    dof_pos=None,
+):
+    if str(action_mode or "").lower() == "a2w_joint_action9":
+        action_names = A2W_JOINT_ACTION9_NAMES
+    else:
+        action_names = float_dp_action_feature_names(state_mode=action_mode)
+    if float_dp_action_is_a2w_joint9(action_names):
+        if dof_names is None or dof_pos is None:
+            raise ValueError("A2W joint9 action recording requires dof_names and dof_pos.")
+        return np.concatenate(
+            [
+                np.asarray([vx, yaw_rate], dtype=np.float32),
+                a2w_joint_values_from_dofs(dof_names, dof_pos),
+            ],
+            axis=0,
+        ).astype(np.float32)
     target_pos_base = world_pos_to_base(target_pos, base_xy, base_z, yaw)
     target_quat_base = world_quat_to_base(base_ik.normalize_quat(target_quat), yaw)
     return np.concatenate(
@@ -2806,33 +2987,85 @@ def apply_float_dp_action(action, base_xy, base_z, yaw, dt, action_frame="base")
     return base_xy_next.astype(np.float32), yaw_next, target_pos, target_quat, gripper
 
 
+def apply_float_dp_joint_action9(action, base_xy, yaw, dt):
+    action = np.asarray(action, dtype=np.float32).reshape(-1)
+    if action.shape[0] < len(A2W_JOINT_ACTION9_NAMES):
+        raise ValueError(
+            f"A2W joint action must have at least {len(A2W_JOINT_ACTION9_NAMES)} values, got shape {action.shape}"
+        )
+    vx = float(action[0])
+    yaw_rate = float(action[1])
+    yaw_next = float(yaw) + yaw_rate * float(dt)
+    heading = np.asarray([math.cos(float(yaw)), math.sin(float(yaw))], dtype=np.float32)
+    base_xy_next = np.asarray(base_xy, dtype=np.float32) + heading * (vx * float(dt))
+    joint_targets = {
+        joint_name: float(action[2 + joint_idx])
+        for joint_idx, joint_name in enumerate(A2W_Z1_JOINT_NAMES)
+    }
+    return base_xy_next.astype(np.float32), yaw_next, joint_targets
+
+
+def set_a2w_joint_targets_from_action(dof_positions, dof_names, joint_targets, lower=None, upper=None):
+    name_to_idx = {str(name): int(idx) for idx, name in enumerate(list(dof_names or []))}
+    if lower is not None and hasattr(lower, "detach"):
+        lower = lower.detach().cpu().numpy()
+    if upper is not None and hasattr(upper, "detach"):
+        upper = upper.detach().cpu().numpy()
+    for joint_name, value in dict(joint_targets or {}).items():
+        idx = name_to_idx.get(str(joint_name))
+        if idx is None or idx >= len(dof_positions):
+            continue
+        target = float(value)
+        if lower is not None and upper is not None and idx < len(lower) and idx < len(upper):
+            target = float(np.clip(target, float(lower[idx]), float(upper[idx])))
+        dof_positions[idx] = target
+    return dof_positions
+
+
 def _round_list(value, precision=5):
     return np.round(np.asarray(value, dtype=np.float64), precision).tolist()
 
 
 def make_float_dp_policy_log_record(step, st, dp_action, dp_state, ee_pos, ee_quat, door_pos, phase, action_names=None):
     action_frame = str(getattr(st, "dp_action_frame", "base"))
-    return {
-        "step": int(step),
-        "controlled_env_id": int(st.index),
-        "num_envs": int(st.args.num_envs),
-        "phase_name": str(phase),
-        "dp_action_names": list(action_names or []),
-        "action_frame": action_frame,
-        "dp_action_raw": _round_list(dp_action),
-        "state": _round_list(dp_state),
-        "base": {
-            "xy": _round_list(st.traj.get("base_xy", st.base_start)),
-            "yaw": float(st.traj.get("yaw", st.yaw_start)),
-        },
-        "ee": {
+    action_names = list(action_names or [])
+    action_mode = float_dp_action_mode_from_feature_names(action_names)
+    if action_mode == "a2w_joint_action9":
+        ee_record = {
+            "target_pos_world": _round_list(st.last_target_pos),
+            "target_pos_action": [],
+            "target_quat": None if st.last_target_quat is None else _round_list(st.last_target_quat),
+            "target_quat_action": [],
+            "actual_pos_world": _round_list(ee_pos),
+            "actual_quat": _round_list(ee_quat),
+        }
+        joint_targets = _round_list(dp_action[2:9])
+    else:
+        ee_record = {
             "target_pos_world": _round_list(st.last_target_pos),
             "target_pos_action": _round_list(dp_action[2:5]),
             "target_quat": None if st.last_target_quat is None else _round_list(st.last_target_quat),
             "target_quat_action": _round_list(dp_action[5:9]),
             "actual_pos_world": _round_list(ee_pos),
             "actual_quat": _round_list(ee_quat),
+        }
+        joint_targets = []
+    return {
+        "step": int(step),
+        "controlled_env_id": int(st.index),
+        "num_envs": int(st.args.num_envs),
+        "phase_name": str(phase),
+        "dp_action_names": action_names,
+        "action_frame": action_frame,
+        "action_mode": action_mode,
+        "dp_action_raw": _round_list(dp_action),
+        "state": _round_list(dp_state),
+        "base": {
+            "xy": _round_list(st.traj.get("base_xy", st.base_start)),
+            "yaw": float(st.traj.get("yaw", st.yaw_start)),
         },
+        "ee": ee_record,
+        "joint_targets": joint_targets,
         "gripper": {"target": float(st.last_gripper)},
         "door": {"dof": _round_list(door_pos) if door_pos is not None else []},
     }
@@ -2841,6 +3074,18 @@ def make_float_dp_policy_log_record(step, st, dp_action, dp_state, ee_pos, ee_qu
 def print_float_dp_policy_log_record(record):
     action = record["dp_action_raw"]
     ee = record["ee"]
+    if record.get("action_mode") == "a2w_joint_action9":
+        print(
+            "[DoorDP-FloatIK]"
+            f" step={record['step']}"
+            f" env={record['controlled_env_id']}/{record['num_envs']}"
+            f" phase={record['phase_name']}"
+            f" action_frame={record.get('action_frame')}"
+            f" action(vx,yaw,joints)=({action[0]:.3f}, {action[1]:.3f}, {record.get('joint_targets', [])})"
+            f" ee_actual={ee['actual_pos_world']}",
+            flush=True,
+        )
+        return
     print(
         "[DoorDP-FloatIK]"
         f" step={record['step']}"
@@ -3023,6 +3268,15 @@ def make_float_dp_recorder(
     extra_metadata=None,
 ):
     state_mode = normalize_float_dp_state_mode(getattr(args, "dp_record_state_mode", FLOAT_DP_STATE_MODE_FULL))
+    action_names = float_dp_action_feature_names(state_mode=state_mode)
+    if state_mode == FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10:
+        state_source = "current_vx_yaw_rate_ee_base_gripper"
+    elif state_mode == FLOAT_DP_STATE_MODE_PI05_LAST_COMMAND_STATE10:
+        state_source = "last_command_vx_vyaw_ee_base_gripper"
+    elif state_mode == FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE9:
+        state_source = "last_command_vx_vyaw_a2w_z1_joint_positions"
+    else:
+        state_source = "full_float_ik_state_with_previous_action"
     metadata = {
         "door_asset_index": int(getattr(door, "asset_index", 0)),
         "door_asset_name": door.spec.get("name", ""),
@@ -3044,14 +3298,12 @@ def make_float_dp_recorder(
         "seed": int(getattr(args, "seed", -1)),
         "env_seed": int(getattr(args, "env_seed", -1)),
         "state_format": state_mode,
-        "state_source": (
-            "current_vx_yaw_rate_ee_base_gripper"
-            if state_mode == FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10
-            else (
-                "last_command_vx_vyaw_ee_base_gripper"
-                if state_mode == FLOAT_DP_STATE_MODE_PI05_LAST_COMMAND_STATE10
-                else "full_float_ik_state_with_previous_action"
-            )
+        "state_source": state_source,
+        "action_format": float_dp_action_mode_from_feature_names(action_names),
+        "action_source": (
+            "base_command_plus_a2w_z1_joint_targets"
+            if float_dp_action_is_a2w_joint9(action_names)
+            else "base_command_plus_ee_target_pose"
         ),
         "state_normalized": False,
         "pi05_state_action_aligned": state_mode == FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10,
@@ -3112,6 +3364,7 @@ def make_float_dp_recorder(
         raw_root=args.dp_raw_root,
         fps=args.dp_fps,
         state_feature_names=float_dp_state_feature_names(args, phase_names, make_state_feature_names_fn),
+        action_feature_names=action_names,
         task=args.dp_task,
         vision_mode=vision_mode,
         metadata=metadata,
@@ -3130,6 +3383,7 @@ def print_float_dp_recording_start(args, record_env_ids, vision_mode):
         f"env_ids={sorted(record_env_ids)} success_angle_deg={args.pass_open_angle_deg} "
         f"vision_mode={vision_mode} "
         f"state_mode={normalize_float_dp_state_mode(getattr(args, 'dp_record_state_mode', FLOAT_DP_STATE_MODE_FULL))} "
+        f"action_mode={float_dp_action_mode_from_feature_names(float_dp_action_feature_names(args))} "
         f"record_fps={float(getattr(args, 'dp_fps', 25)):.2f} "
         f"camera_fps={float_dp_camera_effective_fps(args):.2f}",
         flush=True,
@@ -3265,6 +3519,7 @@ def collect_float_dp_policy_actions(gym, sim, env_states, dof_names, gripper_idx
             state_mode=state_mode,
         )
         camera_images = capture_dp_camera_images_from_rendered(gym, sim, st.env, st.camera_handles, st.args)
+        maybe_dump_initial_depth_images(st, camera_images)
         wrist_mask_rgb, wrist_second_rgb, front_mask_rgb, front_second_rgb = dp_image_inputs_from_cpu_cameras(
             camera_images, st.args
         )
@@ -3388,6 +3643,9 @@ def record_float_dp_frame(gym, sim, st, dof_names, gripper_idx, dt, phase_id, do
         base_xy,
         st.args.robot_z,
         yaw,
+        action_mode=state_mode,
+        dof_names=dof_names,
+        dof_pos=st.dof_positions,
     )
     st.dp_recorder.add_frame(
         dp_state,

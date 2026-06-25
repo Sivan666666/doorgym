@@ -1,0 +1,161 @@
+{
+  "script": "offline_opencv_k_gaussian_blur_step_compare.py",
+  "step": 313,
+  "pipeline": "align(color) -> no_rs_filters -> clip/normalize -> full-res opencv_k -> GaussianBlur",
+  "wrist_bag": "/tmp/d435_raw_scripted_20260624_154141/wrist_raw.bag",
+  "front_bag": "/tmp/d435_raw_scripted_20260624_154141/front_raw.bag",
+  "wrist_opencv_k": {
+    "camera": "wrist",
+    "fringe_px": 10,
+    "black_px": 98980,
+    "white_px": 72358,
+    "black_selected_px": 17420,
+    "fringe_added_px": 10990,
+    "white_selected_px": 142,
+    "combined_mask_px": 28552,
+    "changed_px": 25369,
+    "process_scale": 1.0,
+    "process_shape_hw": [
+      480,
+      640
+    ],
+    "fringe_px_fullres": 10,
+    "fringe_px_process": 10
+  },
+  "front_opencv_k": {
+    "camera": "front",
+    "fringe_px": 40,
+    "black_px": 52878,
+    "white_px": 153912,
+    "black_selected_px": 11690,
+    "fringe_added_px": 38830,
+    "white_selected_px": 660,
+    "combined_mask_px": 51180,
+    "changed_px": 44753,
+    "process_scale": 1.0,
+    "process_shape_hw": [
+      480,
+      640
+    ],
+    "fringe_px_fullres": 40,
+    "fringe_px_process": 40
+  },
+  "blur": {
+    "wrist": {
+      "none": {
+        "ksize": 0,
+        "sigma": null,
+        "changed_px": 0,
+        "mean_abs_delta": 0.0
+      },
+      "k3_sigma0": {
+        "ksize": 3,
+        "sigma": 0.0,
+        "changed_px": 27726,
+        "mean_abs_delta": 0.40830403645833335,
+        "max_abs_delta": 88
+      },
+      "k5_sigma0": {
+        "ksize": 5,
+        "sigma": 0.0,
+        "changed_px": 39062,
+        "mean_abs_delta": 0.6163020833333334,
+        "max_abs_delta": 115
+      },
+      "k5_sigma1": {
+        "ksize": 5,
+        "sigma": 1.0,
+        "changed_px": 35009,
+        "mean_abs_delta": 0.57015625,
+        "max_abs_delta": 109
+      },
+      "k7_sigma1.5": {
+        "ksize": 7,
+        "sigma": 1.5,
+        "changed_px": 45218,
+        "mean_abs_delta": 0.9225325520833333,
+        "max_abs_delta": 139
+      },
+      "k9_sigma2": {
+        "ksize": 9,
+        "sigma": 2.0,
+        "changed_px": 53534,
+        "mean_abs_delta": 1.3078743489583333,
+        "max_abs_delta": 151
+      },
+      "k11_sigma3": {
+        "ksize": 11,
+        "sigma": 3.0,
+        "changed_px": 65811,
+        "mean_abs_delta": 1.933837890625,
+        "max_abs_delta": 157
+      },
+      "k15_sigma4": {
+        "ksize": 15,
+        "sigma": 4.0,
+        "changed_px": 78796,
+        "mean_abs_delta": 2.7456087239583336,
+        "max_abs_delta": 154
+      }
+    },
+    "front": {
+      "none": {
+        "ksize": 0,
+        "sigma": null,
+        "changed_px": 0,
+        "mean_abs_delta": 0.0
+      },
+      "k3_sigma0": {
+        "ksize": 3,
+        "sigma": 0.0,
+        "changed_px": 23920,
+        "mean_abs_delta": 0.26768880208333334,
+        "max_abs_delta": 86
+      },
+      "k5_sigma0": {
+        "ksize": 5,
+        "sigma": 0.0,
+        "changed_px": 29467,
+        "mean_abs_delta": 0.39174479166666665,
+        "max_abs_delta": 104
+      },
+      "k5_sigma1": {
+        "ksize": 5,
+        "sigma": 1.0,
+        "changed_px": 26692,
+        "mean_abs_delta": 0.3626985677083333,
+        "max_abs_delta": 99
+      },
+      "k7_sigma1.5": {
+        "ksize": 7,
+        "sigma": 1.5,
+        "changed_px": 32701,
+        "mean_abs_delta": 0.5804296875,
+        "max_abs_delta": 119
+      },
+      "k9_sigma2": {
+        "ksize": 9,
+        "sigma": 2.0,
+        "changed_px": 36422,
+        "mean_abs_delta": 0.8201725260416667,
+        "max_abs_delta": 129
+      },
+      "k11_sigma3": {
+        "ksize": 11,
+        "sigma": 3.0,
+        "changed_px": 42446,
+        "mean_abs_delta": 1.215849609375,
+        "max_abs_delta": 138
+      },
+      "k15_sigma4": {
+        "ksize": 15,
+        "sigma": 4.0,
+        "changed_px": 50864,
+        "mean_abs_delta": 1.7420149739583333,
+        "max_abs_delta": 141
+      }
+    }
+  },
+  "grid": "/tmp/d435_raw_scripted_20260624_154141/opencv_k_no_rs_gaussian_blur_step313/dual_opencv_k_no_rs_gaussian_blur_step_0313.png",
+  "elapsed_s": 2.3344924449920654
+}

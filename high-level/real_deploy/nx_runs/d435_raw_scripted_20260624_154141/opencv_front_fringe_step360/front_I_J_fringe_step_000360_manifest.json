@@ -1,0 +1,73 @@
+{
+  "script": "offline_opencv_front_fringe_step_compare.py",
+  "step": 360,
+  "base_pipeline": "align(color) -> spatial_filter(holes_fill=0) -> temporal_filter -> clip 0.2-1.5m -> u8",
+  "front_black_px": 48029,
+  "small_component_mask": {
+    "max_area": 15000,
+    "max_span_px": 280,
+    "border_margin_px": -1,
+    "stats": {
+      "total_black_px": 48029,
+      "components": 93,
+      "selected_components": 92,
+      "selected_px": 21479,
+      "skipped_area": 1,
+      "skipped_span": 0,
+      "skipped_border": 0,
+      "selected_ratio_of_black": 0.44720897790917985
+    }
+  },
+  "fringe_px": [
+    8,
+    12,
+    20,
+    30
+  ],
+  "variants": [
+    {
+      "label": "I front small/mid TELEA r3",
+      "mask_px": 21479,
+      "changed_px": 21479,
+      "fringe_px": 0
+    },
+    {
+      "label": "J1 front fringe 8px",
+      "large_components": 1,
+      "fringe_px": 8,
+      "fringe_added_px": 10449,
+      "mask_px": 31928,
+      "changed_px": 29481
+    },
+    {
+      "label": "J2 front fringe 12px",
+      "large_components": 1,
+      "fringe_px": 12,
+      "fringe_added_px": 13754,
+      "mask_px": 35233,
+      "changed_px": 31605
+    },
+    {
+      "label": "J3 front fringe 20px",
+      "large_components": 1,
+      "fringe_px": 20,
+      "fringe_added_px": 18889,
+      "mask_px": 40368,
+      "changed_px": 35336
+    },
+    {
+      "label": "J4 front fringe 30px",
+      "large_components": 1,
+      "fringe_px": 30,
+      "fringe_added_px": 23274,
+      "mask_px": 44753,
+      "changed_px": 39871
+    }
+  ],
+  "outputs": {
+    "front_png": "/tmp/d435_raw_scripted_20260624_154141/opencv_front_fringe_step360/front_AE_plus_I_J_fringe_step_000360.png",
+    "front_jpg": "/tmp/d435_raw_scripted_20260624_154141/opencv_front_fringe_step360/front_AE_plus_I_J_fringe_step_000360.jpg",
+    "mask_png": "/tmp/d435_raw_scripted_20260624_154141/opencv_front_fringe_step360/front_I_J_fringe_masks_step_000360.png"
+  },
+  "elapsed_s": 6.500137805938721
+}

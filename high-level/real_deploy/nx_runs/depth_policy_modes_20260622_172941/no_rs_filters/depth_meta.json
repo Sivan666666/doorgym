@@ -1,0 +1,115 @@
+{
+  "wrist_ts": 1782120586.9464426,
+  "front_ts": 1782120586.9806206,
+  "dt_ms": 7.486104965209961,
+  "device_timestamp_dt_ms": 34.17801856994629,
+  "backend": "realsense_async",
+  "worker_mode": "thread",
+  "single_duplicate": false,
+  "wrist": {
+    "serial": "261222075130",
+    "name": "wrist",
+    "timestamp_s": 1782120586.9464426,
+    "arrival_s": 1782120587.002992,
+    "age_ms": 11.78598403930664,
+    "frame_count": 55,
+    "depth_scale": 0.0010000000474974513,
+    "filters": false,
+    "depth_inpaint_mode": "off",
+    "spatial_magnitude": 0,
+    "worker_mode": "thread",
+    "align_depth_to": "color",
+    "crop": {
+      "left": 0,
+      "right": 0,
+      "top": 0,
+      "bottom": 0
+    },
+    "crop_shape_hw": [
+      480,
+      640
+    ],
+    "output_shape_hw": [
+      480,
+      640
+    ],
+    "depth_clip_m": [
+      0.2,
+      1.5
+    ],
+    "device": {
+      "name": "Intel RealSense D435I",
+      "serial": "261222075130",
+      "firmware": "5.15.1.55",
+      "usb": "3.2",
+      "physical_port": "/sys/devices/platform/bus@0/3610000.usb/usb2/2-1/2-1.2/2-1.2:1.0/video4linux/video6",
+      "product_line": "D400"
+    },
+    "depth_min_m": 0.1850000023841858,
+    "depth_max_m": 1.1420000791549683,
+    "depth_mean_m": 0.7483838796615601,
+    "error": ""
+  },
+  "front": {
+    "serial": "261222075566",
+    "name": "front",
+    "timestamp_s": 1782120586.9806206,
+    "arrival_s": 1782120587.010478,
+    "age_ms": 12.612581253051758,
+    "frame_count": 29,
+    "depth_scale": 0.0010000000474974513,
+    "filters": false,
+    "depth_inpaint_mode": "off",
+    "spatial_magnitude": 0,
+    "worker_mode": "thread",
+    "align_depth_to": "color",
+    "crop": {
+      "left": 0,
+      "right": 0,
+      "top": 0,
+      "bottom": 0
+    },
+    "crop_shape_hw": [
+      480,
+      640
+    ],
+    "output_shape_hw": [
+      480,
+      640
+    ],
+    "depth_clip_m": [
+      0.2,
+      1.5
+    ],
+    "device": {
+      "name": "Intel RealSense D435I",
+      "serial": "261222075566",
+      "firmware": "5.15.1.55",
+      "usb": "3.2",
+      "physical_port": "/sys/devices/platform/bus@0/3610000.usb/usb2/2-1/2-1.1/2-1.1:1.0/video4linux/video0",
+      "product_line": "D400"
+    },
+    "depth_min_m": 0.15400001406669617,
+    "depth_max_m": 61.39500427246094,
+    "depth_mean_m": 0.6960644721984863,
+    "error": ""
+  },
+  "resolution": [
+    640,
+    480
+  ],
+  "fps": 30,
+  "align_depth_to": "color",
+  "crop": {
+    "left": 0,
+    "right": 0,
+    "top": 0,
+    "bottom": 0
+  },
+  "depth_clip_m": [
+    0.2,
+    1.5
+  ],
+  "spatial_magnitude": 0,
+  "depth_inpaint_mode": "off"
+}

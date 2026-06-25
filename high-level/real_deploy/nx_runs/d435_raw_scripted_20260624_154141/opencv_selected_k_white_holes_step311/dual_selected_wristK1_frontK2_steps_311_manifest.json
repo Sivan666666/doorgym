@@ -1,0 +1,71 @@
+{
+  "script": "offline_opencv_selected_k_multistep_compare.py",
+  "steps": [
+    311
+  ],
+  "base_C": "align(color) -> spatial_filter(holes_fill=0) -> temporal -> clip 0.2-1.5m -> u8",
+  "selected_policy": {
+    "wrist": {
+      "variant": "K1",
+      "fringe_px": 40
+    },
+    "front": {
+      "variant": "K2",
+      "fringe_px": 60
+    }
+  },
+  "component_mask": {
+    "small_max_area": 15000,
+    "small_max_span_px": 280,
+    "small_border_margin_px": -1
+  },
+  "small_white_holes": {
+    "enabled": true,
+    "threshold": 250,
+    "max_area": 2500,
+    "max_span_px": 90,
+    "border_margin_px": 2,
+    "ring_radius_px": 3,
+    "min_gray_ring_px": 8,
+    "min_gray_ring_ratio": 0.35
+  },
+  "stats": {
+    "wrist": {
+      "311": {
+        "black_px_c": 98213,
+        "white_px_c": 72971,
+        "small_selected_px": 17578,
+        "small_selected_components": 125,
+        "white_selected_px": 0,
+        "white_selected_components": 0,
+        "large_components": 1,
+        "fringe_px": 40,
+        "fringe_added_px": 31245,
+        "mask_px": 48823,
+        "combined_mask_px": 48823,
+        "changed_px": 36731
+      }
+    },
+    "front": {
+      "311": {
+        "black_px_c": 49140,
+        "white_px_c": 155811,
+        "small_selected_px": 10367,
+        "small_selected_components": 62,
+        "white_selected_px": 625,
+        "white_selected_components": 1,
+        "large_components": 2,
+        "fringe_px": 60,
+        "fringe_added_px": 38773,
+        "mask_px": 49140,
+        "combined_mask_px": 49765,
+        "changed_px": 49765
+      }
+    }
+  },
+  "outputs": {
+    "png": "/tmp/d435_raw_scripted_20260624_154141/opencv_selected_k_white_holes_step311/dual_selected_wristK1_frontK2_steps_311.png",
+    "jpg": "/tmp/d435_raw_scripted_20260624_154141/opencv_selected_k_white_holes_step311/dual_selected_wristK1_frontK2_steps_311.jpg"
+  },
+  "elapsed_s": 11.109768629074097
+}

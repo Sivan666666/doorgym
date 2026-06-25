@@ -1,0 +1,113 @@
+{
+  "script": "offline_opencv_dual_aggressive_step_compare.py",
+  "step": 311,
+  "base_pipeline_C": "align(color) -> spatial_filter(holes_fill=0) -> temporal_filter -> clip 0.2-1.5m -> u8",
+  "modes": {
+    "A": {
+      "title": "A no filters",
+      "subtitle": "align(color), raw"
+    },
+    "C": {
+      "title": "C spatial+temporal",
+      "subtitle": "holes_fill=0"
+    },
+    "E": {
+      "title": "E RS holefill+temporal",
+      "subtitle": "holes_fill=5+hole_fill"
+    },
+    "I": {
+      "title": "I OpenCV small/mid",
+      "subtitle": "area<=15000, span<=280"
+    },
+    "K1": {
+      "title": "K1 OpenCV fringe 10px",
+      "subtitle": "I + large black edge fringe"
+    },
+    "K2": {
+      "title": "K2 OpenCV fringe 40px",
+      "subtitle": "I + large black edge fringe"
+    }
+  },
+  "component_mask": {
+    "small_max_area": 15000,
+    "small_max_span_px": 280,
+    "small_border_margin_px": -1,
+    "fringe_px": [
+      10,
+      40
+    ]
+  },
+  "wrist_stats": {
+    "camera": "wrist",
+    "black_px_C": 98213,
+    "opencv": {
+      "I": {
+        "mask_px": 17578,
+        "changed_px": 17578,
+        "base_stats": {
+          "total_black_px": 98213,
+          "components": 126,
+          "selected_components": 125,
+          "selected_px": 17578,
+          "skipped_area": 1,
+          "skipped_span": 0,
+          "skipped_border": 0,
+          "selected_ratio_of_black": 0.1789783429892173
+        }
+      },
+      "K1": {
+        "large_components": 1,
+        "fringe_px": 10,
+        "fringe_added_px": 10246,
+        "mask_px": 27824,
+        "changed_px": 24798
+      },
+      "K2": {
+        "large_components": 1,
+        "fringe_px": 40,
+        "fringe_added_px": 31245,
+        "mask_px": 48823,
+        "changed_px": 36731
+      }
+    }
+  },
+  "front_stats": {
+    "camera": "front",
+    "black_px_C": 49140,
+    "opencv": {
+      "I": {
+        "mask_px": 10367,
+        "changed_px": 10367,
+        "base_stats": {
+          "total_black_px": 49140,
+          "components": 64,
+          "selected_components": 62,
+          "selected_px": 10367,
+          "skipped_area": 2,
+          "skipped_span": 0,
+          "skipped_border": 0,
+          "selected_ratio_of_black": 0.21096866096866096
+        }
+      },
+      "K1": {
+        "large_components": 2,
+        "fringe_px": 10,
+        "fringe_added_px": 19144,
+        "mask_px": 29511,
+        "changed_px": 24413
+      },
+      "K2": {
+        "large_components": 2,
+        "fringe_px": 40,
+        "fringe_added_px": 36449,
+        "mask_px": 46816,
+        "changed_px": 40424
+      }
+    }
+  },
+  "outputs": {
+    "png": "/tmp/d435_raw_scripted_20260624_154141/opencv_wrist_fringe10_compare_step311/dual_A_C_E_I_K_aggressive_step_000311.png",
+    "jpg": "/tmp/d435_raw_scripted_20260624_154141/opencv_wrist_fringe10_compare_step311/dual_A_C_E_I_K_aggressive_step_000311.jpg"
+  },
+  "elapsed_s": 24.4268901348114
+}

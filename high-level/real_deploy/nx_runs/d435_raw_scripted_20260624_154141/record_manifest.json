@@ -1,0 +1,74 @@
+{
+  "script": "record_dual_d435_raw_bag_with_scripted_z1.py",
+  "started_wall_time": 1782286902.0492702,
+  "finished_wall_time": 1782286937.2194738,
+  "out_dir": "/tmp/d435_raw_scripted_20260624_154141",
+  "bags": {
+    "wrist": "/tmp/d435_raw_scripted_20260624_154141/wrist_raw.bag",
+    "front": "/tmp/d435_raw_scripted_20260624_154141/front_raw.bag"
+  },
+  "cameras": {
+    "wrist": {
+      "name": "wrist",
+      "serial": "261222075130",
+      "bag_path": "/tmp/d435_raw_scripted_20260624_154141/wrist_raw.bag",
+      "width": 640,
+      "height": 480,
+      "fps": 30,
+      "enable_color": true,
+      "frames": 494,
+      "depth_scale": 0.0010000000474974513,
+      "device_info": {
+        "name": "Intel RealSense D435I",
+        "serial": "261222075130",
+        "firmware": "5.15.1.55",
+        "usb": "3.2",
+        "physical_port": "/sys/devices/platform/bus@0/3610000.usb/usb2/2-1/2-1.2/2-1.2:1.0/video4linux/video6",
+        "product_line": "D400"
+      },
+      "error": "stop:RuntimeError: stop() cannot be called before start()"
+    },
+    "front": {
+      "name": "front",
+      "serial": "261222075566",
+      "bag_path": "/tmp/d435_raw_scripted_20260624_154141/front_raw.bag",
+      "width": 640,
+      "height": 480,
+      "fps": 30,
+      "enable_color": true,
+      "frames": 1008,
+      "depth_scale": 0.0010000000474974513,
+      "device_info": {
+        "name": "Intel RealSense D435I",
+        "serial": "261222075566",
+        "firmware": "5.15.1.55",
+        "usb": "3.2",
+        "physical_port": "/sys/devices/platform/bus@0/3610000.usb/usb2/2-1/2-1.1/2-1.1:1.0/video4linux/video0",
+        "product_line": "D400"
+      },
+      "error": null
+    }
+  },
+  "trajectory": {
+    "reference_npz": "/tmp/a2w_full_reference.npz",
+    "action_host": "127.0.0.1",
+    "action_port": 15011,
+    "hz": 25.0,
+    "start_step": 0,
+    "end_step_exclusive": 500,
+    "sent": 500,
+    "dry_run": false,
+    "duration_s": 20.000143551000008,
+    "start_wall_time": 1782286904.5311344,
+    "end_wall_time": 1782286924.5312822,
+    "dog_commands_published": false,
+    "send_home_joint_targets_from_step": 364
+  },
+  "trajectory_command": null,
+  "pre_record_s": 2.0,
+  "post_record_s": 2.0,
+  "notes": [
+    "Bags contain raw RealSense streams; use offline_realsense_filter_sweep.py for A-E filter comparisons.",
+    "Robot-base velocity is never published by this script."
+  ]
+}

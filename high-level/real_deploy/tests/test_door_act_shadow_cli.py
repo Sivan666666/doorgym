@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 
@@ -62,6 +63,10 @@ def test_default_mode_preserves_realsense_behavior() -> None:
     assert args.z1_state_timeout_s == 0.5
     assert args.wait_for_z1_startup_zero
     assert args.z1_startup_zero_wait_timeout_s == 20.0
+    assert args.z1_back_to_start_on_exit
+    assert args.z1_back_to_start_wait_timeout_s == 20.0
+    assert args.record_raw_unfiltered_depth_video
+    assert args.record_raw_unfiltered_depth_video_dir is None
 
 
 def test_real_bridges_can_be_disabled_for_shadow_only_runs() -> None:
@@ -121,6 +126,7 @@ def test_rgb_guided_requires_color_alignment_but_allows_no_rs_filters() -> None:
         ("--vel_state_timeout_s", "-1"),
         ("--z1_state_timeout_s", "-1"),
         ("--z1_startup_zero_wait_timeout_s", "-1"),
+        ("--z1_back_to_start_wait_timeout_s", "-1"),
     ],
 )
 def test_invalid_inpaint_parameters_are_rejected(flag: str, value: str) -> None:
@@ -133,6 +139,67 @@ def test_wait_for_z1_startup_zero_requires_state_receiver() -> None:
     args = door_act_shadow.parse_args(["--no_enable_z1_state_receiver"])
     with pytest.raises(ValueError, match="requires --enable_z1_state_receiver"):
         door_act_shadow.validate_runtime_args(args)
+
+
+def test_udp_action_publisher_sends_shutdown_back_to_start_command() -> None:
+    class _FakeSocket:
+        def __init__(self) -> None:
+            self.packets = []
+
+        def sendto(self, data, addr) -> None:
+            self.packets.append((data, addr))
+
+    publisher = object.__new__(door_act_shadow.UdpActionPublisher)
+    publisher.host = "127.0.0.1"
+    publisher.port = 15011
+    publisher.addr = (publisher.host, publisher.port)
+    publisher.sock = _FakeSocket()
+
+    meta = publisher.request_shutdown_back_to_start(repeat=2, interval_s=0.0)
+
+    assert meta["bridge_command"] == "shutdown_back_to_start"
+    assert meta["sent"] == 2
+    assert len(publisher.sock.packets) == 2
+    payload = publisher.sock.packets[0][0].decode("utf-8")
+    assert '"bridge_command": "shutdown_back_to_start"' in payload
+
+
+def test_wait_for_z1_shutdown_back_to_start_accepts_done_state() -> None:
+    class _Receiver:
+        def get_state_tail(self):
+            return None, {
+                "count": 1,
+                "shutdown_requested": True,
+                "shutdown_active": False,
+                "shutdown_done": True,
+                "shutdown_error": "",
+            }
+
+    meta = door_act_shadow.wait_for_z1_shutdown_back_to_start(_Receiver(), 0.1)
+    assert meta["shutdown_done"] is True
+
+
+def test_raw_unfiltered_depth_uses_same_display_normalization_as_policy() -> None:
+    depth = np.asarray([[0.0, 0.2, 0.85, 1.5, 2.0]], dtype=np.float32)
+    raw_u8 = door_act_shadow.depth_m_to_display_u8(depth, 0.2, 1.5)
+    policy_u8 = door_act_shadow.depth_m_to_policy_u8(depth, 0.2, 1.5)
+
+    assert raw_u8.shape == depth.shape
+    assert raw_u8.dtype == np.uint8
+    np.testing.assert_array_equal(policy_u8[..., 0], raw_u8)
+    assert raw_u8[0, 0] == 0
+    assert raw_u8[0, 1] == 0
+    assert raw_u8[0, 3] == 255
+    assert raw_u8[0, 4] == 255
+
+
+def test_dummy_camera_exposes_raw_unfiltered_pair() -> None:
+    camera = door_act_shadow.DummyDepthPair(value_m=0.85)
+    wrist_policy, front_policy, _ = camera.read()
+    wrist_raw, front_raw = camera.raw_unfiltered_depth_u8()
+
+    np.testing.assert_array_equal(wrist_raw, wrist_policy[..., 0])
+    np.testing.assert_array_equal(front_raw, front_policy[..., 0])
 
 
 @pytest.mark.parametrize(

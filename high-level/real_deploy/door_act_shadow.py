@@ -16,10 +16,13 @@ import json
 import multiprocessing as mp
 import os
 import queue
+import signal
 import socket
 import sys
 import threading
 import time
+from collections import deque
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -30,20 +33,36 @@ DEPTH_WIDTH = 640
 DEPTH_HEIGHT = 480
 DEPTH_FPS = 30
 POLICY_HZ = 25.0
+DEFAULT_ACTION_HORIZON = 10
 DEPTH_LOWER_M = 0.2
 DEPTH_FAR_M = 1.5
-DEFAULT_CROP_LEFT = 60
-DEFAULT_CROP_RIGHT = 30
-DEFAULT_CROP_TOP = 30
-DEFAULT_CROP_BOTTOM = 30
+DEFAULT_CROP_LEFT = 0
+DEFAULT_CROP_RIGHT = 0
+DEFAULT_CROP_TOP = 0
+DEFAULT_CROP_BOTTOM = 0
 DEFAULT_RS_SPATIAL_MAGNITUDE = 2
 DEFAULT_RS_SPATIAL_SMOOTH_DELTA = 50
 DEFAULT_RS_SPATIAL_HOLES_FILL = 5
-DEPTH_INPAINT_MODES = ("off", "realsense", "rgb_guided")
-DEFAULT_DEPTH_INPAINT_MODE = "realsense"
+DEPTH_INPAINT_MODES = ("off", "realsense", "rgb_guided", "opencv_k", "opencv_k_no_rs")
+DEFAULT_DEPTH_INPAINT_MODE = "opencv_k_no_rs"
 DEFAULT_DEPTH_INPAINT_MAX_DISTANCE_PX = 64.0
 DEFAULT_DEPTH_INPAINT_ITERATIONS = 2
 DEFAULT_DEPTH_INPAINT_RGB_SIGMA = 0.10
+DEFAULT_OPENCV_K_SMALL_MAX_AREA = 15000
+DEFAULT_OPENCV_K_SMALL_MAX_SPAN_PX = 280
+DEFAULT_OPENCV_K_SMALL_BORDER_MARGIN_PX = -1
+DEFAULT_OPENCV_K_WRIST_FRINGE_PX = 10
+DEFAULT_OPENCV_K_FRONT_FRINGE_PX = 40
+DEFAULT_OPENCV_K_WHITE_HOLE_THRESHOLD = 250
+DEFAULT_OPENCV_K_WHITE_HOLE_MAX_AREA = 2500
+DEFAULT_OPENCV_K_WHITE_HOLE_MAX_SPAN_PX = 90
+DEFAULT_OPENCV_K_WHITE_HOLE_BORDER_MARGIN_PX = 2
+DEFAULT_OPENCV_K_WHITE_HOLE_RING_RADIUS_PX = 3
+DEFAULT_OPENCV_K_WHITE_HOLE_MIN_GRAY_RING_PX = 8
+DEFAULT_OPENCV_K_WHITE_HOLE_MIN_GRAY_RING_RATIO = 0.35
+DEFAULT_OPENCV_K_REALTIME_PROCESS_SCALE = 1.0
+DEFAULT_DEPTH_GAUSSIAN_BLUR_KSIZE = 0
+DEFAULT_DEPTH_GAUSSIAN_BLUR_SIGMA = 0.0
 DEFAULT_WRIST_REALSENSE_SERIAL = "261222075130"
 DEFAULT_FRONT_REALSENSE_SERIAL = "261222075566"
 
@@ -112,7 +131,7 @@ def crop_and_resize_depth(
     return np.asarray(resized, dtype=np.float32), tuple(int(x) for x in cropped.shape)
 
 
-def depth_m_to_policy_u8(
+def depth_m_to_display_u8(
     depth_m: np.ndarray,
     depth_lower_m: float = DEPTH_LOWER_M,
     depth_far_m: float = DEPTH_FAR_M,
@@ -127,7 +146,15 @@ def depth_m_to_policy_u8(
     depth = np.clip(depth, depth_lower_m, depth_far_m)
     scaled = (depth - depth_lower_m) / max(depth_far_m - depth_lower_m, 1.0e-6)
     scaled[~valid] = 0.0
-    u8 = (255.0 * np.clip(scaled, 0.0, 1.0)).astype(np.uint8)
+    return (255.0 * np.clip(scaled, 0.0, 1.0)).astype(np.uint8)
+
+
+def depth_m_to_policy_u8(
+    depth_m: np.ndarray,
+    depth_lower_m: float = DEPTH_LOWER_M,
+    depth_far_m: float = DEPTH_FAR_M,
+) -> np.ndarray:
+    u8 = depth_m_to_display_u8(depth_m, depth_lower_m, depth_far_m)
     return np.repeat(u8[..., None], 3, axis=-1)
 
 
@@ -156,11 +183,346 @@ def make_realsense_filters(
     return filters
 
 
+def _small_component_mask_from_binary(
+    binary: np.ndarray,
+    *,
+    max_area: int,
+    max_span_px: int,
+    min_area: int = 1,
+    border_margin_px: int = -1,
+) -> tuple[np.ndarray, dict[str, int | float]]:
+    import cv2
+
+    mask = np.asarray(binary, dtype=np.uint8)
+    n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    height, width = mask.shape[:2]
+    selected = np.zeros_like(mask, dtype=np.uint8)
+    out: dict[str, int | float] = {
+        "total_px": int(mask.sum()),
+        "components": max(0, int(n_labels) - 1),
+        "selected_components": 0,
+        "selected_px": 0,
+        "skipped_area": 0,
+        "skipped_span": 0,
+        "skipped_border": 0,
+    }
+    for label in range(1, n_labels):
+        x = int(stats[label, cv2.CC_STAT_LEFT])
+        y = int(stats[label, cv2.CC_STAT_TOP])
+        w = int(stats[label, cv2.CC_STAT_WIDTH])
+        h = int(stats[label, cv2.CC_STAT_HEIGHT])
+        area = int(stats[label, cv2.CC_STAT_AREA])
+        if area < int(min_area) or area > int(max_area):
+            out["skipped_area"] = int(out["skipped_area"]) + 1
+            continue
+        if w > int(max_span_px) or h > int(max_span_px):
+            out["skipped_span"] = int(out["skipped_span"]) + 1
+            continue
+        if (
+            x <= int(border_margin_px)
+            or y <= int(border_margin_px)
+            or x + w >= width - int(border_margin_px)
+            or y + h >= height - int(border_margin_px)
+        ):
+            out["skipped_border"] = int(out["skipped_border"]) + 1
+            continue
+        selected[labels == label] = 255
+        out["selected_components"] = int(out["selected_components"]) + 1
+        out["selected_px"] = int(out["selected_px"]) + area
+    out["selected_ratio"] = float(out["selected_px"]) / max(float(out["total_px"]), 1.0)
+    return selected, out
+
+
+def _opencv_k_add_large_component_fringe(
+    depth_u8: np.ndarray,
+    base_mask: np.ndarray,
+    *,
+    small_max_area: int = DEFAULT_OPENCV_K_SMALL_MAX_AREA,
+    small_max_span_px: int = DEFAULT_OPENCV_K_SMALL_MAX_SPAN_PX,
+    fringe_px: int = 0,
+) -> tuple[np.ndarray, dict[str, int]]:
+    import cv2
+
+    out = np.asarray(base_mask, dtype=np.uint8).copy()
+    fringe_px = int(fringe_px)
+    stats = {
+        "large_components": 0,
+        "fringe_px": fringe_px,
+        "fringe_added_px": 0,
+        "black_mask_px": int(np.count_nonzero(out)),
+    }
+    if fringe_px <= 0:
+        return out, stats
+    black = (np.asarray(depth_u8, dtype=np.uint8) == 0).astype(np.uint8)
+    n_labels, labels, cc_stats, _ = cv2.connectedComponentsWithStats(black, connectivity=8)
+    for label in range(1, n_labels):
+        area = int(cc_stats[label, cv2.CC_STAT_AREA])
+        width = int(cc_stats[label, cv2.CC_STAT_WIDTH])
+        height = int(cc_stats[label, cv2.CC_STAT_HEIGHT])
+        if area <= int(small_max_area) and width <= int(small_max_span_px) and height <= int(small_max_span_px):
+            continue
+        component = (labels == label).astype(np.uint8)
+        distance = cv2.distanceTransform(component, cv2.DIST_L2, 3)
+        fringe = ((distance > 0.0) & (distance <= float(fringe_px))).astype(np.uint8) * 255
+        stats["fringe_added_px"] += int(np.count_nonzero((fringe > 0) & (out == 0)))
+        out = np.maximum(out, fringe)
+        stats["large_components"] += 1
+    stats["black_mask_px"] = int(np.count_nonzero(out))
+    return out, stats
+
+
+def _opencv_k_small_white_hole_mask(
+    depth_u8: np.ndarray,
+    *,
+    white_threshold: int = DEFAULT_OPENCV_K_WHITE_HOLE_THRESHOLD,
+    max_area: int = DEFAULT_OPENCV_K_WHITE_HOLE_MAX_AREA,
+    max_span_px: int = DEFAULT_OPENCV_K_WHITE_HOLE_MAX_SPAN_PX,
+    border_margin_px: int = DEFAULT_OPENCV_K_WHITE_HOLE_BORDER_MARGIN_PX,
+    ring_radius_px: int = DEFAULT_OPENCV_K_WHITE_HOLE_RING_RADIUS_PX,
+    min_gray_ring_px: int = DEFAULT_OPENCV_K_WHITE_HOLE_MIN_GRAY_RING_PX,
+    min_gray_ring_ratio: float = DEFAULT_OPENCV_K_WHITE_HOLE_MIN_GRAY_RING_RATIO,
+) -> tuple[np.ndarray, dict[str, int | float]]:
+    import cv2
+
+    image = np.asarray(depth_u8, dtype=np.uint8)
+    white = (image >= int(white_threshold)).astype(np.uint8)
+    n_labels, labels, cc_stats, _ = cv2.connectedComponentsWithStats(white, connectivity=8)
+    height, width = white.shape[:2]
+    selected = np.zeros_like(white, dtype=np.uint8)
+    out: dict[str, int | float] = {
+        "white_threshold": int(white_threshold),
+        "total_white_px": int(white.sum()),
+        "components": max(0, int(n_labels) - 1),
+        "selected_components": 0,
+        "selected_px": 0,
+        "skipped_area": 0,
+        "skipped_span": 0,
+        "skipped_border": 0,
+        "skipped_ring": 0,
+    }
+    kernel_radius = max(1, int(ring_radius_px))
+    kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE,
+        (2 * kernel_radius + 1, 2 * kernel_radius + 1),
+    )
+    for label in range(1, n_labels):
+        x = int(cc_stats[label, cv2.CC_STAT_LEFT])
+        y = int(cc_stats[label, cv2.CC_STAT_TOP])
+        w = int(cc_stats[label, cv2.CC_STAT_WIDTH])
+        h = int(cc_stats[label, cv2.CC_STAT_HEIGHT])
+        area = int(cc_stats[label, cv2.CC_STAT_AREA])
+        if area <= 0 or area > int(max_area):
+            out["skipped_area"] = int(out["skipped_area"]) + 1
+            continue
+        if w > int(max_span_px) or h > int(max_span_px):
+            out["skipped_span"] = int(out["skipped_span"]) + 1
+            continue
+        if (
+            x <= int(border_margin_px)
+            or y <= int(border_margin_px)
+            or x + w >= width - int(border_margin_px)
+            or y + h >= height - int(border_margin_px)
+        ):
+            out["skipped_border"] = int(out["skipped_border"]) + 1
+            continue
+        component = labels == label
+        dilated = cv2.dilate(component.astype(np.uint8), kernel, iterations=1).astype(bool)
+        ring = dilated & ~component
+        ring_count = int(ring.sum())
+        gray_ring = ring & (image > 0) & (image < int(white_threshold))
+        gray_count = int(gray_ring.sum())
+        if (
+            ring_count <= 0
+            or gray_count < int(min_gray_ring_px)
+            or gray_count / max(ring_count, 1) < float(min_gray_ring_ratio)
+        ):
+            out["skipped_ring"] = int(out["skipped_ring"]) + 1
+            continue
+        selected[component] = 255
+        out["selected_components"] = int(out["selected_components"]) + 1
+        out["selected_px"] = int(out["selected_px"]) + area
+    out["selected_ratio_of_white"] = float(out["selected_px"]) / max(float(out["total_white_px"]), 1.0)
+    return selected, out
+
+
+def _opencv_k_inpaint_policy_gray_impl(
+    depth_u8: np.ndarray,
+    *,
+    camera_name: str,
+    small_max_area: int,
+    small_max_span_px: int,
+    wrist_fringe_px: int,
+    front_fringe_px: int,
+    white_hole_max_area: int,
+    white_hole_max_span_px: int,
+    white_hole_border_margin_px: int,
+    white_hole_ring_radius_px: int,
+    white_hole_min_gray_ring_px: int,
+) -> tuple[np.ndarray, dict[str, int | float]]:
+    import cv2
+
+    image = np.asarray(depth_u8, dtype=np.uint8)
+    black_mask, black_stats = _small_component_mask_from_binary(
+        image == 0,
+        max_area=small_max_area,
+        max_span_px=small_max_span_px,
+        min_area=1,
+        border_margin_px=DEFAULT_OPENCV_K_SMALL_BORDER_MARGIN_PX,
+    )
+    name = str(camera_name).lower()
+    fringe_px = front_fringe_px if name == "front" else wrist_fringe_px
+    black_mask, fringe_stats = _opencv_k_add_large_component_fringe(
+        image,
+        black_mask,
+        small_max_area=small_max_area,
+        small_max_span_px=small_max_span_px,
+        fringe_px=fringe_px,
+    )
+    white_mask, white_stats = _opencv_k_small_white_hole_mask(
+        image,
+        max_area=white_hole_max_area,
+        max_span_px=white_hole_max_span_px,
+        border_margin_px=white_hole_border_margin_px,
+        ring_radius_px=white_hole_ring_radius_px,
+        min_gray_ring_px=white_hole_min_gray_ring_px,
+    )
+    combined_mask = np.maximum(black_mask, white_mask)
+    if not np.any(combined_mask):
+        return image.copy(), {
+            "camera": name,
+            "fringe_px": int(fringe_px),
+            "black_px": int(np.count_nonzero(image == 0)),
+            "white_px": int(np.count_nonzero(image >= DEFAULT_OPENCV_K_WHITE_HOLE_THRESHOLD)),
+            "black_selected_px": 0,
+            "fringe_added_px": 0,
+            "white_selected_px": 0,
+            "combined_mask_px": 0,
+            "changed_px": 0,
+        }
+    inpainted = cv2.inpaint(image, combined_mask, 3.0, cv2.INPAINT_TELEA)
+    return inpainted, {
+        "camera": name,
+        "fringe_px": int(fringe_px),
+        "black_px": int(np.count_nonzero(image == 0)),
+        "white_px": int(np.count_nonzero(image >= DEFAULT_OPENCV_K_WHITE_HOLE_THRESHOLD)),
+        "black_selected_px": int(black_stats.get("selected_px", 0)),
+        "fringe_added_px": int(fringe_stats.get("fringe_added_px", 0)),
+        "white_selected_px": int(white_stats.get("selected_px", 0)),
+        "combined_mask_px": int(np.count_nonzero(combined_mask)),
+        "changed_px": int(np.count_nonzero(inpainted != image)),
+    }
+
+
+def opencv_k_inpaint_policy_gray(
+    depth_u8: np.ndarray,
+    *,
+    camera_name: str,
+    process_scale: float = DEFAULT_OPENCV_K_REALTIME_PROCESS_SCALE,
+) -> tuple[np.ndarray, dict[str, int | float]]:
+    import cv2
+
+    image = np.asarray(depth_u8, dtype=np.uint8)
+    height, width = image.shape[:2]
+    scale = float(process_scale)
+    if not 0.0 < scale <= 1.0:
+        raise ValueError(f"process_scale must be in (0, 1], got {process_scale}")
+    if scale >= 0.999:
+        out, stats = _opencv_k_inpaint_policy_gray_impl(
+            image,
+            camera_name=camera_name,
+            small_max_area=DEFAULT_OPENCV_K_SMALL_MAX_AREA,
+            small_max_span_px=DEFAULT_OPENCV_K_SMALL_MAX_SPAN_PX,
+            wrist_fringe_px=DEFAULT_OPENCV_K_WRIST_FRINGE_PX,
+            front_fringe_px=DEFAULT_OPENCV_K_FRONT_FRINGE_PX,
+            white_hole_max_area=DEFAULT_OPENCV_K_WHITE_HOLE_MAX_AREA,
+            white_hole_max_span_px=DEFAULT_OPENCV_K_WHITE_HOLE_MAX_SPAN_PX,
+            white_hole_border_margin_px=DEFAULT_OPENCV_K_WHITE_HOLE_BORDER_MARGIN_PX,
+            white_hole_ring_radius_px=DEFAULT_OPENCV_K_WHITE_HOLE_RING_RADIUS_PX,
+            white_hole_min_gray_ring_px=DEFAULT_OPENCV_K_WHITE_HOLE_MIN_GRAY_RING_PX,
+        )
+        stats = dict(stats)
+        stats["process_scale"] = 1.0
+        stats["process_shape_hw"] = [height, width]
+        stats["fringe_px_fullres"] = (
+            DEFAULT_OPENCV_K_FRONT_FRINGE_PX if str(camera_name).lower() == "front" else DEFAULT_OPENCV_K_WRIST_FRINGE_PX
+        )
+        stats["fringe_px_process"] = stats.get("fringe_px", stats["fringe_px_fullres"])
+        return out, stats
+
+    scaled_width = max(1, int(round(width * scale)))
+    scaled_height = max(1, int(round(height * scale)))
+    small = cv2.resize(image, (scaled_width, scaled_height), interpolation=cv2.INTER_AREA)
+    area_scale = scale * scale
+    small_out, stats = _opencv_k_inpaint_policy_gray_impl(
+        small,
+        camera_name=camera_name,
+        small_max_area=max(1, int(round(DEFAULT_OPENCV_K_SMALL_MAX_AREA * area_scale))),
+        small_max_span_px=max(1, int(round(DEFAULT_OPENCV_K_SMALL_MAX_SPAN_PX * scale))),
+        wrist_fringe_px=max(1, int(round(DEFAULT_OPENCV_K_WRIST_FRINGE_PX * scale))),
+        front_fringe_px=max(1, int(round(DEFAULT_OPENCV_K_FRONT_FRINGE_PX * scale))),
+        white_hole_max_area=max(1, int(round(DEFAULT_OPENCV_K_WHITE_HOLE_MAX_AREA * area_scale))),
+        white_hole_max_span_px=max(1, int(round(DEFAULT_OPENCV_K_WHITE_HOLE_MAX_SPAN_PX * scale))),
+        white_hole_border_margin_px=max(1, int(round(DEFAULT_OPENCV_K_WHITE_HOLE_BORDER_MARGIN_PX * scale))),
+        white_hole_ring_radius_px=max(1, int(round(DEFAULT_OPENCV_K_WHITE_HOLE_RING_RADIUS_PX * scale))),
+        white_hole_min_gray_ring_px=max(1, int(round(DEFAULT_OPENCV_K_WHITE_HOLE_MIN_GRAY_RING_PX * area_scale))),
+    )
+    out = cv2.resize(small_out, (width, height), interpolation=cv2.INTER_LINEAR)
+    stats = dict(stats)
+    stats["process_scale"] = scale
+    stats["process_shape_hw"] = [scaled_height, scaled_width]
+    stats["fringe_px_fullres"] = (
+        DEFAULT_OPENCV_K_FRONT_FRINGE_PX if str(camera_name).lower() == "front" else DEFAULT_OPENCV_K_WRIST_FRINGE_PX
+    )
+    stats["fringe_px_process"] = stats.get("fringe_px", 0)
+    stats["changed_px_fullres"] = int(np.count_nonzero(out != image))
+    return out, stats
+
+
 def validate_depth_inpaint_mode(mode: str) -> str:
     normalized = str(mode).strip().lower()
     if normalized not in DEPTH_INPAINT_MODES:
         raise ValueError(f"Unsupported depth inpaint mode {mode!r}; expected one of {DEPTH_INPAINT_MODES}.")
     return normalized
+
+
+def is_opencv_k_depth_mode(mode: str) -> bool:
+    return validate_depth_inpaint_mode(mode) in ("opencv_k", "opencv_k_no_rs")
+
+
+def validate_gaussian_blur_args(ksize: int, sigma: float) -> tuple[int, float]:
+    k = int(ksize)
+    s = float(sigma)
+    if k < 0:
+        raise ValueError("--depth_gaussian_blur_ksize must be non-negative.")
+    if k > 0 and k % 2 == 0:
+        raise ValueError("--depth_gaussian_blur_ksize must be odd when enabled.")
+    if s < 0:
+        raise ValueError("--depth_gaussian_blur_sigma must be non-negative.")
+    return k, s
+
+
+def maybe_gaussian_blur_depth_u8(
+    depth_u8: np.ndarray,
+    *,
+    ksize: int,
+    sigma: float,
+) -> tuple[np.ndarray, dict[str, int | float | None]]:
+    import cv2
+
+    k, s = validate_gaussian_blur_args(ksize, sigma)
+    if k <= 0:
+        return np.asarray(depth_u8, dtype=np.uint8), {"enabled": False, "ksize": 0, "sigma": None}
+    image = np.asarray(depth_u8, dtype=np.uint8)
+    blurred = cv2.GaussianBlur(image, (k, k), s, borderType=cv2.BORDER_DEFAULT)
+    delta = np.abs(blurred.astype(np.int16) - image.astype(np.int16))
+    return blurred, {
+        "enabled": True,
+        "ksize": int(k),
+        "sigma": float(s),
+        "changed_px": int(np.count_nonzero(delta)),
+        "mean_abs_delta": float(delta.mean()),
+        "max_abs_delta": int(delta.max()) if delta.size else 0,
+    }
 
 
 def save_depth_debug_images(
@@ -281,6 +643,241 @@ def save_depth_debug_images(
         json.dump(meta, f, ensure_ascii=False, indent=2)
 
 
+class AsyncPolicyDepthVideoRecorder:
+    """Asynchronously record the exact uint8 depth images fed to the policy.
+
+    The inference loop only copies the two small uint8 frames into a bounded
+    queue. Encoding happens in a background thread; if the encoder falls behind,
+    frames are dropped instead of delaying robot control.
+    """
+
+    def __init__(
+        self,
+        out_dir: Path,
+        fps: float,
+        queue_size: int = 128,
+        codec: str = "mp4v",
+        separate: bool = False,
+        video_stem: str = "policy_depth_u8",
+        metadata_stem: str = "policy_depth_video",
+        layout: str = "side_by_side_left_wrist_right_front",
+    ) -> None:
+        self.out_dir = Path(out_dir)
+        self.fps = float(fps)
+        self.queue_size = int(queue_size)
+        self.codec = str(codec)
+        self.separate = bool(separate)
+        self.video_stem = str(video_stem)
+        self.metadata_stem = str(metadata_stem)
+        self.layout = str(layout)
+        self.queue: queue.Queue | None = None
+        self.stop_event = threading.Event()
+        self.thread: threading.Thread | None = None
+        self.meta_lock = threading.Lock()
+        self.enqueued = 0
+        self.written = 0
+        self.dropped = 0
+        self.error: str | None = None
+
+    @staticmethod
+    def _gray_u8(image: np.ndarray) -> np.ndarray:
+        arr = np.asarray(image)
+        if arr.ndim == 3:
+            arr = arr[..., 0]
+        if arr.ndim != 2:
+            raise ValueError(f"policy depth image must be HxW or HxWxC, got {arr.shape}.")
+        if arr.dtype != np.uint8:
+            arr = np.clip(arr, 0, 255).astype(np.uint8)
+        return np.ascontiguousarray(arr)
+
+    @staticmethod
+    def _bgr(gray: np.ndarray) -> np.ndarray:
+        return np.repeat(gray[..., None], 3, axis=-1)
+
+    def start(self) -> None:
+        if self.fps <= 0:
+            raise ValueError(f"Policy depth video fps must be positive, got {self.fps}.")
+        if self.queue_size <= 0:
+            raise ValueError(f"Policy depth video queue size must be positive, got {self.queue_size}.")
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+        self.queue = queue.Queue(maxsize=self.queue_size)
+        self.thread = threading.Thread(target=self._loop, name="policy-depth-video", daemon=True)
+        self.thread.start()
+
+    def submit(
+        self,
+        step: int,
+        wall_time: float,
+        wrist_policy_depth: np.ndarray,
+        front_policy_depth: np.ndarray,
+    ) -> dict:
+        if self.queue is None:
+            raise RuntimeError("AsyncPolicyDepthVideoRecorder.start() was not called.")
+        try:
+            wrist = self._gray_u8(wrist_policy_depth).copy()
+            front = self._gray_u8(front_policy_depth).copy()
+        except Exception as exc:
+            with self.meta_lock:
+                self.error = f"copy_failed:{exc}"
+            return self.stats(extra={"queued": False, "drop_reason": "copy_failed"})
+        item = {
+            "step": int(step),
+            "wall_time": float(wall_time),
+            "wrist": wrist,
+            "front": front,
+        }
+        try:
+            self.queue.put_nowait(item)
+        except queue.Full:
+            with self.meta_lock:
+                self.dropped += 1
+                enqueued = self.enqueued
+                written = self.written
+                dropped = self.dropped
+                error = self.error
+            return {
+                "enabled": True,
+                "queued": False,
+                "drop_reason": "queue_full",
+                "enqueued": enqueued,
+                "written": written,
+                "dropped": dropped,
+                "error": error,
+            }
+        with self.meta_lock:
+            self.enqueued += 1
+            enqueued = self.enqueued
+            written = self.written
+            dropped = self.dropped
+            error = self.error
+        return {
+            "enabled": True,
+            "queued": True,
+            "enqueued": enqueued,
+            "written": written,
+            "dropped": dropped,
+            "error": error,
+        }
+
+    def stats(self, extra: dict | None = None) -> dict:
+        with self.meta_lock:
+            out = {
+                "enabled": True,
+                "dir": str(self.out_dir),
+                "fps": self.fps,
+                "enqueued": self.enqueued,
+                "written": self.written,
+                "dropped": self.dropped,
+                "error": self.error,
+            }
+        if extra:
+            out.update(extra)
+        return out
+
+    def stop(self, timeout_s: float = 5.0) -> dict:
+        self.stop_event.set()
+        if self.thread is not None:
+            self.thread.join(timeout=float(timeout_s))
+        return self.stats(extra={"thread_alive": bool(self.thread and self.thread.is_alive())})
+
+    def _open_writer(self, path: Path, size: tuple[int, int]):
+        import cv2
+
+        fourcc = cv2.VideoWriter_fourcc(*self.codec[:4])
+        writer = cv2.VideoWriter(str(path), fourcc, self.fps, size, True)
+        if not writer.isOpened():
+            fallback_path = path.with_suffix(".avi")
+            fourcc = cv2.VideoWriter_fourcc(*"MJPG")
+            writer = cv2.VideoWriter(str(fallback_path), fourcc, self.fps, size, True)
+            path = fallback_path
+        if not writer.isOpened():
+            raise RuntimeError(f"failed to open policy depth video writer: {path}")
+        return writer, path
+
+    def _loop(self) -> None:
+        writers = {}
+        paths = {}
+        meta_file = None
+        try:
+            meta_file = (self.out_dir / f"{self.metadata_stem}_frames.jsonl").open("w", encoding="utf-8")
+            while not self.stop_event.is_set() or (self.queue is not None and not self.queue.empty()):
+                try:
+                    item = self.queue.get(timeout=0.1) if self.queue is not None else None
+                except queue.Empty:
+                    continue
+                if item is None:
+                    continue
+                wrist = np.asarray(item["wrist"], dtype=np.uint8)
+                front = np.asarray(item["front"], dtype=np.uint8)
+                if wrist.shape != front.shape:
+                    raise ValueError(f"wrist/front policy depth shapes differ: {wrist.shape} vs {front.shape}")
+                h, w = wrist.shape
+                if "side_by_side" not in writers:
+                    writers["side_by_side"], paths["side_by_side"] = self._open_writer(
+                        self.out_dir / f"{self.video_stem}_side_by_side.mp4",
+                        (w * 2, h),
+                    )
+                    if self.separate:
+                        writers["wrist"], paths["wrist"] = self._open_writer(
+                            self.out_dir / f"wrist_{self.video_stem}.mp4",
+                            (w, h),
+                        )
+                        writers["front"], paths["front"] = self._open_writer(
+                            self.out_dir / f"front_{self.video_stem}.mp4",
+                            (w, h),
+                        )
+                    with self.meta_lock:
+                        self.error = None
+                combined = np.concatenate([wrist, front], axis=1)
+                writers["side_by_side"].write(self._bgr(combined))
+                if self.separate:
+                    writers["wrist"].write(self._bgr(wrist))
+                    writers["front"].write(self._bgr(front))
+                meta_file.write(
+                    json.dumps(
+                        {
+                            "step": int(item["step"]),
+                            "wall_time": float(item["wall_time"]),
+                            "layout": self.layout,
+                            "shape_hw": [int(h), int(w)],
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+                with self.meta_lock:
+                    self.written += 1
+        except Exception as exc:
+            with self.meta_lock:
+                self.error = str(exc)
+        finally:
+            if meta_file is not None:
+                meta_file.close()
+            for writer in writers.values():
+                writer.release()
+            if paths:
+                try:
+                    (self.out_dir / f"{self.metadata_stem}_manifest.json").write_text(
+                        json.dumps(
+                            {
+                                "fps": self.fps,
+                                "codec_requested": self.codec,
+                                "layout": self.layout,
+                                "video_stem": self.video_stem,
+                                "videos": {key: str(path) for key, path in paths.items()},
+                                "separate": self.separate,
+                                "stats": self.stats(),
+                            },
+                            ensure_ascii=False,
+                            indent=2,
+                        ),
+                        encoding="utf-8",
+                    )
+                except Exception as exc:
+                    with self.meta_lock:
+                        self.error = f"manifest_failed:{exc}"
+
+
 class DummyDepthPair:
     def __init__(
         self,
@@ -292,6 +889,7 @@ class DummyDepthPair:
         self.depth_lower_m = float(depth_lower_m)
         self.depth_far_m = float(depth_far_m)
         self.depth = np.full((DEPTH_HEIGHT, DEPTH_WIDTH), self.value_m, dtype=np.float32)
+        self.last_raw_unfiltered_depth_u8: tuple[np.ndarray, np.ndarray] | None = None
 
     def start(self) -> None:
         pass
@@ -299,6 +897,7 @@ class DummyDepthPair:
     def read(self, capture_debug: bool = False) -> tuple[np.ndarray, np.ndarray, dict]:
         now = time.time()
         image = depth_m_to_policy_u8(self.depth, self.depth_lower_m, self.depth_far_m)
+        self.last_raw_unfiltered_depth_u8 = (image[..., 0].copy(), image[..., 0].copy())
         return image, image.copy(), {
             "wrist_ts": now,
             "front_ts": now,
@@ -306,6 +905,12 @@ class DummyDepthPair:
             "backend": "dummy",
             "depth_clip_m": [self.depth_lower_m, self.depth_far_m],
         }
+
+    def raw_unfiltered_depth_u8(self) -> tuple[np.ndarray, np.ndarray]:
+        if self.last_raw_unfiltered_depth_u8 is None:
+            image = depth_m_to_policy_u8(self.depth, self.depth_lower_m, self.depth_far_m)[..., 0]
+            return image.copy(), image.copy()
+        return tuple(image.copy() for image in self.last_raw_unfiltered_depth_u8)
 
     def debug_snapshots(self) -> dict[str, dict[str, np.ndarray]]:
         return {}
@@ -329,6 +934,8 @@ class AsyncRealSenseDepthCamera:
         depth_far_m: float = DEPTH_FAR_M,
         spatial_magnitude: int = DEFAULT_RS_SPATIAL_MAGNITUDE,
         depth_inpaint_mode: str = DEFAULT_DEPTH_INPAINT_MODE,
+        depth_gaussian_blur_ksize: int = DEFAULT_DEPTH_GAUSSIAN_BLUR_KSIZE,
+        depth_gaussian_blur_sigma: float = DEFAULT_DEPTH_GAUSSIAN_BLUR_SIGMA,
     ) -> None:
         if not serial:
             raise ValueError(f"{name} RealSense serial is empty.")
@@ -345,6 +952,10 @@ class AsyncRealSenseDepthCamera:
         self.depth_far_m = float(depth_far_m)
         self.spatial_magnitude = int(spatial_magnitude)
         self.depth_inpaint_mode = validate_depth_inpaint_mode(depth_inpaint_mode)
+        self.depth_gaussian_blur_ksize, self.depth_gaussian_blur_sigma = validate_gaussian_blur_args(
+            depth_gaussian_blur_ksize,
+            depth_gaussian_blur_sigma,
+        )
         self.crop.validate(DEPTH_WIDTH, DEPTH_HEIGHT)
         self.pipeline = None
         self.align = None
@@ -357,12 +968,14 @@ class AsyncRealSenseDepthCamera:
         self.latest_depth_m: np.ndarray | None = None
         self.latest_aligned_depth_m: np.ndarray | None = None
         self.latest_policy_u8: np.ndarray | None = None
+        self.latest_raw_unfiltered_policy_u8: np.ndarray | None = None
         self.latest_color_rgb: np.ndarray | None = None
         self.latest_raw_cropped_depth_m: np.ndarray | None = None
         self.latest_inpaint_input_depth_m: np.ndarray | None = None
         self.latest_color_crop_rgb: np.ndarray | None = None
         self.latest_invalid_mask: np.ndarray | None = None
         self.latest_output_invalid_mask: np.ndarray | None = None
+        self.latest_opencv_k_stats: dict[str, int | float] | None = None
         self.latest_crop_shape: tuple[int, int] | None = None
         self.latest_timestamp_s: float | None = None
         self.latest_arrival_s: float | None = None
@@ -453,6 +1066,12 @@ class AsyncRealSenseDepthCamera:
                 y1, y2 = int(self.crop.top), height - int(self.crop.bottom)
                 x1, x2 = int(self.crop.left), width - int(self.crop.right)
                 raw_cropped_depth_m = aligned_depth_m[y1:y2, x1:x2]
+                raw_resized_depth_m, _ = crop_and_resize_depth(aligned_depth_m, self.crop)
+                raw_unfiltered_policy_u8 = depth_m_to_display_u8(
+                    raw_resized_depth_m,
+                    self.depth_lower_m,
+                    self.depth_far_m,
+                )
                 inpaint_input_depth_m = filtered_aligned_depth_m[y1:y2, x1:x2]
                 invalid_mask = raw_invalid_mask[y1:y2, x1:x2]
                 output_invalid_mask = cv2.resize(
@@ -462,6 +1081,23 @@ class AsyncRealSenseDepthCamera:
                 ).astype(bool)
                 depth_m, crop_shape = crop_and_resize_depth(filtered_aligned_depth_m, self.crop)
                 policy_u8 = depth_m_to_policy_u8(depth_m, self.depth_lower_m, self.depth_far_m)
+                opencv_k_stats = None
+                gaussian_blur_stats = None
+                policy_gray = policy_u8[..., 0]
+                if is_opencv_k_depth_mode(self.depth_inpaint_mode):
+                    policy_gray, opencv_k_stats = opencv_k_inpaint_policy_gray(
+                        policy_gray,
+                        camera_name=self.name,
+                    )
+                policy_gray, gaussian_blur_stats = maybe_gaussian_blur_depth_u8(
+                    policy_gray,
+                    ksize=self.depth_gaussian_blur_ksize,
+                    sigma=self.depth_gaussian_blur_sigma,
+                )
+                if opencv_k_stats is not None:
+                    opencv_k_stats = dict(opencv_k_stats)
+                    opencv_k_stats["gaussian_blur"] = gaussian_blur_stats
+                policy_u8 = np.repeat(policy_gray[..., None], 3, axis=-1)
                 color_rgb = np.asanyarray(color_frame.get_data()).copy() if color_frame else None
                 color_crop_rgb = (
                     color_rgb[y1:y2, x1:x2]
@@ -474,12 +1110,14 @@ class AsyncRealSenseDepthCamera:
                     self.latest_depth_m = depth_m
                     self.latest_aligned_depth_m = aligned_depth_m
                     self.latest_policy_u8 = policy_u8
+                    self.latest_raw_unfiltered_policy_u8 = raw_unfiltered_policy_u8
                     self.latest_color_rgb = color_rgb
                     self.latest_raw_cropped_depth_m = raw_cropped_depth_m.copy()
                     self.latest_inpaint_input_depth_m = inpaint_input_depth_m.copy()
                     self.latest_color_crop_rgb = color_crop_rgb.copy()
                     self.latest_invalid_mask = invalid_mask.copy()
                     self.latest_output_invalid_mask = output_invalid_mask.copy()
+                    self.latest_opencv_k_stats = None if opencv_k_stats is None else dict(opencv_k_stats)
                     self.latest_crop_shape = crop_shape
                     self.latest_timestamp_s = timestamp_s
                     self.latest_arrival_s = arrival_s
@@ -509,6 +1147,11 @@ class AsyncRealSenseDepthCamera:
                         "depth_scale": self.scale,
                         "filters": self.use_filters,
                         "depth_inpaint_mode": self.depth_inpaint_mode,
+                        "depth_gaussian_blur": {
+                            "enabled": self.depth_gaussian_blur_ksize > 0,
+                            "ksize": int(self.depth_gaussian_blur_ksize),
+                            "sigma": float(self.depth_gaussian_blur_sigma),
+                        },
                         "spatial_magnitude": self.spatial_magnitude if self.use_filters else 0,
                         "worker_mode": "thread",
                         "align_depth_to": "color" if self.align_depth_to_color else "none",
@@ -520,12 +1163,24 @@ class AsyncRealSenseDepthCamera:
                         "depth_min_m": float(positive.min()) if positive.size else 0.0,
                         "depth_max_m": float(positive.max()) if positive.size else 0.0,
                         "depth_mean_m": float(positive.mean()) if positive.size else 0.0,
+                        "opencv_k": None if self.latest_opencv_k_stats is None else dict(self.latest_opencv_k_stats),
                         "error": self.error,
                     }
                     return self.latest_policy_u8.copy(), meta
             if time.monotonic() >= deadline:
                 raise TimeoutError(f"Timed out waiting for {self.name} RealSense depth frame.")
             time.sleep(0.002)
+
+    def read_latest_with_raw(
+        self,
+        timeout_s: float = 2.0,
+    ) -> tuple[np.ndarray, np.ndarray, dict]:
+        policy, meta = self.read_latest(timeout_s=timeout_s)
+        with self.lock:
+            if self.latest_raw_unfiltered_policy_u8 is None:
+                raise RuntimeError(f"{self.name} raw unfiltered depth is unavailable.")
+            raw = self.latest_raw_unfiltered_policy_u8.copy()
+        return policy, raw, meta
 
     def read_latest_inputs(self, timeout_s: float = 2.0) -> tuple[dict[str, np.ndarray], dict]:
         _, meta = self.read_latest(timeout_s=timeout_s)
@@ -535,6 +1190,7 @@ class AsyncRealSenseDepthCamera:
                 or self.latest_color_crop_rgb is None
                 or self.latest_invalid_mask is None
                 or self.latest_output_invalid_mask is None
+                or self.latest_raw_unfiltered_policy_u8 is None
             ):
                 raise RuntimeError(f"{self.name} RealSense inpaint inputs are unavailable.")
             meta = dict(meta)
@@ -551,6 +1207,7 @@ class AsyncRealSenseDepthCamera:
                 "invalid_mask": self.latest_invalid_mask.copy(),
                 "output_invalid_mask": self.latest_output_invalid_mask.copy(),
                 "base_policy_u8": self.latest_policy_u8[..., 0].copy(),
+                "raw_unfiltered_policy_u8": self.latest_raw_unfiltered_policy_u8.copy(),
             }, meta
 
     def debug_snapshot(self, timeout_s: float = 2.0) -> dict[str, np.ndarray | DepthCrop]:
@@ -592,7 +1249,10 @@ def _realsense_process_worker(
     depth_far_m: float,
     spatial_magnitude: int,
     depth_inpaint_mode: str,
+    depth_gaussian_blur_ksize: int,
+    depth_gaussian_blur_sigma: float,
     policy_buffer,
+    raw_unfiltered_policy_buffer,
     processed_depth_buffer,
     aligned_depth_buffer,
     color_buffer,
@@ -610,10 +1270,18 @@ def _realsense_process_worker(
     stop_event,
     status_queue,
 ) -> None:
+    # Ctrl+C belongs to the parent inference process. The parent sets this
+    # worker's shared stop event and joins it cleanly.
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
     import cv2
     import pyrealsense2 as rs
 
     crop = DepthCrop(*crop_values)
+    depth_gaussian_blur_ksize, depth_gaussian_blur_sigma = validate_gaussian_blur_args(
+        depth_gaussian_blur_ksize,
+        depth_gaussian_blur_sigma,
+    )
     pipeline = rs.pipeline()
     cfg = rs.config()
     cfg.enable_device(str(serial))
@@ -663,6 +1331,10 @@ def _realsense_process_worker(
         )
 
         policy_view = np.frombuffer(policy_buffer, dtype=np.uint8).reshape(DEPTH_HEIGHT, DEPTH_WIDTH, 3)
+        raw_unfiltered_policy_view = np.frombuffer(
+            raw_unfiltered_policy_buffer,
+            dtype=np.uint8,
+        ).reshape(DEPTH_HEIGHT, DEPTH_WIDTH)
         processed_view = np.frombuffer(processed_depth_buffer, dtype=np.float32).reshape(DEPTH_HEIGHT, DEPTH_WIDTH)
         aligned_view = np.frombuffer(aligned_depth_buffer, dtype=np.float32).reshape(DEPTH_HEIGHT, DEPTH_WIDTH)
         color_view = np.frombuffer(color_buffer, dtype=np.uint8).reshape(DEPTH_HEIGHT, DEPTH_WIDTH, 3)
@@ -704,6 +1376,16 @@ def _realsense_process_worker(
                 y1, y2 = int(crop.top), height - int(crop.bottom)
                 x1, x2 = int(crop.left), width - int(crop.right)
                 raw_cropped_depth_m = aligned_depth_m[y1:y2, x1:x2]
+                raw_resized_depth_m = cv2.resize(
+                    raw_cropped_depth_m,
+                    (DEPTH_WIDTH, DEPTH_HEIGHT),
+                    interpolation=cv2.INTER_LINEAR,
+                )
+                raw_unfiltered_policy_u8 = depth_m_to_display_u8(
+                    raw_resized_depth_m,
+                    depth_lower_m,
+                    depth_far_m,
+                )
                 inpaint_input_depth_m = filtered_depth_m[y1:y2, x1:x2]
                 invalid_mask = raw_invalid_mask[y1:y2, x1:x2]
                 output_invalid_mask = cv2.resize(
@@ -717,6 +1399,23 @@ def _realsense_process_worker(
                     interpolation=cv2.INTER_LINEAR,
                 )
                 policy_u8 = depth_m_to_policy_u8(processed_depth_m, depth_lower_m, depth_far_m)
+                opencv_k_stats = None
+                gaussian_blur_stats = None
+                policy_gray = policy_u8[..., 0]
+                if is_opencv_k_depth_mode(depth_inpaint_mode):
+                    policy_gray, opencv_k_stats = opencv_k_inpaint_policy_gray(
+                        policy_gray,
+                        camera_name=name,
+                    )
+                policy_gray, gaussian_blur_stats = maybe_gaussian_blur_depth_u8(
+                    policy_gray,
+                    ksize=depth_gaussian_blur_ksize,
+                    sigma=depth_gaussian_blur_sigma,
+                )
+                if opencv_k_stats is not None:
+                    opencv_k_stats = dict(opencv_k_stats)
+                    opencv_k_stats["gaussian_blur"] = gaussian_blur_stats
+                policy_u8 = np.repeat(policy_gray[..., None], 3, axis=-1)
                 color_rgb = (
                     np.asanyarray(color_frame.get_data())
                     if color_frame
@@ -729,6 +1428,7 @@ def _realsense_process_worker(
 
                 with data_lock:
                     policy_view[...] = policy_u8
+                    raw_unfiltered_policy_view[...] = raw_unfiltered_policy_u8
                     # ACT needs policy_u8 every frame.  The larger raw/color
                     # buffers are only for occasional debug snapshots; copying
                     # all ~3.4MB per camera every frame needlessly consumes NX
@@ -748,6 +1448,21 @@ def _realsense_process_worker(
                     arrival_value.value = arrival_s
                     frame_count_value.value = local_frame_count
                     has_frame_value.value = 1
+                if (
+                    opencv_k_stats is not None
+                    and (local_frame_count == 1 or local_frame_count % DEPTH_FPS == 0)
+                ):
+                    try:
+                        status_queue.put_nowait(
+                            {
+                                "type": "opencv_k_stats",
+                                "name": name,
+                                "frame_count": local_frame_count,
+                                "opencv_k": opencv_k_stats,
+                            }
+                        )
+                    except queue.Full:
+                        pass
             except Exception as exc:
                 try:
                     status_queue.put_nowait({"type": "error", "error": repr(exc)})
@@ -787,6 +1502,8 @@ class AsyncRealSenseDepthProcessCamera:
         depth_far_m: float = DEPTH_FAR_M,
         spatial_magnitude: int = DEFAULT_RS_SPATIAL_MAGNITUDE,
         depth_inpaint_mode: str = DEFAULT_DEPTH_INPAINT_MODE,
+        depth_gaussian_blur_ksize: int = DEFAULT_DEPTH_GAUSSIAN_BLUR_KSIZE,
+        depth_gaussian_blur_sigma: float = DEFAULT_DEPTH_GAUSSIAN_BLUR_SIGMA,
     ) -> None:
         if not serial:
             raise ValueError(f"{name} RealSense serial is empty.")
@@ -800,6 +1517,10 @@ class AsyncRealSenseDepthProcessCamera:
         self.depth_far_m = float(depth_far_m)
         self.spatial_magnitude = int(spatial_magnitude)
         self.depth_inpaint_mode = validate_depth_inpaint_mode(depth_inpaint_mode)
+        self.depth_gaussian_blur_ksize, self.depth_gaussian_blur_sigma = validate_gaussian_blur_args(
+            depth_gaussian_blur_ksize,
+            depth_gaussian_blur_sigma,
+        )
         self.crop.validate(DEPTH_WIDTH, DEPTH_HEIGHT)
         self.crop_height = DEPTH_HEIGHT - self.crop.top - self.crop.bottom
         self.crop_width = DEPTH_WIDTH - self.crop.left - self.crop.right
@@ -808,6 +1529,10 @@ class AsyncRealSenseDepthProcessCamera:
         # state can leave the child pipeline alive but unable to receive frames.
         self.ctx = mp.get_context("spawn")
         self.policy_buffer = self.ctx.RawArray(ctypes.c_uint8, DEPTH_HEIGHT * DEPTH_WIDTH * 3)
+        self.raw_unfiltered_policy_buffer = self.ctx.RawArray(
+            ctypes.c_uint8,
+            DEPTH_HEIGHT * DEPTH_WIDTH,
+        )
         self.processed_depth_buffer = self.ctx.RawArray(ctypes.c_float, DEPTH_HEIGHT * DEPTH_WIDTH)
         self.aligned_depth_buffer = self.ctx.RawArray(ctypes.c_float, DEPTH_HEIGHT * DEPTH_WIDTH)
         self.color_buffer = self.ctx.RawArray(ctypes.c_uint8, DEPTH_HEIGHT * DEPTH_WIDTH * 3)
@@ -830,6 +1555,7 @@ class AsyncRealSenseDepthProcessCamera:
         self.status_queue = self.ctx.Queue(maxsize=8)
         self.process: mp.Process | None = None
         self.device_info: dict[str, str] = {}
+        self.latest_opencv_k_stats: dict[str, int | float] | None = None
         self.error = ""
 
     def _drain_status(self) -> None:
@@ -840,6 +1566,8 @@ class AsyncRealSenseDepthProcessCamera:
                 break
             if item.get("type") == "started":
                 self.device_info = dict(item.get("device") or {})
+            elif item.get("type") == "opencv_k_stats":
+                self.latest_opencv_k_stats = dict(item.get("opencv_k") or {})
             elif item.get("type") in {"error", "startup_error"}:
                 self.error = str(item.get("error") or "")
 
@@ -857,7 +1585,10 @@ class AsyncRealSenseDepthProcessCamera:
                 self.depth_far_m,
                 self.spatial_magnitude,
                 self.depth_inpaint_mode,
+                self.depth_gaussian_blur_ksize,
+                self.depth_gaussian_blur_sigma,
                 self.policy_buffer,
+                self.raw_unfiltered_policy_buffer,
                 self.processed_depth_buffer,
                 self.aligned_depth_buffer,
                 self.color_buffer,
@@ -917,6 +1648,11 @@ class AsyncRealSenseDepthProcessCamera:
                     "depth_scale": float(self.depth_scale_value.value),
                     "filters": self.use_filters,
                     "depth_inpaint_mode": self.depth_inpaint_mode,
+                    "depth_gaussian_blur": {
+                        "enabled": self.depth_gaussian_blur_ksize > 0,
+                        "ksize": int(self.depth_gaussian_blur_ksize),
+                        "sigma": float(self.depth_gaussian_blur_sigma),
+                    },
                     "spatial_magnitude": self.spatial_magnitude if self.use_filters else 0,
                     "worker_mode": "process",
                     "align_depth_to": "color" if self.align_depth_to_color else "none",
@@ -931,6 +1667,7 @@ class AsyncRealSenseDepthProcessCamera:
                     "depth_min_m": float(positive.min()) if positive.size else 0.0,
                     "depth_max_m": float(positive.max()) if positive.size else 0.0,
                     "depth_mean_m": float(positive.mean()) if positive.size else 0.0,
+                    "opencv_k": None if self.latest_opencv_k_stats is None else dict(self.latest_opencv_k_stats),
                     "error": self.error,
                 }
             if self.process is not None and not self.process.is_alive():
@@ -938,6 +1675,18 @@ class AsyncRealSenseDepthProcessCamera:
             if time.monotonic() >= deadline:
                 raise TimeoutError(f"Timed out waiting for {self.name} RealSense process frame.")
             time.sleep(0.002)
+
+    def read_latest_with_raw(
+        self,
+        timeout_s: float = 2.0,
+    ) -> tuple[np.ndarray, np.ndarray, dict]:
+        policy, meta = self.read_latest(timeout_s=timeout_s)
+        with self.data_lock:
+            raw = np.frombuffer(
+                self.raw_unfiltered_policy_buffer,
+                dtype=np.uint8,
+            ).reshape(DEPTH_HEIGHT, DEPTH_WIDTH).copy()
+        return policy, raw, meta
 
     def read_latest_inputs(self, timeout_s: float = 2.0) -> tuple[dict[str, np.ndarray], dict]:
         _, meta = self.read_latest(timeout_s=timeout_s)
@@ -974,6 +1723,12 @@ class AsyncRealSenseDepthProcessCamera:
                 .astype(bool),
                 "base_policy_u8": np.frombuffer(self.policy_buffer, dtype=np.uint8)
                 .reshape(DEPTH_HEIGHT, DEPTH_WIDTH, 3)[..., 0]
+                .copy(),
+                "raw_unfiltered_policy_u8": np.frombuffer(
+                    self.raw_unfiltered_policy_buffer,
+                    dtype=np.uint8,
+                )
+                .reshape(DEPTH_HEIGHT, DEPTH_WIDTH)
                 .copy(),
             }, meta
 
@@ -1040,6 +1795,8 @@ class RealSenseDepthPair:
         depth_inpaint_max_distance_px: float = DEFAULT_DEPTH_INPAINT_MAX_DISTANCE_PX,
         depth_inpaint_iterations: int = DEFAULT_DEPTH_INPAINT_ITERATIONS,
         depth_inpaint_rgb_sigma: float = DEFAULT_DEPTH_INPAINT_RGB_SIGMA,
+        depth_gaussian_blur_ksize: int = DEFAULT_DEPTH_GAUSSIAN_BLUR_KSIZE,
+        depth_gaussian_blur_sigma: float = DEFAULT_DEPTH_GAUSSIAN_BLUR_SIGMA,
     ) -> None:
         import pyrealsense2 as rs
 
@@ -1057,6 +1814,10 @@ class RealSenseDepthPair:
         self.depth_inpaint_max_distance_px = float(depth_inpaint_max_distance_px)
         self.depth_inpaint_iterations = int(depth_inpaint_iterations)
         self.depth_inpaint_rgb_sigma = float(depth_inpaint_rgb_sigma)
+        self.depth_gaussian_blur_ksize, self.depth_gaussian_blur_sigma = validate_gaussian_blur_args(
+            depth_gaussian_blur_ksize,
+            depth_gaussian_blur_sigma,
+        )
         self.worker_mode = str(worker_mode)
         if self.worker_mode not in {"auto", "thread", "process"}:
             raise ValueError(f"Unsupported RealSense worker mode: {self.worker_mode}")
@@ -1087,6 +1848,7 @@ class RealSenseDepthPair:
         ] = {}
         self.inpainter = None
         self.last_inpaint_debug: dict[str, dict[str, np.ndarray | DepthCrop]] = {}
+        self.last_raw_unfiltered_depth_u8: tuple[np.ndarray, np.ndarray] | None = None
 
     @staticmethod
     def list_devices() -> list[dict]:
@@ -1114,7 +1876,11 @@ class RealSenseDepthPair:
     def start(self) -> None:
         worker_mode = self.worker_mode
         if worker_mode == "auto":
-            worker_mode = "process" if self.use_filters or self.depth_inpaint_mode == "rgb_guided" else "thread"
+            worker_mode = (
+                "process"
+                if self.use_filters or self.depth_inpaint_mode == "rgb_guided" or is_opencv_k_depth_mode(self.depth_inpaint_mode)
+                else "thread"
+            )
         self.active_worker_mode = worker_mode
         camera_cls = (
             AsyncRealSenseDepthProcessCamera
@@ -1133,6 +1899,8 @@ class RealSenseDepthPair:
                 depth_far_m=self.depth_far_m,
                 spatial_magnitude=self.spatial_magnitude,
                 depth_inpaint_mode=self.depth_inpaint_mode,
+                depth_gaussian_blur_ksize=self.depth_gaussian_blur_ksize,
+                depth_gaussian_blur_sigma=self.depth_gaussian_blur_sigma,
             )
             cam.start()
             self.cameras["single"] = cam
@@ -1149,6 +1917,8 @@ class RealSenseDepthPair:
                     depth_far_m=self.depth_far_m,
                     spatial_magnitude=self.spatial_magnitude,
                     depth_inpaint_mode=self.depth_inpaint_mode,
+                    depth_gaussian_blur_ksize=self.depth_gaussian_blur_ksize,
+                    depth_gaussian_blur_sigma=self.depth_gaussian_blur_sigma,
                 )
                 cam.start()
                 self.cameras[name] = cam
@@ -1169,7 +1939,11 @@ class RealSenseDepthPair:
         if self.depth_inpaint_mode == "rgb_guided":
             return self._read_rgb_guided(capture_debug=capture_debug)
         if self.single_duplicate:
-            depth, meta = self.cameras["single"].read_latest()
+            depth, raw_unfiltered, meta = self.cameras["single"].read_latest_with_raw()
+            self.last_raw_unfiltered_depth_u8 = (
+                raw_unfiltered.copy(),
+                raw_unfiltered.copy(),
+            )
             return depth, depth.copy(), {
                 "wrist_ts": meta["timestamp_s"],
                 "front_ts": meta["timestamp_s"],
@@ -1186,9 +1960,18 @@ class RealSenseDepthPair:
                 "depth_clip_m": [self.depth_lower_m, self.depth_far_m],
                 "spatial_magnitude": self.spatial_magnitude if self.use_filters else 0,
                 "depth_inpaint_mode": self.depth_inpaint_mode,
+                "depth_gaussian_blur": {
+                    "enabled": self.depth_gaussian_blur_ksize > 0,
+                    "ksize": int(self.depth_gaussian_blur_ksize),
+                    "sigma": float(self.depth_gaussian_blur_sigma),
+                },
             }
-        wrist, wrist_meta = self.cameras["wrist"].read_latest()
-        front, front_meta = self.cameras["front"].read_latest()
+        wrist, wrist_raw_unfiltered, wrist_meta = self.cameras["wrist"].read_latest_with_raw()
+        front, front_raw_unfiltered, front_meta = self.cameras["front"].read_latest_with_raw()
+        self.last_raw_unfiltered_depth_u8 = (
+            wrist_raw_unfiltered,
+            front_raw_unfiltered,
+        )
         wrist_ts = wrist_meta["timestamp_s"] or 0.0
         front_ts = front_meta["timestamp_s"] or 0.0
         wrist_arrival = wrist_meta["arrival_s"] or 0.0
@@ -1212,6 +1995,11 @@ class RealSenseDepthPair:
             "depth_clip_m": [self.depth_lower_m, self.depth_far_m],
             "spatial_magnitude": self.spatial_magnitude if self.use_filters else 0,
             "depth_inpaint_mode": self.depth_inpaint_mode,
+            "depth_gaussian_blur": {
+                "enabled": self.depth_gaussian_blur_ksize > 0,
+                "ksize": int(self.depth_gaussian_blur_ksize),
+                "sigma": float(self.depth_gaussian_blur_sigma),
+            },
         }
 
     def _read_rgb_guided(self, capture_debug: bool = False) -> tuple[np.ndarray, np.ndarray, dict]:
@@ -1224,6 +2012,17 @@ class RealSenseDepthPair:
             packet, meta = self.cameras[name].read_latest_inputs()
             packets.append(packet)
             metas.append(meta)
+        if self.single_duplicate:
+            raw_unfiltered = packets[0]["raw_unfiltered_policy_u8"]
+            self.last_raw_unfiltered_depth_u8 = (
+                raw_unfiltered.copy(),
+                raw_unfiltered.copy(),
+            )
+        else:
+            self.last_raw_unfiltered_depth_u8 = (
+                packets[0]["raw_unfiltered_policy_u8"].copy(),
+                packets[1]["raw_unfiltered_policy_u8"].copy(),
+            )
         depth_batch = np.stack([packet["inpaint_input_depth_m"] for packet in packets], axis=0)
         color_batch = np.stack([packet["color_crop_rgb"] for packet in packets], axis=0)
         invalid_batch = np.stack([packet["invalid_mask"] for packet in packets], axis=0)
@@ -1310,6 +2109,12 @@ class RealSenseDepthPair:
             "inpaint": inpaint_stats,
         }
 
+    def raw_unfiltered_depth_u8(self) -> tuple[np.ndarray, np.ndarray]:
+        if self.last_raw_unfiltered_depth_u8 is None:
+            raise RuntimeError("Raw unfiltered depth is unavailable before the first camera read.")
+        wrist, front = self.last_raw_unfiltered_depth_u8
+        return wrist.copy(), front.copy()
+
     def debug_snapshots(self) -> dict[str, dict[str, np.ndarray | DepthCrop]]:
         if self.single_duplicate:
             debug = self.cameras["single"].debug_snapshot()
@@ -1336,6 +2141,273 @@ def zero_state() -> np.ndarray:
     # overwrite state[2:10] from Z1ActStateReceiver before inference.
     state[8] = 1.0
     return state
+
+
+def quaternion_angle_error_deg(target_xyzw: np.ndarray, actual_xyzw: np.ndarray) -> float:
+    target = np.asarray(target_xyzw, dtype=np.float64).reshape(4)
+    actual = np.asarray(actual_xyzw, dtype=np.float64).reshape(4)
+    target_norm = float(np.linalg.norm(target))
+    actual_norm = float(np.linalg.norm(actual))
+    if (
+        not np.isfinite(target_norm)
+        or not np.isfinite(actual_norm)
+        or target_norm < 1.0e-9
+        or actual_norm < 1.0e-9
+    ):
+        return float("nan")
+    target /= target_norm
+    actual /= actual_norm
+    dot = float(np.clip(abs(np.dot(target, actual)), 0.0, 1.0))
+    return float(np.degrees(2.0 * np.arccos(dot)))
+
+
+def compute_arm_tracking_error(
+    actual_state: np.ndarray,
+    target_action: np.ndarray | None,
+    z1_state_meta: dict | None,
+    *,
+    target_step: int | None,
+    current_step: int,
+    target_age_s: float | None,
+    position_tolerance_m: float,
+    orientation_tolerance_deg: float,
+    gripper_tolerance_rad: float,
+) -> dict:
+    meta = z1_state_meta or {}
+    valid_feedback = bool(
+        target_action is not None
+        and not bool(meta.get("stale", True))
+        and int(meta.get("count", 0) or 0) > 0
+    )
+    result = {
+        "valid": False,
+        "feedback_age_s": meta.get("age_s"),
+        "target_step": target_step,
+        "lag_steps": None if target_step is None else int(current_step - target_step),
+        "target_age_s": target_age_s,
+        "ik_ok": meta.get("ik_ok"),
+        "ik_source": meta.get("ik_source"),
+        "ik_fail_count": meta.get("ik_fail_count"),
+        "position_tolerance_m": float(position_tolerance_m),
+        "orientation_tolerance_deg": float(orientation_tolerance_deg),
+        "gripper_tolerance_rad": float(gripper_tolerance_rad),
+        "reached": False,
+    }
+    if not valid_feedback:
+        return result
+
+    actual = np.asarray(actual_state, dtype=np.float64).reshape(-1)
+    target = np.asarray(target_action, dtype=np.float64).reshape(-1)
+    if actual.shape[0] < 10 or target.shape[0] < 10:
+        return result
+    actual_pose = actual[2:10]
+    target_pose = target[2:10]
+    if not (np.isfinite(actual_pose).all() and np.isfinite(target_pose).all()):
+        return result
+
+    position_error_xyz = target[2:5] - actual[2:5]
+    position_error_m = float(np.linalg.norm(position_error_xyz))
+    orientation_error_deg = quaternion_angle_error_deg(target[5:9], actual[5:9])
+    gripper_error_rad = float(target[9] - actual[9])
+    gripper_abs_error_rad = abs(gripper_error_rad)
+    reached = bool(
+        np.isfinite(orientation_error_deg)
+        and position_error_m <= float(position_tolerance_m)
+        and orientation_error_deg <= float(orientation_tolerance_deg)
+        and gripper_abs_error_rad <= float(gripper_tolerance_rad)
+    )
+    result.update(
+        {
+            "valid": True,
+            "actual_ee_pos": np.round(actual[2:5], 6).tolist(),
+            "actual_ee_quat_xyzw": np.round(actual[5:9], 6).tolist(),
+            "actual_gripper": round(float(actual[9]), 6),
+            "target_ee_pos": np.round(target[2:5], 6).tolist(),
+            "target_ee_quat_xyzw": np.round(target[5:9], 6).tolist(),
+            "target_gripper": round(float(target[9]), 6),
+            "position_error_xyz_m": np.round(position_error_xyz, 6).tolist(),
+            "position_error_m": position_error_m,
+            "position_error_mm": position_error_m * 1000.0,
+            "orientation_error_deg": orientation_error_deg,
+            "gripper_error_rad": gripper_error_rad,
+            "gripper_abs_error_rad": gripper_abs_error_rad,
+            "reached": reached,
+        }
+    )
+    return result
+
+
+def shortest_path_slerp_xyzw(
+    old_quat_xyzw: np.ndarray,
+    new_quat_xyzw: np.ndarray,
+    new_weight: float,
+) -> np.ndarray:
+    """SLERP from old to new using the shortest quaternion arc."""
+    old = np.asarray(old_quat_xyzw, dtype=np.float64).reshape(4)
+    new = np.asarray(new_quat_xyzw, dtype=np.float64).reshape(4)
+    old_norm = float(np.linalg.norm(old))
+    new_norm = float(np.linalg.norm(new))
+    if not np.isfinite(old_norm) or old_norm < 1.0e-9:
+        old = np.asarray([0.0, 0.0, 0.0, 1.0], dtype=np.float64)
+    else:
+        old /= old_norm
+    if not np.isfinite(new_norm) or new_norm < 1.0e-9:
+        new = old.copy()
+    else:
+        new /= new_norm
+
+    dot = float(np.dot(old, new))
+    if dot < 0.0:
+        new = -new
+        dot = -dot
+    dot = float(np.clip(dot, 0.0, 1.0))
+    t = float(np.clip(new_weight, 0.0, 1.0))
+    if dot > 0.9995:
+        blended = (1.0 - t) * old + t * new
+    else:
+        theta = float(np.arccos(dot))
+        sin_theta = float(np.sin(theta))
+        blended = (
+            np.sin((1.0 - t) * theta) / sin_theta * old
+            + np.sin(t * theta) / sin_theta * new
+        )
+    blended /= max(float(np.linalg.norm(blended)), 1.0e-9)
+    if blended[3] < 0.0:
+        blended = -blended
+    return blended.astype(np.float32)
+
+
+def blend_ee_actions(
+    old_action: np.ndarray,
+    new_action: np.ndarray,
+    *,
+    old_weight: float = 0.3,
+    new_weight: float = 0.7,
+) -> np.ndarray:
+    """Blend overlapping 10D ACT EE actions without corrupting quaternions."""
+    old = np.asarray(old_action, dtype=np.float32).reshape(-1)
+    new = np.asarray(new_action, dtype=np.float32).reshape(-1)
+    if old.shape[0] < 10 or new.shape[0] < 10:
+        raise ValueError(f"EE action blending requires 10D actions, got {old.shape} and {new.shape}.")
+    total = float(old_weight) + float(new_weight)
+    if total <= 0.0:
+        raise ValueError("EE action blend weights must have a positive sum.")
+    old_alpha = float(old_weight) / total
+    new_alpha = float(new_weight) / total
+    blended = new[:10].copy()
+    # Base vx/vyaw and EE xyz are ordinary Euclidean values.
+    blended[0:5] = old_alpha * old[0:5] + new_alpha * new[0:5]
+    # EE orientation must remain on S^3 and follow the shortest rotation arc.
+    blended[5:9] = shortest_path_slerp_xyzw(old[5:9], new[5:9], new_alpha)
+    # Gripper is intentionally latest-only; blending can delay grasp/release.
+    blended[9] = new[9]
+    return blended
+
+
+@dataclass
+class TimedEEAction:
+    timestep: int
+    action: np.ndarray
+    source: str = "chunk"
+    blend_count: int = 1
+
+
+class EEActionOverlapBuffer:
+    """Timestamped action buffer with EE-aware old/new chunk aggregation."""
+
+    def __init__(self, old_weight: float = 0.3, new_weight: float = 0.7) -> None:
+        self.old_weight = float(old_weight)
+        self.new_weight = float(new_weight)
+        self._queue: deque[TimedEEAction] = deque()
+        self.last_popped_timestep = -1
+
+    def reset(self) -> None:
+        self._queue.clear()
+        self.last_popped_timestep = -1
+
+    @property
+    def queue_size(self) -> int:
+        return len(self._queue)
+
+    @property
+    def first_timestep(self) -> int | None:
+        return None if not self._queue else int(self._queue[0].timestep)
+
+    @property
+    def last_timestep(self) -> int | None:
+        return None if not self._queue else int(self._queue[-1].timestep)
+
+    def ingest(
+        self,
+        actions: list[np.ndarray] | np.ndarray,
+        *,
+        start_timestep: int,
+        current_timestep: int,
+    ) -> dict:
+        rows = np.asarray(actions, dtype=np.float32)
+        if rows.ndim != 2 or rows.shape[1] < 10:
+            raise ValueError(f"Expected action chunk with shape (T, >=10), got {rows.shape}.")
+
+        future = {
+            int(item.timestep): item
+            for item in self._queue
+            if int(item.timestep) > self.last_popped_timestep
+        }
+        stale_skipped = 0
+        overlap_blended = 0
+        appended = 0
+        for offset, row in enumerate(rows):
+            timestep = int(start_timestep) + int(offset)
+            if timestep < int(current_timestep) or timestep <= self.last_popped_timestep:
+                stale_skipped += 1
+                continue
+            if timestep in future:
+                old_item = future[timestep]
+                future[timestep] = TimedEEAction(
+                    timestep=timestep,
+                    action=blend_ee_actions(
+                        old_item.action,
+                        row,
+                        old_weight=self.old_weight,
+                        new_weight=self.new_weight,
+                    ),
+                    source="overlap_0.3_old_0.7_new",
+                    blend_count=int(old_item.blend_count) + 1,
+                )
+                overlap_blended += 1
+            else:
+                future[timestep] = TimedEEAction(
+                    timestep=timestep,
+                    action=np.asarray(row[:10], dtype=np.float32).copy(),
+                    source="new_chunk",
+                    blend_count=1,
+                )
+                appended += 1
+
+        self._queue = deque(sorted(future.values(), key=lambda item: item.timestep))
+        return {
+            "start_timestep": int(start_timestep),
+            "ingest_timestep": int(current_timestep),
+            "stale_skipped": int(stale_skipped),
+            "overlap_blended": int(overlap_blended),
+            "appended": int(appended),
+            "queue_size": self.queue_size,
+            "queue_first_timestep": self.first_timestep,
+            "queue_last_timestep": self.last_timestep,
+            "old_weight": self.old_weight,
+            "new_weight": self.new_weight,
+        }
+
+    def pop(self, expected_timestep: int) -> TimedEEAction:
+        if not self._queue:
+            raise RuntimeError("EE action overlap buffer is empty.")
+        item = self._queue.popleft()
+        if int(item.timestep) != int(expected_timestep):
+            raise RuntimeError(
+                f"EE action timeline mismatch: expected step {expected_timestep}, got {item.timestep}."
+            )
+        self.last_popped_timestep = int(item.timestep)
+        return item
 
 
 class RosBaseVelocityBridge:
@@ -1365,7 +2437,11 @@ class RosBaseVelocityBridge:
         self._last_cmd_stamp_mono = 0.0
         self._owns_rclpy = not rclpy.ok()
         if self._owns_rclpy:
-            rclpy.init(args=None)
+            # Keep Ctrl+C under the ACT main thread so it can publish a final
+            # zero base command before shutting ROS down.
+            from rclpy.signals import SignalHandlerOptions
+
+            rclpy.init(args=None, signal_handler_options=SignalHandlerOptions.NO)
         self.node = rclpy.create_node(str(node_name))
         self.publisher = self.node.create_publisher(Twist, self.cmd_vel_topic, 10)
         self.subscription = self.node.create_subscription(
@@ -1377,11 +2453,19 @@ class RosBaseVelocityBridge:
         self.executor = SingleThreadedExecutor()
         self.executor.add_node(self.node)
         self.thread = threading.Thread(
-            target=self.executor.spin,
+            target=self._spin,
             name="ros-base-velocity",
             daemon=True,
         )
         self.thread.start()
+
+    def _spin(self) -> None:
+        try:
+            self.executor.spin()
+        except Exception as exc:
+            # rclpy may process SIGINT before our orderly stop() call.
+            if exc.__class__.__name__ != "ExternalShutdownException":
+                print(f"warning: ROS base executor stopped unexpectedly: {exc}", file=sys.stderr, flush=True)
 
     def _on_vel_state(self, msg) -> None:
         vel = np.array([float(msg.linear.x), float(msg.angular.z)], dtype=np.float32)
@@ -1489,6 +2573,21 @@ class UdpActionPublisher:
                 action[0:2] = 0.0
         self.publish_action(action)
 
+    def request_shutdown_back_to_start(self, repeat: int = 3, interval_s: float = 0.02) -> dict:
+        payload = {"bridge_command": "shutdown_back_to_start"}
+        encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        sends = max(1, int(repeat))
+        for index in range(sends):
+            self.sock.sendto(encoded, self.addr)
+            if index + 1 < sends and interval_s > 0.0:
+                time.sleep(float(interval_s))
+        return {
+            "host": self.host,
+            "port": self.port,
+            "bridge_command": payload["bridge_command"],
+            "sent": sends,
+        }
+
     def close(self) -> None:
         self.sock.close()
 
@@ -1564,15 +2663,27 @@ class Z1ActStateReceiver:
                 payload_meta = {
                     key: payload.get(key)
                     for key in (
+                        "action_age_s",
+                        "q",
+                        "qd",
                         "startup_zero_requested",
                         "startup_zero_active",
                         "startup_zero_done",
                         "startup_zero_max_err",
+                        "startup_home_q",
+                        "startup_home_max_speed",
                         "startup_zero_error",
+                        "shutdown_requested",
+                        "shutdown_active",
+                        "shutdown_done",
+                        "shutdown_error",
                         "ik_ok",
                         "ik_source",
+                        "ik_fail_count",
+                        "control_count",
                         "arm_enabled",
                         "dry_run",
+                        "last_error",
                     )
                     if key in payload
                 }
@@ -1657,6 +2768,28 @@ def wait_for_z1_startup_zero(receiver: Z1ActStateReceiver, timeout_s: float) -> 
         time.sleep(0.05)
 
 
+def wait_for_z1_shutdown_back_to_start(receiver: Z1ActStateReceiver, timeout_s: float) -> dict:
+    deadline = time.monotonic() + max(float(timeout_s), 0.0)
+    last_meta: dict = {}
+    while True:
+        _tail, meta = receiver.get_state_tail()
+        last_meta = meta
+        if int(meta.get("count", 0) or 0) > 0:
+            done = meta.get("shutdown_done")
+            active = meta.get("shutdown_active")
+            error = str(meta.get("shutdown_error") or "")
+            if done is True:
+                return meta
+            if error and active is False:
+                raise RuntimeError(f"Z1 backToStart failed during ACT shutdown: {error}")
+        if timeout_s <= 0.0 or time.monotonic() >= deadline:
+            raise TimeoutError(
+                "Timed out waiting for Z1 backToStart after ACT shutdown; "
+                f"last_meta={last_meta}"
+            )
+        time.sleep(0.05)
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Shadow ACT inference for Door policy on Jetson.")
     parser.add_argument("--repo_root", type=Path, default=Path("/home/anx/door_act_deploy/visual_whole_body"))
@@ -1665,6 +2798,74 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument("--steps", type=int, default=100)
     parser.add_argument("--hz", type=float, default=POLICY_HZ)
+    parser.add_argument(
+        "--action_horizon",
+        "--dp_action_horizon",
+        dest="action_horizon",
+        type=int,
+        default=DEFAULT_ACTION_HORIZON,
+        help=(
+            "How many actions from each ACT-predicted chunk to execute before running inference again. "
+            f"Default {DEFAULT_ACTION_HORIZON} means replan every {DEFAULT_ACTION_HORIZON} control steps."
+        ),
+    )
+    parser.add_argument(
+        "--warmup_policy_iters",
+        type=int,
+        default=2,
+        help=(
+            "Run this many ACT chunk predictions on live observations before step 0, "
+            "without publishing base or Z1 commands. This warms CUDA/model kernels."
+        ),
+    )
+    add_bool_argument(
+        parser,
+        "--policy_amp",
+        default=True,
+        help_text="Use CUDA FP16 autocast for ACT inference. Disable with --no_policy_amp.",
+    )
+    add_bool_argument(
+        parser,
+        "--async_policy_inference",
+        default=True,
+        help_text=(
+            "Prefetch the next ACT action chunk in a background thread while the current chunk executes. "
+            "Disable with --no_async_policy_inference."
+        ),
+    )
+    parser.add_argument(
+        "--policy_prefetch_actions",
+        type=int,
+        default=3,
+        help=(
+            "Start asynchronous inference when this many actions remain in the active chunk. "
+            "At 25 Hz, 3 remaining actions provide about 160 ms before the next chunk is needed."
+        ),
+    )
+    parser.add_argument(
+        "--log_flush_interval",
+        type=int,
+        default=25,
+        help="Flush the JSONL log every N control steps; 1 restores per-step fsync-style flushing.",
+    )
+    parser.add_argument(
+        "--arm_tracking_position_tolerance_m",
+        type=float,
+        default=0.02,
+        help="Position-error threshold used to mark a Z1 EE target as reached.",
+    )
+    parser.add_argument(
+        "--arm_tracking_orientation_tolerance_deg",
+        type=float,
+        default=5.0,
+        help="Quaternion angular-error threshold used to mark a Z1 EE target as reached.",
+    )
+    parser.add_argument(
+        "--arm_tracking_gripper_tolerance_rad",
+        type=float,
+        default=0.10,
+        help="Absolute gripper-error threshold used to mark a Z1 target as reached.",
+    )
     parser.add_argument("--camera_mode", choices=["dummy", "realsense"], default="dummy")
     parser.add_argument("--dummy_depth_m", type=float, default=0.0)
     parser.add_argument("--wrist_serial", type=str, default=DEFAULT_WRIST_REALSENSE_SERIAL)
@@ -1672,7 +2873,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--allow_single_realsense_duplicate", action="store_true")
     parser.add_argument("--rs_filters", dest="rs_filters", action="store_true")
     parser.add_argument("--no_rs_filters", dest="rs_filters", action="store_false")
-    parser.set_defaults(rs_filters=True)
+    parser.set_defaults(rs_filters=None)
     parser.add_argument(
         "--camera_worker_mode",
         choices=["auto", "thread", "process"],
@@ -1690,7 +2891,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--depth_inpaint_mode",
         choices=DEPTH_INPAINT_MODES,
         default=DEFAULT_DEPTH_INPAINT_MODE,
-        help="off keeps RS denoising without hole propagation; realsense keeps the current RS hole filling; rgb_guided uses bounded CUDA RGB guidance.",
+        help=(
+            "off keeps RS denoising without hole propagation; realsense keeps the current RS hole filling; "
+            "rgb_guided uses bounded CUDA RGB guidance; opencv_k uses the selected OpenCV policy "
+            "(wrist fringe=10px, front fringe=40px, plus tiny white-hole filling); opencv_k_no_rs "
+            "uses the same full-resolution OpenCV policy and always disables RealSense filters."
+        ),
     )
     parser.add_argument(
         "--depth_inpaint_max_distance_px",
@@ -1710,6 +2916,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_DEPTH_INPAINT_RGB_SIGMA,
         help="RGB edge scale in [0,1]; smaller values resist propagation across color edges more strongly.",
     )
+    parser.add_argument(
+        "--depth_gaussian_blur_ksize",
+        type=int,
+        default=DEFAULT_DEPTH_GAUSSIAN_BLUR_KSIZE,
+        help=(
+            "Optional odd GaussianBlur kernel size applied to policy depth u8 after inpainting. "
+            "0 disables it; e.g. 15 with --depth_gaussian_blur_sigma 4.0."
+        ),
+    )
+    parser.add_argument(
+        "--depth_gaussian_blur_sigma",
+        type=float,
+        default=DEFAULT_DEPTH_GAUSSIAN_BLUR_SIGMA,
+        help="GaussianBlur sigma used when --depth_gaussian_blur_ksize > 0.",
+    )
     parser.add_argument("--no_align_depth_to_color", action="store_true")
     parser.add_argument("--camera_warmup_frames", type=int, default=10)
     parser.add_argument("--depth_snapshot_settle_s", type=float, default=1.0)
@@ -1720,6 +2941,58 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--crop_top", type=int, default=DEFAULT_CROP_TOP)
     parser.add_argument("--crop_bottom", type=int, default=DEFAULT_CROP_BOTTOM)
     parser.add_argument("--save_depth_debug_dir", type=Path, default=None)
+    parser.add_argument(
+        "--record_policy_depth_video_dir",
+        type=Path,
+        default=None,
+        help=(
+            "If set, asynchronously record the two policy_depth_u8 inputs as video. "
+            "The side-by-side video layout is left=wrist, right=front."
+        ),
+    )
+    parser.add_argument(
+        "--record_policy_depth_video_fps",
+        type=float,
+        default=0.0,
+        help="Video fps for policy-depth recording. 0 means use --hz.",
+    )
+    parser.add_argument(
+        "--record_policy_depth_video_queue_size",
+        type=int,
+        default=128,
+        help="Bounded async encoding queue. If full, frames are dropped instead of blocking inference.",
+    )
+    parser.add_argument(
+        "--record_policy_depth_video_codec",
+        type=str,
+        default="mp4v",
+        help="FourCC codec for policy-depth video; falls back to MJPG/AVI if unavailable.",
+    )
+    add_bool_argument(
+        parser,
+        "--record_policy_depth_video_separate",
+        default=False,
+        help_text="Also write separate wrist/front videos in addition to the side-by-side video.",
+    )
+    add_bool_argument(
+        parser,
+        "--record_raw_unfiltered_depth_video",
+        default=True,
+        help_text=(
+            "When policy-depth video recording is enabled, also record aligned "
+            "depth before all RealSense filters. Disable with "
+            "--no_record_raw_unfiltered_depth_video."
+        ),
+    )
+    parser.add_argument(
+        "--record_raw_unfiltered_depth_video_dir",
+        type=Path,
+        default=None,
+        help=(
+            "Optional output directory for raw aligned, unfiltered depth video. "
+            "By default it is created beside --record_policy_depth_video_dir."
+        ),
+    )
     parser.add_argument("--depth_snapshot_only", action="store_true")
     parser.add_argument("--camera_benchmark_s", type=float, default=0.0)
     parser.add_argument("--list_realsense", action="store_true")
@@ -1767,17 +3040,60 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help_text="Before loading camera/inference loop, wait until z1_act_ee_bridge reports startup zero-joint pose done.",
     )
     parser.add_argument("--z1_startup_zero_wait_timeout_s", type=float, default=20.0)
+    add_bool_argument(
+        parser,
+        "--z1_back_to_start_on_exit",
+        default=True,
+        help_text=(
+            "On normal completion or Ctrl+C, request the Z1 bridge to call "
+            "backToStart(), enter passive, and exit cleanly."
+        ),
+    )
+    parser.add_argument(
+        "--z1_back_to_start_wait_timeout_s",
+        type=float,
+        default=20.0,
+        help="Seconds to wait for the Z1 bridge to report shutdown backToStart completion.",
+    )
     return parser.parse_args(argv)
 
 
 def validate_runtime_args(args: argparse.Namespace) -> None:
+    if args.action_horizon <= 0:
+        raise ValueError("--action_horizon must be positive.")
+    if args.warmup_policy_iters < 0:
+        raise ValueError("--warmup_policy_iters must be non-negative.")
+    if args.policy_prefetch_actions < 0:
+        raise ValueError("--policy_prefetch_actions must be non-negative.")
+    if args.policy_prefetch_actions >= args.action_horizon:
+        raise ValueError("--policy_prefetch_actions must be smaller than --action_horizon.")
+    if args.log_flush_interval <= 0:
+        raise ValueError("--log_flush_interval must be positive.")
+    if args.arm_tracking_position_tolerance_m < 0:
+        raise ValueError("--arm_tracking_position_tolerance_m must be non-negative.")
+    if args.arm_tracking_orientation_tolerance_deg < 0:
+        raise ValueError("--arm_tracking_orientation_tolerance_deg must be non-negative.")
+    if args.arm_tracking_gripper_tolerance_rad < 0:
+        raise ValueError("--arm_tracking_gripper_tolerance_rad must be non-negative.")
     args.depth_inpaint_mode = validate_depth_inpaint_mode(args.depth_inpaint_mode)
+    if args.rs_filters is None:
+        args.rs_filters = args.depth_inpaint_mode != "opencv_k_no_rs"
+    elif args.depth_inpaint_mode == "opencv_k_no_rs" and bool(args.rs_filters):
+        print(
+            "warning: --depth_inpaint_mode opencv_k_no_rs always disables RealSense filters; ignoring --rs_filters.",
+            flush=True,
+        )
+        args.rs_filters = False
     if args.depth_inpaint_max_distance_px < 0:
         raise ValueError("--depth_inpaint_max_distance_px must be non-negative.")
     if args.depth_inpaint_iterations < 0:
         raise ValueError("--depth_inpaint_iterations must be non-negative.")
     if args.depth_inpaint_rgb_sigma <= 0:
         raise ValueError("--depth_inpaint_rgb_sigma must be positive.")
+    args.depth_gaussian_blur_ksize, args.depth_gaussian_blur_sigma = validate_gaussian_blur_args(
+        args.depth_gaussian_blur_ksize,
+        args.depth_gaussian_blur_sigma,
+    )
     if (
         args.camera_mode == "realsense"
         and args.depth_inpaint_mode == "rgb_guided"
@@ -1790,6 +3106,14 @@ def validate_runtime_args(args: argparse.Namespace) -> None:
         raise ValueError("--z1_state_timeout_s must be non-negative; use 0 to disable timeout.")
     if args.z1_startup_zero_wait_timeout_s < 0:
         raise ValueError("--z1_startup_zero_wait_timeout_s must be non-negative.")
+    if args.z1_back_to_start_wait_timeout_s < 0:
+        raise ValueError("--z1_back_to_start_wait_timeout_s must be non-negative.")
+    if args.record_policy_depth_video_fps < 0:
+        raise ValueError("--record_policy_depth_video_fps must be non-negative; use 0 to follow --hz.")
+    if args.record_policy_depth_video_queue_size <= 0:
+        raise ValueError("--record_policy_depth_video_queue_size must be positive.")
+    if args.record_policy_depth_video_codec and len(args.record_policy_depth_video_codec) < 4:
+        raise ValueError("--record_policy_depth_video_codec must be a FourCC string with at least 4 characters.")
     if args.wait_for_z1_startup_zero and not args.enable_z1_state_receiver:
         raise ValueError("--wait_for_z1_startup_zero requires --enable_z1_state_receiver.")
     for name in ("z1_action_udp_port", "z1_state_udp_port"):
@@ -1839,6 +3163,8 @@ def main() -> None:
             depth_inpaint_max_distance_px=args.depth_inpaint_max_distance_px,
             depth_inpaint_iterations=args.depth_inpaint_iterations,
             depth_inpaint_rgb_sigma=args.depth_inpaint_rgb_sigma,
+            depth_gaussian_blur_ksize=args.depth_gaussian_blur_ksize,
+            depth_gaussian_blur_sigma=args.depth_gaussian_blur_sigma,
         )
     )
 
@@ -1914,29 +3240,46 @@ def main() -> None:
     import torch
     from dp.door_policy_backend import DoorPolicyController
 
+    if torch.cuda.is_available():
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+
     args.log_path.parent.mkdir(parents=True, exist_ok=True)
-    controller = DoorPolicyController(args.checkpoint, device=args.device, action_horizon=50)
+    controller = DoorPolicyController(args.checkpoint, device=args.device, action_horizon=args.action_horizon)
     period = 1.0 / max(float(args.hz), 1.0e-6)
 
     print(
         f"shadow_start checkpoint={args.checkpoint} device={args.device} "
         f"vision={controller.vision_mode} steps={args.steps} camera={args.camera_mode} "
+        f"action_horizon={controller.action_horizon} "
+        f"warmup_policy_iters={args.warmup_policy_iters} "
+        f"policy_amp={args.policy_amp} "
+        f"async_policy_inference={args.async_policy_inference} "
+        f"policy_prefetch_actions={args.policy_prefetch_actions} "
         f"depth_inpaint={args.depth_inpaint_mode} "
         f"ros_base_bridge={args.enable_ros_base_bridge} "
         f"z1_action_bridge={args.enable_z1_action_bridge} "
-        f"z1_state_receiver={args.enable_z1_state_receiver}",
+        f"z1_state_receiver={args.enable_z1_state_receiver} "
+        f"policy_depth_video_dir={args.record_policy_depth_video_dir} "
+        f"raw_unfiltered_depth_video={args.record_raw_unfiltered_depth_video}",
         flush=True,
     )
 
     base_bridge = None
     z1_action_pub = None
     z1_state_receiver = None
+    policy_depth_recorder = None
+    raw_unfiltered_depth_recorder = None
+    policy_executor = None
     run_t0 = time.monotonic()
     next_t = run_t0
     completed_steps = 0
     loop_elapsed = 0.0
     first_record_wall_time = None
     last_record_wall_time = None
+    interrupted = False
+    shutdown_back_to_start_requested = False
     try:
         if args.enable_ros_base_bridge:
             base_bridge = RosBaseVelocityBridge(
@@ -1972,23 +3315,60 @@ def main() -> None:
             print(
                 "z1_startup_zero_ready "
                 f"max_err={meta.get('startup_zero_max_err')} "
+                f"home_q={meta.get('startup_home_q')} "
+                f"max_speed={meta.get('startup_home_max_speed')} "
                 f"arm_enabled={meta.get('arm_enabled')} dry_run={meta.get('dry_run')}",
+                flush=True,
+            )
+        if args.record_policy_depth_video_dir is not None:
+            video_fps = float(args.record_policy_depth_video_fps or args.hz)
+            policy_depth_recorder = AsyncPolicyDepthVideoRecorder(
+                args.record_policy_depth_video_dir,
+                fps=video_fps,
+                queue_size=args.record_policy_depth_video_queue_size,
+                codec=args.record_policy_depth_video_codec,
+                separate=args.record_policy_depth_video_separate,
+            )
+            policy_depth_recorder.start()
+            print(
+                "policy_depth_video_start "
+                f"dir={args.record_policy_depth_video_dir} fps={video_fps:.3f} "
+                f"queue={args.record_policy_depth_video_queue_size}",
+                flush=True,
+            )
+        raw_unfiltered_video_dir = args.record_raw_unfiltered_depth_video_dir
+        if (
+            raw_unfiltered_video_dir is None
+            and args.record_raw_unfiltered_depth_video
+            and args.record_policy_depth_video_dir is not None
+        ):
+            raw_unfiltered_video_dir = (
+                args.record_policy_depth_video_dir.parent
+                / "raw_unfiltered_depth_video"
+            )
+        if raw_unfiltered_video_dir is not None:
+            video_fps = float(args.record_policy_depth_video_fps or args.hz)
+            raw_unfiltered_depth_recorder = AsyncPolicyDepthVideoRecorder(
+                raw_unfiltered_video_dir,
+                fps=video_fps,
+                queue_size=args.record_policy_depth_video_queue_size,
+                codec=args.record_policy_depth_video_codec,
+                separate=args.record_policy_depth_video_separate,
+                video_stem="raw_unfiltered_depth_u8",
+                metadata_stem="raw_unfiltered_depth_video",
+            )
+            raw_unfiltered_depth_recorder.start()
+            print(
+                "raw_unfiltered_depth_video_start "
+                f"dir={raw_unfiltered_video_dir} fps={video_fps:.3f} "
+                f"queue={args.record_policy_depth_video_queue_size}",
                 flush=True,
             )
         camera.start()
         with args.log_path.open("w", encoding="utf-8") as f:
-            for step in range(int(args.steps)):
-                obs_t0 = time.perf_counter()
-                capture_debug = step == 0 and args.save_depth_debug_dir is not None
+            def read_policy_observation(capture_debug: bool = False):
                 wrist_depth, front_depth, cam_meta = camera.read(capture_debug=capture_debug)
-                if step == 0 and args.save_depth_debug_dir is not None:
-                    save_depth_debug_images(
-                        args.save_depth_debug_dir,
-                        wrist_depth,
-                        front_depth,
-                        cam_meta,
-                        debug_frames=camera.debug_snapshots(),
-                    )
+                wrist_raw_unfiltered, front_raw_unfiltered = camera.raw_unfiltered_depth_u8()
                 state = zero_state()
                 vel_state_meta = None
                 z1_state_meta = None
@@ -1998,28 +3378,385 @@ def main() -> None:
                 if base_bridge is not None:
                     vel_state, vel_state_meta = base_bridge.get_vel_state()
                     state[0:2] = vel_state
-                infer_t0 = time.perf_counter()
-                action = controller.act(state, wrist_depth, wrist_depth, front_depth, front_depth)
-                infer_s = time.perf_counter() - infer_t0
+                return (
+                    state,
+                    wrist_depth,
+                    front_depth,
+                    wrist_raw_unfiltered,
+                    front_raw_unfiltered,
+                    cam_meta,
+                    vel_state_meta,
+                    z1_state_meta,
+                )
+
+            policy_amp_enabled = bool(args.policy_amp and controller.device.type == "cuda")
+
+            def infer_policy_chunk(
+                state: np.ndarray,
+                wrist_depth: np.ndarray,
+                front_depth: np.ndarray,
+                observation_timestep: int,
+                start_timestep: int,
+            ) -> dict:
+                prep_t0 = time.perf_counter()
+                controller.append_observation(state, wrist_depth, wrist_depth, front_depth, front_depth)
+                policy_prep_s = time.perf_counter() - prep_t0
+                forward_t0 = time.perf_counter()
+                with torch.inference_mode():
+                    with torch.autocast(
+                        device_type="cuda",
+                        dtype=torch.float16,
+                        enabled=policy_amp_enabled,
+                    ):
+                        controller.sample_action_chunk()
+                policy_forward_s = time.perf_counter() - forward_t0
+                actions = [np.asarray(row, dtype=np.float32).copy() for row in controller.action_queue]
+                controller.action_queue.clear()
+                return {
+                    "actions": actions,
+                    "policy_prep_s": policy_prep_s,
+                    "policy_forward_s": policy_forward_s,
+                    "observation_timestep": int(observation_timestep),
+                    "start_timestep": int(start_timestep),
+                    "completed_monotonic": time.monotonic(),
+                }
+
+            if args.async_policy_inference:
+                policy_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="act-policy")
+
+            def submit_policy_chunk(
+                state: np.ndarray,
+                wrist_depth: np.ndarray,
+                front_depth: np.ndarray,
+                *,
+                observation_timestep: int,
+                start_timestep: int,
+            ) -> Future | dict:
+                inputs = (
+                    np.asarray(state, dtype=np.float32).copy(),
+                    np.asarray(wrist_depth).copy(),
+                    np.asarray(front_depth).copy(),
+                    int(observation_timestep),
+                    int(start_timestep),
+                )
+                if policy_executor is not None:
+                    return policy_executor.submit(infer_policy_chunk, *inputs)
+                return infer_policy_chunk(*inputs)
+
+            for warmup_idx in range(int(args.warmup_policy_iters)):
+                obs_t0 = time.perf_counter()
+                (
+                    state,
+                    wrist_depth,
+                    front_depth,
+                    _wrist_raw_unfiltered,
+                    _front_raw_unfiltered,
+                    cam_meta,
+                    vel_state_meta,
+                    z1_state_meta,
+                ) = read_policy_observation(capture_debug=False)
+                camera_read_s = time.perf_counter() - obs_t0
+                warmup_result = submit_policy_chunk(
+                    state,
+                    wrist_depth,
+                    front_depth,
+                    observation_timestep=-(warmup_idx + 1),
+                    start_timestep=0,
+                )
+                if isinstance(warmup_result, Future):
+                    warmup_result = warmup_result.result()
+                policy_prep_s = float(warmup_result["policy_prep_s"])
+                policy_forward_s = float(warmup_result["policy_forward_s"])
+                warmup_action_count = len(warmup_result["actions"])
+                infer_s = policy_prep_s + policy_forward_s
+                record_wall_time = time.time()
+                record = {
+                    "phase": "warmup",
+                    "warmup_iter": warmup_idx,
+                    "wall_time": record_wall_time,
+                    "obs_s": camera_read_s,
+                    "camera_read_s": camera_read_s,
+                    "infer_s": infer_s,
+                    "policy_prep_s": policy_prep_s,
+                    "policy_forward_s": policy_forward_s,
+                    "policy_replan": True,
+                    "camera": cam_meta,
+                    "state": np.round(state, 6).tolist(),
+                    "vel_state": vel_state_meta,
+                    "z1_state": z1_state_meta,
+                    "warmup_action_count": int(warmup_action_count),
+                    "base_cmd": None,
+                    "z1_action": None,
+                    "published": False,
+                    "cuda_mem_mb": round(torch.cuda.max_memory_allocated() / 1024 / 1024, 2)
+                    if torch.cuda.is_available()
+                    else 0.0,
+                }
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                f.flush()
+                print(
+                    f"warmup={warmup_idx:02d} prep_ms={policy_prep_s * 1000.0:.1f} "
+                    f"forward_ms={policy_forward_s * 1000.0:.1f} "
+                    f"state_vx={float(state[0]):+.4f} state_vyaw={float(state[1]):+.4f} "
+                    f"actions={warmup_action_count} published=false",
+                    flush=True,
+                )
+            controller.reset()
+            action_buffer = EEActionOverlapBuffer(old_weight=0.3, new_weight=0.7)
+            pending_policy_future: Future | None = None
+            pending_policy_result: dict | None = None
+            previous_z1_target: np.ndarray | None = None
+            previous_z1_target_step: int | None = None
+            previous_z1_target_stamp_mono: float | None = None
+            tracking_position_errors_m: list[float] = []
+            tracking_orientation_errors_deg: list[float] = []
+            tracking_gripper_errors_rad: list[float] = []
+            tracking_reached_count = 0
+            tracking_valid_count = 0
+            next_t = time.monotonic()
+            for step in range(int(args.steps)):
+                obs_t0 = time.perf_counter()
+                capture_debug = step == 0 and args.save_depth_debug_dir is not None
+                (
+                    state,
+                    wrist_depth,
+                    front_depth,
+                    wrist_raw_unfiltered,
+                    front_raw_unfiltered,
+                    cam_meta,
+                    vel_state_meta,
+                    z1_state_meta,
+                ) = read_policy_observation(capture_debug=capture_debug)
+                camera_read_s = time.perf_counter() - obs_t0
+                if step == 0 and args.save_depth_debug_dir is not None:
+                    save_depth_debug_images(
+                        args.save_depth_debug_dir,
+                        wrist_depth,
+                        front_depth,
+                        cam_meta,
+                        debug_frames=camera.debug_snapshots(),
+                    )
+                policy_replan = False
+                policy_prefetch_submitted = False
+                policy_observation_used = False
+                policy_prep_s = 0.0
+                policy_forward_s = 0.0
+                policy_wait_s = 0.0
+                policy_result_age_s = None
+                policy_chunk_ingest = None
+                policy_prefetch_start_timestep = None
+                policy_prefetch_observation_timestep = None
+
+                if pending_policy_future is not None and pending_policy_future.done():
+                    pending_policy_result = pending_policy_future.result()
+                    pending_policy_future = None
+                if pending_policy_result is not None:
+                    policy_prep_s = float(pending_policy_result["policy_prep_s"])
+                    policy_forward_s = float(pending_policy_result["policy_forward_s"])
+                    policy_result_age_s = max(
+                        0.0,
+                        time.monotonic() - float(pending_policy_result["completed_monotonic"]),
+                    )
+                    policy_chunk_ingest = action_buffer.ingest(
+                        pending_policy_result["actions"],
+                        start_timestep=int(pending_policy_result["start_timestep"]),
+                        current_timestep=step,
+                    )
+                    policy_chunk_ingest.update(
+                        {
+                            "observation_timestep": int(
+                                pending_policy_result["observation_timestep"]
+                            ),
+                            "completed_to_ingest_age_s": max(
+                                0.0, policy_result_age_s
+                            ),
+                            "policy_prep_s": policy_prep_s,
+                            "policy_forward_s": policy_forward_s,
+                        }
+                    )
+                    pending_policy_result = None
+
+                if action_buffer.queue_size == 0:
+                    policy_replan = True
+                    if pending_policy_future is None:
+                        request = submit_policy_chunk(
+                            state,
+                            wrist_depth,
+                            front_depth,
+                            observation_timestep=step,
+                            start_timestep=step,
+                        )
+                        policy_observation_used = True
+                        if isinstance(request, Future):
+                            pending_policy_future = request
+                        else:
+                            pending_policy_result = request
+                    if pending_policy_result is None:
+                        wait_t0 = time.perf_counter()
+                        pending_policy_result = pending_policy_future.result()
+                        policy_wait_s = time.perf_counter() - wait_t0
+                        pending_policy_future = None
+                    policy_prep_s = float(pending_policy_result["policy_prep_s"])
+                    policy_forward_s = float(pending_policy_result["policy_forward_s"])
+                    policy_result_age_s = max(
+                        0.0,
+                        time.monotonic() - float(pending_policy_result["completed_monotonic"]),
+                    )
+                    policy_chunk_ingest = action_buffer.ingest(
+                        pending_policy_result["actions"],
+                        start_timestep=int(pending_policy_result["start_timestep"]),
+                        current_timestep=step,
+                    )
+                    policy_chunk_ingest.update(
+                        {
+                            "observation_timestep": int(
+                                pending_policy_result["observation_timestep"]
+                            ),
+                            "completed_to_ingest_age_s": policy_result_age_s,
+                            "policy_prep_s": policy_prep_s,
+                            "policy_forward_s": policy_forward_s,
+                        }
+                    )
+                    pending_policy_result = None
+
+                if action_buffer.queue_size == 0:
+                    raise RuntimeError("ACT inference returned an empty action chunk.")
+                action_pop_t0 = time.perf_counter()
+                timed_action = action_buffer.pop(expected_timestep=step)
+                action = timed_action.action
+                action_pop_s = time.perf_counter() - action_pop_t0
+                infer_s = policy_prep_s + policy_forward_s
+
+                now_mono = time.monotonic()
+                previous_target_tracking = compute_arm_tracking_error(
+                    state,
+                    previous_z1_target,
+                    z1_state_meta,
+                    target_step=previous_z1_target_step,
+                    current_step=step,
+                    target_age_s=(
+                        None
+                        if previous_z1_target_stamp_mono is None
+                        else max(0.0, now_mono - previous_z1_target_stamp_mono)
+                    ),
+                    position_tolerance_m=args.arm_tracking_position_tolerance_m,
+                    orientation_tolerance_deg=args.arm_tracking_orientation_tolerance_deg,
+                    gripper_tolerance_rad=args.arm_tracking_gripper_tolerance_rad,
+                )
+                current_target_pre_send_error = compute_arm_tracking_error(
+                    state,
+                    np.asarray(action, dtype=np.float32),
+                    z1_state_meta,
+                    target_step=step,
+                    current_step=step,
+                    target_age_s=0.0,
+                    position_tolerance_m=args.arm_tracking_position_tolerance_m,
+                    orientation_tolerance_deg=args.arm_tracking_orientation_tolerance_deg,
+                    gripper_tolerance_rad=args.arm_tracking_gripper_tolerance_rad,
+                )
+                if previous_target_tracking["valid"]:
+                    tracking_valid_count += 1
+                    tracking_reached_count += int(previous_target_tracking["reached"])
+                    tracking_position_errors_m.append(float(previous_target_tracking["position_error_m"]))
+                    tracking_orientation_errors_deg.append(
+                        float(previous_target_tracking["orientation_error_deg"])
+                    )
+                    tracking_gripper_errors_rad.append(
+                        float(previous_target_tracking["gripper_abs_error_rad"])
+                    )
+
+                if (
+                    args.async_policy_inference
+                    and action_buffer.queue_size <= int(args.policy_prefetch_actions)
+                    and (int(args.steps) - step - 1) > action_buffer.queue_size
+                    and pending_policy_future is None
+                    and pending_policy_result is None
+                ):
+                    # Observation at control step k is sampled after step k-1
+                    # has executed and before the step-k command is published.
+                    # Therefore new action[0] belongs to global step k. If the
+                    # async result arrives later, ingest() drops the expired
+                    # prefix and aligns the remaining rows by global timestep.
+                    policy_prefetch_observation_timestep = int(step)
+                    policy_prefetch_start_timestep = int(step)
+                    request = submit_policy_chunk(
+                        state,
+                        wrist_depth,
+                        front_depth,
+                        observation_timestep=policy_prefetch_observation_timestep,
+                        start_timestep=policy_prefetch_start_timestep,
+                    )
+                    policy_observation_used = True
+                    policy_prefetch_submitted = True
+                    if isinstance(request, Future):
+                        pending_policy_future = request
+                    else:
+                        pending_policy_result = request
                 base_cmd_meta = None
                 if base_bridge is not None:
                     base_cmd_meta = base_bridge.publish_action(np.asarray(action, dtype=np.float32))
                 z1_action_meta = None
                 if z1_action_pub is not None:
                     z1_action_meta = z1_action_pub.publish_action(np.asarray(action, dtype=np.float32))
+                    previous_z1_target = np.asarray(action, dtype=np.float32).copy()
+                    previous_z1_target_step = int(step)
+                    previous_z1_target_stamp_mono = time.monotonic()
                 record_wall_time = time.time()
                 if first_record_wall_time is None:
                     first_record_wall_time = record_wall_time
                 last_record_wall_time = record_wall_time
+                policy_depth_video_meta = None
+                if policy_depth_recorder is not None:
+                    policy_depth_video_meta = policy_depth_recorder.submit(
+                        step,
+                        record_wall_time,
+                        wrist_depth,
+                        front_depth,
+                    )
+                raw_unfiltered_depth_video_meta = None
+                if raw_unfiltered_depth_recorder is not None:
+                    raw_unfiltered_depth_video_meta = raw_unfiltered_depth_recorder.submit(
+                        step,
+                        record_wall_time,
+                        wrist_raw_unfiltered,
+                        front_raw_unfiltered,
+                    )
                 record = {
                     "step": step,
                     "wall_time": record_wall_time,
-                    "obs_s": time.perf_counter() - obs_t0,
+                    "obs_s": camera_read_s,
+                    "camera_read_s": camera_read_s,
                     "infer_s": infer_s,
+                    "policy_prep_s": policy_prep_s,
+                    "policy_forward_s": policy_forward_s,
+                    "policy_replan": policy_replan,
+                    "policy_prefetch_submitted": policy_prefetch_submitted,
+                    "policy_observation_used": policy_observation_used,
+                    "policy_wait_s": policy_wait_s,
+                    "policy_result_age_s": policy_result_age_s,
+                    "policy_chunk_ingest": policy_chunk_ingest,
+                    "policy_prefetch_observation_timestep": policy_prefetch_observation_timestep,
+                    "policy_prefetch_start_timestep": policy_prefetch_start_timestep,
+                    "policy_amp": policy_amp_enabled,
+                    "async_policy_inference": bool(args.async_policy_inference),
+                    "action_pop_s": action_pop_s,
+                    "action_timestep": int(timed_action.timestep),
+                    "action_source": timed_action.source,
+                    "action_blend_count": int(timed_action.blend_count),
+                    "actions_remaining": action_buffer.queue_size,
+                    "action_queue_first_timestep": action_buffer.first_timestep,
+                    "action_queue_last_timestep": action_buffer.last_timestep,
                     "camera": cam_meta,
                     "state": np.round(state, 6).tolist(),
                     "vel_state": vel_state_meta,
                     "z1_state": z1_state_meta,
+                    "arm_tracking": {
+                        "comparison": "feedback_sampled_before_current_publish",
+                        "previous_command": previous_target_tracking,
+                        "current_command_pre_send": current_target_pre_send_error,
+                    },
+                    "policy_depth_video": policy_depth_video_meta,
+                    "raw_unfiltered_depth_video": raw_unfiltered_depth_video_meta,
                     "base_cmd": base_cmd_meta,
                     "z1_action": z1_action_meta,
                     "action": np.round(np.asarray(action, dtype=np.float32), 6).tolist(),
@@ -2029,11 +3766,18 @@ def main() -> None:
                     else 0.0,
                 }
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
-                f.flush()
+                if (step + 1) % int(args.log_flush_interval) == 0:
+                    f.flush()
                 print(
-                    f"step={step:04d} infer_ms={infer_s * 1000.0:.1f} "
+                    f"step={step:04d} replan={str(policy_replan).lower()} "
+                    f"prep_ms={policy_prep_s * 1000.0:.1f} "
+                    f"forward_ms={policy_forward_s * 1000.0:.1f} "
+                    f"wait_ms={policy_wait_s * 1000.0:.1f} "
                     f"state_vx={float(state[0]):+.4f} state_vyaw={float(state[1]):+.4f} "
                     f"action0={float(action[0]):+.4f} action1={float(action[1]):+.4f} "
+                    f"arm_track_mm={float(previous_target_tracking.get('position_error_mm', float('nan'))):.1f} "
+                    f"arm_track_deg={float(previous_target_tracking.get('orientation_error_deg', float('nan'))):.1f} "
+                    f"arm_reached={str(bool(previous_target_tracking.get('reached', False))).lower()} "
                     f"cam_dt_ms={float(cam_meta['dt_ms']):.1f} "
                     f"inpaint_ms={float((cam_meta.get('inpaint') or {}).get('total_ms', 0.0)):.1f}",
                     flush=True,
@@ -2048,11 +3792,111 @@ def main() -> None:
                     # cycle late, do not "catch up" by sending several actions
                     # faster than the requested control rate on the real robot.
                     next_t = time.monotonic()
+            def tracking_percentile(values: list[float], percentile: float) -> float | None:
+                if not values:
+                    return None
+                return float(np.percentile(np.asarray(values, dtype=np.float64), percentile))
+
+            tracking_summary = {
+                "phase": "arm_tracking_summary",
+                "wall_time": time.time(),
+                "comparison": "feedback_at_step_k_vs_command_sent_at_step_k_minus_1",
+                "valid_samples": tracking_valid_count,
+                "reached_samples": tracking_reached_count,
+                "reached_ratio": (
+                    float(tracking_reached_count) / float(tracking_valid_count)
+                    if tracking_valid_count > 0
+                    else None
+                ),
+                "position_error_mm": {
+                    "p50": (
+                        None
+                        if not tracking_position_errors_m
+                        else tracking_percentile(tracking_position_errors_m, 50.0) * 1000.0
+                    ),
+                    "p95": (
+                        None
+                        if not tracking_position_errors_m
+                        else tracking_percentile(tracking_position_errors_m, 95.0) * 1000.0
+                    ),
+                    "max": (
+                        None
+                        if not tracking_position_errors_m
+                        else max(tracking_position_errors_m) * 1000.0
+                    ),
+                },
+                "orientation_error_deg": {
+                    "p50": tracking_percentile(tracking_orientation_errors_deg, 50.0),
+                    "p95": tracking_percentile(tracking_orientation_errors_deg, 95.0),
+                    "max": max(tracking_orientation_errors_deg) if tracking_orientation_errors_deg else None,
+                },
+                "gripper_abs_error_rad": {
+                    "p50": tracking_percentile(tracking_gripper_errors_rad, 50.0),
+                    "p95": tracking_percentile(tracking_gripper_errors_rad, 95.0),
+                    "max": max(tracking_gripper_errors_rad) if tracking_gripper_errors_rad else None,
+                },
+                "thresholds": {
+                    "position_m": float(args.arm_tracking_position_tolerance_m),
+                    "orientation_deg": float(args.arm_tracking_orientation_tolerance_deg),
+                    "gripper_rad": float(args.arm_tracking_gripper_tolerance_rad),
+                },
+            }
+            f.write(json.dumps(tracking_summary, ensure_ascii=False) + "\n")
+            f.flush()
+            print(f"arm_tracking_summary {json.dumps(tracking_summary, ensure_ascii=False)}", flush=True)
         loop_elapsed = time.monotonic() - run_t0
+    except KeyboardInterrupt:
+        interrupted = True
+        loop_elapsed = time.monotonic() - run_t0
+        print("shadow_interrupt received; stopping base and returning Z1 to calibrated home", flush=True)
     finally:
+        if base_bridge is not None:
+            try:
+                base_bridge.publish_zero()
+            except Exception:
+                pass
+        if (
+            z1_action_pub is not None
+            and args.enable_z1_action_bridge
+            and args.z1_back_to_start_on_exit
+        ):
+            try:
+                shutdown_meta = z1_action_pub.request_shutdown_back_to_start()
+                shutdown_back_to_start_requested = True
+                print(
+                    f"z1_shutdown_back_to_start_requested {json.dumps(shutdown_meta, ensure_ascii=False)}",
+                    flush=True,
+                )
+            except Exception as exc:
+                print(f"warning: failed to request Z1 backToStart: {exc}", file=sys.stderr, flush=True)
         try:
             camera.stop()
         finally:
+            if policy_depth_recorder is not None:
+                stats = policy_depth_recorder.stop()
+                print(f"policy_depth_video_done {json.dumps(stats, ensure_ascii=False)}", flush=True)
+            if raw_unfiltered_depth_recorder is not None:
+                stats = raw_unfiltered_depth_recorder.stop()
+                print(
+                    f"raw_unfiltered_depth_video_done {json.dumps(stats, ensure_ascii=False)}",
+                    flush=True,
+                )
+            if policy_executor is not None:
+                policy_executor.shutdown(wait=True, cancel_futures=False)
+            if shutdown_back_to_start_requested and z1_state_receiver is not None:
+                try:
+                    shutdown_meta = wait_for_z1_shutdown_back_to_start(
+                        z1_state_receiver,
+                        args.z1_back_to_start_wait_timeout_s,
+                    )
+                    print(
+                        "z1_shutdown_back_to_start_done "
+                        f"done={shutdown_meta.get('shutdown_done')} "
+                        f"error={shutdown_meta.get('shutdown_error')}",
+                        flush=True,
+                    )
+                except Exception as exc:
+                    print(f"warning: Z1 backToStart completion was not confirmed: {exc}", file=sys.stderr, flush=True)
             if z1_action_pub is not None:
                 try:
                     z1_action_pub.close()
@@ -2074,7 +3918,8 @@ def main() -> None:
     print(
         f"shadow_done log={args.log_path} steps={completed_steps} "
         f"elapsed_s={run_elapsed:.3f} steady_hz={steady_hz:.3f} "
-        f"startup_inclusive_hz={completed_steps / max(run_elapsed, 1.0e-9):.3f}",
+        f"startup_inclusive_hz={completed_steps / max(run_elapsed, 1.0e-9):.3f} "
+        f"interrupted={str(interrupted).lower()}",
         flush=True,
     )
 

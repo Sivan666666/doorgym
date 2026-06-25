@@ -135,6 +135,25 @@ def scalar_str(value):
     return str(arr.reshape(-1)[0])
 
 
+def array_to_str_list(value):
+    return [str(item) for item in np.asarray(value, dtype=object).reshape(-1).tolist()]
+
+
+def detect_action_names(data, sidecar):
+    if sidecar and sidecar.get("action") is not None:
+        names = [str(item) for item in sidecar.get("action", [])]
+        if names:
+            return names
+    if "action_names" in data.files:
+        names = array_to_str_list(data["action_names"])
+        if names:
+            return names
+    action_dim = int(data["action"].shape[-1])
+    if action_dim == len(ACTION_NAMES):
+        return list(ACTION_NAMES)
+    return [f"action_{i}" for i in range(action_dim)]
+
+
 def detect_action_frame(data, sidecar):
     for source in (data, sidecar or {}):
         for key in ("action_frame", "action_pose_frame", "target_pose_frame"):
@@ -264,6 +283,7 @@ def fit_state_preprocess_from_episodes(
 def fit_action_preprocess_from_episodes(
     files,
     sidecar,
+    action_names,
     action_frame,
     ikpush_state_version,
     controller_mode,
@@ -283,7 +303,7 @@ def fit_action_preprocess_from_episodes(
         raise ValueError("Cannot fit action preprocessing without raw actions.")
     config = fit_door_dp_action_preprocess(
         np.concatenate(chunks, axis=0),
-        ACTION_NAMES,
+        action_names,
         lower_quantile=lower_quantile,
         upper_quantile=upper_quantile,
         eps=eps,
@@ -291,7 +311,7 @@ def fit_action_preprocess_from_episodes(
     constant_count = int(np.asarray(config.get("constant_mask", []), dtype=bool).sum())
     print(
         f"Fitted action_preprocess={config['version']} frames={total_frames} "
-        f"action_dim={len(ACTION_NAMES)} constant_dims={constant_count} "
+        f"action_dim={len(action_names)} constant_dims={constant_count} "
         f"quantiles=({lower_quantile}, {upper_quantile})",
         flush=True,
     )
@@ -404,6 +424,12 @@ def main():
         state_names = [str(x) for x in first["state_feature_names"].tolist()]
     else:
         state_names = [f"state_{i}" for i in range(first["state"].shape[-1])]
+    action_names = detect_action_names(first, sidecar)
+    if first["action"].shape[-1] != len(action_names):
+        raise ValueError(
+            f"Raw action_dim={first['action'].shape[-1]} does not match action_names={len(action_names)}: "
+            f"{action_names}"
+        )
     keep_state_indices = list(range(len(state_names)))
     dropped_state_names = []
     if not args.keep_phase_state:
@@ -486,7 +512,7 @@ def main():
                 flush=True,
             )
         existing_action_names = list(existing_sidecar.get("action", []))
-        if existing_action_names and existing_action_names != ACTION_NAMES:
+        if existing_action_names and existing_action_names != action_names:
             raise ValueError(
                 f"Existing LeRobot dataset at {out_dir} has different action names; "
                 "use --overwrite or a new --repo_id."
@@ -536,6 +562,7 @@ def main():
             action_preprocess_config = fit_action_preprocess_from_episodes(
                 files,
                 sidecar,
+                action_names,
                 action_frame,
                 ikpush_state_version,
                 controller_mode,
@@ -549,12 +576,13 @@ def main():
     initial_task = scalar_str(first["task"]) if "task" in first else "door open"
     converted_state_normalized = bool(state_preprocess_config.get("applied", False))
     state_sanitize_config = make_door_dp_sanitize_config(state_names, eps=args.near_zero_rate_eps)
-    action_sanitize_config = make_door_dp_sanitize_config(ACTION_NAMES, eps=args.near_zero_rate_eps)
+    action_sanitize_config = make_door_dp_sanitize_config(action_names, eps=args.near_zero_rate_eps)
     recorder = DoorDPLeRobotRecorder(
         root=args.root,
         repo_id=args.repo_id,
         fps=fps,
         state_feature_names=state_names,
+        action_feature_names=action_names,
         task=initial_task,
         resume=not args.overwrite,
         vision_mode=vision_mode,
@@ -596,8 +624,8 @@ def main():
         states = sanitize_door_dp_state(states, state_names=state_names, eps=args.near_zero_rate_eps)
         states = apply_door_dp_state_preprocess(states, state_names=state_names, config=state_preprocess_config)
         actions = payload["actions"]
-        actions = sanitize_door_dp_action(actions, action_names=ACTION_NAMES, eps=args.near_zero_rate_eps)
-        actions = apply_door_dp_action_preprocess(actions, action_names=ACTION_NAMES, config=action_preprocess_config)
+        actions = sanitize_door_dp_action(actions, action_names=action_names, eps=args.near_zero_rate_eps)
+        actions = apply_door_dp_action_preprocess(actions, action_names=action_names, config=action_preprocess_config)
         wrist_first = payload["wrist_first"]
         wrist_second = payload["wrist_second"]
         front_first = payload["front_first"]
@@ -622,7 +650,7 @@ def main():
     sidecar_payload = {
         "fps": fps,
         "state": state_names,
-        "action": ACTION_NAMES,
+        "action": action_names,
         "image_features": lerobot_image_keys_for_vision_mode(vision_mode),
         "source_raw_root": str(raw_root),
         "action_frame": action_frame,

@@ -1,0 +1,116 @@
+{
+  "script": "offline_opencv_selected_k_multistep_compare.py",
+  "steps": [
+    120,
+    240,
+    360,
+    480
+  ],
+  "base_C": "align(color) -> spatial_filter(holes_fill=0) -> temporal -> clip 0.2-1.5m -> u8",
+  "selected_policy": {
+    "wrist": {
+      "variant": "K1",
+      "fringe_px": 40
+    },
+    "front": {
+      "variant": "K2",
+      "fringe_px": 60
+    }
+  },
+  "component_mask": {
+    "small_max_area": 15000,
+    "small_max_span_px": 280,
+    "small_border_margin_px": -1
+  },
+  "stats": {
+    "wrist": {
+      "120": {
+        "black_px_c": 17757,
+        "small_selected_px": 617,
+        "small_selected_components": 14,
+        "large_components": 1,
+        "fringe_px": 40,
+        "fringe_added_px": 14547,
+        "mask_px": 15164,
+        "changed_px": 9480
+      },
+      "240": {
+        "black_px_c": 87795,
+        "small_selected_px": 1343,
+        "small_selected_components": 41,
+        "large_components": 1,
+        "fringe_px": 40,
+        "fringe_added_px": 33019,
+        "mask_px": 34362,
+        "changed_px": 22278
+      },
+      "360": {
+        "black_px_c": 108797,
+        "small_selected_px": 23784,
+        "small_selected_components": 118,
+        "large_components": 1,
+        "fringe_px": 40,
+        "fringe_added_px": 34451,
+        "mask_px": 58235,
+        "changed_px": 46036
+      },
+      "480": {
+        "black_px_c": 64822,
+        "small_selected_px": 2175,
+        "small_selected_components": 30,
+        "large_components": 1,
+        "fringe_px": 40,
+        "fringe_added_px": 33867,
+        "mask_px": 36042,
+        "changed_px": 21411
+      }
+    },
+    "front": {
+      "120": {
+        "black_px_c": 60821,
+        "small_selected_px": 4564,
+        "small_selected_components": 50,
+        "large_components": 2,
+        "fringe_px": 60,
+        "fringe_added_px": 43404,
+        "mask_px": 47968,
+        "changed_px": 34974
+      },
+      "240": {
+        "black_px_c": 41877,
+        "small_selected_px": 2478,
+        "small_selected_components": 54,
+        "large_components": 2,
+        "fringe_px": 60,
+        "fringe_added_px": 39399,
+        "mask_px": 41877,
+        "changed_px": 41877
+      },
+      "360": {
+        "black_px_c": 48029,
+        "small_selected_px": 21479,
+        "small_selected_components": 92,
+        "large_components": 1,
+        "fringe_px": 60,
+        "fringe_added_px": 26550,
+        "mask_px": 48029,
+        "changed_px": 48029
+      },
+      "480": {
+        "black_px_c": 11352,
+        "small_selected_px": 2990,
+        "small_selected_components": 48,
+        "large_components": 1,
+        "fringe_px": 60,
+        "fringe_added_px": 8362,
+        "mask_px": 11352,
+        "changed_px": 11352
+      }
+    }
+  },
+  "outputs": {
+    "png": "/tmp/d435_raw_scripted_20260624_154141/opencv_selected_k_multistep/dual_selected_wristK1_frontK2_steps_120_240_360_480.png",
+    "jpg": "/tmp/d435_raw_scripted_20260624_154141/opencv_selected_k_multistep/dual_selected_wristK1_frontK2_steps_120_240_360_480.jpg"
+  },
+  "elapsed_s": 41.83250641822815
+}

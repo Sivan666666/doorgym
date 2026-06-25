@@ -1,0 +1,106 @@
+[
+  {
+    "mode": "no_rs_filters",
+    "camera": "wrist",
+    "path": "/tmp/depth_policy_modes_20260622_172941/no_rs_filters/wrist_policy_depth_u8.png",
+    "shape": [
+      480,
+      640
+    ],
+    "nonzero": 253514,
+    "min": 0,
+    "max": 184,
+    "mean": 96.7074609375
+  },
+  {
+    "mode": "no_rs_filters",
+    "camera": "front",
+    "path": "/tmp/depth_policy_modes_20260622_172941/no_rs_filters/front_policy_depth_u8.png",
+    "shape": [
+      480,
+      640
+    ],
+    "nonzero": 266682,
+    "min": 0,
+    "max": 255,
+    "mean": 72.0691015625
+  },
+  {
+    "mode": "rs_filters_off",
+    "camera": "wrist",
+    "path": "/tmp/depth_policy_modes_20260622_172941/rs_filters_off/wrist_policy_depth_u8.png",
+    "shape": [
+      480,
+      640
+    ],
+    "nonzero": 233129,
+    "min": 0,
+    "max": 255,
+    "mean": 98.23559244791667
+  },
+  {
+    "mode": "rs_filters_off",
+    "camera": "front",
+    "path": "/tmp/depth_policy_modes_20260622_172941/rs_filters_off/front_policy_depth_u8.png",
+    "shape": [
+      480,
+      640
+    ],
+    "nonzero": 280946,
+    "min": 0,
+    "max": 255,
+    "mean": 75.89056315104166
+  },
+  {
+    "mode": "realsense",
+    "camera": "wrist",
+    "path": "/tmp/depth_policy_modes_20260622_172941/realsense/wrist_policy_depth_u8.png",
+    "shape": [
+      480,
+      640
+    ],
+    "nonzero": 282198,
+    "min": 0,
+    "max": 183,
+    "mean": 112.37202473958334
+  },
+  {
+    "mode": "realsense",
+    "camera": "front",
+    "path": "/tmp/depth_policy_modes_20260622_172941/realsense/front_policy_depth_u8.png",
+    "shape": [
+      480,
+      640
+    ],
+    "nonzero": 304111,
+    "min": 0,
+    "max": 255,
+    "mean": 87.04511067708333
+  },
+  {
+    "mode": "rgb_guided",
+    "camera": "wrist",
+    "path": "/tmp/depth_policy_modes_20260622_172941/rgb_guided/wrist_policy_depth_u8.png",
+    "shape": [
+      480,
+      640
+    ],
+    "nonzero": 272109,
+    "min": 0,
+    "max": 184,
+    "mean": 105.77972981770833
+  },
+  {
+    "mode": "rgb_guided",
+    "camera": "front",
+    "path": "/tmp/depth_policy_modes_20260622_172941/rgb_guided/front_policy_depth_u8.png",
+    "shape": [
+      480,
+      640
+    ],
+    "nonzero": 307200,
+    "min": 45,
+    "max": 255,
+    "mean": 88.6822265625
+  }
+]
