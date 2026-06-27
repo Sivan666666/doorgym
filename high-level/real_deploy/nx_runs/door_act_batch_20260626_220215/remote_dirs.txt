@@ -1,0 +1,6 @@
+/tmp/door_act_real_new100000_20260626_212707
+/tmp/door_act_real_new100000_blur_20260626_213127
+/tmp/door_act_real_080000_noblur_20260626_213452
+/tmp/door_act_real_080000_realsense_20260626_213920
+/tmp/door_act_real_080000_realsense_20260626_215342
+/home/anx/door_act_deploy/visual_whole_body/9054RUN_DIR

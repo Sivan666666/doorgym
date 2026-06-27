@@ -59,7 +59,62 @@ DATASET_METADATA_KEYS = (
     "depth_noise_enabled",
     "depth_noise_config",
     "depth_camera_randomization_config",
+    "phase_names",
+    "keyframe_loss_enabled",
+    "keyframe_loss_weight",
+    "keyframe_loss_radius",
+    "keyframe_loss_feature",
+    "action_loss_weight_feature",
+    "keyframe_extraction_rules",
 )
+ACTION_LOSS_WEIGHT_FEATURE = "loss.action_weight"
+RAW_ACTION_LOSS_WEIGHT_KEY = "action_loss_weight"
+DEFAULT_KEYFRAME_NAMES = (
+    "start",
+    "stop_before_door",
+    "pregrasp",
+    "grasp",
+    "rotate",
+)
+DEFAULT_KEYFRAME_PHASE_TARGETS = {
+    "start": (),
+    "stop_before_door": ("initial_hold",),
+    # First grasp-frame is the frame immediately after the pregrasp hold/move.
+    "pregrasp": ("grasp",),
+    # At grasp_hold/close_gripper the target has reached the grasp point.
+    "grasp": ("grasp_hold", "close_gripper"),
+    # First push_door-frame is immediately after rotate_handle completes.
+    "rotate": ("push_door",),
+}
+DEFAULT_A2W_PHASE_NAMES = (
+    "walk",
+    "initial_hold",
+    "grasp",
+    "grasp_hold",
+    "close_gripper",
+    "rotate_handle",
+    "push_door",
+    "return_home",
+    "hold_home",
+)
+DEFAULT_MOTION_KEYFRAME_CONFIG = {
+    "window": 5,
+    "min_separation": 15,
+    "merge_tolerance": 2,
+    "dedup_window": 10,
+    "manual_union": True,
+    # Event thresholds are intentionally relative to each episode, because
+    # randomized starts/resistance can change absolute magnitudes a lot.
+    "base_speed_change_quantile": 0.95,
+    "base_speed_change_max_count": 4,
+    "arm_joint_motion_quantile": 0.85,
+    "arm_joint_motion_max_count": 6,
+    "handle_speed_change_quantile": 0.95,
+    "handle_speed_change_max_count": 4,
+    "door_speed_change_quantile": 0.95,
+    "door_speed_change_max_count": 2,
+    "gripper_contact_min_delta": 1.0e-4,
+}
 STATE_PREPROCESS_VERSION = "door_dp_state_robust_quantile_v1"
 ACTION_PREPROCESS_VERSION = "door_dp_action_robust_quantile_v1"
 SANITIZE_VERSION = "door_dp_sanitize_near_zero_rate_v1"
@@ -780,6 +835,381 @@ def _zero_image_like(image):
     return np.zeros_like(np.asarray(image, dtype=np.uint8))
 
 
+def _to_str_list(value):
+    if value is None:
+        return []
+    if isinstance(value, np.ndarray):
+        value = value.tolist()
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value]
+    return [str(value)]
+
+
+def first_phase_index(phase_ids, phase_names, target_phase_names):
+    phase_names = _to_str_list(phase_names)
+    if not phase_names:
+        return None
+    phase_to_id = {name: idx for idx, name in enumerate(phase_names)}
+    target_ids = {phase_to_id[name] for name in target_phase_names if name in phase_to_id}
+    if not target_ids:
+        return None
+    phase_ids = np.asarray(phase_ids, dtype=np.int64).reshape(-1)
+    matches = np.nonzero(np.isin(phase_ids, list(target_ids)))[0]
+    if matches.size <= 0:
+        return None
+    return int(matches[0])
+
+
+def extract_door_keyframes_from_phase_ids(phase_ids, phase_names):
+    """Extract semantic keyframe indices from recorded phase ids.
+
+    Returned keyframes follow the scripted A2W/B1Z1 door sequence:
+    start, stop before door, pregrasp, grasp, rotate.
+    """
+
+    phase_ids = np.asarray(phase_ids, dtype=np.int64).reshape(-1)
+    keyframe_names = []
+    keyframe_indices = []
+    keyframe_target_phase_names = []
+    if phase_ids.size <= 0:
+        return keyframe_indices, keyframe_names, keyframe_target_phase_names
+
+    for name in DEFAULT_KEYFRAME_NAMES:
+        targets = DEFAULT_KEYFRAME_PHASE_TARGETS.get(name, ())
+        if name == "start":
+            idx = 0
+        else:
+            idx = first_phase_index(phase_ids, phase_names, targets)
+            if idx is None and name == "grasp":
+                # With grasp_hold_steps=0 the first close_gripper frame is the
+                # grasp keyframe. If both are missing, fall back to the last
+                # grasp frame, which is still the closest recorded grasp sample.
+                idx = first_phase_index(phase_ids, phase_names, ("grasp",))
+                if idx is not None:
+                    grasp_matches = np.nonzero(
+                        np.asarray(phase_ids, dtype=np.int64)
+                        == _to_str_list(phase_names).index("grasp")
+                    )[0]
+                    if grasp_matches.size > 0:
+                        idx = int(grasp_matches[-1])
+            if idx is None and name == "rotate":
+                rotate_start = first_phase_index(phase_ids, phase_names, ("rotate_handle",))
+                if rotate_start is not None:
+                    rotate_id = _to_str_list(phase_names).index("rotate_handle")
+                    rotate_matches = np.nonzero(np.asarray(phase_ids, dtype=np.int64) == rotate_id)[0]
+                    idx = int(rotate_matches[-1]) if rotate_matches.size > 0 else rotate_start
+        if idx is None:
+            continue
+        keyframe_names.append(name)
+        keyframe_indices.append(int(idx))
+        keyframe_target_phase_names.append(",".join(targets) if targets else "first_frame")
+
+    # Keep deterministic order and drop duplicate frame indices while preserving
+    # the first semantic name assigned to that frame.
+    dedup_indices = []
+    dedup_names = []
+    dedup_targets = []
+    seen = set()
+    for idx, name, target in sorted(zip(keyframe_indices, keyframe_names, keyframe_target_phase_names), key=lambda item: item[0]):
+        if idx in seen:
+            continue
+        seen.add(idx)
+        dedup_indices.append(int(idx))
+        dedup_names.append(str(name))
+        dedup_targets.append(str(target))
+    return dedup_indices, dedup_names, dedup_targets
+
+
+def sliding_mean_displacement(values, window=5):
+    """Mean joint-/signal-space displacement over a trailing sliding window.
+
+    This implements the form used for motion keyframes:
+
+        δ̄_t = 1 / w * Σ_i ||q_{t-i} - q_{t-i-1}||₂
+
+    For the first frames where a full window is not available, the average is
+    computed over the available prefix.
+    """
+
+    values = np.asarray(values, dtype=np.float64)
+    if values.ndim == 1:
+        values = values.reshape(-1, 1)
+    if values.size <= 0:
+        return np.zeros((0,), dtype=np.float64)
+    n = int(values.shape[0])
+    window = max(1, int(window))
+    diff = np.zeros(n, dtype=np.float64)
+    if n > 1:
+        diff[1:] = np.linalg.norm(np.diff(np.nan_to_num(values), axis=0), axis=1)
+    cumsum = np.cumsum(np.concatenate([np.zeros(1, dtype=np.float64), diff]))
+    out = np.zeros(n, dtype=np.float64)
+    for t in range(n):
+        start = max(0, t - window + 1)
+        denom = max(1, t - start + 1)
+        out[t] = (cumsum[t + 1] - cumsum[start]) / denom
+    return out
+
+
+def _raw_has(raw, key):
+    if raw is None:
+        return False
+    if hasattr(raw, "files"):
+        return key in raw.files
+    return key in raw
+
+
+def _raw_get(raw, key, default=None):
+    if not _raw_has(raw, key):
+        return default
+    return raw[key]
+
+
+def _phase_names_for_raw(raw, phase_ids=None, phase_names=None):
+    names = _to_str_list(phase_names)
+    if names:
+        return names
+    if _raw_has(raw, "phase_names"):
+        names = _to_str_list(_raw_get(raw, "phase_names"))
+        if names:
+            return names
+    if phase_ids is not None:
+        phase_ids = np.asarray(phase_ids, dtype=np.int64).reshape(-1)
+        if phase_ids.size > 0 and int(np.max(phase_ids)) < len(DEFAULT_A2W_PHASE_NAMES):
+            return list(DEFAULT_A2W_PHASE_NAMES)
+    return []
+
+
+def _find_salient_peaks(metric, quantile=0.95, min_separation=15, max_count=4, min_threshold=0.0):
+    metric = np.nan_to_num(np.asarray(metric, dtype=np.float64).reshape(-1), nan=0.0, posinf=0.0, neginf=0.0)
+    n = metric.size
+    if n <= 0 or max_count <= 0:
+        return []
+    threshold = max(float(min_threshold), float(np.quantile(metric, float(quantile))))
+    if threshold <= 0.0:
+        return []
+
+    # Smooth scripted trajectories often create a broad high-motion plateau
+    # instead of a sharp local maximum. Select top separated frames over the
+    # whole thresholded region so those plateaus still produce representatives.
+    candidates = np.nonzero(metric >= threshold)[0]
+    if candidates.size <= 0:
+        return []
+
+    selected = []
+    min_separation = max(1, int(min_separation))
+    for idx in sorted(candidates.tolist(), key=lambda i: float(metric[i]), reverse=True):
+        if all(abs(int(idx) - int(prev)) >= min_separation for prev in selected):
+            selected.append(int(idx))
+        if len(selected) >= int(max_count):
+            break
+    return sorted(selected)
+
+
+def _append_keyframe(entries, idx, name, rule, n=None):
+    if idx is None:
+        return
+    idx = int(idx)
+    if n is not None and not (0 <= idx < int(n)):
+        return
+    entries.append((idx, str(name), str(rule)))
+
+
+def _first_gripper_contact_index(raw, phase_ids=None, phase_names=None):
+    """Infer gripper-handle contact from raw signals.
+
+    Isaac Gym contact forces were not stored in the raw episodes. The most
+    reliable recorded proxy is the instant the gripper starts closing after the
+    grasp point. Prefer the scripted close_gripper phase if phase ids are
+    available; otherwise use the first significant positive gripper target
+    change.
+    """
+
+    phase_names = _phase_names_for_raw(raw, phase_ids=phase_ids, phase_names=phase_names)
+    if phase_ids is not None:
+        idx = first_phase_index(phase_ids, phase_names, ("close_gripper",))
+        if idx is not None:
+            return int(idx)
+        idx = first_phase_index(phase_ids, phase_names, ("grasp_hold",))
+        if idx is not None:
+            return int(idx)
+
+    gripper = None
+    action = _raw_get(raw, "action")
+    if action is not None:
+        action = np.asarray(action)
+        if action.ndim == 2 and action.shape[1] >= 1:
+            gripper = action[:, -1]
+    if gripper is None:
+        dof_pos = _raw_get(raw, "replay_dof_pos")
+        if dof_pos is not None:
+            dof_pos = np.asarray(dof_pos)
+            if dof_pos.ndim == 2 and dof_pos.shape[1] >= 1:
+                gripper = dof_pos[:, -1]
+    if gripper is None or len(gripper) < 2:
+        return None
+
+    gripper = np.asarray(gripper, dtype=np.float64).reshape(-1)
+    delta = np.diff(gripper, prepend=gripper[0])
+    min_delta = float(DEFAULT_MOTION_KEYFRAME_CONFIG["gripper_contact_min_delta"])
+    matches = np.nonzero(np.abs(delta) > min_delta)[0]
+    if matches.size <= 0:
+        return None
+    return int(matches[0])
+
+
+def extract_motion_keyframes_from_raw_arrays(raw, phase_names=None, config=None):
+    """Extract dynamic keyframes from a raw Door DP episode.
+
+    Rules:
+    1. base speed changes quickly: sliding mean displacement of actual base
+       velocity [vx, vy, yaw_rate].
+    2. arm joints move quickly: sliding mean displacement of Z1 joint1..joint6
+       positions, taken from the last 7 replay DOFs and excluding gripper.
+    3. handle rotation speed changes quickly: sliding mean displacement of
+       handle joint velocity.
+    4. door hinge rotation speed changes quickly: sliding mean displacement of
+       door hinge joint velocity.
+    5. gripper-handle contact instant: first close_gripper/grasp_hold phase, or
+       first significant gripper target/position change if phase ids are absent.
+
+    The returned keyframes are the union of these dynamic events and the older
+    phase-defined semantic keyframes, so start/stop/pregrasp/grasp/rotate are
+    preserved whenever subtask ids are available.
+    """
+
+    cfg = dict(DEFAULT_MOTION_KEYFRAME_CONFIG)
+    if config:
+        cfg.update(config)
+
+    subtasks = _raw_get(raw, "subtask_index")
+    phase_ids = None
+    if subtasks is not None:
+        phase_ids = np.asarray(subtasks, dtype=np.int64).reshape(-1)
+    names = _phase_names_for_raw(raw, phase_ids=phase_ids, phase_names=phase_names)
+
+    n = None
+    for key in ("state", "action", "replay_root_state", "replay_dof_pos", "replay_door_dof_pos"):
+        value = _raw_get(raw, key)
+        if value is not None:
+            n = int(np.asarray(value).shape[0])
+            break
+    if n is None:
+        n = int(phase_ids.size) if phase_ids is not None else 0
+
+    entries = []
+    if bool(cfg.get("manual_union", True)) and phase_ids is not None:
+        manual_indices, manual_names, manual_targets = extract_door_keyframes_from_phase_ids(phase_ids, names)
+        for idx, name, target in zip(manual_indices, manual_names, manual_targets):
+            _append_keyframe(entries, idx, f"manual:{name}", f"phase:{target}", n=n)
+
+    window = int(cfg.get("window", 5))
+    min_sep = int(cfg.get("min_separation", 15))
+
+    root_state = _raw_get(raw, "replay_root_state")
+    if root_state is not None:
+        root_state = np.asarray(root_state, dtype=np.float64)
+        if root_state.ndim == 2 and root_state.shape[1] >= 13:
+            base_vel = np.stack([root_state[:, 7], root_state[:, 8], root_state[:, 12]], axis=1)
+            metric = sliding_mean_displacement(base_vel, window=window)
+            for idx in _find_salient_peaks(
+                metric,
+                quantile=cfg.get("base_speed_change_quantile", 0.95),
+                min_separation=max(min_sep, 20),
+                max_count=cfg.get("base_speed_change_max_count", 4),
+            ):
+                _append_keyframe(entries, idx, "base_speed_change", "sliding_mean_delta([vx,vy,yaw_rate])", n=n)
+
+    dof_pos = _raw_get(raw, "replay_dof_pos")
+    if dof_pos is not None:
+        dof_pos = np.asarray(dof_pos, dtype=np.float64)
+        if dof_pos.ndim == 2 and dof_pos.shape[1] >= 7:
+            arm_joints = dof_pos[:, -7:-1]
+            metric = sliding_mean_displacement(arm_joints, window=window)
+            for idx in _find_salient_peaks(
+                metric,
+                quantile=cfg.get("arm_joint_motion_quantile", 0.95),
+                min_separation=max(min_sep, 20),
+                max_count=cfg.get("arm_joint_motion_max_count", 6),
+            ):
+                _append_keyframe(entries, idx, "arm_joint_motion_fast", "sliding_mean_delta(joint1..joint6)", n=n)
+
+    door_vel = _raw_get(raw, "replay_door_dof_vel")
+    if door_vel is not None:
+        door_vel = np.asarray(door_vel, dtype=np.float64)
+        if door_vel.ndim == 2 and door_vel.shape[1] >= 2:
+            handle_metric = sliding_mean_displacement(door_vel[:, 1], window=window)
+            for idx in _find_salient_peaks(
+                handle_metric,
+                quantile=cfg.get("handle_speed_change_quantile", 0.95),
+                min_separation=min_sep,
+                max_count=cfg.get("handle_speed_change_max_count", 4),
+            ):
+                _append_keyframe(entries, idx, "handle_speed_change", "sliding_mean_delta(handle_angular_velocity)", n=n)
+
+            door_metric = sliding_mean_displacement(door_vel[:, 0], window=window)
+            for idx in _find_salient_peaks(
+                door_metric,
+                quantile=cfg.get("door_speed_change_quantile", 0.95),
+                min_separation=min_sep,
+                max_count=cfg.get("door_speed_change_max_count", 4),
+            ):
+                _append_keyframe(entries, idx, "door_hinge_speed_change", "sliding_mean_delta(door_angular_velocity)", n=n)
+
+    contact_idx = _first_gripper_contact_index(raw, phase_ids=phase_ids, phase_names=names)
+    _append_keyframe(entries, contact_idx, "gripper_handle_contact", "first_close_gripper_or_gripper_motion", n=n)
+
+    # Final cleanup: collapse keyframes that are too close. Within each
+    # dedup_window cluster, prefer automatically detected motion/contact events;
+    # if the cluster has no automatic event, keep the manual phase keyframe.
+    dedup_window = max(0, int(cfg.get("dedup_window", 10)))
+    clusters = []
+    for idx, name, rule in sorted(entries, key=lambda item: int(item[0])):
+        item = {"idx": int(idx), "name": str(name), "rule": str(rule)}
+        if clusters and item["idx"] - clusters[-1][-1]["idx"] <= dedup_window:
+            clusters[-1].append(item)
+        else:
+            clusters.append([item])
+
+    def auto_priority(item):
+        is_auto = not item["name"].startswith("manual:")
+        # auto first, then frames that carry more semantic labels, then earlier.
+        return (1 if is_auto else 0, item["name"].count("+"), -item["idx"])
+
+    selected_groups = []
+    for cluster in clusters:
+        selected = max(cluster, key=auto_priority)
+        ordered = [selected] + [item for item in cluster if item is not selected]
+        selected_groups.append({
+            "idx": selected["idx"],
+            "names": [item["name"] for item in ordered],
+            "rules": [item["rule"] for item in ordered],
+        })
+
+    indices = [int(group["idx"]) for group in selected_groups]
+    keyframe_names = ["+".join(dict.fromkeys(group["names"])) for group in selected_groups]
+    keyframe_rules = [";".join(dict.fromkeys(group["rules"])) for group in selected_groups]
+    return indices, keyframe_names, keyframe_rules
+
+
+def make_keyframe_action_loss_weight(num_frames, keyframe_indices, weight=6.0, radius=5, enabled=True):
+    weights = np.ones(int(num_frames), dtype=np.float32)
+    if not enabled:
+        return weights
+    if num_frames <= 0:
+        return weights
+    weight = float(weight)
+    radius = int(radius)
+    if weight <= 1.0 or radius < 0:
+        return weights
+    keyframe_indices = np.asarray(keyframe_indices, dtype=np.int64).reshape(-1)
+    if keyframe_indices.size <= 0:
+        return weights
+    frames = np.arange(int(num_frames), dtype=np.int64)
+    near = np.min(np.abs(frames[:, None] - keyframe_indices[None, :]), axis=1) <= radius
+    weights[near] = weight
+    return weights
+
+
 class DoorDPLeRobotRecorder:
     def __init__(
         self,
@@ -794,6 +1224,7 @@ class DoorDPLeRobotRecorder:
         image_storage="video",
         video_codec="h264",
         action_feature_names=None,
+        include_action_loss_weight=False,
     ):
         from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
@@ -808,6 +1239,7 @@ class DoorDPLeRobotRecorder:
         self.video_codec = str(video_codec)
         self.state_feature_names = list(state_feature_names)
         self.action_names = list(action_feature_names or ACTION_NAMES)
+        self.include_action_loss_weight = bool(include_action_loss_weight)
         self.metadata = dict(metadata or {})
         self.root.mkdir(parents=True, exist_ok=True)
         self.dataset_root = self.root / repo_id
@@ -824,6 +1256,12 @@ class DoorDPLeRobotRecorder:
             },
             "subtask_index": {"dtype": "int64", "shape": (1,), "names": ["subtask_index"]},
         }
+        if self.include_action_loss_weight:
+            features[ACTION_LOSS_WEIGHT_FEATURE] = {
+                "dtype": "float32",
+                "shape": (1,),
+                "names": ["action_loss_weight"],
+            }
         for key in lerobot_image_keys_for_vision_mode(self.vision_mode):
             features[key] = {
                 "dtype": self.image_storage,
@@ -861,6 +1299,8 @@ class DoorDPLeRobotRecorder:
             "image_storage": self.image_storage,
             "video_codec": self.video_codec,
         }
+        if self.include_action_loss_weight:
+            sidecar["action_loss_weight_feature"] = ACTION_LOSS_WEIGHT_FEATURE
         if self.vision_mode != "depth":
             sidecar["vision_mode"] = self.vision_mode
         for key in DATASET_METADATA_KEYS:
@@ -880,6 +1320,7 @@ class DoorDPLeRobotRecorder:
         subtask_index,
         front_mask_rgb=None,
         front_second_rgb=None,
+        action_loss_weight=None,
     ):
         if self.vision_mode == "depth":
             front_mask_rgb = _zero_image_like(wrist_mask_rgb) if front_mask_rgb is None else front_mask_rgb
@@ -895,6 +1336,9 @@ class DoorDPLeRobotRecorder:
             "subtask_index": np.asarray([subtask_index], dtype=np.int64),
             "task": self.task,
         }
+        if self.include_action_loss_weight:
+            weight = 1.0 if action_loss_weight is None else float(np.asarray(action_loss_weight).reshape(-1)[0])
+            frame[ACTION_LOSS_WEIGHT_FEATURE] = np.asarray([weight], dtype=np.float32)
         if self.vision_mode == "depth_only":
             frame[image_keys[0]] = np.asarray(wrist_second_rgb, dtype=np.uint8)
             frame[image_keys[1]] = np.asarray(front_second_rgb, dtype=np.uint8)
@@ -1026,14 +1470,61 @@ class RawDoorDPRecorder:
             print("Warning: RawDoorDPRecorder has no frames; skipped saving episode.")
             return
         out = self._next_episode_path()
+        subtasks = np.stack(self.frames["subtask_index"], axis=0).astype(np.int64, copy=False)
+        phase_names = _to_str_list(self.metadata.get("phase_names", []))
+        keyframe_raw = {"subtask_index": subtasks}
+        for key in (
+            "state",
+            "action",
+            "replay_root_state",
+            "replay_dof_pos",
+            "replay_dof_vel",
+            "replay_door_dof_pos",
+            "replay_door_dof_vel",
+            "replay_ee_pos",
+            "replay_ee_quat",
+        ):
+            values = self.frames.get(key)
+            if values and len(values) == self.frame_count:
+                keyframe_raw[key] = np.stack(values, axis=0)
+        keyframe_indices, keyframe_names, keyframe_target_phase_names = extract_motion_keyframes_from_raw_arrays(
+            keyframe_raw,
+            phase_names=phase_names,
+        )
+        keyframe_loss_enabled = bool(self.metadata.get("keyframe_loss_enabled", True))
+        keyframe_loss_weight = float(self.metadata.get("keyframe_loss_weight", 6.0))
+        keyframe_loss_radius = int(self.metadata.get("keyframe_loss_radius", 5))
+        action_loss_weight = make_keyframe_action_loss_weight(
+            self.frame_count,
+            keyframe_indices,
+            weight=keyframe_loss_weight,
+            radius=keyframe_loss_radius,
+            enabled=keyframe_loss_enabled,
+        )
+        keyframe_mask = np.zeros(self.frame_count, dtype=np.uint8)
+        if keyframe_indices:
+            valid_indices = np.asarray(keyframe_indices, dtype=np.int64)
+            valid_indices = valid_indices[(0 <= valid_indices) & (valid_indices < self.frame_count)]
+            keyframe_mask[valid_indices] = 1
         payload = {
             "state": np.stack(self.frames["state"], axis=0).astype(np.float32, copy=False),
             "action": np.stack(self.frames["action"], axis=0).astype(np.float32, copy=False),
-            "subtask_index": np.stack(self.frames["subtask_index"], axis=0).astype(np.int64, copy=False),
+            "subtask_index": subtasks,
+            RAW_ACTION_LOSS_WEIGHT_KEY: action_loss_weight.reshape(-1, 1).astype(np.float32, copy=False),
+            "keyframe_mask": keyframe_mask.reshape(-1, 1).astype(np.uint8, copy=False),
+            "keyframe_indices": np.asarray(keyframe_indices, dtype=np.int64),
+            "keyframe_names": np.asarray(keyframe_names, dtype=object),
+            "keyframe_target_phase_names": np.asarray(keyframe_target_phase_names, dtype=object),
+            "keyframe_extraction_rules": np.asarray(keyframe_target_phase_names, dtype=object),
             "task": np.asarray(self.task),
             "fps": np.asarray(self.fps, dtype=np.int64),
             "state_feature_names": np.asarray(self.state_feature_names, dtype=object),
             "action_names": np.asarray(self.action_names, dtype=object),
+            "phase_names": np.asarray(phase_names, dtype=object),
+            "keyframe_loss_enabled": np.asarray(keyframe_loss_enabled),
+            "keyframe_loss_weight": np.asarray(keyframe_loss_weight, dtype=np.float32),
+            "keyframe_loss_radius": np.asarray(keyframe_loss_radius, dtype=np.int64),
+            "keyframe_loss_feature": np.asarray(ACTION_LOSS_WEIGHT_FEATURE),
         }
         if self.vision_mode != "depth":
             payload["vision_mode"] = np.asarray(self.vision_mode)

@@ -5,6 +5,17 @@ export DOOR_ACT_DISABLE_BACKBONE_PRETRAINED="${DOOR_ACT_DISABLE_BACKBONE_PRETRAI
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
 export LEROBOT_MINIMAL_ACT_IMPORTS="${LEROBOT_MINIMAL_ACT_IMPORTS:-1}"
+export ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY:-0}"
+
+# PC2 robot_control uses CycloneDDS on the 124.x robot network.  Keep the NX
+# ACT process on the same RMW/interface so /cmd_vel_safe and /vel_state discover
+# each other without requiring extra terminal exports before every run.
+if [ -z "${RMW_IMPLEMENTATION:-}" ] && [ -f /home/anx/cyclonedds.xml ]; then
+  export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+fi
+if [ -z "${CYCLONEDDS_URI:-}" ] && [ -f /home/anx/cyclonedds.xml ]; then
+  export CYCLONEDDS_URI=/home/anx/cyclonedds.xml
+fi
 
 if [ -f /opt/ros/humble/setup.bash ]; then
   # The real deployment path publishes/subscribes ROS2 topics by default.

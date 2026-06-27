@@ -1,0 +1,279 @@
+# Default parameters for high-level/float_ik/isaacgym_float_ik_a2w_basearn_push_door_parallel.py
+#
+# The script loads this file on every run and then applies command-line
+# overrides. Leaf keys are the argparse attribute names, grouped only for
+# readability.
+#
+# Depth noise image augmentation itself is configured in:
+#   high-level/dp/config/depth_camera_aug_default.yaml
+
+runtime:
+  asset_root: /home/sivan/whole_body/visual_whole_body/high-level/data/asset/a2wz1
+  asset_file: urdf/a2wz1.urdf
+  rl_device: "cuda:0"
+  num_envs: 1
+  steps: 2405
+  seed: -1
+
+door_selection:
+  door_cfg: /home/sivan/whole_body/visual_whole_body/high-level/data/cfg/b1z1_opendoor.yaml
+  door_name: ""
+  door_index: -1
+  door_selection: diverse
+  door_prefer_name: wc4
+  door_max_unique_assets: 0
+  door_actor_scale: 1.0
+  flip_door_motion_sign: false
+  ignore_door_controller_overrides: false
+  door_use_urdf_rgba: false
+
+door_pose:
+  door_x: 2.5
+  door_y: 0.0
+  door_z_offset: 0.01
+
+walls:
+  no_door_side_walls: false
+  door_wall_height: 2.2
+  door_wall_opening_width: 0.0
+  door_wall_opening_clearance: 0.0
+  door_wall_side_width: 1.0
+  door_wall_thickness: 0.08
+  door_wall_gap: 0.0
+  door_wall_x_offset: 0.0
+  door_wall_y_offset: 0.0
+
+robot_spawn:
+  robot_x: 4.1
+  robot_y: 0.0
+  robot_y_alignment: handle
+  robot_z: 0.50
+  robot_pitch: 0.0  # radians; default 0 deg
+  robot_yaw: 3.141592653589793
+  robot_front_offset: 0.55
+  robot_rear_offset: 0.65
+
+base_motion:
+  stop_distance: 0.15
+  push_base_distance: 0.35
+  base_push_time_scale: 1.35
+  door_pass_clearance: 0.55
+  no_pass_through_door: false
+  push_base_yaw_delta: 0.0
+  walk_steps: 260
+  walk_min_speed: 0.20
+  no_dynamic_walk_steps: false
+
+trajectory_phases:
+  initial_hold_steps: 150
+  initial_hold_move_steps: 100
+  grasp_steps: 50
+  grasp_hold_steps: 0
+  gripper_close_steps: 50
+  handle_rotate_steps: 100
+  door_push_steps: 300
+  return_home_steps: 150
+  return_home_target_chase_alpha: 0.08
+  hold_steps: 300
+
+grasp:
+  pregrasp_offset: 0.15
+  grasp_offset: 0.0
+  grasp_x_offset: -0.015
+  grasp_z_offset: -0.03
+  wc4_pregrasp_z_offset: 0.0
+  wc4_grasp_z_offset: 0.0
+
+handle_and_push:
+  handle_rotate_right_distance: 0.03
+  handle_rotate_down_distance: 0.03
+  handle_rotate_angle: 1.05
+  handle_rotate_direction_sign: -1.0
+  door_push_distance: 1.10
+  lever_step_size: 0.06
+  push_contact_bias: 0.025
+  handle_follow_push_ratio: 0.45
+  door_freeze_blend_start_ratio: 0.82
+  door_freeze_target_ratio: 0.94
+  push_follow_orientation: false
+  unidoor_style_push: false
+
+randomization:
+  no_ikpush_env_randomization: false
+  ikpush_door_x_rand: 0.03
+  ikpush_door_y_rand: 0.03
+  ikpush_door_wall_x_offset_rand: 0.03
+  ikpush_robot_x_rand: 0.03
+  ikpush_robot_x_rand_min: -0.70
+  ikpush_robot_x_rand_max: 0.0
+  ikpush_robot_y_rand: 0.04
+  ikpush_robot_y_rand_min: -0.10
+  ikpush_robot_y_rand_max: 0.04
+  ikpush_robot_z_rand: 0.03
+  ikpush_robot_pitch_rand_min: 0.0  # radians; -5 deg
+  ikpush_robot_pitch_rand_max: 0.08726646259971647                  # radians; 0 deg
+  ikpush_robot_yaw_rand: 0.03
+  ikpush_pregrasp_offset_rand: 0.025
+  ikpush_grasp_x_offset_rand: 0.012
+  ikpush_grasp_z_offset_rand: 0.012
+  ikpush_handle_rotate_angle_rand: 0.04
+  ikpush_door_push_distance_rand: 0.06
+  ikpush_door_joint_friction_rand: 0.08
+  ikpush_door_joint_damping_rand: 0.04
+  ikpush_handle_joint_friction_rand: 0.005
+  ikpush_handle_joint_damping_rand: 0.005
+  ikpush_handle_spring_stiffness_rand: 0.05
+  ikpush_handle_spring_damping_rand: 0.01
+  ikpush_door_open_resistance_prob: 0.50
+  ikpush_door_open_resistance_min: 0.10
+  ikpush_door_open_resistance_max: 0.30
+
+# Absolute randomization ranges used when the corresponding command-line base
+# value is not explicitly set.
+randomization_absolute_ranges:
+  door_joint_friction: [0.05, 0.30]
+  door_joint_damping: [0.05, 0.30]
+  handle_joint_friction: [0.045, 0.055]
+  handle_joint_damping: [0.045, 0.055]
+  handle_spring_stiffness: [0.45, 0.55]
+  handle_spring_damping: [0.09, 0.11]
+
+collision:
+  enable_base_door_collision_check: false
+  enable_collision_physx_check: false
+  enable_collision_geom_check: false
+  base_door_collision_distance: 0.04
+  base_collision_front_extent: 0.55
+  base_collision_rear_extent: 0.65
+  base_collision_half_width: 0.24
+  rigid_contact_geom_gate: 0.16
+  collision_log_interval: 30
+
+gripper:
+  gripper_open: -1.5707963267948966
+  gripper_closed: 0.0
+  gripper_close_ratio: 0.8
+  gripper_open_stage_ratio: 0.25
+  gripper_loosen_steps: 120
+
+door_and_handle_physics:
+  handle_spring_stiffness: 0.5
+  handle_spring_damping: 0.1
+  handle_unlock_ratio: 0.8888888888888888
+  door_open_resistance: 0.0
+  door_open_damping: 0.0
+  door_lock_force: 0.0
+  door_joint_friction: 0.0
+  door_joint_damping: 0.0
+  handle_joint_friction: 0.05
+  handle_joint_damping: 0.05
+  door_auto_open_force: 0.0
+  door_auto_open_sign: 1.0
+  door_auto_open_target_ratio: 0.95
+  door_vhacd_resolution: 100000
+
+ik:
+  forward_ee_roll: 1.5707963267948966
+  forward_ee_pitch: 0.0
+  gripper_red_axis_rot: -1.5707963267948966
+  ik_pos_gain: 1.0
+  ik_rot_gain: 0.7
+  ik_rot_weight: 0.1
+  ik_damping: 0.08
+  ik_max_step: 0.06
+  ik_pos_tolerance: 0.015
+  ik_rot_tolerance: 0.08
+  ik_position_only: false
+  ik_include_gripper: false
+  ik_ee_link: ee_gripper_link
+
+dof_control:
+  stiffness: 80.0
+  damping: 8.0
+  speed_scale: 0.6
+  range_scale: 0.75
+  joint_filter: ""
+
+asset_loading:
+  single_asset: false
+  flip_visual_attachments: false
+  disable_arm_visual_flip: false
+  base_visual_flip: false
+  no_disable_gravity: false
+  disable_self_collisions: false
+  print_collision_summary: false
+  log_interval: 60
+
+visualization:
+  draw_ik_target: true
+  draw_camera_axes: true
+  draw_scripted_trajectory: false
+  trajectory_point_radius: 0.018
+  trajectory_point_samples: 16
+
+cameras:
+  enable_wrist_camera: true
+  enable_front_camera: true
+  show_camera_images: true
+  show_camera_masks: false
+  show_seg: false
+  rgb: false
+  depth_only: false
+  camera_rgb: false
+  camera_depth: true
+  no_camera_depth: false
+  camera_seg: true
+  no_camera_seg: false
+  handle_seg_id: 2
+  camera_depth_clip_lower: 0.2
+  camera_depth_clip_far: 1.5
+  camera_display_scale: 1
+  camera_display_interval: 1
+  dump_initial_depth_dir: ""
+  dump_initial_depth_frames: 0
+  camera_axis_scale: 0.10
+  camera_axis_thickness: 0.004
+  wrist_camera_yaw_deg: 0.0
+  wrist_camera_pitch_deg: 60.0
+  wrist_camera_roll_deg: 0.0
+  front_camera_yaw_deg: 0.0
+  front_camera_pitch_deg: -45.0
+  front_camera_roll_deg: 0.0
+
+depth_augmentation:
+  depth_aug_config: /home/sivan/whole_body/visual_whole_body/high-level/dp/config/depth_camera_aug_default.yaml
+
+keyframes:
+  # Extracted from recorded phase ids:
+  # start, stop_before_door, pregrasp, grasp, rotate.
+  # Frames within keyframe_loss_radius of those indices use
+  # keyframe_loss_weight as the chunk-level ACT action loss weight.
+  keyframe_loss_weight: 6.0
+  keyframe_loss_radius: 5
+  no_keyframe_loss_weights: false
+
+door_dp:
+  record_dp_dataset: false
+  dp_raw_root: /home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_raw/local_door_dp
+  dp_task: push lever door open
+  dp_record_env_id: 0
+  dp_record_all_envs: true
+  dp_fps: 25
+  camera_fps: 25.0
+  dp_record_state_mode: full
+  dp_policy_checkpoint: ""
+  dp_control_env_id: 0
+  dp_control_all_envs: true
+  dp_inference_steps: 10
+  dp_noise_scheduler_type: DDIM
+  # -1 means "use checkpoint/default action horizon"; parse_args converts it to None.
+  dp_action_horizon: -1
+  dp_log_path: ""
+  dp_log_interval: 25
+  dp_print: true
+  dp_warmstart: false
+  dp_warmstart_raw_episode: ""
+  dp_warmstart_step: -1
+  dp_warmstart_expert_obs: false
+  pass_open_angle_deg: 80.0
+  no_preview_trajectory_at_spawn: false

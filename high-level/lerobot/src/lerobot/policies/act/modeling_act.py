@@ -364,7 +364,7 @@ class ACTPolicy(PreTrainedPolicy):
         actions = self.model(batch)[0]
         return actions
 
-    def forward(self, batch: dict[str, Tensor]) -> tuple[Tensor, dict]:
+    def forward(self, batch: dict[str, Tensor], reduction: str = "mean") -> tuple[Tensor, dict]:
         """Run the batch through the model and compute the loss for training or validation."""
         if self.config.image_features:
             batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original
@@ -372,24 +372,51 @@ class ACTPolicy(PreTrainedPolicy):
 
         actions_hat, (mu_hat, log_sigma_x2_hat) = self.model(batch)
 
-        l1_loss = (
-            F.l1_loss(batch[ACTION], actions_hat, reduction="none") * ~batch["action_is_pad"].unsqueeze(-1)
-        ).mean()
+        valid = ~batch["action_is_pad"].unsqueeze(-1)
+        l1_per_elem = F.l1_loss(batch[ACTION], actions_hat, reduction="none") * valid
+        valid_elem_count = valid.to(l1_per_elem.dtype).expand_as(l1_per_elem).sum(dim=(1, 2))
+        l1_per_sample = l1_per_elem.sum(dim=(1, 2)) / torch.clamp(valid_elem_count, min=1.0)
+        action_loss_weight = batch.get("loss.action_weight")
+        sample_weight = None
+        if action_loss_weight is not None:
+            action_loss_weight = action_loss_weight.to(device=l1_per_elem.device, dtype=l1_per_elem.dtype)
+            # Keyframe-consistent weighting follows L = Σ_t w_t l_t / Σ_t w_t,
+            # where l_t is the whole action-chunk loss anchored at frame t.
+            # If an old dataset ever provides a horizon-shaped weight, use the
+            # first timestep as the anchor weight.
+            sample_weight = action_loss_weight.reshape(action_loss_weight.shape[0], -1)[:, 0]
+            sample_weight = torch.clamp(sample_weight, min=0.0)
+            l1_loss = (l1_per_sample * sample_weight).sum() / torch.clamp(sample_weight.sum(), min=1.0)
+            mean_action_loss_weight = sample_weight.mean()
+        else:
+            l1_loss = l1_per_sample.mean()
+            mean_action_loss_weight = None
 
         loss_dict = {"l1_loss": l1_loss.item()}
+        if mean_action_loss_weight is not None:
+            loss_dict["action_loss_weight_mean"] = float(mean_action_loss_weight.detach().cpu())
         if self.config.use_vae:
             # Calculate Dₖₗ(latent_pdf || standard_normal). Note: After computing the KL-divergence for
             # each dimension independently, we sum over the latent dimension to get the total
             # KL-divergence per batch element, then take the mean over the batch.
             # (See App. B of https://huggingface.co/papers/1312.6114 for more details).
-            mean_kld = (
-                (-0.5 * (1 + log_sigma_x2_hat - mu_hat.pow(2) - (log_sigma_x2_hat).exp())).sum(-1).mean()
-            )
+            kld_per_sample = (-0.5 * (1 + log_sigma_x2_hat - mu_hat.pow(2) - (log_sigma_x2_hat).exp())).sum(-1)
+            mean_kld = kld_per_sample.mean()
             loss_dict["kld_loss"] = mean_kld.item()
+            per_sample_loss = l1_per_sample + kld_per_sample * self.config.kl_weight
+            if sample_weight is not None:
+                per_sample_loss = per_sample_loss * sample_weight
             loss = l1_loss + mean_kld * self.config.kl_weight
         else:
+            per_sample_loss = l1_per_sample
+            if sample_weight is not None:
+                per_sample_loss = per_sample_loss * sample_weight
             loss = l1_loss
 
+        if reduction == "none":
+            return per_sample_loss, loss_dict
+        if reduction != "mean":
+            raise ValueError(f"Unsupported ACT loss reduction={reduction!r}; expected 'mean' or 'none'.")
         return loss, loss_dict
 
 

@@ -1063,7 +1063,7 @@ def create_env_actors(gym, sim, base_asset, arm_asset, door, dof_props, dof_stat
 
     robot_pose = gymapi.Transform()
     robot_pose.p = gymapi.Vec3(args.robot_x, robot_y, args.robot_z)
-    robot_pose.r = gymapi.Quat.from_euler_zyx(0.0, 0.0, args.robot_yaw)
+    robot_pose.r = robot_base_gym_quat(getattr(args, "robot_pitch", 0.0), args.robot_yaw)
 
     collision_filter = 1 if args.disable_self_collisions else 0
     actor_handles = []
@@ -1123,7 +1123,7 @@ def create_parallel_env_actors(
 
     robot_pose = gymapi.Transform()
     robot_pose.p = gymapi.Vec3(args.robot_x, robot_y, args.robot_z)
-    robot_pose.r = gymapi.Quat.from_euler_zyx(0.0, 0.0, args.robot_yaw)
+    robot_pose.r = robot_base_gym_quat(getattr(args, "robot_pitch", 0.0), args.robot_yaw)
 
     collision_filter = 1 if args.disable_self_collisions else 0
     actor_handles = []
@@ -1211,8 +1211,16 @@ def sample_with_offset_range(rng, center, min_offset, max_offset, lower=None, up
     return value
 
 
-def set_robot_base_pose(gym, env, actor_handles, xy, z, yaw):
-    quat = base_ik.yaw_quat(yaw)
+def robot_base_gym_quat(pitch, yaw):
+    return gymapi.Quat.from_euler_zyx(0.0, float(pitch), float(yaw))
+
+
+def robot_base_quat_np(pitch, yaw):
+    return gym_quat_to_np(robot_base_gym_quat(pitch, yaw))
+
+
+def set_robot_base_pose(gym, env, actor_handles, xy, z, yaw, pitch=0.0):
+    quat = robot_base_quat_np(pitch, yaw)
     for actor in actor_handles:
         root_handle = gym.get_actor_root_rigid_body_handle(env, actor)
         transform = gymapi.Transform()
@@ -3105,7 +3113,7 @@ def make_float_replay_snapshot(args, door, dof_names, dof_pos, dof_vel, door_pos
     dp_dof_pos, dp_dof_vel = map_float_dofs_to_dp(dof_names, dof_pos, dof_vel)
     root_state = np.zeros(13, dtype=np.float32)
     root_state[:3] = np.asarray([base_xy[0], base_xy[1], args.robot_z], dtype=np.float32)
-    root_state[3:7] = base_ik.yaw_quat(float(yaw))
+    root_state[3:7] = robot_base_quat_np(getattr(args, "robot_pitch", 0.0), float(yaw))
     root_state[7:10] = np.asarray([vx * math.cos(float(yaw)), vx * math.sin(float(yaw)), 0.0], dtype=np.float32)
     root_state[10:13] = np.asarray([0.0, 0.0, yaw_rate], dtype=np.float32)
 
@@ -3312,6 +3320,18 @@ def make_float_dp_recorder(
         "camera_hold_last_frame": True,
         "door_side_walls": bool(door_side_walls_enabled(args)),
         "door_use_urdf_rgba": bool(getattr(args, "door_use_urdf_rgba", False)),
+        "phase_names": list(phase_names),
+        "keyframe_loss_enabled": not bool(getattr(args, "no_keyframe_loss_weights", False)),
+        "keyframe_loss_weight": float(getattr(args, "keyframe_loss_weight", 6.0)),
+        "keyframe_loss_radius": int(getattr(args, "keyframe_loss_radius", 5)),
+        "keyframe_loss_feature": "loss.action_weight",
+        "keyframe_extraction_rules": {
+            "start": "first recorded frame",
+            "stop_before_door": "first initial_hold frame",
+            "pregrasp": "first grasp frame",
+            "grasp": "first grasp_hold/close_gripper frame",
+            "rotate": "first push_door frame, i.e. after rotate_handle completes",
+        },
     }
     metadata.update(depth_camera_randomization_metadata(args))
     sim_dt = getattr(args, "sim_dt", None)

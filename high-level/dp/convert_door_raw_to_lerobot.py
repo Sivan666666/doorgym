@@ -10,15 +10,19 @@ import numpy as np
 try:
     from .door_dp_common import (
         ACTION_NAMES,
+        ACTION_LOSS_WEIGHT_FEATURE,
         DATASET_METADATA_KEYS,
         DEFAULT_NEAR_ZERO_RATE_EPS,
         DoorDPLeRobotRecorder,
+        RAW_ACTION_LOSS_WEIGHT_KEY,
         apply_door_dp_action_preprocess,
         apply_door_dp_state_preprocess,
+        extract_motion_keyframes_from_raw_arrays,
         fit_door_dp_action_preprocess,
         fit_door_dp_state_preprocess,
         image_to_three_channel_uint8,
         lerobot_image_keys_for_vision_mode,
+        make_keyframe_action_loss_weight,
         make_door_dp_sanitize_config,
         normalize_vision_mode,
         raw_image_keys_for_vision_mode,
@@ -28,15 +32,19 @@ try:
 except ImportError:
     from door_dp_common import (
         ACTION_NAMES,
+        ACTION_LOSS_WEIGHT_FEATURE,
         DATASET_METADATA_KEYS,
         DEFAULT_NEAR_ZERO_RATE_EPS,
         DoorDPLeRobotRecorder,
+        RAW_ACTION_LOSS_WEIGHT_KEY,
         apply_door_dp_action_preprocess,
         apply_door_dp_state_preprocess,
+        extract_motion_keyframes_from_raw_arrays,
         fit_door_dp_action_preprocess,
         fit_door_dp_state_preprocess,
         image_to_three_channel_uint8,
         lerobot_image_keys_for_vision_mode,
+        make_keyframe_action_loss_weight,
         make_door_dp_sanitize_config,
         normalize_vision_mode,
         raw_image_keys_for_vision_mode,
@@ -357,6 +365,22 @@ def load_episode_payload(
             front_first = data[image_keys[2]].astype(np.uint8) if image_keys[2] in data else np.zeros_like(wrist_first)
             front_second = data[image_keys[3]].astype(np.uint8) if image_keys[3] in data else np.zeros_like(wrist_second)
         subtasks = data["subtask_index"].astype(np.int64).reshape(-1)
+        if RAW_ACTION_LOSS_WEIGHT_KEY in data.files:
+            action_loss_weight = data[RAW_ACTION_LOSS_WEIGHT_KEY].astype(np.float32).reshape(-1, 1)
+        else:
+            keyframe_indices, _, _ = extract_motion_keyframes_from_raw_arrays(data)
+            keyframe_loss_weight = float(data["keyframe_loss_weight"]) if "keyframe_loss_weight" in data.files else 6.0
+            keyframe_loss_radius = int(data["keyframe_loss_radius"]) if "keyframe_loss_radius" in data.files else 5
+            keyframe_loss_enabled = (
+                bool(data["keyframe_loss_enabled"]) if "keyframe_loss_enabled" in data.files else True
+            )
+            action_loss_weight = make_keyframe_action_loss_weight(
+                states.shape[0],
+                keyframe_indices,
+                weight=keyframe_loss_weight,
+                radius=keyframe_loss_radius,
+                enabled=keyframe_loss_enabled,
+            ).reshape(-1, 1)
     n = states.shape[0]
     if not (
         actions.shape[0]
@@ -365,6 +389,7 @@ def load_episode_payload(
         == front_first.shape[0]
         == front_second.shape[0]
         == subtasks.shape[0]
+        == action_loss_weight.shape[0]
         == n
     ):
         raise ValueError(f"Episode {path} has inconsistent lengths.")
@@ -378,6 +403,7 @@ def load_episode_payload(
         "front_first": front_first,
         "front_second": front_second,
         "subtasks": subtasks,
+        "action_loss_weight": action_loss_weight,
         "n": n,
     }
 
@@ -588,6 +614,7 @@ def main():
         vision_mode=vision_mode,
         image_storage=args.image_storage,
         video_codec=args.video_codec,
+        include_action_loss_weight=True,
         metadata={
             **inherited_metadata,
             "action_frame": action_frame,
@@ -603,6 +630,7 @@ def main():
             "state_preprocess": state_preprocess_config,
             "action_preprocess": action_preprocess_config,
             "state_normalized": converted_state_normalized,
+            "action_loss_weight_feature": ACTION_LOSS_WEIGHT_FEATURE,
         },
     )
     payloads = iter_episode_payloads(
@@ -631,6 +659,7 @@ def main():
         front_first = payload["front_first"]
         front_second = payload["front_second"]
         subtasks = payload["subtasks"]
+        action_loss_weight = payload["action_loss_weight"]
         n = payload["n"]
         for i in range(n):
             recorder.add_frame(
@@ -641,6 +670,7 @@ def main():
                 int(subtasks[i]),
                 front_mask_rgb=image_to_three_channel_uint8(front_first[i]),
                 front_second_rgb=image_to_three_channel_uint8(front_second[i]),
+                action_loss_weight=action_loss_weight[i],
             )
         recorder.save_episode()
         print(f"Converted {payload['path_name']}: {n} frames task={task!r} ({ep_idx + 1}/{len(files)})", flush=True)
@@ -666,6 +696,7 @@ def main():
         "state_preprocess": state_preprocess_config,
         "action_preprocess": action_preprocess_config,
         "state_normalized": converted_state_normalized,
+        "action_loss_weight_feature": ACTION_LOSS_WEIGHT_FEATURE,
     }
     if sidecar:
         for key in DATASET_METADATA_KEYS:

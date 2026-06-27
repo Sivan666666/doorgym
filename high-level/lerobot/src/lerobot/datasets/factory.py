@@ -29,6 +29,9 @@ from lerobot.datasets.streaming_dataset import StreamingLeRobotDataset
 from lerobot.datasets.transforms import ImageTransforms
 from lerobot.utils.constants import ACTION, OBS_PREFIX, REWARD
 
+
+ACTION_LOSS_WEIGHT_FEATURE = "loss.action_weight"
+
 IMAGENET_STATS = {
     "mean": [[[0.485]], [[0.456]], [[0.406]]],  # (c,1,1)
     "std": [[[0.229]], [[0.224]], [[0.225]]],  # (c,1,1)

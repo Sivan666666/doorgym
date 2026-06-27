@@ -1309,13 +1309,18 @@ def confirm_z1_startup_home(
     next_t = time.monotonic()
     timed_out = False
     gripper_open_sent = False
-    gripper_neutral_sent = False
+    gripper_open_start: float | None = None
+    gripper_open_step = 0
+    gripper_open_duration = max(1, int(args.startup_gripper_open_duration_steps))
+    gripper_open_qd = 0.0
 
     print(
         "z1_bridge startup_home begin "
         f"home_q={np.round(home_q, 5).tolist()} drift_tolerance={tolerance:.4f} "
         f"max_joint_speed={max_joint_speed:.4f} "
         f"timeout_s={timeout_s:.2f} hold_s={hold_s:.2f} "
+        f"gripper_target={gripper_target if args.zero_joints_gripper is not None else None} "
+        f"gripper_duration_steps={gripper_open_duration if bool(args.startup_gripper_open_once) else 'continuous'} "
         "command_mode=controller_home",
         flush=True,
     )
@@ -1341,7 +1346,11 @@ def confirm_z1_startup_home(
             tolerance,
             max_joint_speed,
         )
-        if stable:
+        gripper_startup_done = True
+        if bool(args.startup_gripper_open_once) and args.zero_joints_gripper is not None:
+            gripper_startup_done = gripper_open_sent and gripper_open_step >= gripper_open_duration
+
+        if stable and gripper_startup_done:
             if hold_start is None:
                 hold_start = time.monotonic()
             if time.monotonic() - hold_start >= hold_s:
@@ -1376,16 +1385,27 @@ def confirm_z1_startup_home(
         q_next = home_q.copy()
         qd_cmd = np.zeros(6, dtype=np.float64)
         gripper_to_send: float | None = gripper_target
+        gripper_qd_to_send = 0.0
         if bool(args.startup_gripper_open_once):
-            if not gripper_open_sent:
-                gripper_to_send = gripper_target
-                gripper_open_sent = True
-            elif not gripper_neutral_sent:
-                with sdk_lock:
-                    gripper_now = float(arm.lowstate.getGripperQ())
-                gripper_target = float(np.clip(gripper_now, args.gripper_min, args.gripper_max))
-                gripper_to_send = gripper_target
-                gripper_neutral_sent = True
+            if args.zero_joints_gripper is None:
+                gripper_to_send = None
+            elif gripper_open_step < gripper_open_duration:
+                if gripper_open_start is None:
+                    with sdk_lock:
+                        gripper_now = float(arm.lowstate.getGripperQ())
+                    if not np.isfinite(gripper_now):
+                        gripper_now = float(gripper_cmd)
+                    gripper_open_start = float(np.clip(gripper_now, args.gripper_min, args.gripper_max))
+                    gripper_open_qd = (float(gripper_target) - gripper_open_start) / (
+                        float(gripper_open_duration) * period
+                    )
+                ratio = float(gripper_open_step) / float(gripper_open_duration)
+                if gripper_open_step + 1 >= gripper_open_duration:
+                    ratio = 1.0
+                gripper_to_send = gripper_open_start * (1.0 - ratio) + float(gripper_target) * ratio
+                gripper_qd_to_send = gripper_open_qd
+                gripper_open_step += 1
+                gripper_open_sent = gripper_open_step >= gripper_open_duration
             else:
                 gripper_to_send = None
         q_next, qd_cmd = send_lowcmd_joint_target(
@@ -1396,7 +1416,7 @@ def confirm_z1_startup_home(
             qd_cmd,
             np.zeros(6, dtype=np.float64),
             gripper_to_send,
-            0.0,
+            gripper_qd_to_send,
             joint_min,
             joint_max,
         )
@@ -2329,9 +2349,18 @@ def parse_args() -> argparse.Namespace:
         "--startup_gripper_open_once",
         default=True,
         help_text=(
-            "During startup, send the fully-open gripper target only once, then "
-            "neutralize to current feedback until ACT commands arrive. This avoids "
-            "continuously pushing the gripper against its open stop before inference."
+            "During startup, ramp the gripper once from current feedback to --zero_joints_gripper "
+            "over --startup_gripper_open_duration_steps LOWCMD cycles, then omit gripper commands "
+            "until ACT commands arrive."
+        ),
+    )
+    parser.add_argument(
+        "--startup_gripper_open_duration_steps",
+        type=int,
+        default=1000,
+        help=(
+            "Number of 500 Hz LOWCMD cycles used for startup gripper opening, matching the "
+            "duration=1000 style in the Unitree example_lowcmd.py."
         ),
     )
     parser.add_argument("--dry_run_initial_ee_xyz", type=float, nargs=3, default=[0.35, 0.0, 0.25])
@@ -2548,6 +2577,8 @@ def main() -> None:
         raise ValueError("--gripper_min must be <= --gripper_max.")
     if float(args.gripper_close_latch_target) < float(args.gripper_min):
         raise ValueError("--gripper_close_latch_target must be >= --gripper_min.")
+    if int(args.startup_gripper_open_duration_steps) <= 0:
+        raise ValueError("--startup_gripper_open_duration_steps must be positive.")
 
     shared = SharedBridgeState()
     stop_event = threading.Event()

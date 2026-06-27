@@ -1,0 +1,314 @@
+[
+  {
+    "dir": "9054RUN_DIR",
+    "bridge_rows": 0,
+    "ik_top": [],
+    "errors_top": [],
+    "force_closed_true": 0,
+    "force_closed_false": 0,
+    "action_age_p95": null,
+    "qd_p95": null,
+    "qd_max": null
+  },
+  {
+    "dir": "door_act_real_080000_noblur_20260626_213452",
+    "bridge_rows": 261,
+    "ik_top": [
+      [
+        "hold:local",
+        97
+      ],
+      [
+        "local",
+        58
+      ],
+      [
+        "",
+        51
+      ],
+      [
+        "hold:soft",
+        35
+      ],
+      [
+        "soft",
+        8
+      ],
+      [
+        "global",
+        7
+      ]
+    ],
+    "errors_top": [
+      [
+        "no_action",
+        50
+      ],
+      [
+        "soft_ik:p=0.0002,r=2.8,n=4;trajectory_extended:0.0826s",
+        1
+      ],
+      [
+        "soft_ik:p=0.0022,r=3.6,n=2;trajectory_extended:0.0895s",
+        1
+      ],
+      [
+        "soft_ik:p=0.0009,r=16.5,n=10;trajectory_extended:0.5028s",
+        1
+      ],
+      [
+        "soft_ik:p=0.0010,r=18.0,n=10;trajectory_extended:0.5259s",
+        1
+      ],
+      [
+        "trajectory_extended:0.7325s",
+        1
+      ]
+    ],
+    "force_closed_true": 27,
+    "force_closed_false": 234,
+    "action_age_p95": 0.049850000000000005,
+    "qd_p95": 1.91730797290802,
+    "qd_max": 3.9263219833374023
+  },
+  {
+    "dir": "door_act_real_080000_realsense_20260626_213920",
+    "bridge_rows": 321,
+    "ik_top": [
+      [
+        "local",
+        99
+      ],
+      [
+        "hold:local",
+        85
+      ],
+      [
+        "",
+        50
+      ],
+      [
+        "hold:soft",
+        46
+      ],
+      [
+        "hold:global",
+        14
+      ],
+      [
+        "global",
+        14
+      ]
+    ],
+    "errors_top": [
+      [
+        "no_action",
+        50
+      ],
+      [
+        "shutdown_back_to_start",
+        7
+      ],
+      [
+        "trajectory_extended:0.2637s",
+        3
+      ],
+      [
+        "trajectory_extended:0.4587s",
+        2
+      ],
+      [
+        "trajectory_extended:0.4275s",
+        2
+      ],
+      [
+        "soft_ik:p=0.0014,r=1.1,n=10;trajectory_extended:0.0515s",
+        1
+      ]
+    ],
+    "force_closed_true": 9,
+    "force_closed_false": 312,
+    "action_age_p95": 0.07619999999999999,
+    "qd_p95": 2.2225959300994873,
+    "qd_max": 3.910938024520874
+  },
+  {
+    "dir": "door_act_real_080000_realsense_20260626_215342",
+    "bridge_rows": 575,
+    "ik_top": [
+      [
+        "local",
+        145
+      ],
+      [
+        "global",
+        114
+      ],
+      [
+        "hold:local",
+        105
+      ],
+      [
+        "soft",
+        69
+      ],
+      [
+        "hold:soft",
+        51
+      ],
+      [
+        "",
+        50
+      ]
+    ],
+    "errors_top": [
+      [
+        "no_action",
+        50
+      ],
+      [
+        "shutdown_back_to_start",
+        7
+      ],
+      [
+        "shutdown_back_to_start_requested",
+        3
+      ],
+      [
+        "trajectory_extended:0.6811s",
+        2
+      ],
+      [
+        "soft_ik:p=0.0001,r=1.4,n=6;trajectory_extended:0.1370s",
+        1
+      ],
+      [
+        "soft_ik:p=0.0022,r=3.1,n=3;trajectory_extended:0.1124s",
+        1
+      ]
+    ],
+    "force_closed_true": 32,
+    "force_closed_false": 543,
+    "action_age_p95": 0.06570000000000001,
+    "qd_p95": 2.2908172845840444,
+    "qd_max": 3.7021639347076416
+  },
+  {
+    "dir": "door_act_real_new100000_20260626_212707",
+    "bridge_rows": 297,
+    "ik_top": [
+      [
+        "hold:local",
+        117
+      ],
+      [
+        "",
+        52
+      ],
+      [
+        "local",
+        52
+      ],
+      [
+        "hold:soft",
+        48
+      ],
+      [
+        "soft",
+        28
+      ]
+    ],
+    "errors_top": [
+      [
+        "no_action",
+        51
+      ],
+      [
+        "trajectory_extended:0.1793s",
+        2
+      ],
+      [
+        "soft_ik:p=0.0004,r=2.4,n=10;trajectory_extended:0.2274s",
+        1
+      ],
+      [
+        "soft_ik:p=0.0002,r=1.2,n=10;trajectory_extended:0.2837s",
+        1
+      ],
+      [
+        "soft_ik:p=0.0019,r=1.9,n=2;trajectory_extended:0.1417s",
+        1
+      ],
+      [
+        "trajectory_extended:0.1406s",
+        1
+      ]
+    ],
+    "force_closed_true": 85,
+    "force_closed_false": 212,
+    "action_age_p95": 0.05724,
+    "qd_p95": 1.2351444244384764,
+    "qd_max": 2.3536059856414795
+  },
+  {
+    "dir": "door_act_real_new100000_blur_20260626_213127",
+    "bridge_rows": 285,
+    "ik_top": [
+      [
+        "hold:local",
+        80
+      ],
+      [
+        "hold:soft",
+        75
+      ],
+      [
+        "",
+        51
+      ],
+      [
+        "soft",
+        44
+      ],
+      [
+        "local",
+        33
+      ],
+      [
+        "shutdown",
+        2
+      ]
+    ],
+    "errors_top": [
+      [
+        "no_action",
+        50
+      ],
+      [
+        "soft_ik:p=0.0023,r=2.2,n=6;trajectory_extended:0.1439s",
+        3
+      ],
+      [
+        "shutdown_back_to_start",
+        2
+      ],
+      [
+        "soft_ik:p=0.0021,r=1.3,n=5;trajectory_extended:0.0918s",
+        1
+      ],
+      [
+        "trajectory_extended:0.1602s",
+        1
+      ],
+      [
+        "soft_ik:p=0.0003,r=2.2,n=10;trajectory_extended:0.2007s",
+        1
+      ]
+    ],
+    "force_closed_true": 38,
+    "force_closed_false": 247,
+    "action_age_p95": 0.057950000000000015,
+    "qd_p95": 1.1114179611206056,
+    "qd_max": 2.4006009101867676
+  }
+]

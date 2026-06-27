@@ -162,44 +162,36 @@ conda run -n b1z1_lerobot python high-level/dp/train/train_door_act.py \
     --wandb
 
 
-## 6. Play trained policy
+## 6. Play trained A2W policy
 
-# official LeRobot ACT checkpoint 可以直接给 play_door_policy.py；
-# 第一次运行会自动 wrap 到 high-level/dp/logs/door-auto-wrapped/。
-# --depth_only 表示只给策略两张 depth。
-# --dp_fps 25 放在最后 -- 后面，会透传到底层 float_ik，表示 25Hz command 节奏。
-python high-level/dp/play/play_door_policy.py \
-    --mode ikpush \
-    --checkpoint "$ACT_CKPT" \
-    --num_envs 16 \
-    --steps 2500 \
+# 这是当前确认正确 play 训练好 A2W 10D state policy 的命令。
+# 注意：底层 isaacgym_float_ik_a2w...py 不能直接吃 official LeRobot checkpoint 目录；
+# 这里必须先指向已经 wrap 好的 Door checkpoint model_latest.pt。
+export DOOR_CKPT=high-level/dp/logs/door-auto-wrapped/leroact_a2w_state10_wc4_newfov_randomized_200_depthonly_chunk100_exec50_bs16_0625_0212/100000/model_latest.pt
+
+conda run --no-capture-output -n b1z1 python \
+    high-level/float_ik/isaacgym_float_ik_a2w_basearn_push_door_parallel.py \
+    --num_envs 4 \
+    --steps 1000 \
+    --seed -1 \
+    --door_name wc4 \
     --rl_device cuda:0 \
     --sim_device cuda:0 \
+    --graphics_device_id 0 \
+    --enable_wrist_camera \
+    --enable_front_camera \
+    --camera_depth \
     --depth_only \
-    --dp_action_horizon 50 \
-    --camera_display_scale 1 \
-    -- \
-    --door_cfg high-level/experiments/isaacgym/b1z1_opendoor.yaml \
-    --pass_open_angle_deg 80 \
+    --camera_depth_clip_lower 0.2 \
+    --camera_depth_clip_far 1.5 \
+    --dp_policy_checkpoint "$DOOR_CKPT" \
+    --dp_control_all_envs \
+    --dp_action_horizon 10 \
     --dp_fps 25 \
-    --seed 123456
-
-# 只看单门 door0。
-python high-level/dp/play/play_door_policy.py \
-    --mode ikpush \
-    --checkpoint "$ACT_CKPT" \
-    --num_envs 16 \
-    --steps 2500 \
-    --rl_device cuda:0 \
-    --sim_device cuda:0 \
-    --depth_only \
-    --dp_action_horizon 50 \
-    --camera_display_scale 1 \
-    -- \
-    --door_cfg high-level/experiments/isaacgym/b1z1_opendoor_single_door0.yaml \
-    --pass_open_angle_deg 80 \
-    --dp_fps 25 \
-    --seed 123456
+    --no_preview_trajectory_at_spawn \
+    --no_draw_ik_target \
+    --no_draw_camera_axes \
+    --no_show_seg
 
 
 ## 7. Eval: expert obs 对比

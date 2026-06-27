@@ -74,6 +74,13 @@ class TrainPipelineConfig(HubMixin):
     rabc_epsilon: float = 1e-6  # Small constant for numerical stability
     rabc_head_mode: str | None = "sparse"  # For dual-head models: "sparse" or "dense"
 
+    # Keyframe-window sampling for ACT-style action chunk training.
+    # 0.0 keeps the original DataLoader behavior. 0.2 samples about 20% of
+    # chunk anchors from keyframe-adjacent windows and 80% from ordinary frames.
+    keyframe_sampling_ratio: float = 0.0
+    keyframe_sampling_weight_feature: str = "loss.action_weight"
+    keyframe_sampling_threshold: float = 1.0
+
     # Rename map for the observation to override the image and state keys
     rename_map: dict[str, str] = field(default_factory=dict)
     checkpoint_path: Path | None = field(init=False, default=None)
@@ -147,6 +154,11 @@ class TrainPipelineConfig(HubMixin):
                 self.rabc_progress_path = str(Path(self.dataset.root) / "sarm_progress.parquet")
             else:
                 self.rabc_progress_path = f"hf://datasets/{repo_id}/sarm_progress.parquet"
+
+        if not 0.0 <= self.keyframe_sampling_ratio <= 1.0:
+            raise ValueError(
+                f"keyframe_sampling_ratio must be in [0, 1], got {self.keyframe_sampling_ratio}."
+            )
 
     @classmethod
     def __get_path_fields__(cls) -> list[str]:

@@ -29,7 +29,7 @@ from tqdm import tqdm
 from lerobot.configs import parser
 from lerobot.configs.train import TrainPipelineConfig
 from lerobot.datasets.factory import make_dataset
-from lerobot.datasets.sampler import EpisodeAwareSampler
+from lerobot.datasets.sampler import EpisodeAwareSampler, make_keyframe_window_sampler
 from lerobot.datasets.utils import cycle
 from lerobot.envs.factory import make_env, make_env_pre_post_processors
 from lerobot.envs.utils import close_envs
@@ -339,7 +339,30 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
         logging.info(f"{num_total_params=} ({format_big_number(num_total_params)})")
 
     # create dataloader for offline training
-    if hasattr(cfg.policy, "drop_n_last_frames"):
+    sampler = None
+    shuffle = True
+    drop_n_first_frames = 0
+    drop_n_last_frames = int(getattr(cfg.policy, "drop_n_last_frames", 0))
+    if getattr(cfg, "keyframe_sampling_ratio", 0.0) > 0.0:
+        if cfg.dataset.streaming:
+            logging.warning("Keyframe-window sampling is disabled for streaming datasets.")
+        else:
+            sampler, keyframe_sampler_stats = make_keyframe_window_sampler(
+                dataset,
+                keyframe_sampling_ratio=cfg.keyframe_sampling_ratio,
+                weight_feature=cfg.keyframe_sampling_weight_feature,
+                keyframe_threshold=cfg.keyframe_sampling_threshold,
+                drop_n_first_frames=drop_n_first_frames,
+                drop_n_last_frames=drop_n_last_frames,
+                seed=cfg.seed,
+            )
+            if sampler is None:
+                logging.warning("Keyframe-window sampler disabled: %s", keyframe_sampler_stats)
+            else:
+                shuffle = False
+                logging.info("Using keyframe-window sampler: %s", keyframe_sampler_stats)
+
+    if sampler is None and hasattr(cfg.policy, "drop_n_last_frames"):
         shuffle = False
         sampler = EpisodeAwareSampler(
             dataset.meta.episodes["dataset_from_index"],
@@ -348,9 +371,6 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
             drop_n_last_frames=cfg.policy.drop_n_last_frames,
             shuffle=True,
         )
-    else:
-        shuffle = True
-        sampler = None
 
     dataloader = torch.utils.data.DataLoader(
         dataset,

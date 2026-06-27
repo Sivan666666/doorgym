@@ -93,6 +93,23 @@ def parse_args():
     parser.add_argument("--camera_depth_clip_lower", type=float, default=0.2)
     parser.add_argument("--camera_depth_clip_far", type=float, default=1.5)
     parser.add_argument(
+        "--keyframe_loss_weight",
+        type=float,
+        default=6.0,
+        help="Action loss weight λ applied to frames within --keyframe_loss_radius of extracted keyframes.",
+    )
+    parser.add_argument(
+        "--keyframe_loss_radius",
+        type=int,
+        default=5,
+        help="Frame radius δ around each extracted keyframe that receives --keyframe_loss_weight.",
+    )
+    parser.add_argument(
+        "--no_keyframe_loss_weights",
+        action="store_true",
+        help="Record keyframe indices but keep action_loss_weight at 1.0 everywhere.",
+    )
+    parser.add_argument(
         "--steps",
         type=int,
         default=None,
@@ -440,7 +457,13 @@ def run_one(mode, rollout_idx, args):
             str(args.camera_depth_clip_far),
             "--dp_record_state_mode",
             dp_record_state_mode_for_schema(args.state_action_mode),
+            "--keyframe_loss_weight",
+            str(args.keyframe_loss_weight),
+            "--keyframe_loss_radius",
+            str(args.keyframe_loss_radius),
         ]
+        if args.no_keyframe_loss_weights:
+            cmd.append("--no_keyframe_loss_weights")
         if args.rgb and args.depth_only:
             raise ValueError("--rgb and --depth_only are mutually exclusive.")
         if args.rgb:
@@ -643,7 +666,8 @@ def main():
         repo_hint = A2W_LEROBOT_REPO_ID
     print(
         "\nDone. Only successful env rollouts were saved as raw episodes. "
-        f"{schema_desc}, so convert it once with:\n"
+        f"{schema_desc}. Each raw episode also includes keyframe_indices/keyframe_names/"
+        "action_loss_weight for weighted ACT training, so convert it once with:\n"
         f"  python high-level/dp/convert_door_raw_to_lerobot.py --raw_root {args.raw_root} "
         f"--root data/lerobot --repo_id {repo_hint}{' --rgb' if args.rgb else ''}",
         flush=True,

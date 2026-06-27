@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import sys
 import tempfile
 import time
@@ -23,6 +24,11 @@ try:
     import cv2
 except ImportError:
     cv2 = None
+
+try:
+    import yaml
+except Exception:
+    yaml = None
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -85,6 +91,87 @@ sorted_asset_entries = dc.sorted_asset_entries
 
 
 VIEWER_PAUSE_ACTION = "pause_simulation"
+A2W_FLOAT_IK_CONFIG_ENV_VAR = "A2W_FLOAT_IK_CONFIG"
+A2W_FLOAT_IK_DEFAULT_CONFIG_PATH = SCRIPT_DIR / "config" / "a2w_float_ik_push_door_parallel.yaml"
+A2W_FLOAT_IK_CONFIG_DERIVED_ATTRS = {
+    "dp_print",
+}
+
+
+def default_a2w_float_ik_config_path():
+    override = os.environ.get(A2W_FLOAT_IK_CONFIG_ENV_VAR, "").strip()
+    if override:
+        return str(Path(override).expanduser())
+    return str(A2W_FLOAT_IK_DEFAULT_CONFIG_PATH)
+
+
+def load_yaml_mapping(path):
+    path = Path(path).expanduser()
+    if not path.exists():
+        return {}
+    if yaml is None:
+        raise RuntimeError(f"PyYAML is required to read A2W float IK config: {path}")
+    with path.open("r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    if not isinstance(data, dict):
+        raise ValueError(f"A2W float IK config must be a mapping: {path}")
+    return data
+
+
+def flatten_a2w_config(data, prefix=()):
+    flat = {}
+    for key, value in dict(data or {}).items():
+        if key in ("randomization_absolute_ranges",):
+            continue
+        if isinstance(value, dict):
+            flat.update(flatten_a2w_config(value, prefix + (str(key),)))
+        else:
+            flat[str(key)] = value
+    return flat
+
+
+def cli_flag_present(argv, flag):
+    prefix = flag + "="
+    return any(str(token) == flag or str(token).startswith(prefix) for token in argv)
+
+
+def cli_attr_was_set(argv, attr):
+    attr = str(attr)
+    return cli_flag_present(argv, f"--{attr}") or cli_flag_present(argv, f"--no_{attr}")
+
+
+def apply_a2w_float_ik_config_defaults(args, argv):
+    config_path = Path(getattr(args, "a2w_float_ik_config", default_a2w_float_ik_config_path())).expanduser()
+    config = load_yaml_mapping(config_path)
+    flat_defaults = flatten_a2w_config(config)
+    setattr(args, "a2w_float_ik_config", str(config_path))
+    setattr(args, "_a2w_float_ik_config_defaults", dict(flat_defaults))
+
+    ranges = config.get("randomization_absolute_ranges", {}) if isinstance(config, dict) else {}
+    if ranges:
+        if not isinstance(ranges, dict):
+            raise ValueError("randomization_absolute_ranges must be a mapping of name: [min, max].")
+        for name, pair in ranges.items():
+            if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+                raise ValueError(f"randomization_absolute_ranges.{name} must contain exactly [min, max].")
+            IKPUSH_DEFAULT_ENV_RANGES[str(name)] = (float(pair[0]), float(pair[1]))
+
+    for attr, value in flat_defaults.items():
+        if attr == "a2w_float_ik_config":
+            continue
+        if not hasattr(args, attr) and attr not in A2W_FLOAT_IK_CONFIG_DERIVED_ATTRS:
+            raise ValueError(f"Unknown key in A2W float IK config {config_path}: {attr}")
+        if cli_attr_was_set(argv, attr):
+            continue
+        current = getattr(args, attr, None)
+        if isinstance(current, bool) and isinstance(value, str):
+            lowered = value.strip().lower()
+            if lowered in ("1", "true", "yes", "on"):
+                value = True
+            elif lowered in ("0", "false", "no", "off"):
+                value = False
+        setattr(args, attr, value)
+    return args
 
 
 def setup_viewer_pause_shortcut(gym, viewer):
@@ -132,6 +219,15 @@ def parse_args():
             {"name": "--num_envs", "type": int, "default": 1},
             {"name": "--steps", "type": int, "default": 2405},
             {"name": "--seed", "type": int, "default": -1},
+            {
+                "name": "--a2w_float_ik_config",
+                "type": str,
+                "default": default_a2w_float_ik_config_path(),
+                "help": (
+                    "YAML file providing default A2W float IK parameters. "
+                    f"Set {A2W_FLOAT_IK_CONFIG_ENV_VAR} to change the global default."
+                ),
+            },
             {"name": "--door_cfg", "type": str, "default": str(DEFAULT_DOOR_CFG)},
             {"name": "--door_name", "type": str, "default": ""},
             {"name": "--door_index", "type": int, "default": -1},
@@ -185,10 +281,11 @@ def parse_args():
                 "help": "How to place the robot in Y relative to each door: handle or door_center.",
             },
             {"name": "--robot_z", "type": float, "default": 0.50},
+            {"name": "--robot_pitch", "type": float, "default": 0.0},
             {"name": "--robot_yaw", "type": float, "default": math.pi},
             {"name": "--robot_front_offset", "type": float, "default": 0.55},
             {"name": "--robot_rear_offset", "type": float, "default": 0.65},
-            {"name": "--stop_distance", "type": float, "default": 0.25},
+            {"name": "--stop_distance", "type": float, "default": 0.15},
             {"name": "--push_base_distance", "type": float, "default": 0.35},
             {"name": "--base_push_time_scale", "type": float, "default": 1.35},
             {"name": "--door_pass_clearance", "type": float, "default": 0.55},
@@ -214,7 +311,7 @@ def parse_args():
             {"name": "--hold_steps", "type": int, "default": 300},
             {"name": "--pregrasp_offset", "type": float, "default": 0.15},
             {"name": "--grasp_offset", "type": float, "default": 0.0},
-            {"name": "--grasp_x_offset", "type": float, "default": -0.03},
+            {"name": "--grasp_x_offset", "type": float, "default": -0.015},
             {"name": "--grasp_z_offset", "type": float, "default": -0.03},
             {
                 "name": "--wc4_pregrasp_z_offset",
@@ -241,7 +338,11 @@ def parse_args():
             {"name": "--ikpush_robot_x_rand_min", "type": float, "default": -0.70},
             {"name": "--ikpush_robot_x_rand_max", "type": float, "default": 0.0},
             {"name": "--ikpush_robot_y_rand", "type": float, "default": 0.04},
+            {"name": "--ikpush_robot_y_rand_min", "type": float, "default": -0.10},
+            {"name": "--ikpush_robot_y_rand_max", "type": float, "default": 0.04},
             {"name": "--ikpush_robot_z_rand", "type": float, "default": 0.03},
+            {"name": "--ikpush_robot_pitch_rand_min", "type": float, "default": math.radians(-5.0)},
+            {"name": "--ikpush_robot_pitch_rand_max", "type": float, "default": 0.0},
             {"name": "--ikpush_robot_yaw_rand", "type": float, "default": 0.03},
             {"name": "--ikpush_pregrasp_offset_rand", "type": float, "default": 0.025},
             {"name": "--ikpush_grasp_x_offset_rand", "type": float, "default": 0.012},
@@ -418,6 +519,9 @@ def parse_args():
             {"name": "--dp_log_path", "type": str, "default": ""},
             {"name": "--dp_log_interval", "type": int, "default": 25},
             {"name": "--no_dp_print", "dest": "dp_print", "action": "store_false", "default": True},
+            {"name": "--keyframe_loss_weight", "type": float, "default": 6.0},
+            {"name": "--keyframe_loss_radius", "type": int, "default": 5},
+            {"name": "--no_keyframe_loss_weights", "action": "store_true"},
             {"name": "--dp_warmstart", "action": "store_true"},
             {"name": "--dp_warmstart_raw_episode", "type": str, "default": ""},
             {"name": "--dp_warmstart_step", "type": int, "default": -1},
@@ -428,9 +532,13 @@ def parse_args():
         ],
     )
 
+    argv_list = sys.argv[1:]
+    apply_a2w_float_ik_config_defaults(args, argv_list)
+
     # gymutil's wrapper does not preserve default=True for store_true custom args,
     # so keep these visualization helpers on by default and let --no_* flags opt out.
-    argv = set(sys.argv[1:])
+    argv = set(argv_list)
+    config_defaults = getattr(args, "_a2w_float_ik_config_defaults", {})
     default_true_flags = (
         ("draw_ik_target", "--draw_ik_target", "--no_draw_ik_target"),
         ("draw_camera_axes", "--draw_camera_axes", "--no_draw_camera_axes"),
@@ -444,7 +552,7 @@ def parse_args():
         elif positive_flag in argv:
             setattr(args, attr, True)
         else:
-            setattr(args, attr, True)
+            setattr(args, attr, bool(config_defaults.get(attr, True)))
 
     if "--no_show_seg" in argv:
         args.show_camera_images = False
@@ -455,12 +563,31 @@ def parse_args():
     if bool(getattr(args, "rgb", False)):
         args.depth_only = False
     args.camera_seg = bool(args.camera_seg or not args.no_camera_seg)
-    args.dp_record_all_envs = not bool(args.no_dp_record_all_envs)
-    args.dp_control_all_envs = not bool(args.no_dp_control_all_envs)
-    args.dp_print = "--no_dp_print" not in argv
-    args.enable_base_door_collision_check = "--enable_base_door_collision_check" in argv and "--no_base_door_collision_check" not in argv
-    args.enable_collision_physx_check = args.enable_base_door_collision_check or "--enable_collision_physx_check" in argv
-    args.enable_collision_geom_check = args.enable_base_door_collision_check or "--enable_collision_geom_check" in argv
+    if "--no_dp_record_all_envs" in argv:
+        args.dp_record_all_envs = False
+    elif "--dp_record_all_envs" in argv:
+        args.dp_record_all_envs = True
+    else:
+        args.dp_record_all_envs = bool(config_defaults.get("dp_record_all_envs", not bool(args.no_dp_record_all_envs)))
+    if "--no_dp_control_all_envs" in argv:
+        args.dp_control_all_envs = False
+    elif "--dp_control_all_envs" in argv:
+        args.dp_control_all_envs = True
+    else:
+        args.dp_control_all_envs = bool(config_defaults.get("dp_control_all_envs", not bool(args.no_dp_control_all_envs)))
+    args.dp_print = False if "--no_dp_print" in argv else bool(config_defaults.get("dp_print", True))
+    if "--enable_base_door_collision_check" in argv:
+        args.enable_base_door_collision_check = "--no_base_door_collision_check" not in argv
+    elif "--no_base_door_collision_check" in argv:
+        args.enable_base_door_collision_check = False
+    else:
+        args.enable_base_door_collision_check = bool(config_defaults.get("enable_base_door_collision_check", False))
+    args.enable_collision_physx_check = args.enable_base_door_collision_check or bool(
+        config_defaults.get("enable_collision_physx_check", False)
+    ) or "--enable_collision_physx_check" in argv
+    args.enable_collision_geom_check = args.enable_base_door_collision_check or bool(
+        config_defaults.get("enable_collision_geom_check", False)
+    ) or "--enable_collision_geom_check" in argv
     args.dp_action_horizon = None if int(args.dp_action_horizon) < 0 else int(args.dp_action_horizon)
     if args.num_envs <= 0:
         raise ValueError("--num_envs must be positive.")
@@ -752,8 +879,18 @@ def make_env_args(args, env_index):
         "ikpush_robot_x_rand_max",
         legacy_half_attr="ikpush_robot_x_rand",
     )
-    set_sampled("robot_y", "ikpush_robot_y_rand")
+    set_sampled_offset_range(
+        "robot_y",
+        "ikpush_robot_y_rand_min",
+        "ikpush_robot_y_rand_max",
+        legacy_half_attr="ikpush_robot_y_rand",
+    )
     set_sampled("robot_z", "ikpush_robot_z_rand")
+    set_sampled_offset_range(
+        "robot_pitch",
+        "ikpush_robot_pitch_rand_min",
+        "ikpush_robot_pitch_rand_max",
+    )
     set_sampled("robot_yaw", "ikpush_robot_yaw_rand")
     set_fixed("pregrasp_offset")
     set_fixed("grasp_x_offset")
@@ -1703,7 +1840,15 @@ def run_demo(
             yaw_push,
             traj,
         )
-        set_robot_base_pose(gym, env, actor_handles, base_xy, args.robot_z, yaw)
+        set_robot_base_pose(
+            gym,
+            env,
+            actor_handles,
+            base_xy,
+            args.robot_z,
+            yaw,
+            getattr(args, "robot_pitch", 0.0),
+        )
         if phase == "return_home":
             if "return_home_start_dofs" not in traj:
                 traj["return_home_start_dofs"] = np.asarray(dof_positions, dtype=np.float32).copy()
@@ -2157,7 +2302,15 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                     dp_logger.write(dp_record)
                 if args.dp_print and step % max(1, int(args.dp_log_interval)) == 0:
                     print_float_dp_policy_log_record(dp_record)
-            set_robot_base_pose(gym, st.env, st.actor_handles, base_xy, st.args.robot_z, yaw)
+            set_robot_base_pose(
+                gym,
+                st.env,
+                st.actor_handles,
+                base_xy,
+                st.args.robot_z,
+                yaw,
+                getattr(st.args, "robot_pitch", 0.0),
+            )
             if phase == "return_home":
                 if "return_home_start_dofs" not in st.traj:
                     st.traj["return_home_start_dofs"] = np.asarray(st.dof_positions, dtype=np.float32).copy()

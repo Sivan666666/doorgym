@@ -39,6 +39,17 @@ ros2 launch robot_control robot_control_node.launch.py
 1. `a2_sport_udp_helper`：负责通过 `unitree_sdk2` 和 A2 底层通信。
 2. `robot_control_node`：订阅 `/cmd_vel_safe`，调用 helper 转发到底盘，并以 50 Hz 发布 `/vel_state`。
 
+2026-06-25 注意：PC2 上 `source ~/whole_body/install/setup.bash` 后，ROS Humble 的 `LD_LIBRARY_PATH`
+会优先找到 ROS 自带的 `libddsc`，而 `a2_sport_udp_helper` 需要 Unitree SDK 的
+`/usr/local/lib/libddsc`。否则 helper 会在 launch 中报 `free(): invalid pointer` 后退出。
+已在 PC2 的 source 与 install 两份 launch 文件里给 helper 单独加了：
+
+```python
+additional_env={
+    "LD_LIBRARY_PATH": "/usr/local/lib:" + os.environ.get("LD_LIBRARY_PATH", ""),
+}
+```
+
 当前 launch 默认网卡：
 
 ```text
@@ -327,6 +338,21 @@ robot_control_node:
   a2_helper_port=15021
 ```
 
+PC2 launch 的 helper 进程需要单独使用 `/usr/local/lib` 优先的 `LD_LIBRARY_PATH`，
+否则在 ROS 环境中可能误加载 ROS 的 `libddsc`，表现为：
+
+```text
+a2_sport_udp_helper starting network_interface=eth0 bind=127.0.0.1:15021
+free(): invalid pointer
+```
+
+当前已修复到：
+
+```bash
+~/whole_body/robot_control/launch/robot_control_node.launch.py
+~/whole_body/install/robot_control/share/robot_control/launch/robot_control_node.launch.py
+```
+
 `network_interface=eth0` 的含义：
 
 - 这是 PC2 上连 A2/狗底层通信的网卡。
@@ -341,6 +367,31 @@ robot_control_node:
 - PC2 发布 `/vel_state`
 - `/vel_state` 发布的是上一个时刻收到的 command：`last_vx` 和 `last_vyaw`
 - ACT state 前两维对齐录制脚本：`[last command vx, last command vyaw]`
+
+## 5.1 ACT Ctrl-C 与 Z1 bridge 行为
+
+2026-06-25 已回滚连续测试实验改动：
+
+- 不再使用 `startup_open_gripper` bridge 命令。
+- 不再让 bridge 在 Ctrl-C/backToStart 后继续留在 LOWCMD 等下一轮 ACT。
+- 不再在 Ctrl-C 后额外 pulse 夹爪闭合目标。
+- 当前恢复为之前的保守流程：ACT 收到 Ctrl-C 时发送 `shutdown_back_to_start`；bridge 收到后跳出控制循环，并在退出 `finally` 中调用 Z1 SDK `backToStart()` / `passive`。
+- bridge 启动回零阶段：`startup_gripper_open_once=True`，参考 Z1 SDK `example_lowcmd.py` 的 `duration=1000` 方式，从当前夹爪反馈插值到默认张开目标 `-pi/2`，共 `startup_gripper_open_duration_steps=1000` 个 LOWCMD 周期；完成后不再发送夹爪当前位置。
+
+如果 ACT 报：
+
+```text
+Timed out waiting for Z1 startup zero before ACT inference; last_meta count=0
+```
+
+说明 ACT 没收到 bridge 的 15013 状态，优先检查：
+
+```bash
+ssh anx@192.168.1.154
+pgrep -af 'z1_ctrl|z1_act_ee_bridge'
+ss -lunp | grep -E '15011|15012|15013'
+tail -n 100 /tmp/door_act_services/z1_bridge.log
+```
 
 ## 6. RealSense 深度图当前约定
 
@@ -446,7 +497,7 @@ high-level/real_deploy/z1_act_ee_bridge.py
 - 不再发送六关节全零作为回零。
 - `backToStart()` 完成后的实际关节角记录为 `home_q`。
 - 启动检查只看关节反馈有限、速度足够小、稳定约 `0.3 s`，不要求 `home_q == 0`。
-- 启动时夹爪最大张开只发送一次，然后不持续顶开。
+- 启动时夹爪参考 Z1 SDK `example_lowcmd.py`，用 `duration=1000` 个 LOWCMD 周期从当前反馈插值到最大张开 `-pi/2`，完成后不再发夹爪当前位置。
 - ACT EE action 进入 bridge 后：
   - 精确 6D IK 优先。
   - 失败后使用 soft IK，优先位置，姿态低权重。
@@ -1148,7 +1199,7 @@ F filled_ratio_of_invalid: 0.01946
   - 失败时继续当前轨迹并平滑减速
 - 关节控制改为 500 Hz 连续 quintic 轨迹输出。
 - 夹爪：
-  - 启动最大张开只发一次。
+  - 启动最大张开改为 `duration=1000` LOWCMD 插值到 `-pi/2`。
   - ACT 阶段 gripper target 来自 action[9]。
   - 当前限速 `3.14 rad/s`，限加速度 `120 rad/s^2`。
   - 增加 close latch：

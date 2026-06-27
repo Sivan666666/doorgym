@@ -1,0 +1,19 @@
+{
+  "fps": 25.0,
+  "codec_requested": "mp4v",
+  "layout": "side_by_side_left_wrist_right_front",
+  "video_stem": "raw_unfiltered_depth_u8",
+  "videos": {
+    "side_by_side": "9054RUN_DIR/raw_unfiltered_depth_video/raw_unfiltered_depth_u8_side_by_side.mp4"
+  },
+  "separate": false,
+  "stats": {
+    "enabled": true,
+    "dir": "9054RUN_DIR/raw_unfiltered_depth_video",
+    "fps": 25.0,
+    "enqueued": 329,
+    "written": 329,
+    "dropped": 0,
+    "error": null
+  }
+}

@@ -171,7 +171,20 @@ hold_steps                 300
 
 ## 4. A2W 默认 base / door 参数
 
-在 `isaacgym_float_ik_a2w_basearn_push_door_parallel.py` 的 custom parameters 里：
+在 `isaacgym_float_ik_a2w_basearn_push_door_parallel.py` 的 custom parameters 里。现在这些默认值同时集中到了 YAML，方便之后直接改配置：
+
+```text
+high-level/float_ik/config/a2w_float_ik_push_door_parallel.yaml
+```
+
+脚本默认会加载这份 YAML；也可以用下面两种方式换另一份：
+
+```bash
+--a2w_float_ik_config /path/to/a2w_float_ik_push_door_parallel.yaml
+export A2W_FLOAT_IK_CONFIG=/path/to/a2w_float_ik_push_door_parallel.yaml
+```
+
+命令行参数优先级最高：如果同一个参数既在 YAML 里写了，又在终端里传了，终端值会覆盖 YAML。
 
 ```text
 door_x                  2.5
@@ -182,10 +195,11 @@ robot_x                 4.1
 robot_y                 0.0
 robot_y_alignment       handle
 robot_z                 0.50
+robot_pitch             0.0
 robot_yaw               pi
 robot_front_offset      0.55
 robot_rear_offset       0.65
-stop_distance           0.25
+stop_distance           0.15
 push_base_distance      0.35
 door_push_distance      1.10
 ```
@@ -209,8 +223,9 @@ door_x                         ±0.03m
 door_y                         ±0.03m
 door_wall_x_offset             ±0.03m
 robot_x                        -0.70m 到 0.0m
-robot_y                        ±0.04m
+robot_y                        -0.10m 到 +0.04m
 robot_z                        ±0.03m
+robot_pitch                    -5° 到 0°
 robot_yaw                      ±0.03rad
 door_joint_friction            ±0.08，下限 0
 door_joint_damping             ±0.04，下限 0
@@ -396,6 +411,124 @@ raw action：
 
 不要把 10D 和 9D raw episode 混在同一个 `raw_root` 里。录制脚本会检查 `door_dp_feature_names.json` 防止 schema 混用。
 
+### 7.3 关键帧提取和 weighted ACT action loss
+
+详细说明单独记录在：
+
+```text
+high-level/dp/KEYFRAME_TRAINING_NOTES.md
+```
+
+A2W raw 录制现在会基于每帧的 `subtask_index/phase_id` 自动提取关键帧，并写进每个 raw episode：
+
+```text
+keyframe_indices
+keyframe_names
+keyframe_target_phase_names
+keyframe_mask
+action_loss_weight
+```
+
+默认关键帧语义：
+
+```text
+start              第一帧
+stop_before_door   第一个 initial_hold 帧，也就是 base 停在门前
+pregrasp           第一个 grasp 帧，也就是开始从 pregrasp 往 grasp 走
+grasp              第一个 grasp_hold/close_gripper 帧，也就是到达 grasp 点
+rotate             第一个 push_door 帧，也就是 rotate_handle 结束、到达 rotate 点
+```
+
+默认 loss 权重是：
+
+```text
+lambda = 6.0
+delta  = 5 frames
+```
+
+也就是对距离任一关键帧 `<= 5` 帧的 chunk 起点帧，写入：
+
+```text
+action_loss_weight = 6.0
+```
+
+其他位置是：
+
+```text
+action_loss_weight = 1.0
+```
+
+可以从录制 wrapper 或底层 A2W 脚本直接调：
+
+```bash
+--keyframe_loss_weight 6.0
+--keyframe_loss_radius 5
+--no_keyframe_loss_weights
+```
+
+raw 转 LeRobot 时，`action_loss_weight` 会变成 LeRobot feature：
+
+```text
+loss.action_weight
+```
+
+本地 LeRobot ACT 已经支持读取这个 feature：如果 batch 里存在 `loss.action_weight`，ACT 会把它作为 chunk-level sample weight 使用：
+
+```text
+L = Σ_t w_t * l_t / Σ_t w_t
+```
+
+其中 `l_t` 是以当前帧 `t` 为起点的整个 action chunk loss。也就是说，关键帧前后 `delta` 帧内采到的训练 chunk，整段 chunk loss 都乘 `lambda`；如果老数据没有这个 feature，则保持原来的普通平均 loss。
+
+ACT 训练 sampler 也支持关键帧窗口重采样。原版 LeRobot train 在没有 sampler 时是 `shuffle=True` 的均匀随机采样；现在可通过：
+
+```bash
+--keyframe_sampling_ratio=0.2
+```
+
+让大约 20% 的 chunk 起点从 `loss.action_weight > 1` 的关键帧窗口采样，80% 从普通帧采样。设成：
+
+```bash
+--keyframe_sampling_ratio=0.0
+```
+
+即可回到原来的均匀随机采样。如果数据里没有 `loss.action_weight`，训练会自动 fallback 到原采样方式。
+
+当前动态关键帧默认规则：
+
+```text
+base_speed_change         p95，最多 4 个
+arm_joint_motion_fast     p85，最多 6 个
+handle_speed_change       p95，最多 4 个
+door_hinge_speed_change   p95，最多 2 个
+gripper_handle_contact    第一个 close_gripper/grasp_hold，或 gripper delta > 1e-4
+```
+
+提取后还会做一次相邻关键帧整理：
+
+```text
+相邻 <= 10 frames 的关键帧只保留一个；
+同一组里优先保留自动检测事件，其次保留 manual phase keyframe。
+```
+
+关键帧可视化脚本：
+
+```bash
+python high-level/dp/visualize_door_raw_keyframes.py \
+  --raw_root high-level/data/door_dp_raw/a2w_state10_wc4_newfov_randomized_stop015_graspx015_100 \
+  --episode 0 \
+  --cols 3 \
+  --thumb_width 240
+```
+
+输出：
+
+```text
+<raw_root>/keyframe_viz/episode_000000/keyframe_timeline.png
+<raw_root>/keyframe_viz/episode_000000/keyframe_contact_sheet.png
+<raw_root>/keyframe_viz/episode_000000/keyframes.csv
+```
+
 ## 8. A2W 10D 数据录制命令：新版 FOV，相机 0.2-1.5m
 
 16 个 env 一组，录制成功 150 条，开启随机化，所有门用 wc4：
@@ -567,8 +700,9 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
   --batch_size=16 \
   --steps=100000 \
   --num_workers=4 \
-  --save_freq=1000 \
+  --save_freq=10000 \
   --log_freq=10 \
+  --keyframe_sampling_ratio=0.2 \
   --job_name="$ACT_RUN_NAME" \
   --output_dir="$OUTPUT_ROOT/$ACT_RUN_NAME" \
   --wandb.enable=true \
@@ -607,8 +741,9 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
   --batch_size=16 \
   --steps=100000 \
   --num_workers=4 \
-  --save_freq=1000 \
+  --save_freq=10000 \
   --log_freq=10 \
+  --keyframe_sampling_ratio=0.2 \
   --job_name="$ACT_RUN_NAME" \
   --output_dir="$OUTPUT_ROOT/$ACT_RUN_NAME" \
   --wandb.enable=true \
@@ -626,7 +761,11 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
 
 ### 12.1 直接 play A2W policy，4 env
 
+当前确认正确 play 训练好的 A2W 10D state policy 的方式是：先把 `DOOR_CKPT` 指向已经 wrap 好的 Door checkpoint，再直接调用底层 A2W float IK 脚本。注意不要把 official LeRobot checkpoint 目录直接传给底层 `isaacgym_float_ik_a2w_basearn_push_door_parallel.py`；底层脚本需要 `door_policy_meta.json`，也就是 Door checkpoint 的 `model_latest.pt`。
+
 ```bash
+export DOOR_CKPT=high-level/dp/logs/door-auto-wrapped/leroact_a2w_state10_wc4_newfov_randomized_200_depthonly_chunk100_exec50_bs16_0625_0212/100000/model_latest.pt
+
 conda run --no-capture-output -n b1z1 python \
   high-level/float_ik/isaacgym_float_ik_a2w_basearn_push_door_parallel.py \
   --num_envs 4 \
@@ -642,7 +781,7 @@ conda run --no-capture-output -n b1z1 python \
   --depth_only \
   --camera_depth_clip_lower 0.2 \
   --camera_depth_clip_far 1.5 \
-  --dp_policy_checkpoint high-level/dp/logs/door-auto-wrapped/<RUN>/<STEP>/model_latest.pt \
+  --dp_policy_checkpoint "$DOOR_CKPT" \
   --dp_control_all_envs \
   --dp_action_horizon 10 \
   --dp_fps 25 \
@@ -653,6 +792,8 @@ conda run --no-capture-output -n b1z1 python \
 ```
 
 ### 12.2 用 play_door_policy.py 入口
+
+`play_door_policy.py` 可以自动 wrap official LeRobot checkpoint，但当前 A2W 新 FOV / wc4 randomized 200 的 play 调试里，稳定确认正确的是上面的 12.1 底层脚本 + `DOOR_CKPT=model_latest.pt` 方式。
 
 ```bash
 conda run --no-capture-output -n b1z1 python \
@@ -775,6 +916,7 @@ conda run --no-capture-output -n b1z1 python \
 
 2. `high-level/float_ik/isaacgym_float_ik_a2w_basearn_push_door_parallel.py`
    - A2W robot 默认参数。
+   - 默认参数从 `high-level/float_ik/config/a2w_float_ik_push_door_parallel.yaml` 读取，CLI 仍然优先。
    - scripted trajectory phase/timing。
    - per-env randomization。
    - A2W camera mount。
@@ -808,9 +950,10 @@ conda run --no-capture-output -n b1z1 python \
 1. A2W 相机 FOV / position / rotation / mount body。
 2. A2W scripted trajectory phase、默认 step、gripper/handle/push 参数。
 3. 随机化范围。
-4. raw schema，尤其 10D / 9D state/action 名字。
-5. depth clip、depth noise、camera randomization。
-6. raw 转 LeRobot 命令。
-7. LeRobot train 命令或 checkpoint 目录命名。
-8. play/eval 成功率命令。
-9. 任何已经踩过的坑，例如门方向、墙方向、success metric、depth_only mismatch。
+4. `high-level/float_ik/config/a2w_float_ik_push_door_parallel.yaml` 里的默认参数分类或字段名。
+5. raw schema，尤其 10D / 9D state/action 名字。
+6. depth clip、depth noise、camera randomization。
+7. raw 转 LeRobot 命令。
+8. LeRobot train 命令或 checkpoint 目录命名。
+9. play/eval 成功率命令。
+10. 任何已经踩过的坑，例如门方向、墙方向、success metric、depth_only mismatch。
