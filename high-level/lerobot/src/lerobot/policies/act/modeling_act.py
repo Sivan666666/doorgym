@@ -376,7 +376,9 @@ class ACTPolicy(PreTrainedPolicy):
         l1_per_elem = F.l1_loss(batch[ACTION], actions_hat, reduction="none") * valid
         valid_elem_count = valid.to(l1_per_elem.dtype).expand_as(l1_per_elem).sum(dim=(1, 2))
         l1_per_sample = l1_per_elem.sum(dim=(1, 2)) / torch.clamp(valid_elem_count, min=1.0)
-        action_loss_weight = batch.get("loss.action_weight")
+        action_loss_weight = (
+            batch.get("loss.action_weight") if bool(getattr(self.config, "use_action_loss_weight", True)) else None
+        )
         sample_weight = None
         if action_loss_weight is not None:
             action_loss_weight = action_loss_weight.to(device=l1_per_elem.device, dtype=l1_per_elem.dtype)

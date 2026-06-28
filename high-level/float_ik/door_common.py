@@ -3322,8 +3322,8 @@ def make_float_dp_recorder(
         "door_use_urdf_rgba": bool(getattr(args, "door_use_urdf_rgba", False)),
         "phase_names": list(phase_names),
         "keyframe_loss_enabled": not bool(getattr(args, "no_keyframe_loss_weights", False)),
-        "keyframe_loss_weight": float(getattr(args, "keyframe_loss_weight", 6.0)),
-        "keyframe_loss_radius": int(getattr(args, "keyframe_loss_radius", 5)),
+        "keyframe_loss_weight": float(getattr(args, "keyframe_loss_weight", 8.0)),
+        "keyframe_loss_radius": int(getattr(args, "keyframe_loss_radius", 3)),
         "keyframe_loss_feature": "loss.action_weight",
         "keyframe_extraction_rules": {
             "start": "first recorded frame",

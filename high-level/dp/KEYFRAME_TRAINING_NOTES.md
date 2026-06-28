@@ -260,11 +260,30 @@ loss.action_weight
 2. 根据关键帧生成 `action_loss_weight`。
 3. 写入 LeRobot 的 `loss.action_weight` feature。
 
+如果旧 raw 已经保存了旧权重，可以在转换时强制用新窗口重新计算，而不改关键帧索引：
+
+```bash
+--keyframe_loss_weight 8 \
+--keyframe_loss_radius 3
+```
+
+如果 LeRobot 数据集已经转换完成，可直接更新 Parquet 权重列及统计，不重新编码视频：
+
+```bash
+conda run --no-capture-output -n b1z1_lerobot python \
+  high-level/dp/update_lerobot_keyframe_weights.py \
+  --raw_root <raw_root> \
+  --dataset_root <lerobot_dataset_root> \
+  --weight 8 \
+  --radius 3
+```
+
 对应位置：
 
 ```text
 high-level/dp/convert_door_raw_to_lerobot.py
 extract_motion_keyframes_from_raw_arrays(data)
+high-level/dp/update_lerobot_keyframe_weights.py
 ```
 
 ## 8. Keyframe ACT loss
@@ -291,11 +310,11 @@ w_t = loss.action_weight[t]
 默认：
 
 ```text
-keyframe_loss_weight = 6.0
-keyframe_loss_radius = 5
+keyframe_loss_weight = 8.0
+keyframe_loss_radius = 3
 ```
 
-也就是距离关键帧 `<= 5 frames` 的 chunk 起点帧，整段 action chunk loss 会乘以 6。
+也就是距离关键帧 `<= 3 frames` 的 chunk 起点帧，整段 action chunk loss 会乘以 8。
 
 注意：当前权重只加在 action L1 loss 上，KL loss 仍然普通平均。
 
@@ -391,4 +410,3 @@ loss.action_weight
 ```
 
 `high-level/dp/command_lerobot.txt` 里的 ACT / ACT-DINOv2 / ACT-DeFM 命令已经加入该参数。
-

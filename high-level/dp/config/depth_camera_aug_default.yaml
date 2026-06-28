@@ -40,11 +40,11 @@ depth_salt_pepper_prob: 0.002
 
 # Optional post-noise Gaussian blur, matching the NX RealSense debug setting.
 # This is applied after all other depth image noise. It is disabled by default.
-enable_depth_gaussian_blur: true
+enable_depth_gaussian_blur: false
 depth_gaussian_blur_ksize: 5
 depth_gaussian_blur_sigma: 1.0
 
 # Optional camera pose jitter. This is separate from image-depth noise.
-enable_depth_camera_randomization: false
+enable_depth_camera_randomization: true
 depth_camera_pos_rand_m: 0.02
 depth_camera_rot_rand_deg: 5.0

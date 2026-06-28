@@ -69,6 +69,8 @@ DATASET_METADATA_KEYS = (
 )
 ACTION_LOSS_WEIGHT_FEATURE = "loss.action_weight"
 RAW_ACTION_LOSS_WEIGHT_KEY = "action_loss_weight"
+DEFAULT_KEYFRAME_LOSS_WEIGHT = 8.0
+DEFAULT_KEYFRAME_LOSS_RADIUS = 3
 DEFAULT_KEYFRAME_NAMES = (
     "start",
     "stop_before_door",
@@ -1191,7 +1193,13 @@ def extract_motion_keyframes_from_raw_arrays(raw, phase_names=None, config=None)
     return indices, keyframe_names, keyframe_rules
 
 
-def make_keyframe_action_loss_weight(num_frames, keyframe_indices, weight=6.0, radius=5, enabled=True):
+def make_keyframe_action_loss_weight(
+    num_frames,
+    keyframe_indices,
+    weight=DEFAULT_KEYFRAME_LOSS_WEIGHT,
+    radius=DEFAULT_KEYFRAME_LOSS_RADIUS,
+    enabled=True,
+):
     weights = np.ones(int(num_frames), dtype=np.float32)
     if not enabled:
         return weights
@@ -1492,8 +1500,12 @@ class RawDoorDPRecorder:
             phase_names=phase_names,
         )
         keyframe_loss_enabled = bool(self.metadata.get("keyframe_loss_enabled", True))
-        keyframe_loss_weight = float(self.metadata.get("keyframe_loss_weight", 6.0))
-        keyframe_loss_radius = int(self.metadata.get("keyframe_loss_radius", 5))
+        keyframe_loss_weight = float(
+            self.metadata.get("keyframe_loss_weight", DEFAULT_KEYFRAME_LOSS_WEIGHT)
+        )
+        keyframe_loss_radius = int(
+            self.metadata.get("keyframe_loss_radius", DEFAULT_KEYFRAME_LOSS_RADIUS)
+        )
         action_loss_weight = make_keyframe_action_loss_weight(
             self.frame_count,
             keyframe_indices,

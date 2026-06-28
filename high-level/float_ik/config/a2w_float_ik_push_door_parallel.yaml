@@ -110,8 +110,8 @@ randomization:
   ikpush_robot_y_rand_min: -0.10
   ikpush_robot_y_rand_max: 0.04
   ikpush_robot_z_rand: 0.03
-  ikpush_robot_pitch_rand_min: 0.0  # radians; -5 deg
-  ikpush_robot_pitch_rand_max: 0.08726646259971647                  # radians; 0 deg
+  ikpush_robot_pitch_rand_min: 0.0  # radians; 0 deg
+  ikpush_robot_pitch_rand_max: 0.08726646259971647  # radians; +5 deg
   ikpush_robot_yaw_rand: 0.03
   ikpush_pregrasp_offset_rand: 0.025
   ikpush_grasp_x_offset_rand: 0.012
@@ -248,8 +248,8 @@ keyframes:
   # start, stop_before_door, pregrasp, grasp, rotate.
   # Frames within keyframe_loss_radius of those indices use
   # keyframe_loss_weight as the chunk-level ACT action loss weight.
-  keyframe_loss_weight: 6.0
-  keyframe_loss_radius: 5
+  keyframe_loss_weight: 8.0
+  keyframe_loss_radius: 3
   no_keyframe_loss_weights: false
 
 door_dp:

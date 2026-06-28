@@ -18,6 +18,7 @@ if str(DP_ROOT) not in sys.path:
     sys.path.insert(0, str(DP_ROOT))
 
 from depth_camera_aug import add_depth_aug_args, add_depth_aug_command_args, apply_depth_aug_config_defaults
+from door_dp_common import DEFAULT_KEYFRAME_LOSS_RADIUS, DEFAULT_KEYFRAME_LOSS_WEIGHT
 
 
 A2W_IKPUSH_SCRIPT = (
@@ -95,13 +96,13 @@ def parse_args():
     parser.add_argument(
         "--keyframe_loss_weight",
         type=float,
-        default=6.0,
+        default=DEFAULT_KEYFRAME_LOSS_WEIGHT,
         help="Action loss weight λ applied to frames within --keyframe_loss_radius of extracted keyframes.",
     )
     parser.add_argument(
         "--keyframe_loss_radius",
         type=int,
-        default=5,
+        default=DEFAULT_KEYFRAME_LOSS_RADIUS,
         help="Frame radius δ around each extracted keyframe that receives --keyframe_loss_weight.",
     )
     parser.add_argument(

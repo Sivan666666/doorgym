@@ -12,6 +12,8 @@ try:
         ACTION_NAMES,
         ACTION_LOSS_WEIGHT_FEATURE,
         DATASET_METADATA_KEYS,
+        DEFAULT_KEYFRAME_LOSS_RADIUS,
+        DEFAULT_KEYFRAME_LOSS_WEIGHT,
         DEFAULT_NEAR_ZERO_RATE_EPS,
         DoorDPLeRobotRecorder,
         RAW_ACTION_LOSS_WEIGHT_KEY,
@@ -34,6 +36,8 @@ except ImportError:
         ACTION_NAMES,
         ACTION_LOSS_WEIGHT_FEATURE,
         DATASET_METADATA_KEYS,
+        DEFAULT_KEYFRAME_LOSS_RADIUS,
+        DEFAULT_KEYFRAME_LOSS_WEIGHT,
         DEFAULT_NEAR_ZERO_RATE_EPS,
         DoorDPLeRobotRecorder,
         RAW_ACTION_LOSS_WEIGHT_KEY,
@@ -118,6 +122,24 @@ def parse_args():
     parser.add_argument("--action_quantile_low", type=float, default=0.01)
     parser.add_argument("--action_quantile_high", type=float, default=0.99)
     parser.add_argument("--action_preprocess_eps", type=float, default=1.0e-6)
+    parser.add_argument(
+        "--keyframe_loss_weight",
+        type=float,
+        default=None,
+        help=(
+            "Override the keyframe action-loss weight stored in raw episodes. "
+            "When set, loss.action_weight is recomputed from keyframe_indices."
+        ),
+    )
+    parser.add_argument(
+        "--keyframe_loss_radius",
+        type=int,
+        default=None,
+        help=(
+            "Override the keyframe window radius stored in raw episodes. "
+            "When set, loss.action_weight is recomputed from keyframe_indices."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -338,6 +360,8 @@ def load_episode_payload(
     controller_mode,
     vision_mode,
     initial_task,
+    keyframe_loss_weight_override=None,
+    keyframe_loss_radius_override=None,
 ):
     with np.load(path, allow_pickle=True) as data:
         validate_episode_metadata(path, data, sidecar, action_frame, ikpush_state_version, controller_mode)
@@ -365,12 +389,36 @@ def load_episode_payload(
             front_first = data[image_keys[2]].astype(np.uint8) if image_keys[2] in data else np.zeros_like(wrist_first)
             front_second = data[image_keys[3]].astype(np.uint8) if image_keys[3] in data else np.zeros_like(wrist_second)
         subtasks = data["subtask_index"].astype(np.int64).reshape(-1)
-        if RAW_ACTION_LOSS_WEIGHT_KEY in data.files:
+        override_keyframe_weight = (
+            keyframe_loss_weight_override is not None or keyframe_loss_radius_override is not None
+        )
+        if RAW_ACTION_LOSS_WEIGHT_KEY in data.files and not override_keyframe_weight:
             action_loss_weight = data[RAW_ACTION_LOSS_WEIGHT_KEY].astype(np.float32).reshape(-1, 1)
         else:
-            keyframe_indices, _, _ = extract_motion_keyframes_from_raw_arrays(data)
-            keyframe_loss_weight = float(data["keyframe_loss_weight"]) if "keyframe_loss_weight" in data.files else 6.0
-            keyframe_loss_radius = int(data["keyframe_loss_radius"]) if "keyframe_loss_radius" in data.files else 5
+            if "keyframe_indices" in data.files:
+                keyframe_indices = data["keyframe_indices"].astype(np.int64).reshape(-1)
+            else:
+                keyframe_indices, _, _ = extract_motion_keyframes_from_raw_arrays(data)
+            stored_keyframe_loss_weight = (
+                float(data["keyframe_loss_weight"])
+                if "keyframe_loss_weight" in data.files
+                else DEFAULT_KEYFRAME_LOSS_WEIGHT
+            )
+            stored_keyframe_loss_radius = (
+                int(data["keyframe_loss_radius"])
+                if "keyframe_loss_radius" in data.files
+                else DEFAULT_KEYFRAME_LOSS_RADIUS
+            )
+            keyframe_loss_weight = (
+                stored_keyframe_loss_weight
+                if keyframe_loss_weight_override is None
+                else float(keyframe_loss_weight_override)
+            )
+            keyframe_loss_radius = (
+                stored_keyframe_loss_radius
+                if keyframe_loss_radius_override is None
+                else int(keyframe_loss_radius_override)
+            )
             keyframe_loss_enabled = (
                 bool(data["keyframe_loss_enabled"]) if "keyframe_loss_enabled" in data.files else True
             )
@@ -440,6 +488,10 @@ def main():
     args = parse_args()
     if args.num_workers < 1:
         raise ValueError("--num_workers must be >= 1")
+    if args.keyframe_loss_weight is not None and args.keyframe_loss_weight <= 0.0:
+        raise ValueError("--keyframe_loss_weight must be > 0")
+    if args.keyframe_loss_radius is not None and args.keyframe_loss_radius < 0:
+        raise ValueError("--keyframe_loss_radius must be >= 0")
     raw_root = Path(args.raw_root)
     files = episode_files(raw_root)
     sidecar = load_sidecar(raw_root)
@@ -566,6 +618,16 @@ def main():
         for key in DATASET_METADATA_KEYS:
             if key in sidecar:
                 inherited_metadata[key] = sidecar[key]
+    converted_keyframe_loss_weight = (
+        float(args.keyframe_loss_weight)
+        if args.keyframe_loss_weight is not None
+        else float(inherited_metadata.get("keyframe_loss_weight", DEFAULT_KEYFRAME_LOSS_WEIGHT))
+    )
+    converted_keyframe_loss_radius = (
+        int(args.keyframe_loss_radius)
+        if args.keyframe_loss_radius is not None
+        else int(inherited_metadata.get("keyframe_loss_radius", DEFAULT_KEYFRAME_LOSS_RADIUS))
+    )
 
     if state_preprocess_config is None:
         if args.state_preprocess == "robust_quantile":
@@ -631,6 +693,8 @@ def main():
             "action_preprocess": action_preprocess_config,
             "state_normalized": converted_state_normalized,
             "action_loss_weight_feature": ACTION_LOSS_WEIGHT_FEATURE,
+            "keyframe_loss_weight": converted_keyframe_loss_weight,
+            "keyframe_loss_radius": converted_keyframe_loss_radius,
         },
     )
     payloads = iter_episode_payloads(
@@ -644,6 +708,8 @@ def main():
         controller_mode=controller_mode,
         vision_mode=vision_mode,
         initial_task=initial_task,
+        keyframe_loss_weight_override=args.keyframe_loss_weight,
+        keyframe_loss_radius_override=args.keyframe_loss_radius,
     )
     for ep_idx, payload in payloads:
         task = payload["task"]
@@ -697,6 +763,8 @@ def main():
         "action_preprocess": action_preprocess_config,
         "state_normalized": converted_state_normalized,
         "action_loss_weight_feature": ACTION_LOSS_WEIGHT_FEATURE,
+        "keyframe_loss_weight": converted_keyframe_loss_weight,
+        "keyframe_loss_radius": converted_keyframe_loss_radius,
     }
     if sidecar:
         for key in DATASET_METADATA_KEYS:

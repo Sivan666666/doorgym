@@ -225,7 +225,7 @@ door_wall_x_offset             ±0.03m
 robot_x                        -0.70m 到 0.0m
 robot_y                        -0.10m 到 +0.04m
 robot_z                        ±0.03m
-robot_pitch                    -5° 到 0°
+robot_pitch                     0° 到 +5°
 robot_yaw                      ±0.03rad
 door_joint_friction            ±0.08，下限 0
 door_joint_damping             ±0.04，下限 0
@@ -442,14 +442,14 @@ rotate             第一个 push_door 帧，也就是 rotate_handle 结束、�
 默认 loss 权重是：
 
 ```text
-lambda = 6.0
-delta  = 5 frames
+lambda = 8.0
+delta  = 3 frames
 ```
 
-也就是对距离任一关键帧 `<= 5` 帧的 chunk 起点帧，写入：
+也就是对距离任一关键帧 `<= 3` 帧的 chunk 起点帧，写入：
 
 ```text
-action_loss_weight = 6.0
+action_loss_weight = 8.0
 ```
 
 其他位置是：
@@ -461,8 +461,8 @@ action_loss_weight = 1.0
 可以从录制 wrapper 或底层 A2W 脚本直接调：
 
 ```bash
---keyframe_loss_weight 6.0
---keyframe_loss_radius 5
+--keyframe_loss_weight 8.0
+--keyframe_loss_radius 3
 --no_keyframe_loss_weights
 ```
 
@@ -619,6 +619,8 @@ conda run --no-capture-output -n b1z1_lerobot python \
   --num_workers 4 \
   --state_preprocess none \
   --action_preprocess none \
+  --keyframe_loss_weight 8 \
+  --keyframe_loss_radius 3 \
   --near_zero_rate_eps 1e-5
 ```
 
@@ -638,6 +640,8 @@ conda run --no-capture-output -n b1z1_lerobot python \
   --num_workers 4 \
   --state_preprocess none \
   --action_preprocess none \
+  --keyframe_loss_weight 8 \
+  --keyframe_loss_radius 3 \
   --near_zero_rate_eps 1e-5
 ```
 
@@ -648,6 +652,17 @@ high-level/data/lerobot/local/<repo_id>/door_dp_feature_names.json
 ```
 
 这个 sidecar 很重要，记录 state/action 名字、vision mode、depth noise、depth clip、action_format 等。policy play / export / eval 要靠它判断 10D 还是 9D。
+
+已经转换好的数据可以只更新 `loss.action_weight` 和统计信息，不重新编码视频：
+
+```bash
+conda run --no-capture-output -n b1z1_lerobot python \
+  high-level/dp/update_lerobot_keyframe_weights.py \
+  --raw_root <raw_root> \
+  --dataset_root <lerobot_dataset_root> \
+  --weight 8 \
+  --radius 3
+```
 
 ## 11. LeRobot ACT 训练命令
 
