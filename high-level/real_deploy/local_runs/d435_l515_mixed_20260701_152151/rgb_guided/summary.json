@@ -1,0 +1,59 @@
+{
+  "mode": "rgb_guided",
+  "duration_s": 12.000149945029989,
+  "read_count": 360,
+  "read_hz": 29.999625142109036,
+  "worker_hz": {
+    "D435": 29.999625142109036,
+    "L515": 29.999625142109036
+  },
+  "effective_hz": 29.999625142109036,
+  "rs_filters": true,
+  "cameras": [
+    {
+      "name": "wrist",
+      "model": "D435",
+      "serial": "261222075130",
+      "color_width": 640,
+      "color_height": 480,
+      "align_target": "color"
+    },
+    {
+      "name": "front",
+      "model": "L515",
+      "serial": "f1381957",
+      "color_width": 960,
+      "color_height": 540,
+      "align_target": "depth"
+    }
+  ],
+  "startup": [
+    {
+      "type": "started",
+      "name": "wrist",
+      "model": "D435",
+      "serial": "261222075130",
+      "firmware": "5.15.1.55",
+      "align_target": "color",
+      "color_profile": [
+        640,
+        480,
+        30
+      ]
+    },
+    {
+      "type": "started",
+      "name": "front",
+      "model": "L515",
+      "serial": "f1381957",
+      "firmware": "1.5.4.1",
+      "align_target": "depth",
+      "color_profile": [
+        960,
+        540,
+        30
+      ]
+    }
+  ],
+  "errors": []
+}

@@ -100,6 +100,16 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
     --wandb.project=door-act \
     --wandb.disable_artifact=true
 
+# Optional ACT front/wrist camera input gating (disabled by default).
+# Add these flags to the ACT command above to enable it:
+#
+#   --policy.camera_input_gating=true \
+#   --policy.camera_input_gating_hidden_dim=128 \
+#   --policy.camera_input_gating_temperature=1.0 \
+#
+# The final gating layer is zero-initialized and uses 2*softmax, so training
+# starts at g_front=g_wrist=1. W&B logs camera_gate_front/camera_gate_wrist.
+
 
 ## 2b. ACT + frozen DINOv2-base, official LeRobot train.py
 #

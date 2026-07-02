@@ -1033,6 +1033,11 @@ def make_lerobot_act_config(
     defm_depth_far: float = 2.0,
     defm_pretrained: bool = True,
     defm_pretrained_path: Optional[str] = None,
+    camera_input_gating: bool = False,
+    camera_input_gating_hidden_dim: int = 128,
+    camera_input_gating_temperature: float = 1.0,
+    camera_input_gating_front_key: Optional[str] = None,
+    camera_input_gating_wrist_key: Optional[str] = None,
     pre_norm: bool = False,
     dim_model: int = 512,
     n_heads: int = 8,
@@ -1106,6 +1111,11 @@ def make_lerobot_act_config(
         defm_depth_far=float(defm_depth_far),
         defm_pretrained=bool(defm_pretrained),
         defm_pretrained_path=defm_pretrained_path,
+        camera_input_gating=bool(camera_input_gating),
+        camera_input_gating_hidden_dim=int(camera_input_gating_hidden_dim),
+        camera_input_gating_temperature=float(camera_input_gating_temperature),
+        camera_input_gating_front_key=camera_input_gating_front_key,
+        camera_input_gating_wrist_key=camera_input_gating_wrist_key,
         pre_norm=bool(pre_norm),
         dim_model=int(dim_model),
         n_heads=int(n_heads),
@@ -1569,6 +1579,7 @@ class LeRobotActDoorPolicyBackend:
             self.image_keys,
             self.device,
         )
+        self.last_camera_gates: Optional[np.ndarray] = None
 
     @property
     def obs_horizon(self) -> int:
@@ -1675,6 +1686,11 @@ class LeRobotActDoorPolicyBackend:
             defm_depth_far=float(cfg.get("defm_depth_far", 2.0)),
             defm_pretrained=bool(cfg.get("defm_pretrained", True)),
             defm_pretrained_path=cfg.get("defm_pretrained_path"),
+            camera_input_gating=bool(cfg.get("camera_input_gating", False)),
+            camera_input_gating_hidden_dim=int(cfg.get("camera_input_gating_hidden_dim", 128)),
+            camera_input_gating_temperature=float(cfg.get("camera_input_gating_temperature", 1.0)),
+            camera_input_gating_front_key=cfg.get("camera_input_gating_front_key"),
+            camera_input_gating_wrist_key=cfg.get("camera_input_gating_wrist_key"),
             pre_norm=bool(cfg.get("pre_norm", False)),
             dim_model=int(cfg.get("dim_model", 512)),
             n_heads=int(cfg.get("n_heads", 8)),
@@ -1729,6 +1745,8 @@ class LeRobotActDoorPolicyBackend:
         batch_norm = self.normalizer.normalize_batch(batch, include_action=False)
         self.policy.eval()
         actions = self.policy.predict_action_chunk(batch_norm)
+        gates = getattr(getattr(self.policy, "model", None), "_last_camera_gates", None)
+        self.last_camera_gates = None if gates is None else gates.detach().cpu().float().numpy()
         return self.normalizer.denormalize_action(actions)
 
     def metadata(self, extra_config: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
@@ -1762,6 +1780,11 @@ class LeRobotActDoorPolicyBackend:
             "defm_depth_far": float(self.config.defm_depth_far),
             "defm_pretrained": bool(self.config.defm_pretrained),
             "defm_pretrained_path": self.config.defm_pretrained_path,
+            "camera_input_gating": bool(self.config.camera_input_gating),
+            "camera_input_gating_hidden_dim": int(self.config.camera_input_gating_hidden_dim),
+            "camera_input_gating_temperature": float(self.config.camera_input_gating_temperature),
+            "camera_input_gating_front_key": self.config.camera_input_gating_front_key,
+            "camera_input_gating_wrist_key": self.config.camera_input_gating_wrist_key,
             "pre_norm": bool(self.config.pre_norm),
             "dim_model": int(self.config.dim_model),
             "n_heads": int(self.config.n_heads),
@@ -2258,6 +2281,8 @@ class DoorPolicyController:
         self.action_queue: deque = deque()
         self.multi_obs_buffers: Dict[int, deque] = {}
         self.multi_action_queues: Dict[int, deque] = {}
+        self.multi_camera_gates: Dict[int, np.ndarray] = {}
+        self.last_camera_gates: Optional[np.ndarray] = None
         self.sidecar_config = dict(getattr(self.backend, "sidecar_config", {}) or {})
         self.state_feature_names = list(self.sidecar_config.get("state") or self.config.get("state_feature_names", []))
         self.state_sanitize = self.sidecar_config.get("state_sanitize") or self.config.get("state_sanitize")
@@ -2271,16 +2296,21 @@ class DoorPolicyController:
         self.action_queue.clear()
         self.multi_obs_buffers.clear()
         self.multi_action_queues.clear()
+        self.multi_camera_gates.clear()
+        self.last_camera_gates = None
 
     def reset_envs(self, env_ids: Optional[Sequence[int]] = None) -> None:
         if env_ids is None:
             self.multi_obs_buffers.clear()
             self.multi_action_queues.clear()
+            self.multi_camera_gates.clear()
+            self.last_camera_gates = None
             return
         for env_id in env_ids:
             env_id = int(env_id)
             self.multi_obs_buffers.pop(env_id, None)
             self.multi_action_queues.pop(env_id, None)
+            self.multi_camera_gates.pop(env_id, None)
 
     def _ensure_env_buffers(self, env_id: int) -> Tuple[deque, deque]:
         env_id = int(env_id)
@@ -2446,20 +2476,41 @@ class DoorPolicyController:
                 raise RuntimeError(f"Observation buffer for env {env_id} is not initialized.")
             windows.append(list(obs_buffer))
         actions = self.predict_action_chunks_from_windows(windows, noise=noise)
+        gates = getattr(self.backend, "last_camera_gates", None)
+        self.last_camera_gates = None if gates is None else np.asarray(gates, dtype=np.float32).copy()
         actions_np = actions.detach().cpu().numpy().astype(np.float32)
         for row_idx, env_id in enumerate(env_ids):
             _, action_queue = self._ensure_env_buffers(env_id)
             action_queue.clear()
             for row in actions_np[row_idx, : self.action_horizon]:
                 action_queue.append(row)
+            if gates is None:
+                self.multi_camera_gates.pop(int(env_id), None)
+            else:
+                self.multi_camera_gates[int(env_id)] = np.asarray(gates[row_idx], dtype=np.float32).copy()
 
     @torch.no_grad()
     def sample_action_chunk(self, noise: Optional[torch.Tensor] = None) -> None:
         actions = self.predict_action_chunks_from_batch(self._current_batch(), noise=noise)
+        gates = getattr(self.backend, "last_camera_gates", None)
+        self.last_camera_gates = None if gates is None else np.asarray(gates, dtype=np.float32).copy()
         actions_np = actions[0].detach().cpu().numpy().astype(np.float32)
         self.action_queue.clear()
         for row in actions_np[: self.action_horizon]:
             self.action_queue.append(row)
+
+    def get_last_camera_gates_for_env(self, env_id: Optional[int] = None) -> Optional[np.ndarray]:
+        """Return the most recent [front, wrist] camera gates for a policy-controlled env.
+
+        Gates are produced only by ACT checkpoints trained with camera_input_gating=True.
+        They update when a new action chunk is sampled; queued actions reuse the same gates.
+        """
+        if env_id is None:
+            if self.last_camera_gates is None or len(self.last_camera_gates) == 0:
+                return None
+            return np.asarray(self.last_camera_gates[0], dtype=np.float32).copy()
+        value = self.multi_camera_gates.get(int(env_id))
+        return None if value is None else np.asarray(value, dtype=np.float32).copy()
 
     def act(
         self,
@@ -2616,6 +2667,8 @@ class DoorPolicySubprocessController:
         except Exception:
             self.close()
             raise
+        self.multi_camera_gates: Dict[int, np.ndarray] = {}
+        self.last_camera_gates: Optional[np.ndarray] = None
         self._set_metadata(response["metadata"])
         self.obs_buffer = _RemoteObsBufferProxy(self)
         self.action_queue = _RemoteActionQueueProxy(self)
@@ -2647,9 +2700,17 @@ class DoorPolicySubprocessController:
 
     def reset(self) -> None:
         self._request({"cmd": "reset"})
+        self.multi_camera_gates.clear()
+        self.last_camera_gates = None
 
     def reset_envs(self, env_ids: Optional[Sequence[int]] = None) -> None:
         self._request({"cmd": "reset_envs", "env_ids": None if env_ids is None else [int(x) for x in env_ids]})
+        if env_ids is None:
+            self.multi_camera_gates.clear()
+            self.last_camera_gates = None
+        else:
+            for env_id in env_ids:
+                self.multi_camera_gates.pop(int(env_id), None)
 
     def append_observation(
         self,
@@ -2696,12 +2757,14 @@ class DoorPolicySubprocessController:
         )
 
     def sample_action_chunk(self, noise: Optional[torch.Tensor] = None) -> None:
-        self._request(
+        response = self._request(
             {
                 "cmd": "sample_action_chunk",
                 "noise": None if noise is None else noise.detach().cpu(),
             }
         )
+        gates = response.get("camera_gates")
+        self.last_camera_gates = None if gates is None else np.asarray(gates, dtype=np.float32)
 
     def act(
         self,
@@ -2723,6 +2786,8 @@ class DoorPolicySubprocessController:
                 else np.asarray(front_masked_depth_rgb),
             }
         )
+        gates = response.get("camera_gates")
+        self.last_camera_gates = None if gates is None else np.asarray(gates, dtype=np.float32).reshape(1, -1)
         return np.asarray(response["action"], dtype=np.float32)
 
     def act_batch(
@@ -2747,7 +2812,23 @@ class DoorPolicySubprocessController:
                 else np.asarray(front_masked_depth_rgbs),
             }
         )
+        gates = response.get("camera_gates")
+        self.last_camera_gates = None if gates is None else np.asarray(gates, dtype=np.float32)
+        if gates is None:
+            for env_id in env_ids:
+                self.multi_camera_gates.pop(int(env_id), None)
+        else:
+            for row_idx, env_id in enumerate(env_ids):
+                self.multi_camera_gates[int(env_id)] = np.asarray(gates[row_idx], dtype=np.float32).copy()
         return np.asarray(response["actions"], dtype=np.float32)
+
+    def get_last_camera_gates_for_env(self, env_id: Optional[int] = None) -> Optional[np.ndarray]:
+        if env_id is None:
+            if self.last_camera_gates is None or len(self.last_camera_gates) == 0:
+                return None
+            return np.asarray(self.last_camera_gates[0], dtype=np.float32).copy()
+        value = self.multi_camera_gates.get(int(env_id))
+        return None if value is None else np.asarray(value, dtype=np.float32).copy()
 
     def close(self) -> None:
         proc = getattr(self, "_proc", None)

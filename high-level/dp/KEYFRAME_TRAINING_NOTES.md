@@ -9,7 +9,8 @@
 因此现在做两件事：
 
 1. 在 raw episode 里提取关键帧，并给关键帧附近窗口写入 `action_loss_weight`。
-2. ACT 训练时可以额外提高关键帧附近窗口的采样概率。
+2. ACT 训练时可以让 chunk 内靠近关键帧的 action timestep 获得更高 loss 权重。
+3. ACT 训练时可以额外提高关键帧附近窗口的采样概率。
 
 ## 2. 关键帧来源
 
@@ -294,17 +295,19 @@ LeRobot ACT 已经支持读取：
 loss.action_weight
 ```
 
-现在 action loss 是 chunk-level weighted mean：
+raw/LeRobot 里 `loss.action_weight` 是每帧一个 scalar。训练 ACT 时，dataset 会像 `action` 一样按未来 horizon 取一个 chunk：
 
 ```text
-L_action = Σ_t w_t * l_t / Σ_t w_t
+action[t : t + H]
+loss.action_weight[t : t + H]
 ```
 
-其中：
+因此现在 action loss 是 per-timestep weighted mean：
 
 ```text
-l_t = 以当前帧 t 为起点的整个 action chunk 的平均 L1 loss
-w_t = loss.action_weight[t]
+L_action =
+  Σ_{b,h,d} w_{b,h} valid_{b,h} |a_hat_{b,h,d} - a_{b,h,d}|
+  / Σ_{b,h,d} w_{b,h} valid_{b,h}
 ```
 
 默认：
@@ -314,9 +317,19 @@ keyframe_loss_weight = 8.0
 keyframe_loss_radius = 3
 ```
 
-也就是距离关键帧 `<= 3 frames` 的 chunk 起点帧，整段 action chunk loss 会乘以 8。
+也就是如果 `t + h` 这一帧距离关键帧 `<= 3 frames`，那么当前 observation 预测出来的 100-step action chunk 里第 `h` 个 action loss 会乘以 8；其他 timestep 仍为 1。
+
+这和旧实现不同：旧实现是只看 chunk 起点 `t`，如果起点在关键帧窗口里，整段 100-step chunk 都乘同一个权重。现在不再用一个 scalar 权重乘整个 chunk。
 
 注意：当前权重只加在 action L1 loss 上，KL loss 仍然普通平均。
+
+兼容性：
+
+```text
+loss.action_weight shape (B, H) / (B, H, 1)  -> per-timestep 权重
+loss.action_weight shape (B,) / (B, 1)       -> 旧 scalar 权重，broadcast 到整段 chunk
+没有 loss.action_weight                     -> 原始普通平均 L1
+```
 
 ## 9. Keyframe sampler
 

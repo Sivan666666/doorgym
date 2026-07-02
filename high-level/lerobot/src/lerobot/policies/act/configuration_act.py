@@ -59,6 +59,14 @@ class ACTConfig(PreTrainedConfig):
             `None` means no pretrained weights.
         replace_final_stride_with_dilation: Whether to replace the ResNet's final 2x2 stride with a dilated
             convolution.
+        camera_input_gating: Enable learned front/wrist camera gating between the CNN and transformer encoder.
+            Disabled by default to preserve the original ACT architecture and checkpoint behavior.
+        camera_input_gating_hidden_dim: Hidden dimension of the camera-gating MLP.
+        camera_input_gating_temperature: Softmax temperature for the two camera gates.
+        camera_input_gating_front_key: Optional exact front-camera feature key. If unset, the key containing
+            "front" is selected automatically.
+        camera_input_gating_wrist_key: Optional exact wrist-camera feature key. If unset, the key containing
+            "wrist" is selected automatically.
         pre_norm: Whether to use "pre-norm" in the transformer blocks.
         dim_model: The transformer blocks' main hidden dimension.
         n_heads: The number of heads to use in the transformer blocks' multi-head attention.
@@ -110,6 +118,13 @@ class ACTConfig(PreTrainedConfig):
     defm_depth_far: float = 2.0
     defm_pretrained: bool = True
     defm_pretrained_path: str | None = None
+    # Optional learned front/wrist input gating. The gate is initialized to
+    # [1, 1], so enabling it starts from the original ACT visual-token path.
+    camera_input_gating: bool = False
+    camera_input_gating_hidden_dim: int = 128
+    camera_input_gating_temperature: float = 1.0
+    camera_input_gating_front_key: str | None = None
+    camera_input_gating_wrist_key: str | None = None
     # Transformer layers.
     pre_norm: bool = False
     dim_model: int = 512
@@ -195,6 +210,16 @@ class ACTConfig(PreTrainedConfig):
                     "`defm_depth_far` must be greater than `defm_depth_lower`. "
                     f"Got far={self.defm_depth_far}, lower={self.defm_depth_lower}."
                 )
+        if self.camera_input_gating_hidden_dim <= 0:
+            raise ValueError(
+                "`camera_input_gating_hidden_dim` must be positive. "
+                f"Got {self.camera_input_gating_hidden_dim}."
+            )
+        if self.camera_input_gating_temperature <= 0.0:
+            raise ValueError(
+                "`camera_input_gating_temperature` must be positive. "
+                f"Got {self.camera_input_gating_temperature}."
+            )
         if self.temporal_ensemble_coeff is not None and self.n_action_steps > 1:
             raise NotImplementedError(
                 "`n_action_steps` must be 1 when using temporal ensembling. This is "

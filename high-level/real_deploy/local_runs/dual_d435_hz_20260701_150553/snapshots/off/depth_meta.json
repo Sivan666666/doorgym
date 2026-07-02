@@ -1,0 +1,132 @@
+{
+  "wrist_ts": 1782889805.1420093,
+  "front_ts": 1782889805.135201,
+  "dt_ms": 9.545087814331055,
+  "device_timestamp_dt_ms": 6.808280944824219,
+  "backend": "realsense_async",
+  "worker_mode": "process",
+  "single_duplicate": false,
+  "wrist": {
+    "serial": "261222075130",
+    "name": "wrist",
+    "timestamp_s": 1782889805.1420093,
+    "arrival_s": 1782889805.1861653,
+    "age_ms": 7.833719253540039,
+    "frame_count": 118,
+    "depth_scale": 0.0010000000474974513,
+    "filters": true,
+    "depth_inpaint_mode": "off",
+    "depth_gaussian_blur": {
+      "enabled": false,
+      "ksize": 0,
+      "sigma": 0.0
+    },
+    "spatial_magnitude": 2,
+    "worker_mode": "process",
+    "align_depth_to": "color",
+    "crop": {
+      "left": 0,
+      "right": 0,
+      "top": 0,
+      "bottom": 0
+    },
+    "crop_shape_hw": [
+      480,
+      640
+    ],
+    "output_shape_hw": [
+      480,
+      640
+    ],
+    "depth_clip_m": [
+      0.2,
+      1.5
+    ],
+    "device": {
+      "name": "Intel RealSense D435I",
+      "serial": "261222075130",
+      "firmware": "5.15.1.55",
+      "usb": "3.2",
+      "physical_port": "/sys/devices/pci0000:00/0000:00:14.0/usb2/2-3/2-3.2/2-3.2:1.0/video4linux/video0",
+      "product_line": "D400"
+    },
+    "depth_min_m": 0.1850000023841858,
+    "depth_max_m": 0.9360000491142273,
+    "depth_mean_m": 0.7194291353225708,
+    "opencv_k": null,
+    "error": ""
+  },
+  "front": {
+    "serial": "261222075566",
+    "name": "front",
+    "timestamp_s": 1782889805.135201,
+    "arrival_s": 1782889805.1766202,
+    "age_ms": 18.651485443115234,
+    "frame_count": 61,
+    "depth_scale": 0.0010000000474974513,
+    "filters": true,
+    "depth_inpaint_mode": "off",
+    "depth_gaussian_blur": {
+      "enabled": false,
+      "ksize": 0,
+      "sigma": 0.0
+    },
+    "spatial_magnitude": 2,
+    "worker_mode": "process",
+    "align_depth_to": "color",
+    "crop": {
+      "left": 0,
+      "right": 0,
+      "top": 0,
+      "bottom": 0
+    },
+    "crop_shape_hw": [
+      480,
+      640
+    ],
+    "output_shape_hw": [
+      480,
+      640
+    ],
+    "depth_clip_m": [
+      0.2,
+      1.5
+    ],
+    "device": {
+      "name": "Intel RealSense D435I",
+      "serial": "261222075566",
+      "firmware": "5.15.1.55",
+      "usb": "3.2",
+      "physical_port": "/sys/devices/pci0000:00/0000:00:14.0/usb2/2-3/2-3.3/2-3.3:1.0/video4linux/video6",
+      "product_line": "D400"
+    },
+    "depth_min_m": 0.18300001323223114,
+    "depth_max_m": 4.534000396728516,
+    "depth_mean_m": 1.3730767965316772,
+    "opencv_k": null,
+    "error": ""
+  },
+  "resolution": [
+    640,
+    480
+  ],
+  "fps": 30,
+  "align_depth_to": "color",
+  "crop": {
+    "left": 0,
+    "right": 0,
+    "top": 0,
+    "bottom": 0
+  },
+  "depth_clip_m": [
+    0.2,
+    1.5
+  ],
+  "spatial_magnitude": 2,
+  "depth_inpaint_mode": "off",
+  "depth_gaussian_blur": {
+    "enabled": false,
+    "ksize": 0,
+    "sigma": 0.0
+  }
+}

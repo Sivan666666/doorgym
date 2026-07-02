@@ -1,0 +1,6 @@
+mode	read_hz	wrist_hz	front_hz	rs_filters	spatial_magnitude
+off	30.000	26.166	24.500	true	2
+realsense	30.000	25.500	24.000	true	2
+rgb_guided	23.334	26.323	24.247	true	2
+opencv_k	30.000	15.333	9.167	true	2
+opencv_k_no_rs	30.000	19.333	16.833	false	0

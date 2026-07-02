@@ -1,0 +1,7 @@
+mode	read_hz	D435_hz	L515_hz	effective_hz	rs_filters
+off	30.000	30.000	30.083	30.000	true
+realsense	30.000	29.916	30.000	29.916	true
+rgb_guided	30.000	30.000	30.000	30.000	true
+opencv_k	30.000	29.917	6.250	6.250	true
+opencv_k_no_rs	30.000	29.917	6.750	6.750	false
+off_no_rs	30.000	29.916	30.000	29.916	false

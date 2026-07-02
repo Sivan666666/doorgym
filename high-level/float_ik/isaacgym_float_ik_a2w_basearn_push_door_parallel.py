@@ -519,6 +519,13 @@ def parse_args():
             {"name": "--dp_log_path", "type": str, "default": ""},
             {"name": "--dp_log_interval", "type": int, "default": 25},
             {"name": "--no_dp_print", "dest": "dp_print", "action": "store_false", "default": True},
+            {
+                "name": "--dp_gripper_latch",
+                "action": "store_true",
+                "help": "Runtime-only diagnostic: after the DP gripper command closes past a threshold, prevent reopen until the door is open enough.",
+            },
+            {"name": "--dp_gripper_latch_close_threshold", "type": float, "default": -0.45},
+            {"name": "--dp_gripper_latch_release_door_deg", "type": float, "default": 75.0},
             {"name": "--keyframe_loss_weight", "type": float, "default": 8.0},
             {"name": "--keyframe_loss_radius", "type": int, "default": 3},
             {"name": "--no_keyframe_loss_weights", "action": "store_true"},
@@ -761,8 +768,44 @@ class ParallelEnvState:
     last_target_pos: object = None
     last_target_quat: object = None
     last_gripper: float = 0.0
+    dp_gripper_latch_active: bool = False
+    dp_gripper_latch_value: object = None
     base_door_collision_detected: bool = False
     base_door_collision_log_step: int = -10**9
+
+
+def apply_dp_gripper_latch(st: ParallelEnvState, gripper: float, door_pos) -> float:
+    """Prevent a DP-controlled gripper from reopening after it has closed.
+
+    This is a runtime-only diagnostic/safety shim.  It is disabled by default and
+    only applies when --dp_gripper_latch is set.  The gripper convention here is
+    open ~= -1.57 and more closed is larger, so a latched command is the max of
+    all post-close commands until the door has opened enough to release it.
+    """
+    if not bool(getattr(st.args, "dp_gripper_latch", False)):
+        return float(gripper)
+
+    release_deg = float(getattr(st.args, "dp_gripper_latch_release_door_deg", 75.0))
+    door_deg = 0.0
+    if door_pos is not None:
+        arr = np.asarray(door_pos, dtype=np.float32).reshape(-1)
+        if arr.size > 0:
+            door_deg = abs(float(arr[0])) * 180.0 / math.pi
+    if door_deg >= release_deg:
+        st.dp_gripper_latch_active = False
+        st.dp_gripper_latch_value = None
+        return float(gripper)
+
+    threshold = float(getattr(st.args, "dp_gripper_latch_close_threshold", -0.45))
+    value = float(gripper)
+    if value >= threshold or bool(st.dp_gripper_latch_active):
+        previous = st.dp_gripper_latch_value
+        latched = value if previous is None else max(float(previous), value)
+        if latched >= threshold:
+            st.dp_gripper_latch_active = True
+            st.dp_gripper_latch_value = float(latched)
+            return float(latched)
+    return value
 
 
 clone_door_runtime = dc.clone_door_runtime
@@ -2222,6 +2265,10 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                     st.last_dp_ee_pos = None if ee_pos is None else np.asarray(ee_pos, dtype=np.float32).copy()
                     st.last_dp_ee_quat = None if ee_quat is None else np.asarray(ee_quat, dtype=np.float32).copy()
                     st.last_dp_handle_goal = None if handle_goal is None else np.asarray(handle_goal, dtype=np.float32).copy()
+                    camera_gates = dp_policy_input.get("camera_gates")
+                    st.last_dp_camera_gates = (
+                        None if camera_gates is None else np.asarray(camera_gates, dtype=np.float32).copy()
+                    )
                 else:
                     base_xy_current = np.asarray(st.traj.get("base_xy", st.base_start), dtype=np.float32)
                     yaw_current = float(st.traj.get("yaw", st.yaw_start))
@@ -2230,6 +2277,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                     ee_quat = getattr(st, "last_dp_ee_quat", None)
                     dp_state = getattr(st, "last_dp_state", None)
                     dp_action = np.asarray(st.last_dp_action, dtype=np.float32).copy()
+                    camera_gates = getattr(st, "last_dp_camera_gates", None)
                 if dp_policy_uses_joint_action:
                     base_xy, yaw, joint_targets = apply_float_dp_joint_action9(
                         dp_action,
@@ -2280,6 +2328,14 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                 ee_pos = None
                 ee_quat = None
                 door_pos_for_log = None
+            if dp_action is not None:
+                gripper = apply_dp_gripper_latch(st, gripper, door_pos_for_log)
+                if bool(dp_policy_uses_joint_action) and gripper_idx is not None:
+                    st.dof_positions[gripper_idx] = np.clip(
+                        float(gripper),
+                        st.ik_state.lower[gripper_idx].item(),
+                        st.ik_state.upper[gripper_idx].item(),
+                    )
             st.last_phase = phase
             st.dp_joint_action_active = bool(dp_action is not None and dp_policy_uses_joint_action)
             st.last_handle_goal = handle_goal
@@ -2297,6 +2353,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                     door_pos_for_log,
                     phase,
                     action_names=dp_policy_action_names or ACTION_NAMES,
+                    camera_gates=camera_gates,
                 )
                 if dp_logger is not None:
                     dp_logger.write(dp_record)

@@ -3034,7 +3034,18 @@ def _round_list(value, precision=5):
     return np.round(np.asarray(value, dtype=np.float64), precision).tolist()
 
 
-def make_float_dp_policy_log_record(step, st, dp_action, dp_state, ee_pos, ee_quat, door_pos, phase, action_names=None):
+def make_float_dp_policy_log_record(
+    step,
+    st,
+    dp_action,
+    dp_state,
+    ee_pos,
+    ee_quat,
+    door_pos,
+    phase,
+    action_names=None,
+    camera_gates=None,
+):
     action_frame = str(getattr(st, "dp_action_frame", "base"))
     action_names = list(action_names or [])
     action_mode = float_dp_action_mode_from_feature_names(action_names)
@@ -3058,7 +3069,7 @@ def make_float_dp_policy_log_record(step, st, dp_action, dp_state, ee_pos, ee_qu
             "actual_quat": _round_list(ee_quat),
         }
         joint_targets = []
-    return {
+    record = {
         "step": int(step),
         "controlled_env_id": int(st.index),
         "num_envs": int(st.args.num_envs),
@@ -3077,6 +3088,15 @@ def make_float_dp_policy_log_record(step, st, dp_action, dp_state, ee_pos, ee_qu
         "gripper": {"target": float(st.last_gripper)},
         "door": {"dof": _round_list(door_pos) if door_pos is not None else []},
     }
+    if camera_gates is not None:
+        gates = np.asarray(camera_gates, dtype=np.float32).reshape(-1)
+        if gates.size >= 2:
+            record["camera_gates"] = {
+                "front": float(gates[0]),
+                "wrist": float(gates[1]),
+                "sum": float(gates[0] + gates[1]),
+            }
+    return record
 
 
 def print_float_dp_policy_log_record(record):
@@ -3582,6 +3602,10 @@ def collect_float_dp_policy_actions(gym, sim, env_states, dof_names, gripper_idx
         )
         for env_id, dp_action in zip(batch_env_ids, dp_actions):
             dp_actions_by_env[int(env_id)] = np.asarray(dp_action, dtype=np.float32)
+            if hasattr(dp_controller, "get_last_camera_gates_for_env"):
+                dp_policy_inputs_by_env[int(env_id)]["camera_gates"] = dp_controller.get_last_camera_gates_for_env(
+                    int(env_id)
+                )
     return dp_policy_inputs_by_env, dp_actions_by_env
 
 

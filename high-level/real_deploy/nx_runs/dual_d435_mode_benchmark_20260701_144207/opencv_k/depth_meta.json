@@ -1,0 +1,176 @@
+{
+  "wrist_ts": 1782888236.8446891,
+  "front_ts": 1782888236.8183036,
+  "dt_ms": 0.8389949798583984,
+  "device_timestamp_dt_ms": 26.38554573059082,
+  "backend": "realsense_async",
+  "worker_mode": "process",
+  "single_duplicate": false,
+  "wrist": {
+    "serial": "261222075130",
+    "name": "wrist",
+    "timestamp_s": 1782888236.8446891,
+    "arrival_s": 1782888236.940252,
+    "age_ms": 58.341026306152344,
+    "frame_count": 55,
+    "depth_scale": 0.0010000000474974513,
+    "filters": true,
+    "depth_inpaint_mode": "opencv_k",
+    "depth_gaussian_blur": {
+      "enabled": false,
+      "ksize": 0,
+      "sigma": 0.0
+    },
+    "spatial_magnitude": 2,
+    "worker_mode": "process",
+    "align_depth_to": "color",
+    "crop": {
+      "left": 0,
+      "right": 0,
+      "top": 0,
+      "bottom": 0
+    },
+    "crop_shape_hw": [
+      480,
+      640
+    ],
+    "output_shape_hw": [
+      480,
+      640
+    ],
+    "depth_clip_m": [
+      0.2,
+      1.5
+    ],
+    "device": {
+      "name": "Intel RealSense D435I",
+      "serial": "261222075130",
+      "firmware": "5.15.1.55",
+      "usb": "3.2",
+      "physical_port": "/sys/devices/platform/bus@0/3610000.usb/usb2/2-1/2-1.2/2-1.2:1.0/video4linux/video6",
+      "product_line": "D400"
+    },
+    "depth_min_m": 0.1850000023841858,
+    "depth_max_m": 1.5630000829696655,
+    "depth_mean_m": 1.2154039144515991,
+    "opencv_k": {
+      "camera": "wrist",
+      "fringe_px": 10,
+      "black_px": 56858,
+      "white_px": 25892,
+      "black_selected_px": 328,
+      "fringe_added_px": 14279,
+      "white_selected_px": 0,
+      "combined_mask_px": 14607,
+      "changed_px": 10594,
+      "process_scale": 1.0,
+      "process_shape_hw": [
+        480,
+        640
+      ],
+      "fringe_px_fullres": 10,
+      "fringe_px_process": 10,
+      "gaussian_blur": {
+        "enabled": false,
+        "ksize": 0,
+        "sigma": null
+      }
+    },
+    "error": ""
+  },
+  "front": {
+    "serial": "261222075566",
+    "name": "front",
+    "timestamp_s": 1782888236.8183036,
+    "arrival_s": 1782888236.941091,
+    "age_ms": 61.40017509460449,
+    "frame_count": 18,
+    "depth_scale": 0.0010000000474974513,
+    "filters": true,
+    "depth_inpaint_mode": "opencv_k",
+    "depth_gaussian_blur": {
+      "enabled": false,
+      "ksize": 0,
+      "sigma": 0.0
+    },
+    "spatial_magnitude": 2,
+    "worker_mode": "process",
+    "align_depth_to": "color",
+    "crop": {
+      "left": 0,
+      "right": 0,
+      "top": 0,
+      "bottom": 0
+    },
+    "crop_shape_hw": [
+      480,
+      640
+    ],
+    "output_shape_hw": [
+      480,
+      640
+    ],
+    "depth_clip_m": [
+      0.2,
+      1.5
+    ],
+    "device": {
+      "name": "Intel RealSense D435I",
+      "serial": "261222075566",
+      "firmware": "5.15.1.55",
+      "usb": "3.2",
+      "physical_port": "/sys/devices/platform/bus@0/3610000.usb/usb2/2-1/2-1.1/2-1.1:1.0/video4linux/video0",
+      "product_line": "D400"
+    },
+    "depth_min_m": 0.16500000655651093,
+    "depth_max_m": 4.604000091552734,
+    "depth_mean_m": 3.0784995555877686,
+    "opencv_k": {
+      "camera": "front",
+      "fringe_px": 40,
+      "black_px": 23164,
+      "white_px": 283916,
+      "black_selected_px": 5306,
+      "fringe_added_px": 17858,
+      "white_selected_px": 0,
+      "combined_mask_px": 23164,
+      "changed_px": 23164,
+      "process_scale": 1.0,
+      "process_shape_hw": [
+        480,
+        640
+      ],
+      "fringe_px_fullres": 40,
+      "fringe_px_process": 40,
+      "gaussian_blur": {
+        "enabled": false,
+        "ksize": 0,
+        "sigma": null
+      }
+    },
+    "error": ""
+  },
+  "resolution": [
+    640,
+    480
+  ],
+  "fps": 30,
+  "align_depth_to": "color",
+  "crop": {
+    "left": 0,
+    "right": 0,
+    "top": 0,
+    "bottom": 0
+  },
+  "depth_clip_m": [
+    0.2,
+    1.5
+  ],
+  "spatial_magnitude": 2,
+  "depth_inpaint_mode": "opencv_k",
+  "depth_gaussian_blur": {
+    "enabled": false,
+    "ksize": 0,
+    "sigma": 0.0
+  }
+}

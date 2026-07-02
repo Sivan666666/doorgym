@@ -373,23 +373,36 @@ class ACTPolicy(PreTrainedPolicy):
         actions_hat, (mu_hat, log_sigma_x2_hat) = self.model(batch)
 
         valid = ~batch["action_is_pad"].unsqueeze(-1)
-        l1_per_elem = F.l1_loss(batch[ACTION], actions_hat, reduction="none") * valid
-        valid_elem_count = valid.to(l1_per_elem.dtype).expand_as(l1_per_elem).sum(dim=(1, 2))
-        l1_per_sample = l1_per_elem.sum(dim=(1, 2)) / torch.clamp(valid_elem_count, min=1.0)
+        valid_f = valid.to(dtype=actions_hat.dtype)
+        l1_per_elem = F.l1_loss(batch[ACTION], actions_hat, reduction="none")
+        valid_elem_count = valid_f.expand_as(l1_per_elem).sum(dim=(1, 2))
+        l1_per_sample = (l1_per_elem * valid_f).sum(dim=(1, 2)) / torch.clamp(valid_elem_count, min=1.0)
         action_loss_weight = (
             batch.get("loss.action_weight") if bool(getattr(self.config, "use_action_loss_weight", True)) else None
         )
-        sample_weight = None
+        action_weight = None
         if action_loss_weight is not None:
-            action_loss_weight = action_loss_weight.to(device=l1_per_elem.device, dtype=l1_per_elem.dtype)
-            # Keyframe-consistent weighting follows L = Σ_t w_t l_t / Σ_t w_t,
-            # where l_t is the whole action-chunk loss anchored at frame t.
-            # If an old dataset ever provides a horizon-shaped weight, use the
-            # first timestep as the anchor weight.
-            sample_weight = action_loss_weight.reshape(action_loss_weight.shape[0], -1)[:, 0]
-            sample_weight = torch.clamp(sample_weight, min=0.0)
-            l1_loss = (l1_per_sample * sample_weight).sum() / torch.clamp(sample_weight.sum(), min=1.0)
-            mean_action_loss_weight = sample_weight.mean()
+            action_weight = self._action_loss_weight_to_timestep_weight(
+                action_loss_weight,
+                target_horizon=batch[ACTION].shape[1],
+                device=l1_per_elem.device,
+                dtype=l1_per_elem.dtype,
+            )
+            # Per-timestep keyframe-consistent weighting:
+            #   L = Σ_{b,h,d} w_{b,h} * valid_{b,h} * |a_hat - a|
+            #       / Σ_{b,h,d} w_{b,h} * valid_{b,h}
+            # New datasets provide w as (B, H, 1), aligned with the action chunk.
+            # Old datasets that provide (B, 1) still work by broadcasting the scalar
+            # anchor weight across the whole chunk.
+            weighted_valid = valid_f * action_weight
+            weighted_valid_elem = weighted_valid.expand_as(l1_per_elem)
+            weighted_elem_sum = (l1_per_elem * weighted_valid).sum(dim=(1, 2))
+            weighted_elem_count = weighted_valid_elem.sum(dim=(1, 2))
+            l1_per_sample = weighted_elem_sum / torch.clamp(weighted_elem_count, min=1.0)
+            l1_loss = weighted_elem_sum.sum() / torch.clamp(weighted_elem_count.sum(), min=1.0)
+            mean_action_loss_weight = (
+                (action_weight * valid_f).sum() / torch.clamp(valid_f.sum(), min=1.0)
+            )
         else:
             l1_loss = l1_per_sample.mean()
             mean_action_loss_weight = None
@@ -397,6 +410,9 @@ class ACTPolicy(PreTrainedPolicy):
         loss_dict = {"l1_loss": l1_loss.item()}
         if mean_action_loss_weight is not None:
             loss_dict["action_loss_weight_mean"] = float(mean_action_loss_weight.detach().cpu())
+        if self.model._last_camera_gates is not None:
+            loss_dict["camera_gate_front"] = float(self.model._last_camera_gates[:, 0].mean().cpu())
+            loss_dict["camera_gate_wrist"] = float(self.model._last_camera_gates[:, 1].mean().cpu())
         if self.config.use_vae:
             # Calculate Dₖₗ(latent_pdf || standard_normal). Note: After computing the KL-divergence for
             # each dimension independently, we sum over the latent dimension to get the total
@@ -406,13 +422,9 @@ class ACTPolicy(PreTrainedPolicy):
             mean_kld = kld_per_sample.mean()
             loss_dict["kld_loss"] = mean_kld.item()
             per_sample_loss = l1_per_sample + kld_per_sample * self.config.kl_weight
-            if sample_weight is not None:
-                per_sample_loss = per_sample_loss * sample_weight
             loss = l1_loss + mean_kld * self.config.kl_weight
         else:
             per_sample_loss = l1_per_sample
-            if sample_weight is not None:
-                per_sample_loss = per_sample_loss * sample_weight
             loss = l1_loss
 
         if reduction == "none":
@@ -420,6 +432,50 @@ class ACTPolicy(PreTrainedPolicy):
         if reduction != "mean":
             raise ValueError(f"Unsupported ACT loss reduction={reduction!r}; expected 'mean' or 'none'.")
         return loss, loss_dict
+
+    @staticmethod
+    def _action_loss_weight_to_timestep_weight(
+        action_loss_weight: Tensor,
+        *,
+        target_horizon: int,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> Tensor:
+        """Normalize action-loss weights to shape (B, H, 1).
+
+        Supported inputs:
+        - (B,) or (B, 1): legacy scalar anchor weight; broadcast to all H steps.
+        - (B, H): per-timestep chunk weights.
+        - (B, H, 1) or (B, H, D): per-timestep weights; D is reduced to its first channel.
+
+        The output is clamped to non-negative values because it is used as a loss
+        weight, not as a signed target.
+        """
+        weight = action_loss_weight.to(device=device, dtype=dtype)
+        batch_size = int(weight.shape[0])
+        horizon = int(target_horizon)
+
+        if weight.ndim == 1:
+            weight = weight.reshape(batch_size, 1, 1)
+        elif weight.ndim == 2:
+            if int(weight.shape[1]) == horizon:
+                weight = weight.unsqueeze(-1)
+            else:
+                weight = weight.reshape(batch_size, -1)[:, :1].reshape(batch_size, 1, 1)
+        else:
+            # Keep the first per-timestep weight channel.  If the horizon axis is
+            # not present, fall back to a scalar legacy weight.
+            if int(weight.shape[1]) == horizon:
+                weight = weight.reshape(batch_size, horizon, -1)[..., :1]
+            else:
+                weight = weight.reshape(batch_size, -1)[:, :1].reshape(batch_size, 1, 1)
+
+        if int(weight.shape[1]) == 1 and horizon != 1:
+            weight = weight.expand(batch_size, horizon, 1)
+        elif int(weight.shape[1]) != horizon:
+            weight = weight[:, :1].expand(batch_size, horizon, 1)
+
+        return torch.clamp(weight, min=0.0)
 
 
 class ACTTemporalEnsembler:
@@ -511,6 +567,55 @@ class ACTTemporalEnsembler:
             self.ensembled_actions_count[1:],
         )
         return action
+
+
+class ACTCameraInputGating(nn.Module):
+    """Predict identity-initialized front/wrist gates from visual features and robot state."""
+
+    def __init__(
+        self,
+        dim_model: int,
+        robot_state_dim: int,
+        hidden_dim: int,
+        temperature: float = 1.0,
+    ) -> None:
+        super().__init__()
+        self.temperature = float(temperature)
+        self.mlp = nn.Sequential(
+            nn.Linear(2 * int(dim_model) + int(robot_state_dim), int(hidden_dim)),
+            nn.GELU(),
+            nn.Linear(int(hidden_dim), 2),
+        )
+        # Zero logits give softmax([0, 0]) = [0.5, 0.5]. Multiplying by 2
+        # initializes both gates to exactly 1, preserving original ACT inputs.
+        final = self.mlp[-1]
+        nn.init.zeros_(final.weight)
+        nn.init.zeros_(final.bias)
+
+    def forward(
+        self,
+        front_features: Tensor,
+        wrist_features: Tensor,
+        robot_state: Tensor,
+    ) -> Tensor:
+        if front_features.ndim != 4 or wrist_features.ndim != 4:
+            raise ValueError(
+                "Camera gating expects projected feature maps shaped (batch, channels, height, width)."
+            )
+        if front_features.shape[:2] != wrist_features.shape[:2]:
+            raise ValueError(
+                "Front and wrist projected feature maps must have matching batch/channel dimensions. "
+                f"Got front={tuple(front_features.shape)} and wrist={tuple(wrist_features.shape)}."
+            )
+        batch_size = front_features.shape[0]
+        robot_state = robot_state.to(
+            device=front_features.device,
+            dtype=front_features.dtype,
+        ).reshape(batch_size, -1)
+        front_global = F.adaptive_avg_pool2d(front_features, output_size=1).flatten(1)
+        wrist_global = F.adaptive_avg_pool2d(wrist_features, output_size=1).flatten(1)
+        logits = self.mlp(torch.cat([front_global, wrist_global, robot_state], dim=-1))
+        return 2.0 * torch.softmax(logits / self.temperature, dim=-1)
 
 
 class ACT(nn.Module):
@@ -655,12 +760,58 @@ class ACT(nn.Module):
         self.action_head = nn.Linear(config.dim_model, self.config.action_feature.shape[0])
 
         self._reset_parameters()
+        self._last_camera_gates: Tensor | None = None
+        if self.config.camera_input_gating:
+            self._init_camera_input_gating()
 
     def _reset_parameters(self):
         """Xavier-uniform initialization of the transformer parameters as in the original code."""
         for p in chain(self.encoder.parameters(), self.decoder.parameters()):
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
+
+    def _init_camera_input_gating(self) -> None:
+        image_keys = list(self.config.image_features)
+        if len(image_keys) != 2:
+            raise ValueError(
+                "ACT camera input gating currently requires exactly two image features "
+                f"(front and wrist); got {image_keys}."
+            )
+        if self.config.robot_state_feature is None:
+            raise ValueError("ACT camera input gating requires an observation.state feature.")
+
+        def resolve_camera_index(explicit_key: str | None, camera_name: str) -> int:
+            if explicit_key:
+                if explicit_key not in image_keys:
+                    raise ValueError(
+                        f"Configured {camera_name} camera key {explicit_key!r} is not present in "
+                        f"ACT image features {image_keys}."
+                    )
+                return image_keys.index(explicit_key)
+            candidates = [index for index, key in enumerate(image_keys) if camera_name in key.lower()]
+            if len(candidates) != 1:
+                raise ValueError(
+                    f"Could not uniquely infer the {camera_name} camera from ACT image features {image_keys}. "
+                    f"Set --policy.camera_input_gating_{camera_name}_key explicitly."
+                )
+            return candidates[0]
+
+        self.camera_input_gating_front_index = resolve_camera_index(
+            self.config.camera_input_gating_front_key,
+            "front",
+        )
+        self.camera_input_gating_wrist_index = resolve_camera_index(
+            self.config.camera_input_gating_wrist_key,
+            "wrist",
+        )
+        if self.camera_input_gating_front_index == self.camera_input_gating_wrist_index:
+            raise ValueError("Front and wrist camera gating keys must refer to different image features.")
+        self.camera_input_gate = ACTCameraInputGating(
+            dim_model=self.config.dim_model,
+            robot_state_dim=self.config.robot_state_feature.shape[0],
+            hidden_dim=self.config.camera_input_gating_hidden_dim,
+            temperature=self.config.camera_input_gating_temperature,
+        )
 
     def forward(self, batch: dict[str, Tensor]) -> tuple[Tensor, tuple[Tensor, Tensor] | tuple[None, None]]:
         """A forward pass through the Action Chunking Transformer (with optional VAE encoder).
@@ -685,6 +836,7 @@ class ACT(nn.Module):
             assert ACTION in batch, (
                 "actions must be provided when using the variational objective in training mode."
             )
+        self._last_camera_gates = None
 
         batch_size = batch[OBS_IMAGES][0].shape[0] if OBS_IMAGES in batch else batch[OBS_ENV_STATE].shape[0]
 
@@ -756,11 +908,31 @@ class ACT(nn.Module):
             # For a list of images, the H and W may vary but H*W is constant.
             # NOTE: If modifying this section, verify on MPS devices that
             # gradients remain stable (no explosions or NaNs).
+            camera_feature_maps = []
+            camera_pos_embeds = []
             for img in batch[OBS_IMAGES]:
                 cam_features = self.backbone(img)["feature_map"]
                 cam_pos_embed = self.encoder_cam_feat_pos_embed(cam_features).to(dtype=cam_features.dtype)
                 cam_features = self.encoder_img_feat_input_proj(cam_features)
+                camera_feature_maps.append(cam_features)
+                camera_pos_embeds.append(cam_pos_embed)
 
+            camera_gates = None
+            if self.config.camera_input_gating:
+                camera_gates = self.camera_input_gate(
+                    camera_feature_maps[self.camera_input_gating_front_index],
+                    camera_feature_maps[self.camera_input_gating_wrist_index],
+                    batch[OBS_STATE],
+                )
+                # Canonical order is always [front, wrist], independent of image-feature order.
+                self._last_camera_gates = camera_gates.detach()
+
+            for camera_index, (cam_features, cam_pos_embed) in enumerate(
+                zip(camera_feature_maps, camera_pos_embeds, strict=True)
+            ):
+                if camera_gates is not None:
+                    gate_index = 0 if camera_index == self.camera_input_gating_front_index else 1
+                    cam_features = cam_features * camera_gates[:, gate_index].view(-1, 1, 1, 1)
                 # Rearrange features to (sequence, batch, dim).
                 cam_features = einops.rearrange(cam_features, "b c h w -> (h w) b c")
                 cam_pos_embed = einops.rearrange(cam_pos_embed, "b c h w -> (h w) b c")

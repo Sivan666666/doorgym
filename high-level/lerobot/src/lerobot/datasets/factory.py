@@ -62,6 +62,14 @@ def resolve_delta_timestamps(
             delta_timestamps[key] = [i / ds_meta.fps for i in cfg.reward_delta_indices]
         if key == ACTION and cfg.action_delta_indices is not None:
             delta_timestamps[key] = [i / ds_meta.fps for i in cfg.action_delta_indices]
+        if key == ACTION_LOSS_WEIGHT_FEATURE and cfg.action_delta_indices is not None:
+            # Door ACT stores one scalar action-loss weight per raw frame.  During ACT training the
+            # model predicts an action chunk, so this weight must be queried over the same future
+            # horizon as "action" to support per-timestep loss weighting:
+            #   action[t : t + H], loss.action_weight[t : t + H].
+            # Older scalar-weight behavior is still handled inside ACT.forward when a dataset does
+            # not provide this feature or is loaded without delta timestamps.
+            delta_timestamps[key] = [i / ds_meta.fps for i in cfg.action_delta_indices]
         if key.startswith(OBS_PREFIX) and cfg.observation_delta_indices is not None:
             delta_timestamps[key] = [i / ds_meta.fps for i in cfg.observation_delta_indices]
 

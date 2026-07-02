@@ -472,13 +472,21 @@ raw 转 LeRobot 时，`action_loss_weight` 会变成 LeRobot feature：
 loss.action_weight
 ```
 
-本地 LeRobot ACT 已经支持读取这个 feature：如果 batch 里存在 `loss.action_weight`，ACT 会把它作为 chunk-level sample weight 使用：
+本地 LeRobot ACT 已经支持读取这个 feature：如果 batch 里存在 `loss.action_weight`，dataset 会像 `action` 一样取未来 chunk：
 
 ```text
-L = Σ_t w_t * l_t / Σ_t w_t
+action[t : t + H]
+loss.action_weight[t : t + H]
 ```
 
-其中 `l_t` 是以当前帧 `t` 为起点的整个 action chunk loss。也就是说，关键帧前后 `delta` 帧内采到的训练 chunk，整段 chunk loss 都乘 `lambda`；如果老数据没有这个 feature，则保持原来的普通平均 loss。
+ACT loss 会对 chunk 内每个未来 timestep 单独加权：
+
+```text
+L = Σ_{b,h,d} w_{b,h} valid_{b,h} |a_hat_{b,h,d} - a_{b,h,d}|
+    / Σ_{b,h,d} w_{b,h} valid_{b,h}
+```
+
+其中 `h` 是当前 observation 之后的第 `h` 个 action step。也就是说，如果 `t+h` 靠近关键帧，只会给 chunk 里第 `h` 个动作加权，不再把整个 100-step chunk 一起乘同一个权重。老数据/老 loader 如果只提供 `(B,)` 或 `(B,1)` scalar 权重，ACT 仍会兼容地 broadcast 到整段 chunk；如果没有这个 feature，则保持原来的普通平均 loss。
 
 ACT 训练 sampler 也支持关键帧窗口重采样。原版 LeRobot train 在没有 sampler 时是 `shuffle=True` 的均匀随机采样；现在可通过：
 
@@ -767,6 +775,48 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
 '
 ```
 
+### 11.3 可选的 front/wrist camera input gating
+
+Camera gating 默认关闭，因此旧 ACT 配置、旧 checkpoint 和原始视觉 token 路径保持不变。显式开启时，在共享 CNN 和 `encoder_img_feat_input_proj` 之后、Transformer encoder 之前执行：
+
+```text
+h_front = AvgPool(front_feature_map)
+h_wrist = AvgPool(wrist_feature_map)
+logits = MLP([h_front, h_wrist, observation.state])
+[g_front, g_wrist] = 2 * softmax(logits / temperature)
+```
+
+MLP 最后一层权重和 bias 都初始化为 0，因此初始严格为：
+
+```text
+g_front = 1
+g_wrist = 1
+```
+
+只缩放视觉 feature，不缩放相机位置编码。启用参数：
+
+```bash
+--policy.camera_input_gating=true \
+--policy.camera_input_gating_hidden_dim=128 \
+--policy.camera_input_gating_temperature=1.0
+```
+
+当前 A2W 的 `front_masked_depth` / `wrist_masked_depth` 会按 feature key 自动识别；非标准名称可通过下面两个参数显式指定：
+
+```bash
+--policy.camera_input_gating_front_key=observation.images.front_masked_depth \
+--policy.camera_input_gating_wrist_key=observation.images.wrist_masked_depth
+```
+
+训练日志会额外包含：
+
+```text
+camera_gate_front
+camera_gate_wrist
+```
+
+Official LeRobot checkpoint 转 Door checkpoint 时会同步保存这些 gating 配置，Door backend 在 play/eval 时按相同结构严格加载。
+
 小注：
 
 - `--num-processes=1` 是 accelerate 只启动一个训练进程，适合单卡。
@@ -972,3 +1022,71 @@ conda run --no-capture-output -n b1z1 python \
 8. LeRobot train 命令或 checkpoint 目录命名。
 9. play/eval 成功率命令。
 10. 任何已经踩过的坑，例如门方向、墙方向、success metric、depth_only mismatch。
+11. ACT camera input gating 的结构、默认开关和训练参数。
+
+## 16. ACT camera gating 推理曲线记录
+
+ACT 的 camera input gating 在训练时会把 batch 平均的 `camera_gate_front` / `camera_gate_wrist`
+写到 loss dict / W&B；这只是训练 batch 的平均值，不等价于一次 closed-loop play 过程中的时间曲线。
+
+现在 A2W play 推理时也会把最近一次 action chunk forward 得到的 gate 写入 `--dp_log_path` 的 jsonl：
+
+```json
+"camera_gates": {
+  "front": 0.94,
+  "wrist": 1.06,
+  "sum": 2.0
+}
+```
+
+注意：
+
+1. gate 只有启用了 `--policy.camera_input_gating=true` 的 ACT checkpoint 才会有。
+2. gate 使用 `2 * softmax`，因此 `front + wrist ≈ 2`。
+3. play 中一次 forward 会预测一个 100-step action chunk，但实际只执行 `--dp_action_horizon` 个 action；所以 gate 会在重新采样 action chunk 时更新。比如 `--dp_action_horizon 12` 时，曲线通常是阶梯状，而不是每个 sim step 都重新计算。
+4. 如果没有 camera gating，jsonl 里不会出现 `camera_gates` 字段。
+
+画曲线：
+
+```bash
+python high-level/dp/plot_camera_gates_from_dp_log.py \
+  --log high-level/logs/gating_debug/a2w_gate_trace.jsonl \
+  --env_id 0 \
+  --out high-level/logs/gating_debug/a2w_gate_trace_env0.png
+```
+
+常用 play 示例：
+
+```bash
+export DOOR_CKPT=/home/sivan/whole_body/visual_whole_body/high-level/dp/logs/door-auto-wrapped/leroact_a2w_gating_keyframe_w3_r3_sample30_chunk100_exec50_bs16_0630_2234/050000/model_latest.pt
+
+conda run --no-capture-output -n b1z1 python \
+  high-level/float_ik/isaacgym_float_ik_a2w_basearn_push_door_parallel.py \
+  --num_envs 4 \
+  --steps 1000 \
+  --seed 62000 \
+  --door_name wc4 \
+  --rl_device cuda:0 \
+  --sim_device cuda:0 \
+  --graphics_device_id 0 \
+  --enable_wrist_camera \
+  --enable_front_camera \
+  --camera_depth \
+  --depth_only \
+  --camera_depth_clip_lower 0.2 \
+  --camera_depth_clip_far 1.5 \
+  --dp_policy_checkpoint "$DOOR_CKPT" \
+  --dp_control_all_envs \
+  --dp_action_horizon 12 \
+  --dp_fps 25 \
+  --no_enable_depth_noise \
+  --no_enable_depth_gaussian_blur \
+  --enable_depth_camera_randomization \
+  --depth_camera_pos_rand_m 0.02 \
+  --depth_camera_rot_rand_deg 5.0 \
+  --dp_log_path high-level/logs/gating_debug/a2w_gate_trace.jsonl \
+  --no_preview_trajectory_at_spawn \
+  --no_draw_ik_target \
+  --no_draw_camera_axes \
+  --no_show_seg
+```

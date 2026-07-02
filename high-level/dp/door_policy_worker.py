@@ -79,6 +79,24 @@ def fail(exc: BaseException) -> None:
     write_message({"ok": False, "error": traceback.format_exc()})
 
 
+def camera_gates_payload(controller: DoorPolicyController, env_ids=None):
+    if not hasattr(controller, "get_last_camera_gates_for_env"):
+        return None
+    if env_ids is None:
+        gates = controller.get_last_camera_gates_for_env()
+        return None if gates is None else np.asarray(gates, dtype=np.float32).tolist()
+    values = []
+    any_gate = False
+    for env_id in env_ids:
+        gates = controller.get_last_camera_gates_for_env(int(env_id))
+        if gates is None:
+            values.append([float("nan"), float("nan")])
+        else:
+            any_gate = True
+            values.append(np.asarray(gates, dtype=np.float32).tolist())
+    return values if any_gate else None
+
+
 def main() -> None:
     controller = None
     while True:
@@ -129,7 +147,7 @@ def main() -> None:
                 if noise is not None and not isinstance(noise, torch.Tensor):
                     noise = torch.as_tensor(noise, dtype=torch.float32)
                 controller.sample_action_chunk(noise=noise)
-                ok()
+                ok(camera_gates=camera_gates_payload(controller))
             elif cmd == "act":
                 action = controller.act(
                     np.asarray(request["state"], dtype=np.float32),
@@ -138,17 +156,24 @@ def main() -> None:
                     request.get("front_mask_rgb"),
                     request.get("front_masked_depth_rgb"),
                 )
-                ok(action=np.asarray(action, dtype=np.float32).tolist())
+                ok(
+                    action=np.asarray(action, dtype=np.float32).tolist(),
+                    camera_gates=camera_gates_payload(controller),
+                )
             elif cmd == "act_batch":
+                env_ids = [int(x) for x in request["env_ids"]]
                 actions = controller.act_batch(
-                    [int(x) for x in request["env_ids"]],
+                    env_ids,
                     np.asarray(request["states"], dtype=np.float32),
                     request["mask_rgbs"],
                     request["masked_depth_rgbs"],
                     request.get("front_mask_rgbs"),
                     request.get("front_masked_depth_rgbs"),
                 )
-                ok(actions=np.asarray(actions, dtype=np.float32).tolist())
+                ok(
+                    actions=np.asarray(actions, dtype=np.float32).tolist(),
+                    camera_gates=camera_gates_payload(controller, env_ids),
+                )
             elif cmd == "close":
                 ok()
                 return
