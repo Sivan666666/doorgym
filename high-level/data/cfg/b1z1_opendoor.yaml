@@ -3400,6 +3400,29 @@ env:
             handle_joint_damping: 0.5
             handle_spring_stiffness: 0.5
             handle_spring_damping: 0.5
+        "668":
+          bounding_box: "button_door/bounding_box.json"
+          handle_bounding: "button_door/handle_bounding.json"
+          name: "button_door"
+          path: "button_door/model.urdf"
+          actor_scale: 1.0
+          actor_yaw_offset: 1.5707963267948966
+          bounds_yaw_offset_override: 0.0
+          observer_target_local: [0.2425, 0.1, 1.05]
+          handle_closeup_target_local: [0.2425, 0.1, 1.05]
+          robot_alignment_y_offset: -0.2425
+          door_motion_sign_multiplier: -1.0
+          door_body_name: "door_panel"
+          handle_body_name: "lever_handle"
+          door_dof_name: "door_hinge_joint"
+          handle_dof_name: "handle_actuation_joint"
+          controller_multipliers:
+            door_joint_friction: 0.5
+            door_joint_damping: 0.5
+            handle_joint_friction: 0.5
+            handle_joint_damping: 0.5
+            handle_spring_stiffness: 0.5
+            handle_spring_damping: 0.5
 
     control:
       stiffness: {"joint": 80, "z1": 5}

@@ -1,0 +1,77 @@
+{
+  "version": "door_skill_program_v1",
+  "metadata": {
+    "name": "wc4_smoke_skill",
+    "asset_name": "wc4",
+    "purpose": "Single-door Door Twin validation with open-and-traverse behavior.",
+    "notes": {
+      "base_speed_mps": 0.2,
+      "push_forward_distance_m": 1.2,
+      "traverse_forward_distance_m": 0.74,
+      "total_forward_distance_m": 1.94,
+      "dt_s": 0.02
+    }
+  },
+  "skill_program": [
+    {
+      "name": "MoveTo",
+      "stage": "approach",
+      "vx": 0.2,
+      "vyaw": 0.0,
+      "stop_distance": 0.15
+    },
+    {
+      "name": "ApproachDoor",
+      "base_offset": 0.15,
+      "yaw_align": true
+    },
+    {
+      "name": "MoveEEToHandle",
+      "pregrasp_offset": [0.15, 0.0, -0.03],
+      "grasp_offset": [0.0, 0.0, -0.03],
+      "handle_goal_bias_world": [-0.015, 0.0, 0.0],
+      "duration_steps": 50
+    },
+    {
+      "name": "CloseGripper",
+      "force": 0.8,
+      "duration_steps": 50
+    },
+    {
+      "name": "RotateHandle",
+      "angle": 1.05,
+      "duration_steps": 100,
+      "local_delta": [0.0, 0.03, -0.03]
+    },
+    {
+      "name": "PushDoor",
+      "distance": 1.1,
+      "duration_steps": 300,
+      "contact_bias": 0.025
+    },
+    {
+      "name": "MoveTo",
+      "stage": "push",
+      "vx": 0.2,
+      "vyaw": 0.0,
+      "distance": 1.2,
+      "duration_steps": 300
+    },
+    {
+      "name": "TraverseDoor",
+      "door_angle_target": 80
+    },
+    {
+      "name": "MoveTo",
+      "stage": "traverse",
+      "vx": 0.2,
+      "vyaw": 0.0,
+      "distance": 0.74,
+      "duration_steps": 185
+    },
+    {
+      "name": "ReleaseAndRetract",
+      "duration_steps": 150
+    }
+  ]
+}

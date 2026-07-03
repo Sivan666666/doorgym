@@ -32,8 +32,10 @@ from torch.utils.data import Dataset
 try:
     from .door_dp_common import (
         ACTION_NAMES,
+        FRONT_CAMERA_POSE_FEATURE,
         IMAGE_HEIGHT,
         IMAGE_WIDTH,
+        WRIST_CAMERA_POSE_FEATURE,
         apply_door_dp_state_preprocess,
         invert_door_dp_action_preprocess,
         lerobot_image_keys_for_vision_mode,
@@ -44,8 +46,10 @@ try:
 except ImportError:
     from door_dp_common import (
         ACTION_NAMES,
+        FRONT_CAMERA_POSE_FEATURE,
         IMAGE_HEIGHT,
         IMAGE_WIDTH,
+        WRIST_CAMERA_POSE_FEATURE,
         apply_door_dp_state_preprocess,
         invert_door_dp_action_preprocess,
         lerobot_image_keys_for_vision_mode,
@@ -1038,6 +1042,13 @@ def make_lerobot_act_config(
     camera_input_gating_temperature: float = 1.0,
     camera_input_gating_front_key: Optional[str] = None,
     camera_input_gating_wrist_key: Optional[str] = None,
+    plucker_conditioning: bool = False,
+    plucker_front_pose_key: str = FRONT_CAMERA_POSE_FEATURE,
+    plucker_wrist_pose_key: str = WRIST_CAMERA_POSE_FEATURE,
+    plucker_encoder_channels: str = "32,64",
+    plucker_image_width: int = IMAGE_WIDTH,
+    plucker_image_height: int = IMAGE_HEIGHT,
+    plucker_horizontal_fov_deg: float = 69.0,
     pre_norm: bool = False,
     dim_model: int = 512,
     n_heads: int = 8,
@@ -1085,6 +1096,9 @@ def make_lerobot_act_config(
     }
     for key in image_keys:
         input_features[key] = PolicyFeature(type=FeatureType.VISUAL, shape=(3, IMAGE_HEIGHT, IMAGE_WIDTH))
+    if bool(plucker_conditioning):
+        input_features[str(plucker_front_pose_key)] = PolicyFeature(type=FeatureType.STATE, shape=(7,))
+        input_features[str(plucker_wrist_pose_key)] = PolicyFeature(type=FeatureType.STATE, shape=(7,))
     output_features = {
         ACTION: PolicyFeature(type=FeatureType.ACTION, shape=(int(action_dim),)),
     }
@@ -1116,6 +1130,13 @@ def make_lerobot_act_config(
         camera_input_gating_temperature=float(camera_input_gating_temperature),
         camera_input_gating_front_key=camera_input_gating_front_key,
         camera_input_gating_wrist_key=camera_input_gating_wrist_key,
+        plucker_conditioning=bool(plucker_conditioning),
+        plucker_front_pose_key=str(plucker_front_pose_key),
+        plucker_wrist_pose_key=str(plucker_wrist_pose_key),
+        plucker_encoder_channels=str(plucker_encoder_channels),
+        plucker_image_width=int(plucker_image_width),
+        plucker_image_height=int(plucker_image_height),
+        plucker_horizontal_fov_deg=float(plucker_horizontal_fov_deg),
         pre_norm=bool(pre_norm),
         dim_model=int(dim_model),
         n_heads=int(n_heads),
@@ -1691,6 +1712,13 @@ class LeRobotActDoorPolicyBackend:
             camera_input_gating_temperature=float(cfg.get("camera_input_gating_temperature", 1.0)),
             camera_input_gating_front_key=cfg.get("camera_input_gating_front_key"),
             camera_input_gating_wrist_key=cfg.get("camera_input_gating_wrist_key"),
+            plucker_conditioning=bool(cfg.get("plucker_conditioning", False)),
+            plucker_front_pose_key=cfg.get("plucker_front_pose_key", FRONT_CAMERA_POSE_FEATURE),
+            plucker_wrist_pose_key=cfg.get("plucker_wrist_pose_key", WRIST_CAMERA_POSE_FEATURE),
+            plucker_encoder_channels=cfg.get("plucker_encoder_channels", "32,64"),
+            plucker_image_width=int(cfg.get("plucker_image_width", IMAGE_WIDTH)),
+            plucker_image_height=int(cfg.get("plucker_image_height", IMAGE_HEIGHT)),
+            plucker_horizontal_fov_deg=float(cfg.get("plucker_horizontal_fov_deg", 69.0)),
             pre_norm=bool(cfg.get("pre_norm", False)),
             dim_model=int(cfg.get("dim_model", 512)),
             n_heads=int(cfg.get("n_heads", 8)),
@@ -1785,6 +1813,13 @@ class LeRobotActDoorPolicyBackend:
             "camera_input_gating_temperature": float(self.config.camera_input_gating_temperature),
             "camera_input_gating_front_key": self.config.camera_input_gating_front_key,
             "camera_input_gating_wrist_key": self.config.camera_input_gating_wrist_key,
+            "plucker_conditioning": bool(getattr(self.config, "plucker_conditioning", False)),
+            "plucker_front_pose_key": getattr(self.config, "plucker_front_pose_key", FRONT_CAMERA_POSE_FEATURE),
+            "plucker_wrist_pose_key": getattr(self.config, "plucker_wrist_pose_key", WRIST_CAMERA_POSE_FEATURE),
+            "plucker_encoder_channels": getattr(self.config, "plucker_encoder_channels", "32,64"),
+            "plucker_image_width": int(getattr(self.config, "plucker_image_width", IMAGE_WIDTH)),
+            "plucker_image_height": int(getattr(self.config, "plucker_image_height", IMAGE_HEIGHT)),
+            "plucker_horizontal_fov_deg": float(getattr(self.config, "plucker_horizontal_fov_deg", 69.0)),
             "pre_norm": bool(self.config.pre_norm),
             "dim_model": int(self.config.dim_model),
             "n_heads": int(self.config.n_heads),
@@ -2290,6 +2325,12 @@ class DoorPolicyController:
         self.action_names = list(self.sidecar_config.get("action") or self.config.get("action_names", ACTION_NAMES))
         self.action_sanitize = self.sidecar_config.get("action_sanitize") or self.config.get("action_sanitize")
         self.action_preprocess = self.sidecar_config.get("action_preprocess") or self.config.get("action_preprocess")
+        self.plucker_conditioning = bool(self.config.get("plucker_conditioning", False))
+        self.plucker_front_pose_key = str(self.config.get("plucker_front_pose_key", FRONT_CAMERA_POSE_FEATURE))
+        self.plucker_wrist_pose_key = str(self.config.get("plucker_wrist_pose_key", WRIST_CAMERA_POSE_FEATURE))
+        self.extra_observation_keys = (
+            [self.plucker_front_pose_key, self.plucker_wrist_pose_key] if self.plucker_conditioning else []
+        )
 
     def reset(self) -> None:
         self.obs_buffer.clear()
@@ -2369,6 +2410,8 @@ class DoorPolicyController:
         second_rgb: Any,
         front_mask_rgb: Any = None,
         front_second_rgb: Any = None,
+        front_camera_pose_base: Any = None,
+        wrist_camera_pose_base: Any = None,
     ) -> Dict[str, torch.Tensor]:
         if front_mask_rgb is None:
             front_mask_rgb = np.zeros_like(mask_rgb)
@@ -2386,6 +2429,14 @@ class DoorPolicyController:
             item[self.image_keys[1]] = _image_to_chw_float_device(second_rgb, self.device, required=True)
             item[self.image_keys[2]] = _image_to_chw_float_device(front_mask_rgb, self.device, required=True)
             item[self.image_keys[3]] = _image_to_chw_float_device(front_second_rgb, self.device, required=True)
+        if self.plucker_conditioning:
+            if front_camera_pose_base is None or wrist_camera_pose_base is None:
+                raise ValueError(
+                    "This ACT checkpoint was trained with Plücker conditioning and requires front/wrist "
+                    "camera poses in robot base frame."
+                )
+            item[self.plucker_front_pose_key] = _tensor_to_device(front_camera_pose_base, self.device, torch.float32).reshape(7)
+            item[self.plucker_wrist_pose_key] = _tensor_to_device(wrist_camera_pose_base, self.device, torch.float32).reshape(7)
         return item
 
     def append_observation(
@@ -2395,8 +2446,18 @@ class DoorPolicyController:
         masked_depth_rgb: Any,
         front_mask_rgb: Any = None,
         front_masked_depth_rgb: Any = None,
+        front_camera_pose_base: Any = None,
+        wrist_camera_pose_base: Any = None,
     ) -> None:
-        item = self._make_item(state, mask_rgb, masked_depth_rgb, front_mask_rgb, front_masked_depth_rgb)
+        item = self._make_item(
+            state,
+            mask_rgb,
+            masked_depth_rgb,
+            front_mask_rgb,
+            front_masked_depth_rgb,
+            front_camera_pose_base,
+            wrist_camera_pose_base,
+        )
         if len(self.obs_buffer) == 0:
             for _ in range(self.obs_horizon):
                 self.obs_buffer.append(item)
@@ -2411,8 +2472,18 @@ class DoorPolicyController:
         masked_depth_rgb: Any,
         front_mask_rgb: Any = None,
         front_masked_depth_rgb: Any = None,
+        front_camera_pose_base: Any = None,
+        wrist_camera_pose_base: Any = None,
     ) -> None:
-        item = self._make_item(state, mask_rgb, masked_depth_rgb, front_mask_rgb, front_masked_depth_rgb)
+        item = self._make_item(
+            state,
+            mask_rgb,
+            masked_depth_rgb,
+            front_mask_rgb,
+            front_masked_depth_rgb,
+            front_camera_pose_base,
+            wrist_camera_pose_base,
+        )
         obs_buffer, _ = self._ensure_env_buffers(int(env_id))
         if len(obs_buffer) == 0:
             for _ in range(self.obs_horizon):
@@ -2424,6 +2495,8 @@ class DoorPolicyController:
         batch: Dict[str, List[torch.Tensor]] = {OBS_STATE: []}
         for key in self.image_keys:
             batch[key] = []
+        for key in self.extra_observation_keys:
+            batch[key] = []
         for window in windows:
             if getattr(self.backend, "uses_observation_sequence", True):
                 if len(window) != self.obs_horizon:
@@ -2431,10 +2504,14 @@ class DoorPolicyController:
                 batch[OBS_STATE].append(torch.stack([item[OBS_STATE] for item in window], dim=0))
                 for key in self.image_keys:
                     batch[key].append(torch.stack([item[key] for item in window], dim=0))
+                for key in self.extra_observation_keys:
+                    batch[key].append(torch.stack([item[key] for item in window], dim=0))
             else:
                 item = window[-1]
                 batch[OBS_STATE].append(item[OBS_STATE])
                 for key in self.image_keys:
+                    batch[key].append(item[key])
+                for key in self.extra_observation_keys:
                     batch[key].append(item[key])
         return {key: torch.stack(values, dim=0) for key, values in batch.items()}
 
@@ -2490,6 +2567,38 @@ class DoorPolicyController:
                 self.multi_camera_gates[int(env_id)] = np.asarray(gates[row_idx], dtype=np.float32).copy()
 
     @torch.no_grad()
+    def predict_action_chunks_for_envs(
+        self,
+        env_ids: Sequence[int],
+        noise: Optional[torch.Tensor] = None,
+    ) -> np.ndarray:
+        """Predict full action chunks for initialized env observation buffers.
+
+        Unlike ``sample_action_chunks_for_envs`` this does not mutate the
+        per-env action queues. It is used by closed-loop overlap/temporal
+        ensembling code that owns its own timestamped action buffer.
+        """
+        env_ids = [int(env_id) for env_id in env_ids]
+        if not env_ids:
+            return np.zeros((0, 0, self.action_dim), dtype=np.float32)
+        windows = []
+        for env_id in env_ids:
+            obs_buffer, _ = self._ensure_env_buffers(env_id)
+            if len(obs_buffer) != self.obs_horizon:
+                raise RuntimeError(f"Observation buffer for env {env_id} is not initialized.")
+            windows.append(list(obs_buffer))
+        actions = self.predict_action_chunks_from_windows(windows, noise=noise)
+        gates = getattr(self.backend, "last_camera_gates", None)
+        self.last_camera_gates = None if gates is None else np.asarray(gates, dtype=np.float32).copy()
+        if gates is None:
+            for env_id in env_ids:
+                self.multi_camera_gates.pop(int(env_id), None)
+        else:
+            for row_idx, env_id in enumerate(env_ids):
+                self.multi_camera_gates[int(env_id)] = np.asarray(gates[row_idx], dtype=np.float32).copy()
+        return actions.detach().cpu().numpy().astype(np.float32)
+
+    @torch.no_grad()
     def sample_action_chunk(self, noise: Optional[torch.Tensor] = None) -> None:
         actions = self.predict_action_chunks_from_batch(self._current_batch(), noise=noise)
         gates = getattr(self.backend, "last_camera_gates", None)
@@ -2519,8 +2628,18 @@ class DoorPolicyController:
         masked_depth_rgb: Any,
         front_mask_rgb: Any = None,
         front_masked_depth_rgb: Any = None,
+        front_camera_pose_base: Any = None,
+        wrist_camera_pose_base: Any = None,
     ) -> np.ndarray:
-        self.append_observation(state, mask_rgb, masked_depth_rgb, front_mask_rgb, front_masked_depth_rgb)
+        self.append_observation(
+            state,
+            mask_rgb,
+            masked_depth_rgb,
+            front_mask_rgb,
+            front_masked_depth_rgb,
+            front_camera_pose_base,
+            wrist_camera_pose_base,
+        )
         if not self.action_queue:
             self.sample_action_chunk()
         return self.action_queue.popleft()
@@ -2533,6 +2652,8 @@ class DoorPolicyController:
         masked_depth_rgbs: Any,
         front_mask_rgbs: Any = None,
         front_masked_depth_rgbs: Any = None,
+        front_camera_pose_bases: Any = None,
+        wrist_camera_pose_bases: Any = None,
     ) -> np.ndarray:
         env_ids = [int(env_id) for env_id in env_ids]
         if not env_ids:
@@ -2546,6 +2667,10 @@ class DoorPolicyController:
         front_second_seq = [None] * len(env_ids) if front_masked_depth_rgbs is None else list(front_masked_depth_rgbs)
         if len(front_mask_seq) != len(env_ids) or len(front_second_seq) != len(env_ids):
             raise ValueError("act_batch front image inputs must have the same length as env_ids.")
+        front_pose_seq = [None] * len(env_ids) if front_camera_pose_bases is None else list(front_camera_pose_bases)
+        wrist_pose_seq = [None] * len(env_ids) if wrist_camera_pose_bases is None else list(wrist_camera_pose_bases)
+        if len(front_pose_seq) != len(env_ids) or len(wrist_pose_seq) != len(env_ids):
+            raise ValueError("act_batch camera-pose inputs must have the same length as env_ids.")
 
         for idx, env_id in enumerate(env_ids):
             self.append_observation_for_env(
@@ -2555,6 +2680,8 @@ class DoorPolicyController:
                 second_seq[idx],
                 front_mask_seq[idx],
                 front_second_seq[idx],
+                front_pose_seq[idx],
+                wrist_pose_seq[idx],
             )
 
         empty_env_ids = [env_id for env_id in env_ids if not self._ensure_env_buffers(env_id)[1]]
@@ -2719,6 +2846,8 @@ class DoorPolicySubprocessController:
         masked_depth_rgb: Any,
         front_mask_rgb: Any = None,
         front_masked_depth_rgb: Any = None,
+        front_camera_pose_base: Any = None,
+        wrist_camera_pose_base: Any = None,
     ) -> None:
         self._request(
             {
@@ -2730,6 +2859,12 @@ class DoorPolicySubprocessController:
                 "front_masked_depth_rgb": None
                 if front_masked_depth_rgb is None
                 else np.asarray(front_masked_depth_rgb),
+                "front_camera_pose_base": None
+                if front_camera_pose_base is None
+                else np.asarray(front_camera_pose_base, dtype=np.float32),
+                "wrist_camera_pose_base": None
+                if wrist_camera_pose_base is None
+                else np.asarray(wrist_camera_pose_base, dtype=np.float32),
             }
         )
 
@@ -2741,6 +2876,8 @@ class DoorPolicySubprocessController:
         masked_depth_rgb: Any,
         front_mask_rgb: Any = None,
         front_masked_depth_rgb: Any = None,
+        front_camera_pose_base: Any = None,
+        wrist_camera_pose_base: Any = None,
     ) -> None:
         self._request(
             {
@@ -2753,6 +2890,12 @@ class DoorPolicySubprocessController:
                 "front_masked_depth_rgb": None
                 if front_masked_depth_rgb is None
                 else np.asarray(front_masked_depth_rgb),
+                "front_camera_pose_base": None
+                if front_camera_pose_base is None
+                else np.asarray(front_camera_pose_base, dtype=np.float32),
+                "wrist_camera_pose_base": None
+                if wrist_camera_pose_base is None
+                else np.asarray(wrist_camera_pose_base, dtype=np.float32),
             }
         )
 
@@ -2773,6 +2916,8 @@ class DoorPolicySubprocessController:
         masked_depth_rgb: Any,
         front_mask_rgb: Any = None,
         front_masked_depth_rgb: Any = None,
+        front_camera_pose_base: Any = None,
+        wrist_camera_pose_base: Any = None,
     ) -> np.ndarray:
         response = self._request(
             {
@@ -2784,6 +2929,12 @@ class DoorPolicySubprocessController:
                 "front_masked_depth_rgb": None
                 if front_masked_depth_rgb is None
                 else np.asarray(front_masked_depth_rgb),
+                "front_camera_pose_base": None
+                if front_camera_pose_base is None
+                else np.asarray(front_camera_pose_base, dtype=np.float32),
+                "wrist_camera_pose_base": None
+                if wrist_camera_pose_base is None
+                else np.asarray(wrist_camera_pose_base, dtype=np.float32),
             }
         )
         gates = response.get("camera_gates")
@@ -2798,6 +2949,8 @@ class DoorPolicySubprocessController:
         masked_depth_rgbs: Any,
         front_mask_rgbs: Any = None,
         front_masked_depth_rgbs: Any = None,
+        front_camera_pose_bases: Any = None,
+        wrist_camera_pose_bases: Any = None,
     ) -> np.ndarray:
         response = self._request(
             {
@@ -2810,8 +2963,37 @@ class DoorPolicySubprocessController:
                 "front_masked_depth_rgbs": None
                 if front_masked_depth_rgbs is None
                 else np.asarray(front_masked_depth_rgbs),
+                "front_camera_pose_bases": None
+                if front_camera_pose_bases is None
+                else np.asarray(front_camera_pose_bases, dtype=np.float32),
+                "wrist_camera_pose_bases": None
+                if wrist_camera_pose_bases is None
+                else np.asarray(wrist_camera_pose_bases, dtype=np.float32),
             }
         )
+        gates = response.get("camera_gates")
+        self.last_camera_gates = None if gates is None else np.asarray(gates, dtype=np.float32)
+        if gates is None:
+            for env_id in env_ids:
+                self.multi_camera_gates.pop(int(env_id), None)
+        else:
+            for row_idx, env_id in enumerate(env_ids):
+                self.multi_camera_gates[int(env_id)] = np.asarray(gates[row_idx], dtype=np.float32).copy()
+        return np.asarray(response["actions"], dtype=np.float32)
+
+    def predict_action_chunks_for_envs(
+        self,
+        env_ids: Sequence[int],
+        noise: Optional[torch.Tensor] = None,
+    ) -> np.ndarray:
+        response = self._request(
+            {
+                "cmd": "predict_action_chunks_for_envs",
+                "env_ids": [int(env_id) for env_id in env_ids],
+                "noise": None if noise is None else noise.detach().cpu(),
+            }
+        )
+        env_ids = [int(env_id) for env_id in env_ids]
         gates = response.get("camera_gates")
         self.last_camera_gates = None if gates is None else np.asarray(gates, dtype=np.float32)
         if gates is None:

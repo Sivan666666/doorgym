@@ -45,6 +45,8 @@ depth_gaussian_blur_ksize: 5
 depth_gaussian_blur_sigma: 1.0
 
 # Optional camera pose jitter. This is separate from image-depth noise.
-enable_depth_camera_randomization: true
+# Keep it disabled by default so viewer/debug camera axes match the attached
+# camera transform instead of re-sampling jitter every draw frame.
+enable_depth_camera_randomization: false
 depth_camera_pos_rand_m: 0.02
 depth_camera_rot_rand_deg: 5.0

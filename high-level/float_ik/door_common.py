@@ -10,6 +10,7 @@ import os
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
+from collections import deque
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -560,7 +561,13 @@ def load_door_specs(args):
     asset_file_door = asset_cfg["assetFileDoor"]
     door_set_root = asset_root / asset_file_door
     loaded_specs = []
+    path_override = str(getattr(args, "door_asset_path_override", "") or "").strip()
+    if path_override and len(selected_entries) != 1:
+        raise RuntimeError("--door_asset_path_override requires selecting exactly one door via --door_name or --door_index")
     for asset_index, selected in selected_entries:
+        selected = dict(selected)
+        if path_override:
+            selected["path"] = path_override
         with (door_set_root / selected["bounding_box"]).open("r", encoding="utf-8") as f:
             bounding = json.load(f)
         with (door_set_root / selected["handle_bounding"]).open("r", encoding="utf-8") as f:
@@ -1903,7 +1910,14 @@ def monitor_base_door_collision(gym, step, st):
         float(getattr(args, "base_collision_half_width", 0.24)),
     )
     threshold = float(getattr(args, "base_door_collision_distance", 0.04))
-    geom_collision = bool(geom_check and geom_distance <= threshold)
+    phase = str(getattr(st, "last_phase", "unknown"))
+    open_deg = door_open_degrees(getattr(st, "last_door_pos", None), args)
+    ignore_open_traverse_geom = bool(
+        getattr(args, "pass_through_door", False)
+        and phase in ("traverse_door", "return_home", "hold_home")
+        and open_deg >= float(getattr(args, "pass_open_angle_deg", 80.0))
+    )
+    geom_collision = bool(geom_check and not ignore_open_traverse_geom and geom_distance <= threshold)
     rigid_gate = float(getattr(args, "rigid_contact_geom_gate", max(0.15, threshold)))
     gated_rigid_contact = bool(physx_check and rigid_contact and geom_distance <= rigid_gate)
     frame_contact = bool(physx_check and frame_contact)
@@ -1917,9 +1931,42 @@ def monitor_base_door_collision(gym, step, st):
         interval = max(1, int(getattr(args, "collision_log_interval", 30)))
         if int(step) - int(getattr(st, "base_door_collision_log_step", -10**9)) >= interval:
             st.base_door_collision_log_step = int(step)
+            json_contact_pair = {}
+            for key, value in (contact_pair or {}).items():
+                if value is None:
+                    json_contact_pair[key] = None
+                elif isinstance(value, (int, float, np.integer, np.floating)):
+                    json_contact_pair[key] = float(value)
+                else:
+                    json_contact_pair[key] = str(value)
+            tracker = getattr(st, "door_twin_tracker", None)
+            if tracker is not None:
+                tracker.add_artifact(
+                    "base_collision_event",
+                    {
+                        "step": int(step),
+                        "phase": phase,
+                        "physx_check": bool(physx_check),
+                        "geom_check": bool(geom_check),
+                        "rigid_contact": bool(rigid_contact),
+                        "frame_contact": bool(frame_contact),
+                        "gated_rigid_contact": bool(gated_rigid_contact),
+                        "geom_collision": bool(geom_collision),
+                        "geom_distance": float(geom_distance),
+                        "threshold": float(threshold),
+                        "gate": float(rigid_gate),
+                        "contact_pair": json_contact_pair,
+                        "base_xy": np.round(base_xy, 5).tolist(),
+                        "door_local": {
+                            "hinge": np.round(hinge_local, 5).tolist(),
+                            "handle": np.round(handle_local, 5).tolist(),
+                        },
+                        "open_deg": float(open_deg),
+                    },
+                )
             print(
                 "[BaseDoorCollision]"
-                f" step={int(step)} env={int(st.index)} phase={getattr(st, 'last_phase', 'unknown')}"
+                f" step={int(step)} env={int(st.index)} phase={phase}"
                 f" physx_check={bool(physx_check)} geom_check={bool(geom_check)}"
                 f" rigid_contact={bool(rigid_contact)} frame_contact={bool(frame_contact)}"
                 f" gated_rigid_contact={bool(gated_rigid_contact)} geom_collision={bool(geom_collision)}"
@@ -1927,7 +1974,7 @@ def monitor_base_door_collision(gym, step, st):
                 f" contact_pair={contact_pair}"
                 f" base_xy={np.round(base_xy, 4).tolist()}"
                 f" door_local=({np.round(hinge_local, 4).tolist()}, {np.round(handle_local, 4).tolist()})"
-                f" open_deg={door_open_degrees(getattr(st, 'last_door_pos', None), args):.1f}",
+                f" open_deg={open_deg:.1f}",
                 flush=True,
             )
     elif physx_check and rigid_contact:
@@ -1976,6 +2023,139 @@ def local_camera_pose_from_cfg(camera_cfg, local_rot_override=None):
         local_rot = list(local_rot_override)
     local_quat = gym_quat_to_np(gymapi.Quat.from_euler_zyx(*local_rot))
     return local_pos, base_ik.normalize_quat(local_quat)
+
+
+def camera_intrinsics_from_cfg(camera_cfg):
+    resolution = camera_cfg.get("resolution", DEPTH_CAMERA_RESOLUTION)
+    width = int(resolution[0])
+    height = int(resolution[1])
+    hfov_deg = float(camera_cfg.get("horizontal_fov", 69.0))
+    fx = float(width) / (2.0 * math.tan(math.radians(hfov_deg) / 2.0))
+    fy = fx
+    return {
+        "fx": fx,
+        "fy": fy,
+        "cx": float(width) / 2.0,
+        "cy": float(height) / 2.0,
+        "width": width,
+        "height": height,
+        "horizontal_fov_deg": hfov_deg,
+    }
+
+
+def depth_camera_intrinsics_metadata():
+    return {
+        "front": camera_intrinsics_from_cfg(DEFAULT_FRONT_CAMERA_CFG),
+        "wrist": camera_intrinsics_from_cfg(DEFAULT_WRIST_CAMERA_CFG),
+    }
+
+
+def _cached_or_default_local_camera_pose(args, camera_name, camera_cfg, local_rot_override=None):
+    cache = getattr(args, "_camera_axis_local_poses", {}) or {}
+    cached = cache.get(camera_name)
+    if cached is not None:
+        local_pos = np.asarray(cached.get("local_pos", [0.0, 0.0, 0.0]), dtype=np.float32)
+        local_quat = base_ik.normalize_quat(
+            np.asarray(cached.get("local_quat", [0.0, 0.0, 0.0, 1.0]), dtype=np.float32)
+        )
+        return local_pos, local_quat
+    local_pos, local_quat = local_camera_pose_from_cfg(camera_cfg, local_rot_override)
+    # If this function is called before the camera has been attached, mirror the
+    # attach-time jitter path so --record_camera_pose still records the actual
+    # randomized local pose once and caches it for all later calls.
+    if bool(getattr(args, "enable_depth_camera_randomization", False)):
+        local_rot = camera_rotation_radians_from_cfg(camera_cfg)
+        if local_rot_override is not None:
+            local_rot = list(local_rot_override)
+        local_pos, local_rot = jitter_camera_pose_for_args(local_pos, local_rot, args)
+        local_quat = base_ik.normalize_quat(gym_quat_to_np(gymapi.Quat.from_euler_zyx(*local_rot)))
+        cache = getattr(args, "_camera_axis_local_poses", None)
+        if cache is None:
+            cache = {}
+            setattr(args, "_camera_axis_local_poses", cache)
+        cache[camera_name] = {
+            "local_pos": np.asarray(local_pos, dtype=np.float32).copy(),
+            "local_quat": np.asarray(local_quat, dtype=np.float32).copy(),
+        }
+    return local_pos, local_quat
+
+
+def compose_pose_np(parent_pos, parent_quat, local_pos, local_quat):
+    parent_pos = np.asarray(parent_pos, dtype=np.float32)
+    parent_quat = base_ik.normalize_quat(np.asarray(parent_quat, dtype=np.float32))
+    local_pos = np.asarray(local_pos, dtype=np.float32)
+    local_quat = base_ik.normalize_quat(np.asarray(local_quat, dtype=np.float32))
+    pos = parent_pos + quat_apply(parent_quat, local_pos)
+    quat = base_ik.normalize_quat(base_ik.quat_multiply(parent_quat, local_quat))
+    return pos.astype(np.float32), quat.astype(np.float32)
+
+
+def relative_pose_np(parent_pos, parent_quat, child_pos, child_quat):
+    parent_pos = np.asarray(parent_pos, dtype=np.float32)
+    parent_quat = base_ik.normalize_quat(np.asarray(parent_quat, dtype=np.float32))
+    child_pos = np.asarray(child_pos, dtype=np.float32)
+    child_quat = base_ik.normalize_quat(np.asarray(child_quat, dtype=np.float32))
+    inv_parent_quat = base_ik.quat_conjugate(parent_quat)
+    rel_pos = quat_apply(inv_parent_quat, child_pos - parent_pos)
+    rel_quat = base_ik.normalize_quat(base_ik.quat_multiply(inv_parent_quat, child_quat))
+    return rel_pos.astype(np.float32), rel_quat.astype(np.float32)
+
+
+def pose7_np(pos, quat):
+    return np.concatenate(
+        [
+            np.asarray(pos, dtype=np.float32).reshape(3),
+            base_ik.normalize_quat(np.asarray(quat, dtype=np.float32)).reshape(4),
+        ],
+        axis=0,
+    ).astype(np.float32)
+
+
+def float_camera_pose_base(gym, st):
+    """Return (front_pose_base, wrist_pose_base), each [x,y,z,qx,qy,qz,qw].
+
+    Poses are camera optical-frame poses expressed in the robot base/root
+    rigid-body frame.  The local camera poses are the same cached values used
+    for Isaac Gym camera attachment and camera-axis visualization.
+    """
+    base_actor = st.actor_handles[0] if len(st.actor_handles) > 1 else st.arm_actor
+    base_pos, base_quat = get_body_pose(gym, st.env, base_actor, 0)
+
+    front_rot = front_camera_rotation_radians_from_args(st.args)
+    front_local_pos, front_local_quat = _cached_or_default_local_camera_pose(
+        st.args,
+        "front",
+        DEFAULT_FRONT_CAMERA_CFG,
+        front_rot,
+    )
+    front_body_pos, front_body_quat = get_body_pose(gym, st.env, base_actor, 0)
+    front_world_pos, front_world_quat = compose_pose_np(
+        front_body_pos,
+        front_body_quat,
+        front_local_pos,
+        front_local_quat,
+    )
+    front_base_pos, front_base_quat = relative_pose_np(base_pos, base_quat, front_world_pos, front_world_quat)
+
+    wrist_body_index = get_actor_body_index(gym, st.env, st.arm_actor, "link06")
+    if wrist_body_index is None:
+        raise RuntimeError("Cannot record wrist camera pose because arm body 'link06' was not found.")
+    wrist_rot = wrist_camera_rotation_radians_from_args(st.args)
+    wrist_local_pos, wrist_local_quat = _cached_or_default_local_camera_pose(
+        st.args,
+        "wrist",
+        DEFAULT_WRIST_CAMERA_CFG,
+        wrist_rot,
+    )
+    wrist_body_pos, wrist_body_quat = get_body_pose(gym, st.env, st.arm_actor, wrist_body_index)
+    wrist_world_pos, wrist_world_quat = compose_pose_np(
+        wrist_body_pos,
+        wrist_body_quat,
+        wrist_local_pos,
+        wrist_local_quat,
+    )
+    wrist_base_pos, wrist_base_quat = relative_pose_np(base_pos, base_quat, wrist_world_pos, wrist_world_quat)
+    return pose7_np(front_base_pos, front_base_quat), pose7_np(wrist_base_pos, wrist_base_quat)
 
 
 def depth_camera_noise_config_for_args(args):
@@ -3096,6 +3276,9 @@ def make_float_dp_policy_log_record(
                 "wrist": float(gates[1]),
                 "sum": float(gates[0] + gates[1]),
             }
+    temporal_meta = getattr(st, "dp_temporal_last_action_meta", None)
+    if temporal_meta is not None:
+        record["temporal_ensemble"] = temporal_meta
     return record
 
 
@@ -3353,6 +3536,18 @@ def make_float_dp_recorder(
             "rotate": "first push_door frame, i.e. after rotate_handle completes",
         },
     }
+    if bool(getattr(args, "record_camera_pose", False)):
+        metadata.update(
+            {
+                "camera_intrinsics": depth_camera_intrinsics_metadata(),
+                "camera_pose_frame": "robot_base",
+                "camera_pose_convention": "optical_frame",
+                "camera_pose_features": [
+                    "observation.camera_pose.front",
+                    "observation.camera_pose.wrist",
+                ],
+            }
+        )
     metadata.update(depth_camera_randomization_metadata(args))
     sim_dt = getattr(args, "sim_dt", None)
     if sim_dt is not None:
@@ -3430,6 +3625,155 @@ def print_float_dp_recording_start(args, record_env_ids, vision_mode):
     )
 
 
+def shortest_path_slerp_xyzw(old_quat_xyzw, new_quat_xyzw, new_weight):
+    """SLERP from old to new using the shortest quaternion arc."""
+    old = np.asarray(old_quat_xyzw, dtype=np.float64).reshape(4)
+    new = np.asarray(new_quat_xyzw, dtype=np.float64).reshape(4)
+    old_norm = float(np.linalg.norm(old))
+    new_norm = float(np.linalg.norm(new))
+    if not np.isfinite(old_norm) or old_norm < 1.0e-9:
+        old = np.asarray([0.0, 0.0, 0.0, 1.0], dtype=np.float64)
+    else:
+        old /= old_norm
+    if not np.isfinite(new_norm) or new_norm < 1.0e-9:
+        new = old.copy()
+    else:
+        new /= new_norm
+
+    dot = float(np.dot(old, new))
+    if dot < 0.0:
+        new = -new
+        dot = -dot
+    dot = float(np.clip(dot, 0.0, 1.0))
+    t = float(np.clip(new_weight, 0.0, 1.0))
+    if dot > 0.9995:
+        blended = (1.0 - t) * old + t * new
+    else:
+        theta = float(np.arccos(dot))
+        sin_theta = float(np.sin(theta))
+        blended = (
+            np.sin((1.0 - t) * theta) / sin_theta * old
+            + np.sin(t * theta) / sin_theta * new
+        )
+    blended /= max(float(np.linalg.norm(blended)), 1.0e-9)
+    if blended[3] < 0.0:
+        blended = -blended
+    return blended.astype(np.float32)
+
+
+def blend_float_dp_ee_actions(old_action, new_action, old_weight=0.3, new_weight=0.7):
+    """Blend overlapping 10D EE actions like the real NX deployment path."""
+    old = np.asarray(old_action, dtype=np.float32).reshape(-1)
+    new = np.asarray(new_action, dtype=np.float32).reshape(-1)
+    if old.shape[0] < 10 or new.shape[0] < 10:
+        raise ValueError(f"EE action blending requires 10D actions, got {old.shape} and {new.shape}.")
+    total = float(old_weight) + float(new_weight)
+    if total <= 0.0:
+        raise ValueError("EE action blend weights must have a positive sum.")
+    old_alpha = float(old_weight) / total
+    new_alpha = float(new_weight) / total
+    blended = new[:10].copy()
+    blended[0:5] = old_alpha * old[0:5] + new_alpha * new[0:5]
+    blended[5:9] = shortest_path_slerp_xyzw(old[5:9], new[5:9], new_alpha)
+    # Gripper follows the newest chunk directly; blending delays grasp/release.
+    blended[9] = new[9]
+    return blended
+
+
+@dataclass
+class FloatDPTimedAction:
+    timestep: int
+    action: np.ndarray
+    source: str = "chunk"
+    blend_count: int = 1
+
+
+class FloatDPActionOverlapBuffer:
+    """Timestamped EE action buffer with NX-style overlap aggregation."""
+
+    def __init__(self, old_weight=0.3, new_weight=0.7):
+        self.old_weight = float(old_weight)
+        self.new_weight = float(new_weight)
+        self._queue = deque()
+        self.last_popped_timestep = -1
+
+    @property
+    def queue_size(self):
+        return len(self._queue)
+
+    @property
+    def first_timestep(self):
+        return None if not self._queue else int(self._queue[0].timestep)
+
+    @property
+    def last_timestep(self):
+        return None if not self._queue else int(self._queue[-1].timestep)
+
+    def ingest(self, actions, start_timestep, current_timestep):
+        rows = np.asarray(actions, dtype=np.float32)
+        if rows.ndim != 2 or rows.shape[1] < 10:
+            raise ValueError(f"Expected action chunk with shape (T, >=10), got {rows.shape}.")
+        future = {
+            int(item.timestep): item
+            for item in self._queue
+            if int(item.timestep) > self.last_popped_timestep
+        }
+        stale_skipped = 0
+        overlap_blended = 0
+        appended = 0
+        for offset, row in enumerate(rows):
+            timestep = int(start_timestep) + int(offset)
+            if timestep < int(current_timestep) or timestep <= self.last_popped_timestep:
+                stale_skipped += 1
+                continue
+            if timestep in future:
+                old_item = future[timestep]
+                future[timestep] = FloatDPTimedAction(
+                    timestep=timestep,
+                    action=blend_float_dp_ee_actions(
+                        old_item.action,
+                        row,
+                        old_weight=self.old_weight,
+                        new_weight=self.new_weight,
+                    ),
+                    source="overlap_0.3_old_0.7_new",
+                    blend_count=int(old_item.blend_count) + 1,
+                )
+                overlap_blended += 1
+            else:
+                future[timestep] = FloatDPTimedAction(
+                    timestep=timestep,
+                    action=np.asarray(row[:10], dtype=np.float32).copy(),
+                    source="new_chunk",
+                    blend_count=1,
+                )
+                appended += 1
+        self._queue = deque(sorted(future.values(), key=lambda item: item.timestep))
+        return {
+            "start_timestep": int(start_timestep),
+            "ingest_timestep": int(current_timestep),
+            "stale_skipped": int(stale_skipped),
+            "overlap_blended": int(overlap_blended),
+            "appended": int(appended),
+            "queue_size": self.queue_size,
+            "queue_first_timestep": self.first_timestep,
+            "queue_last_timestep": self.last_timestep,
+            "old_weight": self.old_weight,
+            "new_weight": self.new_weight,
+        }
+
+    def pop(self, expected_timestep):
+        if not self._queue:
+            raise RuntimeError("Float DP action overlap buffer is empty.")
+        item = self._queue.popleft()
+        if int(item.timestep) != int(expected_timestep):
+            raise RuntimeError(
+                f"Float DP action timeline mismatch: expected step {expected_timestep}, got {item.timestep}."
+            )
+        self.last_popped_timestep = int(item.timestep)
+        return item
+
+
 def setup_float_dp_policy_controller(
     args,
     env_states,
@@ -3483,6 +3827,13 @@ def setup_float_dp_policy_controller(
     controlled_states = [env_states[env_id] for env_id in dp_control_env_ids]
     for controlled_state in controlled_states:
         controlled_state.dp_action_frame = getattr(dp_controller, "action_frame", "world")
+        if bool(getattr(args, "dp_temporal_ensemble", False)):
+            controlled_state.dp_temporal_action_buffer = FloatDPActionOverlapBuffer(
+                old_weight=float(getattr(args, "dp_temporal_old_weight", 0.3)),
+                new_weight=float(getattr(args, "dp_temporal_new_weight", 0.7)),
+            )
+            controlled_state.dp_temporal_timestep = 0
+            controlled_state.dp_temporal_warned_fallback = False
         if not controlled_state.camera_handles:
             raise RuntimeError(f"{mode_name} DP policy execution requires camera sensors; do not disable wrist/front cameras.")
     print(
@@ -3490,6 +3841,14 @@ def setup_float_dp_policy_controller(
         f"action_frame={getattr(dp_controller, 'action_frame', 'world')}",
         flush=True,
     )
+    if bool(getattr(args, "dp_temporal_ensemble", False)):
+        print(
+            "Door DP temporal ensemble enabled: "
+            f"prefetch={int(getattr(args, 'dp_temporal_prefetch_actions', 3))} "
+            f"old_weight={float(getattr(args, 'dp_temporal_old_weight', 0.3)):.3g} "
+            f"new_weight={float(getattr(args, 'dp_temporal_new_weight', 0.7)):.3g}",
+            flush=True,
+        )
     if args.dp_control_all_envs:
         print(f"Door DP controls all {len(dp_control_env_ids)} envs with one batched policy.", flush=True)
     else:
@@ -3506,6 +3865,89 @@ def setup_float_dp_policy_controller(
     return dp_controller, dp_logger, controlled_states[0], dp_control_env_ids, dp_control_env_id_set
 
 
+def _collect_float_dp_policy_actions_temporal(
+    dp_controller,
+    dp_policy_inputs_by_env,
+    batch_env_ids,
+    batch_states,
+    batch_wrist_masks,
+    batch_wrist_seconds,
+    batch_front_masks,
+    batch_front_seconds,
+    batch_front_camera_poses,
+    batch_wrist_camera_poses,
+    env_state_by_id,
+):
+    for idx, env_id in enumerate(batch_env_ids):
+        dp_controller.append_observation_for_env(
+            int(env_id),
+            batch_states[idx],
+            batch_wrist_masks[idx],
+            batch_wrist_seconds[idx],
+            batch_front_masks[idx],
+            batch_front_seconds[idx],
+            None if batch_front_camera_poses is None else batch_front_camera_poses[idx],
+            None if batch_wrist_camera_poses is None else batch_wrist_camera_poses[idx],
+        )
+
+    sample_env_ids = []
+    prefetch_by_env = {}
+    for env_id in batch_env_ids:
+        st = env_state_by_id[int(env_id)]
+        buffer = getattr(st, "dp_temporal_action_buffer", None)
+        if buffer is None:
+            buffer = FloatDPActionOverlapBuffer(
+                old_weight=float(getattr(st.args, "dp_temporal_old_weight", 0.3)),
+                new_weight=float(getattr(st.args, "dp_temporal_new_weight", 0.7)),
+            )
+            st.dp_temporal_action_buffer = buffer
+            st.dp_temporal_timestep = 0
+        prefetch = max(0, int(getattr(st.args, "dp_temporal_prefetch_actions", 3)))
+        prefetch_by_env[int(env_id)] = prefetch
+        if buffer.queue_size <= prefetch:
+            sample_env_ids.append(int(env_id))
+
+    if sample_env_ids:
+        chunks = np.asarray(dp_controller.predict_action_chunks_for_envs(sample_env_ids), dtype=np.float32)
+        if chunks.ndim != 3 or chunks.shape[-1] < 10:
+            raise RuntimeError(f"Temporal ensemble expected action chunks shaped (B,T,>=10), got {chunks.shape}.")
+        for row_idx, env_id in enumerate(sample_env_ids):
+            st = env_state_by_id[int(env_id)]
+            buffer = st.dp_temporal_action_buffer
+            current_timestep = int(getattr(st, "dp_temporal_timestep", 0))
+            controller_horizon = int(getattr(dp_controller, "action_horizon", chunks.shape[1]))
+            args_horizon = getattr(st.args, "dp_action_horizon", None)
+            action_horizon = int(args_horizon) if args_horizon is not None else controller_horizon
+            action_horizon = max(1, min(int(action_horizon), int(chunks.shape[1])))
+            ingest_meta = buffer.ingest(
+                chunks[row_idx, :action_horizon],
+                start_timestep=current_timestep,
+                current_timestep=current_timestep,
+            )
+            st.dp_temporal_last_ingest_meta = ingest_meta
+
+    dp_actions_by_env = {}
+    for env_id in batch_env_ids:
+        env_id = int(env_id)
+        st = env_state_by_id[env_id]
+        current_timestep = int(getattr(st, "dp_temporal_timestep", 0))
+        item = st.dp_temporal_action_buffer.pop(current_timestep)
+        st.dp_temporal_timestep = current_timestep + 1
+        st.dp_temporal_last_action_meta = {
+            "timestep": int(item.timestep),
+            "source": str(item.source),
+            "blend_count": int(item.blend_count),
+            "queue_size_after_pop": int(st.dp_temporal_action_buffer.queue_size),
+            "prefetch_actions": int(prefetch_by_env.get(env_id, 0)),
+            "last_ingest": getattr(st, "dp_temporal_last_ingest_meta", None),
+        }
+        dp_actions_by_env[env_id] = np.asarray(item.action, dtype=np.float32)
+        dp_policy_inputs_by_env[env_id]["temporal_ensemble"] = dict(st.dp_temporal_last_action_meta)
+        if hasattr(dp_controller, "get_last_camera_gates_for_env"):
+            dp_policy_inputs_by_env[env_id]["camera_gates"] = dp_controller.get_last_camera_gates_for_env(env_id)
+    return dp_actions_by_env
+
+
 def collect_float_dp_policy_actions(gym, sim, env_states, dof_names, gripper_idx, dt, dp_controller, dp_control_env_id_set, mode_name):
     dp_policy_inputs_by_env = {}
     dp_actions_by_env = {}
@@ -3519,6 +3961,8 @@ def collect_float_dp_policy_actions(gym, sim, env_states, dof_names, gripper_idx
     batch_wrist_seconds = []
     batch_front_masks = []
     batch_front_seconds = []
+    batch_front_camera_poses = []
+    batch_wrist_camera_poses = []
     state_mode = float_dp_state_mode_from_feature_names(getattr(dp_controller, "state_feature_names", []))
     for st in env_states:
         if st.index not in dp_control_env_id_set:
@@ -3585,27 +4029,67 @@ def collect_float_dp_policy_actions(gym, sim, env_states, dof_names, gripper_idx
             "ee_quat": ee_quat,
             "dp_state": dp_state,
         }
+        if bool(getattr(dp_controller, "config", {}).get("plucker_conditioning", False)):
+            front_pose_base, wrist_pose_base = float_camera_pose_base(gym, st)
+            dp_policy_inputs_by_env[st.index]["front_camera_pose_base"] = front_pose_base
+            dp_policy_inputs_by_env[st.index]["wrist_camera_pose_base"] = wrist_pose_base
+        else:
+            front_pose_base = None
+            wrist_pose_base = None
         batch_env_ids.append(st.index)
         batch_states.append(dp_state)
         batch_wrist_masks.append(wrist_mask_rgb)
         batch_wrist_seconds.append(wrist_second_rgb)
         batch_front_masks.append(front_mask_rgb)
         batch_front_seconds.append(front_second_rgb)
+        batch_front_camera_poses.append(front_pose_base)
+        batch_wrist_camera_poses.append(wrist_pose_base)
     if batch_env_ids:
-        dp_actions = dp_controller.act_batch(
-            batch_env_ids,
-            batch_states,
-            batch_wrist_masks,
-            batch_wrist_seconds,
-            batch_front_masks,
-            batch_front_seconds,
-        )
-        for env_id, dp_action in zip(batch_env_ids, dp_actions):
-            dp_actions_by_env[int(env_id)] = np.asarray(dp_action, dtype=np.float32)
-            if hasattr(dp_controller, "get_last_camera_gates_for_env"):
-                dp_policy_inputs_by_env[int(env_id)]["camera_gates"] = dp_controller.get_last_camera_gates_for_env(
-                    int(env_id)
-                )
+        env_state_by_id = {int(st.index): st for st in env_states}
+        use_temporal = bool(getattr(env_states[0].args, "dp_temporal_ensemble", False))
+        can_temporal = callable(getattr(dp_controller, "predict_action_chunks_for_envs", None)) and int(
+            getattr(dp_controller, "action_dim", 10)
+        ) >= 10
+        if use_temporal and can_temporal:
+            dp_actions_by_env = _collect_float_dp_policy_actions_temporal(
+                dp_controller,
+                dp_policy_inputs_by_env,
+                batch_env_ids,
+                batch_states,
+                batch_wrist_masks,
+                batch_wrist_seconds,
+                batch_front_masks,
+                batch_front_seconds,
+                batch_front_camera_poses,
+                batch_wrist_camera_poses,
+                env_state_by_id,
+            )
+        else:
+            if use_temporal:
+                st0 = env_state_by_id[int(batch_env_ids[0])]
+                if not bool(getattr(st0, "dp_temporal_warned_fallback", False)):
+                    print(
+                        "Warning: --dp_temporal_ensemble requested but the loaded policy controller "
+                        "does not expose compatible 10D action chunks; falling back to plain act_batch.",
+                        flush=True,
+                    )
+                    st0.dp_temporal_warned_fallback = True
+            dp_actions = dp_controller.act_batch(
+                batch_env_ids,
+                batch_states,
+                batch_wrist_masks,
+                batch_wrist_seconds,
+                batch_front_masks,
+                batch_front_seconds,
+                None if not any(pose is not None for pose in batch_front_camera_poses) else batch_front_camera_poses,
+                None if not any(pose is not None for pose in batch_wrist_camera_poses) else batch_wrist_camera_poses,
+            )
+            for env_id, dp_action in zip(batch_env_ids, dp_actions):
+                dp_actions_by_env[int(env_id)] = np.asarray(dp_action, dtype=np.float32)
+                if hasattr(dp_controller, "get_last_camera_gates_for_env"):
+                    dp_policy_inputs_by_env[int(env_id)]["camera_gates"] = dp_controller.get_last_camera_gates_for_env(
+                        int(env_id)
+                    )
     return dp_policy_inputs_by_env, dp_actions_by_env
 
 
@@ -3691,6 +4175,25 @@ def record_float_dp_frame(gym, sim, st, dof_names, gripper_idx, dt, phase_id, do
         dof_names=dof_names,
         dof_pos=st.dof_positions,
     )
+    replay_snapshot = make_float_replay_snapshot(
+        st.args,
+        st.door,
+        dof_names,
+        dof_pos_actual,
+        dof_vel_actual,
+        door_pos_record,
+        door_vel_record,
+        ee_pos,
+        ee_quat,
+        base_xy,
+        yaw,
+        vx_cmd,
+        yaw_rate_cmd,
+    )
+    if bool(getattr(st.args, "record_camera_pose", False)):
+        front_pose_base, wrist_pose_base = float_camera_pose_base(gym, st)
+        replay_snapshot["front_camera_pose_base"] = front_pose_base
+        replay_snapshot["wrist_camera_pose_base"] = wrist_pose_base
     st.dp_recorder.add_frame(
         dp_state,
         wrist_mask_rgb,
@@ -3699,21 +4202,7 @@ def record_float_dp_frame(gym, sim, st, dof_names, gripper_idx, dt, phase_id, do
         phase_id,
         front_mask_rgb=front_mask_rgb,
         front_second_rgb=front_second_rgb,
-        replay_snapshot=make_float_replay_snapshot(
-            st.args,
-            st.door,
-            dof_names,
-            dof_pos_actual,
-            dof_vel_actual,
-            door_pos_record,
-            door_vel_record,
-            ee_pos,
-            ee_quat,
-            base_xy,
-            yaw,
-            vx_cmd,
-            yaw_rate_cmd,
-        ),
+        replay_snapshot=replay_snapshot,
     )
     st.last_dp_action = dp_action.copy()
     st.dp_record_prev_base_xy = np.asarray(base_xy, dtype=np.float32).copy()

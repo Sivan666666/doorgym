@@ -180,6 +180,14 @@ def parse_args():
     parser.add_argument("--dp_inference_steps", type=int, default=10)
     parser.add_argument("--dp_noise_scheduler_type", type=str.upper, choices=["DDIM", "DDPM"], default="DDIM")
     parser.add_argument("--dp_action_horizon", type=int, default=None)
+    parser.add_argument(
+        "--dp_temporal_ensemble",
+        action="store_true",
+        help="Use NX-style action chunk overlap fusion for 10D EE actions during local sim play.",
+    )
+    parser.add_argument("--dp_temporal_prefetch_actions", type=int, default=3)
+    parser.add_argument("--dp_temporal_old_weight", type=float, default=0.3)
+    parser.add_argument("--dp_temporal_new_weight", type=float, default=0.7)
     parser.add_argument("--dp_control_env_id", type=int, default=0)
     parser.add_argument("--dp_control_all_envs", dest="dp_control_all_envs", action="store_true", default=True)
     parser.add_argument("--no_dp_control_all_envs", dest="dp_control_all_envs", action="store_false")
@@ -313,6 +321,11 @@ def main():
         cmd.append("--no_dp_control_all_envs")
     if args.dp_action_horizon is not None:
         cmd += ["--dp_action_horizon", str(args.dp_action_horizon)]
+    if args.dp_temporal_ensemble:
+        cmd.append("--dp_temporal_ensemble")
+        cmd += ["--dp_temporal_prefetch_actions", str(args.dp_temporal_prefetch_actions)]
+        cmd += ["--dp_temporal_old_weight", str(args.dp_temporal_old_weight)]
+        cmd += ["--dp_temporal_new_weight", str(args.dp_temporal_new_weight)]
     if args.dp_warmstart:
         cmd += [
             "--dp_warmstart",

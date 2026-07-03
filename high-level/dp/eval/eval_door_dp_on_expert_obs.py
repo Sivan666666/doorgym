@@ -26,6 +26,8 @@ if str(DP_ROOT) not in sys.path:
 from door_dp_common import (  # noqa: E402
     ACTION_NAMES,
     DoorDPPolicyController,
+    RAW_FRONT_CAMERA_POSE_KEY,
+    RAW_WRIST_CAMERA_POSE_KEY,
     image_to_three_channel_uint8,
     normalize_vision_mode,
     raw_image_keys_for_vision_mode,
@@ -241,6 +243,8 @@ def validate_inputs(data, controller: DoorDPPolicyController, expected_vision_mo
 
 def preload_episode_arrays(data, image_keys: list[str]) -> dict[str, np.ndarray]:
     keys = ["state", "action"] + list(image_keys)
+    if RAW_FRONT_CAMERA_POSE_KEY in data.files and RAW_WRIST_CAMERA_POSE_KEY in data.files:
+        keys += [RAW_FRONT_CAMERA_POSE_KEY, RAW_WRIST_CAMERA_POSE_KEY]
     return {key: np.asarray(data[key]) for key in keys}
 
 
@@ -249,17 +253,35 @@ def episode_memory_mb(episode: dict[str, np.ndarray]) -> float:
 
 
 def make_controller_item(controller: DoorDPPolicyController, state: np.ndarray, episode, image_keys: list[str], idx: int):
+    if bool(getattr(controller, "plucker_conditioning", False)):
+        if RAW_FRONT_CAMERA_POSE_KEY not in episode or RAW_WRIST_CAMERA_POSE_KEY not in episode:
+            raise ValueError("Plücker checkpoint eval requires raw episode camera pose arrays.")
+        front_pose = episode[RAW_FRONT_CAMERA_POSE_KEY][idx]
+        wrist_pose = episode[RAW_WRIST_CAMERA_POSE_KEY][idx]
+    else:
+        front_pose = None
+        wrist_pose = None
     if controller.vision_mode == "depth_only":
         wrist_depth = image_to_three_channel_uint8(episode[image_keys[0]][idx])
         front_depth = image_to_three_channel_uint8(episode[image_keys[1]][idx])
         dummy_mask = np.zeros_like(wrist_depth)
-        return controller._make_item(state.astype(np.float32), dummy_mask, wrist_depth, None, front_depth)
+        return controller._make_item(
+            state.astype(np.float32),
+            dummy_mask,
+            wrist_depth,
+            None,
+            front_depth,
+            front_pose,
+            wrist_pose,
+        )
     return controller._make_item(
         state.astype(np.float32),
         episode[image_keys[0]][idx].astype(np.uint8),
         episode[image_keys[1]][idx].astype(np.uint8),
         episode[image_keys[2]][idx].astype(np.uint8),
         episode[image_keys[3]][idx].astype(np.uint8),
+        front_pose,
+        wrist_pose,
     )
 
 
@@ -317,6 +339,14 @@ def reset_controller_on_expert_window(controller: DoorDPPolicyController, data, 
     controller.action_queue.clear()
     first = max(0, int(step) - controller.obs_horizon + 1)
     for idx in range(first, int(step) + 1):
+        if bool(getattr(controller, "plucker_conditioning", False)):
+            if RAW_FRONT_CAMERA_POSE_KEY not in data.files or RAW_WRIST_CAMERA_POSE_KEY not in data.files:
+                raise ValueError("Plücker checkpoint eval requires raw episode camera pose arrays.")
+            front_pose = data[RAW_FRONT_CAMERA_POSE_KEY][idx]
+            wrist_pose = data[RAW_WRIST_CAMERA_POSE_KEY][idx]
+        else:
+            front_pose = None
+            wrist_pose = None
         if controller.vision_mode == "depth_only":
             wrist_depth = image_to_three_channel_uint8(data[image_keys[0]][idx])
             front_depth = image_to_three_channel_uint8(data[image_keys[1]][idx])
@@ -326,6 +356,8 @@ def reset_controller_on_expert_window(controller: DoorDPPolicyController, data, 
                 wrist_depth,
                 None,
                 front_depth,
+                front_pose,
+                wrist_pose,
             )
         else:
             controller.append_observation(
@@ -334,6 +366,8 @@ def reset_controller_on_expert_window(controller: DoorDPPolicyController, data, 
                 data[image_keys[1]][idx].astype(np.uint8),
                 data[image_keys[2]][idx].astype(np.uint8),
                 data[image_keys[3]][idx].astype(np.uint8),
+                front_pose,
+                wrist_pose,
             )
 
 

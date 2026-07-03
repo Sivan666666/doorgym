@@ -143,6 +143,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dp_noise_scheduler_type", type=str.upper, choices=["DDIM", "DDPM"], default="DDIM")
     parser.add_argument("--dp_action_horizon", type=int, default=None)
     parser.add_argument(
+        "--dp_temporal_ensemble",
+        action="store_true",
+        help="Forward NX-style action chunk overlap fusion to play_door_policy.py.",
+    )
+    parser.add_argument("--dp_temporal_prefetch_actions", type=int, default=3)
+    parser.add_argument("--dp_temporal_old_weight", type=float, default=0.3)
+    parser.add_argument("--dp_temporal_new_weight", type=float, default=0.7)
+    parser.add_argument(
         "--dp_fps",
         type=int,
         default=25,
@@ -371,6 +379,11 @@ def build_play_command(args: argparse.Namespace, batch_envs: int, batch_idx: int
     ]
     if args.dp_action_horizon is not None:
         cmd += ["--dp_action_horizon", str(args.dp_action_horizon)]
+    if args.dp_temporal_ensemble:
+        cmd.append("--dp_temporal_ensemble")
+        cmd += ["--dp_temporal_prefetch_actions", str(args.dp_temporal_prefetch_actions)]
+        cmd += ["--dp_temporal_old_weight", str(args.dp_temporal_old_weight)]
+        cmd += ["--dp_temporal_new_weight", str(args.dp_temporal_new_weight)]
     if args.rgb:
         cmd.append("--rgb")
     elif args.depth_only:
@@ -511,7 +524,8 @@ def main() -> None:
         f"mode={args.mode} robot_body={args.robot_body} num_envs={args.num_envs} total_trials={args.total_trials} "
         f"steps={args.steps} threshold={args.pass_open_angle_deg}deg metric={metric} "
         f"vision_mode={'rgb' if args.rgb else ('depth_only' if args.depth_only else 'depth')} "
-        f"dp_action_horizon={args.dp_action_horizon} dp_fps={args.dp_fps:g} "
+        f"dp_action_horizon={args.dp_action_horizon} dp_temporal_ensemble={args.dp_temporal_ensemble} "
+        f"dp_fps={args.dp_fps:g} "
         f"parallel_batches={args.parallel_batches} headless={args.headless} run_root={run_root}"
     )
     if args.parallel_batches > 1:
@@ -594,6 +608,10 @@ def main() -> None:
         "dp_inference_steps": int(args.dp_inference_steps),
         "dp_noise_scheduler_type": args.dp_noise_scheduler_type,
         "dp_action_horizon": None if args.dp_action_horizon is None else int(args.dp_action_horizon),
+        "dp_temporal_ensemble": bool(args.dp_temporal_ensemble),
+        "dp_temporal_prefetch_actions": int(args.dp_temporal_prefetch_actions),
+        "dp_temporal_old_weight": float(args.dp_temporal_old_weight),
+        "dp_temporal_new_weight": float(args.dp_temporal_new_weight),
         "dp_fps": int(args.dp_fps),
         "rgb": bool(args.rgb),
         "depth_only": bool(args.depth_only),

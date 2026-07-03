@@ -169,6 +169,87 @@ hold_steps                 300
 
 注意：`walk_steps` 如果没有显式从 CLI 指定，会根据出生点到 stop distance 的距离动态算，保证最小移动速度约 `0.2m/s`。这样不同 env 因为出生距离不同，可以不同步进入 `initial_hold`，不会出现远的 env 被迫走得特别快、近的 env 走得特别慢。
 
+### 3.1 Door Digital Twin V1
+
+新增模块：
+
+```text
+high-level/float_ik/door_twin/
+```
+
+当前 V1 做的是确定性结构提取 + skill program 解释执行 + rollout report，不直接让 VLM 改 Python。主脚本新增参数：
+
+```bash
+--skill_program_json /path/to/skill.json   # 或 auto，用当前 scripted 参数生成默认 skill
+--door_twin_log_dir /path/to/run_dir
+--save_failed_rollouts
+--dump_keyframe_images
+--door_twin_camera_views wrist,front,observer_left,observer_right
+```
+
+不传 `--skill_program_json` 时，`trajectory_targets(...)` 仍走原来的手写 offset 轨迹。`--skill_program_json auto` 会生成带 `execution_mode=legacy_replay` 的结构化程序，第一轮仍逐步执行原 scripted waypoint、smoothstep、phase timing 和 per-env randomization，用于建立严格 baseline。只有用户传入新 skill，或者 optimizer/VLM 产生参数补丁后，程序才切换到 `skill_interpreter`：
+
+- `MoveEEToHandle` / `RotateHandle` 的 EE 关键点按局部 frame `[approach, lateral, z]` 生成，不再直接依赖 world-X offset。
+- `MoveTo` 是显式底盘原语，可重复出现并通过 `stage=approach/push/traverse` 区分，参数包含 `vx`、`vyaw`、`distance` / `stop_distance`、`duration_steps`。`skill_interpreter` 中该原语使用线性时间参数化，实际底盘命令会贴近指定的 `vx/vyaw`；`legacy_replay` 仍使用原 smoothstep。
+- rollout trace 会记录实际执行得到的 `base_command={vx, vyaw}`、`max_abs_base_vx` 和 `max_abs_base_vyaw`。
+
+示例底盘原语：
+
+```json
+{"name": "MoveTo", "stage": "approach", "vx": 0.20, "vyaw": 0.0, "stop_distance": 0.20}
+{"name": "MoveTo", "stage": "push", "vx": 0.05, "vyaw": 0.0, "distance": 0.30, "duration_steps": 300}
+```
+
+`--dump_keyframe_images` 在 headless 模式下也会强制创建相机。默认视角是 wrist、front、observer_left、observer_right，其中 observer 是对准 handle 区域的世界坐标相机，适合 VLM 同时观察机械臂接触、门板角度和底盘碰撞。每个关键 phase 同时保存 RGB、depth、handle mask 和多视角 montage。
+
+`--door_twin_log_dir` 会为每个 env 输出：
+
+```text
+env_0000_report.json
+rollout_summary.json
+keyframes/env_0000/*.png             # RGB/depth/mask
+keyframes/env_0000/*_montage.png     # 多视角拼图
+expert_raw/episode_*.npz             # 仅成功且启用 --record_dp_dataset
+```
+
+`RolloutReport` 里包含 success、failure_stage、secondary_failures、door_open_deg、handle_rotation_deg、ee_handle_dist、ee_tracking_error、base_collision、body_passed、camera_available、handle_unlocked、底盘命令统计和 artifact 路径。主失败按因果阶段排序：解锁前 IK / grasp / handle failure 优先于之后继续 push 导致的碰撞。`rollout_summary.json` 的 `expert_trajectories` 会直接索引本轮保存成功的 raw NPZ。失败分类当前包括：
+
+```text
+grasp_miss
+handle_not_unlocked
+contact_lost
+door_push_insufficient
+arm_joint_limit_or_ik_bad
+base_collision
+body_blocked
+camera_unavailable
+asset_invalid
+timeout
+```
+
+成功 raw DP episode 仍然沿用原来的 recorder 逻辑保存；失败 rollout 不写入 expert 数据，只写 DoorTwin report / trace / keyframe artifacts。
+
+已验证的 wc4 skill 示例：
+
+```text
+high-level/float_ik/door_twin/examples/wc4_smoke_skill.json
+```
+
+2026-07-02 实际 smoke 结果：
+
+- Unit + compile：`9 passed`，同时在默认 Python 和 `b1z1` Python 3.8 做过 `py_compile`。
+- legacy A/B：wc4 原 scripted 与 `auto legacy_replay` 各跑 930 steps；45 个 trace 采样点的 phase、base XY、EE target、EE pose、handle goal 全部最大差值 `0.0`，两边都是 `1/1 success`、无碰撞。
+- wc4：`1/1 success`，door `90.0 deg`、handle `45.0 deg`、无 base collision、4 个相机有效；trace 中 approach `vx=0.2016 m/s`、push `vx=0.0500 m/s`。
+- expert recorder：保存 186 帧 `episode_000000.npz`；state `(186, 73)`、action `(186, 10)`、wrist/front depth `(186, 480, 640)`。
+- 每个 rollout 保存 78 张关键帧 PNG，其中 6 张是 phase montage。
+- record_materialization door index 0：原 scripted 与 `auto legacy_replay` 的轨迹也逐点一致。两者都会先出现解锁前 IK 误差/关节极限，把手未解锁、门保持关闭；脚本继续执行 push 后，front bumper 才与关闭的 door panel 产生真实 PhysX contact。因此主失败是 `arm_joint_limit_or_ik_bad`，`handle_not_unlocked` / `base_collision` / `door_push_insufficient` 是 secondary failures，不应先修改原来的 `stop_distance=0.15`、`push_base_distance=0.35`。该 generated door 尚未优化成功。
+
+完整成功 smoke 的产物：
+
+```text
+high-level/experiments/door_twin_runs/smoke_wc4_multiview_v8_final_expert/
+```
+
 ## 4. A2W 默认 base / door 参数
 
 在 `isaacgym_float_ik_a2w_basearn_push_door_parallel.py` 的 custom parameters 里。现在这些默认值同时集中到了 YAML，方便之后直接改配置：
@@ -1089,4 +1170,141 @@ conda run --no-capture-output -n b1z1 python \
   --no_draw_ik_target \
   --no_draw_camera_axes \
   --no_show_seg
+```
+
+## 17. 本机 ACT temporal ensemble / NX chunk smoothing
+
+2026-07-02 增加了一个本机仿真可选开关，用来复用 NX 真机部署里的 ACT action chunk overlap temporal ensemble。
+
+新增参数：
+
+```text
+--dp_temporal_ensemble
+--dp_temporal_prefetch_actions 3
+--dp_temporal_old_weight 0.3
+--dp_temporal_new_weight 0.7
+```
+
+行为：
+
+1. 默认关闭，不影响旧 play/eval。
+2. 开启后，policy queue 剩余 action 数 `<= prefetch_actions` 时提前推理新 chunk。
+3. 新 chunk 的 step0 对齐当前 policy timestep。
+4. 重叠 timestep 按 NX 逻辑融合：
+   - `vx/vyaw/xyz`: `0.3 old + 0.7 new`
+   - quat: shortest-path SLERP
+   - gripper: 直接使用最新 chunk，不融合
+5. `--dp_log_path` JSONL 中会写入 `temporal_ensemble` 字段，记录 action 来源、blend_count 和 overlap meta。
+
+相关实现：
+
+```text
+high-level/dp/door_policy_backend.py
+high-level/dp/door_policy_worker.py
+high-level/dp/door_dp_common.py
+high-level/dp/play/play_door_policy.py
+high-level/dp/eval/eval_door_policy_success.py
+high-level/float_ik/door_common.py
+high-level/float_ik/isaacgym_float_ik_a2w_basearn_push_door_parallel.py
+```
+
+最新 100K checkpoint 测试报告：
+
+```text
+high-level/dp/result/A2W_ACT_TEMPORAL_ENSEMBLE_TEST_20260702.md
+```
+
+关键结果：
+
+```text
+raw H12:      34/64 = 53.12%
+temporal H12: 34/64 = 53.12%
+```
+
+结论：对 `leroact_a2w_keyframe_perstep_w8_r3_sample20_nogating_chunk100_exec50_bs16_0702_0106/100000`
+这份 checkpoint，本机仿真里启用 NX-style temporal ensemble 没有提升成功率。它会改变个别 env 的成败，但总体互相抵消。因此本机 eval 默认仍建议用 raw chunk/horizon sweep，只把 temporal ensemble 作为部署一致性或消融选项。
+
+## 18. Plücker-conditioned dual-depth ACT
+
+2026-07-03 增加了一个默认关闭的新 ACT 输入变体：`Plücker-conditioned ACT`。
+
+目标是让 front / wrist 两路 depth token 显式知道每个 pixel 在 robot base 坐标系下对应的 3D 观察射线。实现上不把 Plücker map 拼进 pretrained ResNet 输入，而是：
+
+```text
+depth image -> pretrained ResNet -> image feature
+camera pose -> full-res 6D Plücker ray-map -> small CNN -> geometry feature
+concat(image feature, geometry feature) -> 1x1 projection -> ACT transformer
+```
+
+新增训练参数：
+
+```text
+--policy.plucker_conditioning=true
+--policy.plucker_front_pose_key=observation.camera_pose.front
+--policy.plucker_wrist_pose_key=observation.camera_pose.wrist
+--policy.plucker_encoder_channels=32,64
+--policy.plucker_image_width=640
+--policy.plucker_image_height=480
+--policy.plucker_horizontal_fov_deg=69.0
+```
+
+默认 `plucker_conditioning=false`，旧 ACT / 旧 checkpoint / 旧 play 路径不受影响。开启后 v1 只支持 ResNet backbone；DINOv2 / DeFM 会直接报错。
+
+录制新增参数：
+
+```text
+--record_camera_pose
+```
+
+启用后 raw episode 会保存：
+
+```text
+front_camera_pose_base: T x 7
+wrist_camera_pose_base: T x 7
+```
+
+并在 sidecar / LeRobot metadata 中记录：
+
+```text
+camera_intrinsics
+camera_pose_frame = robot_base
+camera_pose_convention = optical_frame
+camera_pose_features = [
+  observation.camera_pose.front,
+  observation.camera_pose.wrist,
+]
+```
+
+注意：
+
+1. Plücker ray-map 在原始 `480x640` 全分辨率生成，再由 Plücker encoder 下采样到 ResNet feature map 尺寸。
+2. wrist camera pose 在仿真里由实际 link06 + camera local pose 计算，能跟随机械臂运动变化。
+3. camera pose 是几何量，ACT preprocessor 会跳过它的 STATE 归一化，保持真实 robot-base 坐标。
+4. 旧 raw dataset 没有每帧 camera pose，不能用于正式 Plücker 训练；正式实验需要重新录制 `--record_camera_pose` 数据。
+
+相关实现：
+
+```text
+high-level/lerobot/src/lerobot/policies/act/configuration_act.py
+high-level/lerobot/src/lerobot/policies/act/modeling_act.py
+high-level/lerobot/src/lerobot/policies/act/processor_act.py
+high-level/dp/door_dp_common.py
+high-level/dp/convert_door_raw_to_lerobot.py
+high-level/dp/door_policy_backend.py
+high-level/dp/door_policy_worker.py
+high-level/dp/export_official_lerobot_act_to_door_checkpoint.py
+high-level/dp/eval/eval_door_dp_on_expert_obs.py
+high-level/float_ik/door_common.py
+high-level/float_ik/isaacgym_float_ik_a2w_basearn_push_door_parallel.py
+high-level/dp/record/record_door_dp_dataset_a2w_state10.py
+```
+
+已做 smoke test：
+
+```text
+Plücker map shape: (1, 6, 480, 640)
+max ||d|| error: ~1e-7
+max |d·m|: ~2e-8
+ACT forward shape: (1, chunk, 10)
+plucker_conditioning=false 时 state_dict 无 plucker 参数
 ```

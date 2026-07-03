@@ -53,6 +53,19 @@ def make_act_pre_post_processors(
         pre-processor pipeline and the post-processor pipeline.
     """
 
+    normalize_observation_keys = None
+    if bool(getattr(config, "plucker_conditioning", False)):
+        # Camera poses are geometric inputs used to build Plücker rays. They
+        # must stay in metric robot-base coordinates, not be normalized as
+        # generic STATE features.
+        plucker_pose_keys = {
+            str(getattr(config, "plucker_front_pose_key", "")),
+            str(getattr(config, "plucker_wrist_pose_key", "")),
+        }
+        normalize_observation_keys = {
+            key for key in config.input_features if key not in plucker_pose_keys
+        }
+
     input_steps = [
         RenameObservationsProcessorStep(rename_map={}),
         AddBatchDimensionProcessorStep(),
@@ -62,6 +75,7 @@ def make_act_pre_post_processors(
             norm_map=config.normalization_mapping,
             stats=dataset_stats,
             device=config.device,
+            normalize_observation_keys=normalize_observation_keys,
         ),
     ]
     output_steps = [

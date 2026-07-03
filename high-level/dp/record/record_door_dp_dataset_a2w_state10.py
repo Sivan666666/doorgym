@@ -133,6 +133,14 @@ def parse_args():
     parser.add_argument("--record_env_id", type=int, default=0)
     parser.add_argument("--record_all_envs", dest="record_all_envs", action="store_true", default=True)
     parser.add_argument("--no_record_all_envs", dest="record_all_envs", action="store_false")
+    parser.add_argument(
+        "--record_camera_pose",
+        action="store_true",
+        help=(
+            "Forward --record_camera_pose to the A2W float_ik script so raw episodes include "
+            "front/wrist camera poses for Plücker-conditioned ACT."
+        ),
+    )
     parser.add_argument("--no_preview_trajectory_at_spawn", action="store_true", default=True)
     parser.add_argument(
         "--run_log_root",
@@ -465,6 +473,8 @@ def run_one(mode, rollout_idx, args):
         ]
         if args.no_keyframe_loss_weights:
             cmd.append("--no_keyframe_loss_weights")
+        if args.record_camera_pose:
+            cmd.append("--record_camera_pose")
         if args.rgb and args.depth_only:
             raise ValueError("--rgb and --depth_only are mutually exclusive.")
         if args.rgb:

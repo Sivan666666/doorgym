@@ -34,6 +34,12 @@ RGB_LEROBOT_IMAGE_KEYS = [
     "observation.images.front_handle_mask",
     "observation.images.front_rgb",
 ]
+FRONT_CAMERA_POSE_FEATURE = "observation.camera_pose.front"
+WRIST_CAMERA_POSE_FEATURE = "observation.camera_pose.wrist"
+CAMERA_POSE_FEATURES = [FRONT_CAMERA_POSE_FEATURE, WRIST_CAMERA_POSE_FEATURE]
+CAMERA_POSE_NAMES = ["x", "y", "z", "qx", "qy", "qz", "qw"]
+RAW_FRONT_CAMERA_POSE_KEY = "front_camera_pose_base"
+RAW_WRIST_CAMERA_POSE_KEY = "wrist_camera_pose_base"
 DATASET_METADATA_KEYS = (
     "action_frame",
     "action_pose_frame",
@@ -59,6 +65,10 @@ DATASET_METADATA_KEYS = (
     "depth_noise_enabled",
     "depth_noise_config",
     "depth_camera_randomization_config",
+    "camera_intrinsics",
+    "camera_pose_frame",
+    "camera_pose_convention",
+    "camera_pose_features",
     "phase_names",
     "keyframe_loss_enabled",
     "keyframe_loss_weight",
@@ -1233,6 +1243,7 @@ class DoorDPLeRobotRecorder:
         video_codec="h264",
         action_feature_names=None,
         include_action_loss_weight=False,
+        include_camera_pose=False,
     ):
         from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
@@ -1248,6 +1259,7 @@ class DoorDPLeRobotRecorder:
         self.state_feature_names = list(state_feature_names)
         self.action_names = list(action_feature_names or ACTION_NAMES)
         self.include_action_loss_weight = bool(include_action_loss_weight)
+        self.include_camera_pose = bool(include_camera_pose)
         self.metadata = dict(metadata or {})
         self.root.mkdir(parents=True, exist_ok=True)
         self.dataset_root = self.root / repo_id
@@ -1270,6 +1282,13 @@ class DoorDPLeRobotRecorder:
                 "shape": (1,),
                 "names": ["action_loss_weight"],
             }
+        if self.include_camera_pose:
+            for key in CAMERA_POSE_FEATURES:
+                features[key] = {
+                    "dtype": "float32",
+                    "shape": (len(CAMERA_POSE_NAMES),),
+                    "names": CAMERA_POSE_NAMES,
+                }
         for key in lerobot_image_keys_for_vision_mode(self.vision_mode):
             features[key] = {
                 "dtype": self.image_storage,
@@ -1309,6 +1328,10 @@ class DoorDPLeRobotRecorder:
         }
         if self.include_action_loss_weight:
             sidecar["action_loss_weight_feature"] = ACTION_LOSS_WEIGHT_FEATURE
+        if self.include_camera_pose:
+            sidecar["camera_pose_features"] = CAMERA_POSE_FEATURES
+            sidecar.setdefault("camera_pose_frame", "robot_base")
+            sidecar.setdefault("camera_pose_convention", "optical_frame")
         if self.vision_mode != "depth":
             sidecar["vision_mode"] = self.vision_mode
         for key in DATASET_METADATA_KEYS:
@@ -1329,6 +1352,8 @@ class DoorDPLeRobotRecorder:
         front_mask_rgb=None,
         front_second_rgb=None,
         action_loss_weight=None,
+        front_camera_pose_base=None,
+        wrist_camera_pose_base=None,
     ):
         if self.vision_mode == "depth":
             front_mask_rgb = _zero_image_like(wrist_mask_rgb) if front_mask_rgb is None else front_mask_rgb
@@ -1347,6 +1372,11 @@ class DoorDPLeRobotRecorder:
         if self.include_action_loss_weight:
             weight = 1.0 if action_loss_weight is None else float(np.asarray(action_loss_weight).reshape(-1)[0])
             frame[ACTION_LOSS_WEIGHT_FEATURE] = np.asarray([weight], dtype=np.float32)
+        if self.include_camera_pose:
+            if front_camera_pose_base is None or wrist_camera_pose_base is None:
+                raise ValueError("LeRobot camera-pose dataset frames require both front and wrist camera poses.")
+            frame[FRONT_CAMERA_POSE_FEATURE] = np.asarray(front_camera_pose_base, dtype=np.float32).reshape(7)
+            frame[WRIST_CAMERA_POSE_FEATURE] = np.asarray(wrist_camera_pose_base, dtype=np.float32).reshape(7)
         if self.vision_mode == "depth_only":
             frame[image_keys[0]] = np.asarray(wrist_second_rgb, dtype=np.uint8)
             frame[image_keys[1]] = np.asarray(front_second_rgb, dtype=np.uint8)
@@ -1618,8 +1648,25 @@ class DoorDPPolicyController:
     def _normalize_state(self, state):
         return self._impl._normalize_state(state)
 
-    def append_observation(self, state, mask_rgb, masked_depth_rgb, front_mask_rgb=None, front_masked_depth_rgb=None):
-        return self._impl.append_observation(state, mask_rgb, masked_depth_rgb, front_mask_rgb, front_masked_depth_rgb)
+    def append_observation(
+        self,
+        state,
+        mask_rgb,
+        masked_depth_rgb,
+        front_mask_rgb=None,
+        front_masked_depth_rgb=None,
+        front_camera_pose_base=None,
+        wrist_camera_pose_base=None,
+    ):
+        return self._impl.append_observation(
+            state,
+            mask_rgb,
+            masked_depth_rgb,
+            front_mask_rgb,
+            front_masked_depth_rgb,
+            front_camera_pose_base,
+            wrist_camera_pose_base,
+        )
 
     def append_observation_for_env(
         self,
@@ -1629,6 +1676,8 @@ class DoorDPPolicyController:
         masked_depth_rgb,
         front_mask_rgb=None,
         front_masked_depth_rgb=None,
+        front_camera_pose_base=None,
+        wrist_camera_pose_base=None,
     ):
         return self._impl.append_observation_for_env(
             env_id,
@@ -1637,6 +1686,8 @@ class DoorDPPolicyController:
             masked_depth_rgb,
             front_mask_rgb,
             front_masked_depth_rgb,
+            front_camera_pose_base,
+            wrist_camera_pose_base,
         )
 
     def _denormalize_action(self, action):
@@ -1646,8 +1697,25 @@ class DoorDPPolicyController:
     def sample_action_chunk(self, noise=None):
         return self._impl.sample_action_chunk(noise=noise)
 
-    def act(self, state, mask_rgb, masked_depth_rgb, front_mask_rgb=None, front_masked_depth_rgb=None):
-        return self._impl.act(state, mask_rgb, masked_depth_rgb, front_mask_rgb, front_masked_depth_rgb)
+    def act(
+        self,
+        state,
+        mask_rgb,
+        masked_depth_rgb,
+        front_mask_rgb=None,
+        front_masked_depth_rgb=None,
+        front_camera_pose_base=None,
+        wrist_camera_pose_base=None,
+    ):
+        return self._impl.act(
+            state,
+            mask_rgb,
+            masked_depth_rgb,
+            front_mask_rgb,
+            front_masked_depth_rgb,
+            front_camera_pose_base,
+            wrist_camera_pose_base,
+        )
 
     def act_batch(
         self,
@@ -1657,6 +1725,8 @@ class DoorDPPolicyController:
         masked_depth_rgbs,
         front_mask_rgbs=None,
         front_masked_depth_rgbs=None,
+        front_camera_pose_bases=None,
+        wrist_camera_pose_bases=None,
     ):
         return self._impl.act_batch(
             env_ids,
@@ -1665,7 +1735,12 @@ class DoorDPPolicyController:
             masked_depth_rgbs,
             front_mask_rgbs,
             front_masked_depth_rgbs,
+            front_camera_pose_bases,
+            wrist_camera_pose_bases,
         )
+
+    def predict_action_chunks_for_envs(self, env_ids, noise=None):
+        return self._impl.predict_action_chunks_for_envs(env_ids, noise=noise)
 
 
 def apply_door_dp_action(env, action, env_id=0, delta_rpy_fn=None):

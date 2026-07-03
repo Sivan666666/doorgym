@@ -1,0 +1,389 @@
+{
+  "requested": {
+    "width": 1280,
+    "height": 720,
+    "fps": 30,
+    "frames": 3,
+    "align_to": "color",
+    "near_m": 0.2,
+    "far_m": 1.5,
+    "rs_filters": true,
+    "rs_spatial": true,
+    "rs_temporal": true,
+    "rs_hole_filling": true,
+    "rs_spatial_magnitude": 2,
+    "rs_spatial_alpha": 0.5,
+    "rs_spatial_delta": 20.0,
+    "rs_spatial_holes_fill": 0,
+    "rs_temporal_alpha": 0.4,
+    "rs_temporal_delta": 20.0,
+    "rs_hole_filling_mode": 1
+  },
+  "connected_devices": [
+    {
+      "name": "Intel RealSense D435I",
+      "serial": "261222075566",
+      "firmware": "5.15.1.55",
+      "usb": "3.2",
+      "physical_port": "/sys/devices/pci0000:00/0000:00:1a.0/0000:07:00.0/0000:08:02.0/0000:55:00.0/usb4/4-2/4-2.3/4-2.3:1.0/video4linux/video4",
+      "product_line": "D400"
+    }
+  ],
+  "output_dir": "/home/robo/txc/rgbd/latest_rs_filters",
+  "saved_frames": [
+    {
+      "index": 0,
+      "frame_number": 35,
+      "timestamp_ms": 1783001140079.5935,
+      "rgb_shape": [
+        720,
+        1280,
+        3
+      ],
+      "depth_shape": [
+        720,
+        1280
+      ],
+      "depth_units_dtype": "uint16",
+      "rs_filters_enabled": true,
+      "raw_aligned_depth_m_min": 0.628000020980835,
+      "raw_aligned_depth_m_mean": 3.1395375728607178,
+      "raw_aligned_depth_m_max": 5.091000080108643,
+      "depth_m_min": 0.6320000290870667,
+      "depth_m_mean": 3.1489439010620117,
+      "depth_m_max": 5.091000080108643,
+      "depth_intrinsics_before_align": {
+        "width": 1280,
+        "height": 720,
+        "fx": 639.5499267578125,
+        "fy": 639.5499267578125,
+        "cx": 642.9489135742188,
+        "cy": 362.0300598144531,
+        "model": "distortion.brown_conrady",
+        "coeffs": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "fov_x_deg": 90.04030682296386,
+        "fov_y_deg": 58.749959565903794
+      },
+      "color_intrinsics_before_align": {
+        "width": 1280,
+        "height": 720,
+        "fx": 907.106201171875,
+        "fy": 905.7008056640625,
+        "cx": 653.6356201171875,
+        "cy": 361.2338562011719,
+        "model": "distortion.inverse_brown_conrady",
+        "coeffs": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "fov_x_deg": 70.40902220274576,
+        "fov_y_deg": 43.35388587572343
+      },
+      "depth_intrinsics_after_align": {
+        "width": 1280,
+        "height": 720,
+        "fx": 907.106201171875,
+        "fy": 905.7008056640625,
+        "cx": 653.6356201171875,
+        "cy": 361.2338562011719,
+        "model": "distortion.inverse_brown_conrady",
+        "coeffs": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "fov_x_deg": 70.40902220274576,
+        "fov_y_deg": 43.35388587572343
+      },
+      "color_intrinsics_after_align": {
+        "width": 1280,
+        "height": 720,
+        "fx": 907.106201171875,
+        "fy": 905.7008056640625,
+        "cx": 653.6356201171875,
+        "cy": 361.2338562011719,
+        "model": "distortion.inverse_brown_conrady",
+        "coeffs": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "fov_x_deg": 70.40902220274576,
+        "fov_y_deg": 43.35388587572343
+      },
+      "files": {
+        "rgb": "frame_000_rgb.png",
+        "raw_aligned_depth_mm": "frame_000_raw_aligned_depth_mm.png",
+        "aligned_depth_mm": "frame_000_aligned_depth_mm.png",
+        "depth_gray": "frame_000_depth_gray_0p2_1p5.png",
+        "depth_color": "frame_000_depth_color_0p2_1p5.png",
+        "contact": "frame_000_contact.png"
+      }
+    },
+    {
+      "index": 1,
+      "frame_number": 56,
+      "timestamp_ms": 1783001140771.1143,
+      "rgb_shape": [
+        720,
+        1280,
+        3
+      ],
+      "depth_shape": [
+        720,
+        1280
+      ],
+      "depth_units_dtype": "uint16",
+      "rs_filters_enabled": true,
+      "raw_aligned_depth_m_min": 0.625,
+      "raw_aligned_depth_m_mean": 3.144605875015259,
+      "raw_aligned_depth_m_max": 65.53500366210938,
+      "depth_m_min": 0.6310000419616699,
+      "depth_m_mean": 3.677065372467041,
+      "depth_m_max": 65.53500366210938,
+      "depth_intrinsics_before_align": {
+        "width": 1280,
+        "height": 720,
+        "fx": 639.5499267578125,
+        "fy": 639.5499267578125,
+        "cx": 642.9489135742188,
+        "cy": 362.0300598144531,
+        "model": "distortion.brown_conrady",
+        "coeffs": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "fov_x_deg": 90.04030682296386,
+        "fov_y_deg": 58.749959565903794
+      },
+      "color_intrinsics_before_align": {
+        "width": 1280,
+        "height": 720,
+        "fx": 907.106201171875,
+        "fy": 905.7008056640625,
+        "cx": 653.6356201171875,
+        "cy": 361.2338562011719,
+        "model": "distortion.inverse_brown_conrady",
+        "coeffs": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "fov_x_deg": 70.40902220274576,
+        "fov_y_deg": 43.35388587572343
+      },
+      "depth_intrinsics_after_align": {
+        "width": 1280,
+        "height": 720,
+        "fx": 907.106201171875,
+        "fy": 905.7008056640625,
+        "cx": 653.6356201171875,
+        "cy": 361.2338562011719,
+        "model": "distortion.inverse_brown_conrady",
+        "coeffs": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "fov_x_deg": 70.40902220274576,
+        "fov_y_deg": 43.35388587572343
+      },
+      "color_intrinsics_after_align": {
+        "width": 1280,
+        "height": 720,
+        "fx": 907.106201171875,
+        "fy": 905.7008056640625,
+        "cx": 653.6356201171875,
+        "cy": 361.2338562011719,
+        "model": "distortion.inverse_brown_conrady",
+        "coeffs": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "fov_x_deg": 70.40902220274576,
+        "fov_y_deg": 43.35388587572343
+      },
+      "files": {
+        "rgb": "frame_001_rgb.png",
+        "raw_aligned_depth_mm": "frame_001_raw_aligned_depth_mm.png",
+        "aligned_depth_mm": "frame_001_aligned_depth_mm.png",
+        "depth_gray": "frame_001_depth_gray_0p2_1p5.png",
+        "depth_color": "frame_001_depth_color_0p2_1p5.png",
+        "contact": "frame_001_contact.png"
+      }
+    },
+    {
+      "index": 2,
+      "frame_number": 76,
+      "timestamp_ms": 1783001141437.4998,
+      "rgb_shape": [
+        720,
+        1280,
+        3
+      ],
+      "depth_shape": [
+        720,
+        1280
+      ],
+      "depth_units_dtype": "uint16",
+      "rs_filters_enabled": true,
+      "raw_aligned_depth_m_min": 0.6240000128746033,
+      "raw_aligned_depth_m_mean": 3.1456661224365234,
+      "raw_aligned_depth_m_max": 19.3070011138916,
+      "depth_m_min": 0.6290000081062317,
+      "depth_m_mean": 3.1887011528015137,
+      "depth_m_max": 19.3070011138916,
+      "depth_intrinsics_before_align": {
+        "width": 1280,
+        "height": 720,
+        "fx": 639.5499267578125,
+        "fy": 639.5499267578125,
+        "cx": 642.9489135742188,
+        "cy": 362.0300598144531,
+        "model": "distortion.brown_conrady",
+        "coeffs": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "fov_x_deg": 90.04030682296386,
+        "fov_y_deg": 58.749959565903794
+      },
+      "color_intrinsics_before_align": {
+        "width": 1280,
+        "height": 720,
+        "fx": 907.106201171875,
+        "fy": 905.7008056640625,
+        "cx": 653.6356201171875,
+        "cy": 361.2338562011719,
+        "model": "distortion.inverse_brown_conrady",
+        "coeffs": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "fov_x_deg": 70.40902220274576,
+        "fov_y_deg": 43.35388587572343
+      },
+      "depth_intrinsics_after_align": {
+        "width": 1280,
+        "height": 720,
+        "fx": 907.106201171875,
+        "fy": 905.7008056640625,
+        "cx": 653.6356201171875,
+        "cy": 361.2338562011719,
+        "model": "distortion.inverse_brown_conrady",
+        "coeffs": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "fov_x_deg": 70.40902220274576,
+        "fov_y_deg": 43.35388587572343
+      },
+      "color_intrinsics_after_align": {
+        "width": 1280,
+        "height": 720,
+        "fx": 907.106201171875,
+        "fy": 905.7008056640625,
+        "cx": 653.6356201171875,
+        "cy": 361.2338562011719,
+        "model": "distortion.inverse_brown_conrady",
+        "coeffs": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "fov_x_deg": 70.40902220274576,
+        "fov_y_deg": 43.35388587572343
+      },
+      "files": {
+        "rgb": "frame_002_rgb.png",
+        "raw_aligned_depth_mm": "frame_002_raw_aligned_depth_mm.png",
+        "aligned_depth_mm": "frame_002_aligned_depth_mm.png",
+        "depth_gray": "frame_002_depth_gray_0p2_1p5.png",
+        "depth_color": "frame_002_depth_color_0p2_1p5.png",
+        "contact": "frame_002_contact.png"
+      }
+    }
+  ],
+  "device": {
+    "name": "Intel RealSense D435I",
+    "serial": "261222075566",
+    "firmware": "5.15.1.55",
+    "usb": "3.2",
+    "physical_port": "/sys/devices/pci0000:00/0000:00:1a.0/0000:07:00.0/0000:08:02.0/0000:55:00.0/usb4/4-2/4-2.3/4-2.3:1.0/video4linux/video4",
+    "product_line": "D400"
+  },
+  "depth_scale_m_per_unit": 0.0010000000474974513,
+  "stream_intrinsics_before_align": {
+    "depth": {
+      "width": 1280,
+      "height": 720,
+      "fx": 639.5499267578125,
+      "fy": 639.5499267578125,
+      "cx": 642.9489135742188,
+      "cy": 362.0300598144531,
+      "model": "distortion.brown_conrady",
+      "coeffs": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "fov_x_deg": 90.04030682296386,
+      "fov_y_deg": 58.749959565903794
+    },
+    "color": {
+      "width": 1280,
+      "height": 720,
+      "fx": 907.106201171875,
+      "fy": 905.7008056640625,
+      "cx": 653.6356201171875,
+      "cy": 361.2338562011719,
+      "model": "distortion.inverse_brown_conrady",
+      "coeffs": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "fov_x_deg": 70.40902220274576,
+      "fov_y_deg": 43.35388587572343
+    }
+  },
+  "elapsed_capture_s": 2.0547837640042417
+}

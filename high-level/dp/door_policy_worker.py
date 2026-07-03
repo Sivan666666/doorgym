@@ -130,6 +130,8 @@ def main() -> None:
                     request["masked_depth_rgb"],
                     request.get("front_mask_rgb"),
                     request.get("front_masked_depth_rgb"),
+                    request.get("front_camera_pose_base"),
+                    request.get("wrist_camera_pose_base"),
                 )
                 ok()
             elif cmd == "append_observation_for_env":
@@ -140,6 +142,8 @@ def main() -> None:
                     request["masked_depth_rgb"],
                     request.get("front_mask_rgb"),
                     request.get("front_masked_depth_rgb"),
+                    request.get("front_camera_pose_base"),
+                    request.get("wrist_camera_pose_base"),
                 )
                 ok()
             elif cmd == "sample_action_chunk":
@@ -155,6 +159,8 @@ def main() -> None:
                     request["masked_depth_rgb"],
                     request.get("front_mask_rgb"),
                     request.get("front_masked_depth_rgb"),
+                    request.get("front_camera_pose_base"),
+                    request.get("wrist_camera_pose_base"),
                 )
                 ok(
                     action=np.asarray(action, dtype=np.float32).tolist(),
@@ -169,7 +175,19 @@ def main() -> None:
                     request["masked_depth_rgbs"],
                     request.get("front_mask_rgbs"),
                     request.get("front_masked_depth_rgbs"),
+                    request.get("front_camera_pose_bases"),
+                    request.get("wrist_camera_pose_bases"),
                 )
+                ok(
+                    actions=np.asarray(actions, dtype=np.float32).tolist(),
+                    camera_gates=camera_gates_payload(controller, env_ids),
+                )
+            elif cmd == "predict_action_chunks_for_envs":
+                env_ids = [int(x) for x in request["env_ids"]]
+                noise = request.get("noise")
+                if noise is not None and not isinstance(noise, torch.Tensor):
+                    noise = torch.as_tensor(noise, dtype=torch.float32)
+                actions = controller.predict_action_chunks_for_envs(env_ids, noise=noise)
                 ok(
                     actions=np.asarray(actions, dtype=np.float32).tolist(),
                     camera_gates=camera_gates_payload(controller, env_ids),

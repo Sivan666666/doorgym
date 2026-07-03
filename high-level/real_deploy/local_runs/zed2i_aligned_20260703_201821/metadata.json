@@ -1,0 +1,162 @@
+{
+  "requested": {
+    "frames": 3,
+    "warmup_frames": 30,
+    "stride": 5,
+    "resolution": "HD2K",
+    "fps": 15,
+    "depth_mode": "NEURAL",
+    "near_m": 0.2,
+    "far_m": 1.5,
+    "out_dir": ""
+  },
+  "sdk_version": "5.0.7",
+  "output_dir": "high-level/real_deploy/local_runs/zed2i_aligned_20260703_201821",
+  "saved_frames": [
+    {
+      "index": 0,
+      "rgb_shape": [
+        1242,
+        2208,
+        3
+      ],
+      "depth_shape": [
+        1242,
+        2208
+      ],
+      "depth_dtype": "float32",
+      "depth_stats": {
+        "valid_ratio": 0.496224751452776,
+        "min_m": 0.9745241403579712,
+        "mean_m": 3.1729323863983154,
+        "max_m": 4.325057506561279
+      },
+      "files": {
+        "rgb": "frame_000_rgb.png",
+        "depth_mm": "frame_000_depth_mm.png",
+        "depth_m": "frame_000_depth_m.npy",
+        "depth_gray": "frame_000_depth_gray_0p2_1p5.png",
+        "depth_color": "frame_000_depth_color_0p2_1p5.png",
+        "contact": "frame_000_contact.png"
+      }
+    },
+    {
+      "index": 1,
+      "rgb_shape": [
+        1242,
+        2208,
+        3
+      ],
+      "depth_shape": [
+        1242,
+        2208
+      ],
+      "depth_dtype": "float32",
+      "depth_stats": {
+        "valid_ratio": 0.1389738529487269,
+        "min_m": 0.9339431524276733,
+        "mean_m": 3.2698051929473877,
+        "max_m": 4.197540283203125
+      },
+      "files": {
+        "rgb": "frame_001_rgb.png",
+        "depth_mm": "frame_001_depth_mm.png",
+        "depth_m": "frame_001_depth_m.npy",
+        "depth_gray": "frame_001_depth_gray_0p2_1p5.png",
+        "depth_color": "frame_001_depth_color_0p2_1p5.png",
+        "contact": "frame_001_contact.png"
+      }
+    },
+    {
+      "index": 2,
+      "rgb_shape": [
+        1242,
+        2208,
+        3
+      ],
+      "depth_shape": [
+        1242,
+        2208
+      ],
+      "depth_dtype": "float32",
+      "depth_stats": {
+        "valid_ratio": 0.5171860778547924,
+        "min_m": 1.13533353805542,
+        "mean_m": 2.5601608753204346,
+        "max_m": 4.177621841430664
+      },
+      "files": {
+        "rgb": "frame_002_rgb.png",
+        "depth_mm": "frame_002_depth_mm.png",
+        "depth_m": "frame_002_depth_m.npy",
+        "depth_gray": "frame_002_depth_gray_0p2_1p5.png",
+        "depth_color": "frame_002_depth_color_0p2_1p5.png",
+        "contact": "frame_002_contact.png"
+      }
+    }
+  ],
+  "camera_model": "ZED 2i",
+  "serial_number": 36990603,
+  "fps": 15,
+  "resolution": {
+    "width": 2208,
+    "height": 1242
+  },
+  "calibration_parameters": {
+    "left_cam": {
+      "fx": 1048.1607666015625,
+      "fy": 1048.1607666015625,
+      "cx": 1113.220703125,
+      "cy": 623.8143310546875,
+      "h_fov_deg": 92.97522735595703,
+      "v_fov_deg": 61.29243469238281,
+      "d_fov_deg": 100.78799438476562,
+      "disto": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "resolution": {
+        "width": 2208,
+        "height": 1242
+      }
+    },
+    "right_cam": {
+      "fx": 1048.1607666015625,
+      "fy": 1048.1607666015625,
+      "cx": 1113.220703125,
+      "cy": 623.8143310546875,
+      "h_fov_deg": 92.97522735595703,
+      "v_fov_deg": 61.29243469238281,
+      "d_fov_deg": 100.78799438476562,
+      "disto": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "resolution": {
+        "width": 2208,
+        "height": 1242
+      }
+    }
+  },
+  "elapsed_capture_s": 6.459767538122833
+}

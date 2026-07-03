@@ -11,12 +11,16 @@ try:
     from .door_dp_common import (
         ACTION_NAMES,
         ACTION_LOSS_WEIGHT_FEATURE,
+        FRONT_CAMERA_POSE_FEATURE,
+        RAW_FRONT_CAMERA_POSE_KEY,
+        RAW_WRIST_CAMERA_POSE_KEY,
         DATASET_METADATA_KEYS,
         DEFAULT_KEYFRAME_LOSS_RADIUS,
         DEFAULT_KEYFRAME_LOSS_WEIGHT,
         DEFAULT_NEAR_ZERO_RATE_EPS,
         DoorDPLeRobotRecorder,
         RAW_ACTION_LOSS_WEIGHT_KEY,
+        WRIST_CAMERA_POSE_FEATURE,
         apply_door_dp_action_preprocess,
         apply_door_dp_state_preprocess,
         extract_motion_keyframes_from_raw_arrays,
@@ -35,12 +39,16 @@ except ImportError:
     from door_dp_common import (
         ACTION_NAMES,
         ACTION_LOSS_WEIGHT_FEATURE,
+        FRONT_CAMERA_POSE_FEATURE,
+        RAW_FRONT_CAMERA_POSE_KEY,
+        RAW_WRIST_CAMERA_POSE_KEY,
         DATASET_METADATA_KEYS,
         DEFAULT_KEYFRAME_LOSS_RADIUS,
         DEFAULT_KEYFRAME_LOSS_WEIGHT,
         DEFAULT_NEAR_ZERO_RATE_EPS,
         DoorDPLeRobotRecorder,
         RAW_ACTION_LOSS_WEIGHT_KEY,
+        WRIST_CAMERA_POSE_FEATURE,
         apply_door_dp_action_preprocess,
         apply_door_dp_state_preprocess,
         extract_motion_keyframes_from_raw_arrays,
@@ -389,6 +397,19 @@ def load_episode_payload(
             front_first = data[image_keys[2]].astype(np.uint8) if image_keys[2] in data else np.zeros_like(wrist_first)
             front_second = data[image_keys[3]].astype(np.uint8) if image_keys[3] in data else np.zeros_like(wrist_second)
         subtasks = data["subtask_index"].astype(np.int64).reshape(-1)
+        has_front_pose = RAW_FRONT_CAMERA_POSE_KEY in data.files
+        has_wrist_pose = RAW_WRIST_CAMERA_POSE_KEY in data.files
+        if has_front_pose != has_wrist_pose:
+            raise ValueError(
+                f"Episode {path} has incomplete camera pose fields: "
+                f"{RAW_FRONT_CAMERA_POSE_KEY}={has_front_pose}, {RAW_WRIST_CAMERA_POSE_KEY}={has_wrist_pose}."
+            )
+        if has_front_pose:
+            front_camera_pose_base = data[RAW_FRONT_CAMERA_POSE_KEY].astype(np.float32).reshape(-1, 7)
+            wrist_camera_pose_base = data[RAW_WRIST_CAMERA_POSE_KEY].astype(np.float32).reshape(-1, 7)
+        else:
+            front_camera_pose_base = None
+            wrist_camera_pose_base = None
         override_keyframe_weight = (
             keyframe_loss_weight_override is not None or keyframe_loss_radius_override is not None
         )
@@ -441,6 +462,10 @@ def load_episode_payload(
         == n
     ):
         raise ValueError(f"Episode {path} has inconsistent lengths.")
+    if front_camera_pose_base is not None and (
+        front_camera_pose_base.shape[0] != n or wrist_camera_pose_base.shape[0] != n
+    ):
+        raise ValueError(f"Episode {path} has camera pose length inconsistent with frame count.")
     return {
         "path_name": Path(path).name,
         "task": task,
@@ -452,6 +477,9 @@ def load_episode_payload(
         "front_second": front_second,
         "subtasks": subtasks,
         "action_loss_weight": action_loss_weight,
+        "front_camera_pose_base": front_camera_pose_base,
+        "wrist_camera_pose_base": wrist_camera_pose_base,
+        "has_camera_pose": front_camera_pose_base is not None,
         "n": n,
     }
 
@@ -503,6 +531,15 @@ def main():
     else:
         state_names = [f"state_{i}" for i in range(first["state"].shape[-1])]
     action_names = detect_action_names(first, sidecar)
+    has_camera_pose = RAW_FRONT_CAMERA_POSE_KEY in first.files or RAW_WRIST_CAMERA_POSE_KEY in first.files
+    if has_camera_pose and not (
+        RAW_FRONT_CAMERA_POSE_KEY in first.files and RAW_WRIST_CAMERA_POSE_KEY in first.files
+    ):
+        raise ValueError(
+            "Raw data has incomplete camera pose fields in the first episode: "
+            f"{RAW_FRONT_CAMERA_POSE_KEY}={RAW_FRONT_CAMERA_POSE_KEY in first.files}, "
+            f"{RAW_WRIST_CAMERA_POSE_KEY}={RAW_WRIST_CAMERA_POSE_KEY in first.files}."
+        )
     if first["action"].shape[-1] != len(action_names):
         raise ValueError(
             f"Raw action_dim={first['action'].shape[-1]} does not match action_names={len(action_names)}: "
@@ -618,6 +655,10 @@ def main():
         for key in DATASET_METADATA_KEYS:
             if key in sidecar:
                 inherited_metadata[key] = sidecar[key]
+    if has_camera_pose:
+        inherited_metadata.setdefault("camera_pose_features", [FRONT_CAMERA_POSE_FEATURE, WRIST_CAMERA_POSE_FEATURE])
+        inherited_metadata.setdefault("camera_pose_frame", "robot_base")
+        inherited_metadata.setdefault("camera_pose_convention", "optical_frame")
     converted_keyframe_loss_weight = (
         float(args.keyframe_loss_weight)
         if args.keyframe_loss_weight is not None
@@ -677,6 +718,7 @@ def main():
         image_storage=args.image_storage,
         video_codec=args.video_codec,
         include_action_loss_weight=True,
+        include_camera_pose=has_camera_pose,
         metadata={
             **inherited_metadata,
             "action_frame": action_frame,
@@ -726,6 +768,13 @@ def main():
         front_second = payload["front_second"]
         subtasks = payload["subtasks"]
         action_loss_weight = payload["action_loss_weight"]
+        if bool(payload.get("has_camera_pose", False)) != bool(has_camera_pose):
+            raise ValueError(
+                f"Episode {payload['path_name']} camera-pose presence does not match the first episode. "
+                "Do not mix Plücker-ready and legacy raw episodes in one conversion."
+            )
+        front_camera_pose_base = payload.get("front_camera_pose_base")
+        wrist_camera_pose_base = payload.get("wrist_camera_pose_base")
         n = payload["n"]
         for i in range(n):
             recorder.add_frame(
@@ -737,6 +786,8 @@ def main():
                 front_mask_rgb=image_to_three_channel_uint8(front_first[i]),
                 front_second_rgb=image_to_three_channel_uint8(front_second[i]),
                 action_loss_weight=action_loss_weight[i],
+                front_camera_pose_base=None if front_camera_pose_base is None else front_camera_pose_base[i],
+                wrist_camera_pose_base=None if wrist_camera_pose_base is None else wrist_camera_pose_base[i],
             )
         recorder.save_episode()
         print(f"Converted {payload['path_name']}: {n} frames task={task!r} ({ep_idx + 1}/{len(files)})", flush=True)
@@ -766,6 +817,10 @@ def main():
         "keyframe_loss_weight": converted_keyframe_loss_weight,
         "keyframe_loss_radius": converted_keyframe_loss_radius,
     }
+    if has_camera_pose:
+        sidecar_payload["camera_pose_features"] = [FRONT_CAMERA_POSE_FEATURE, WRIST_CAMERA_POSE_FEATURE]
+        sidecar_payload["camera_pose_frame"] = "robot_base"
+        sidecar_payload["camera_pose_convention"] = "optical_frame"
     if sidecar:
         for key in DATASET_METADATA_KEYS:
             if key in sidecar and key not in sidecar_payload:

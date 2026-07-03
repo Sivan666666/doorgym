@@ -67,6 +67,17 @@ class ACTConfig(PreTrainedConfig):
             "front" is selected automatically.
         camera_input_gating_wrist_key: Optional exact wrist-camera feature key. If unset, the key containing
             "wrist" is selected automatically.
+        plucker_conditioning: Enable per-pixel Plücker ray conditioning for dual-depth ACT. Disabled by
+            default to preserve the original ACT architecture and checkpoint behavior.
+        plucker_front_pose_key: Batch key containing front camera pose in robot base frame as
+            [x, y, z, qx, qy, qz, qw].
+        plucker_wrist_pose_key: Batch key containing wrist camera pose in robot base frame as
+            [x, y, z, qx, qy, qz, qw].
+        plucker_encoder_channels: Comma-separated hidden channel sizes for the Plücker CNN before the final
+            output layer.
+        plucker_image_width / plucker_image_height: Full-resolution image size used to generate the ray-map.
+        plucker_horizontal_fov_deg: Horizontal FOV used to derive default pinhole intrinsics. v1 assumes front
+            and wrist depth cameras share this intrinsics model.
         pre_norm: Whether to use "pre-norm" in the transformer blocks.
         dim_model: The transformer blocks' main hidden dimension.
         n_heads: The number of heads to use in the transformer blocks' multi-head attention.
@@ -125,6 +136,16 @@ class ACTConfig(PreTrainedConfig):
     camera_input_gating_temperature: float = 1.0
     camera_input_gating_front_key: str | None = None
     camera_input_gating_wrist_key: str | None = None
+    # Optional Plücker-conditioned dual-depth input. The ResNet still receives
+    # the original 3-channel depth image; a small separate CNN encodes the 6D
+    # per-pixel ray-map and fuses it with the ResNet feature map afterwards.
+    plucker_conditioning: bool = False
+    plucker_front_pose_key: str = "observation.camera_pose.front"
+    plucker_wrist_pose_key: str = "observation.camera_pose.wrist"
+    plucker_encoder_channels: str = "32,64"
+    plucker_image_width: int = 640
+    plucker_image_height: int = 480
+    plucker_horizontal_fov_deg: float = 69.0
     # Transformer layers.
     pre_norm: bool = False
     dim_model: int = 512
@@ -220,6 +241,48 @@ class ACTConfig(PreTrainedConfig):
                 "`camera_input_gating_temperature` must be positive. "
                 f"Got {self.camera_input_gating_temperature}."
             )
+        if self.plucker_conditioning:
+            if not is_resnet:
+                raise ValueError(
+                    "ACT Plücker conditioning v1 only supports ResNet backbones because it fuses after the "
+                    f"ResNet feature map. Got vision_backbone={self.vision_backbone!r}."
+                )
+            image_keys = list(self.image_features)
+            if len(image_keys) != 2:
+                raise ValueError(
+                    "ACT Plücker conditioning v1 expects exactly two image features (front and wrist). "
+                    f"Got {image_keys}."
+                )
+            lower_keys = [str(key).lower() for key in image_keys]
+            if not any("front" in key for key in lower_keys) or not any("wrist" in key for key in lower_keys):
+                raise ValueError(
+                    "ACT Plücker conditioning needs one front image key and one wrist image key so it can "
+                    f"select the matching camera pose. Got {image_keys}."
+                )
+            if not self.plucker_front_pose_key or not self.plucker_wrist_pose_key:
+                raise ValueError("Plücker conditioning requires front and wrist camera pose keys.")
+            if self.plucker_image_width <= 0 or self.plucker_image_height <= 0:
+                raise ValueError(
+                    "`plucker_image_width` and `plucker_image_height` must be positive. "
+                    f"Got {self.plucker_image_width}x{self.plucker_image_height}."
+                )
+            if self.plucker_horizontal_fov_deg <= 0.0 or self.plucker_horizontal_fov_deg >= 180.0:
+                raise ValueError(
+                    "`plucker_horizontal_fov_deg` must be in (0, 180). "
+                    f"Got {self.plucker_horizontal_fov_deg}."
+                )
+            try:
+                channels = [int(x.strip()) for x in str(self.plucker_encoder_channels).split(",") if x.strip()]
+            except ValueError as exc:
+                raise ValueError(
+                    "`plucker_encoder_channels` must be a comma-separated list of positive integers. "
+                    f"Got {self.plucker_encoder_channels!r}."
+                ) from exc
+            if not channels or any(channel <= 0 for channel in channels):
+                raise ValueError(
+                    "`plucker_encoder_channels` must contain at least one positive channel size. "
+                    f"Got {self.plucker_encoder_channels!r}."
+                )
         if self.temporal_ensemble_coeff is not None and self.n_action_steps > 1:
             raise NotImplementedError(
                 "`n_action_steps` must be 1 when using temporal ensembling. This is "

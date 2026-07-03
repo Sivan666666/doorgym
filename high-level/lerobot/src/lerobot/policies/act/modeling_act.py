@@ -618,6 +618,119 @@ class ACTCameraInputGating(nn.Module):
         return 2.0 * torch.softmax(logits / self.temperature, dim=-1)
 
 
+def _parse_plucker_encoder_channels(value: str | list[int] | tuple[int, ...]) -> list[int]:
+    if isinstance(value, str):
+        channels = [int(x.strip()) for x in value.split(",") if x.strip()]
+    else:
+        channels = [int(x) for x in value]
+    if not channels or any(channel <= 0 for channel in channels):
+        raise ValueError(f"Invalid Plücker encoder channel list: {value!r}")
+    return channels
+
+
+def make_camera_local_unit_rays(
+    *,
+    height: int,
+    width: int,
+    horizontal_fov_deg: float,
+    dtype: torch.dtype = torch.float32,
+) -> Tensor:
+    """Create normalized optical-frame rays at full image resolution.
+
+    Pixel coordinates use pixel centers: u=x+0.5, v=y+0.5.  The optical frame
+    convention is x-right, y-down, z-forward, matching the pinhole projection
+    used by depth images.
+    """
+    height = int(height)
+    width = int(width)
+    hfov = math.radians(float(horizontal_fov_deg))
+    fx = float(width) / (2.0 * math.tan(hfov / 2.0))
+    fy = fx
+    cx = float(width) / 2.0
+    cy = float(height) / 2.0
+    ys, xs = torch.meshgrid(
+        torch.arange(height, dtype=dtype),
+        torch.arange(width, dtype=dtype),
+        indexing="ij",
+    )
+    u = xs + 0.5
+    v = ys + 0.5
+    rays = torch.stack(
+        [
+            (u - cx) / fx,
+            (v - cy) / fy,
+            torch.ones_like(u),
+        ],
+        dim=0,
+    )
+    return F.normalize(rays, dim=0)
+
+
+def quat_xyzw_to_matrix(quat: Tensor) -> Tensor:
+    """Convert normalized xyzw quaternions to rotation matrices."""
+    quat = F.normalize(quat, dim=-1)
+    x, y, z, w = quat.unbind(dim=-1)
+    xx, yy, zz = x * x, y * y, z * z
+    xy, xz, yz = x * y, x * z, y * z
+    wx, wy, wz = w * x, w * y, w * z
+    row0 = torch.stack([1.0 - 2.0 * (yy + zz), 2.0 * (xy - wz), 2.0 * (xz + wy)], dim=-1)
+    row1 = torch.stack([2.0 * (xy + wz), 1.0 - 2.0 * (xx + zz), 2.0 * (yz - wx)], dim=-1)
+    row2 = torch.stack([2.0 * (xz - wy), 2.0 * (yz + wx), 1.0 - 2.0 * (xx + yy)], dim=-1)
+    return torch.stack([row0, row1, row2], dim=-2)
+
+
+def make_plucker_map(camera_pose_base: Tensor, camera_local_unit_rays: Tensor) -> Tensor:
+    """Create B×6×H×W Plücker ray-maps in robot base coordinates.
+
+    Args:
+        camera_pose_base: B×7 pose [x, y, z, qx, qy, qz, qw] of the camera
+            optical frame in the robot base frame.
+        camera_local_unit_rays: 3×H×W normalized optical-frame ray directions.
+
+    Returns:
+        B×6×H×W map [d_x, d_y, d_z, m_x, m_y, m_z], where d is the unit ray
+        direction in base frame and m = C × d with C the camera center.
+    """
+    if camera_pose_base.ndim != 2 or camera_pose_base.shape[-1] != 7:
+        raise ValueError(f"Expected camera poses shaped (B,7), got {tuple(camera_pose_base.shape)}.")
+    rays = camera_local_unit_rays.to(device=camera_pose_base.device, dtype=camera_pose_base.dtype)
+    center = camera_pose_base[:, :3]
+    rot = quat_xyzw_to_matrix(camera_pose_base[:, 3:7])
+    directions = torch.einsum("bij,jhw->bihw", rot, rays)
+    directions = F.normalize(directions, dim=1)
+    centers = center[:, :, None, None].expand_as(directions)
+    moments = torch.cross(centers, directions, dim=1)
+    return torch.cat([directions, moments], dim=1)
+
+
+class ACTPluckerEncoder(nn.Module):
+    """Small CNN that encodes full-resolution 6D Plücker maps to visual-feature resolution."""
+
+    def __init__(self, out_channels: int, hidden_channels: list[int]) -> None:
+        super().__init__()
+        layers: list[nn.Module] = []
+        in_channels = 6
+        for hidden in hidden_channels:
+            layers.extend(
+                [
+                    nn.Conv2d(in_channels, int(hidden), kernel_size=3, stride=2, padding=1),
+                    nn.GELU(),
+                ]
+            )
+            in_channels = int(hidden)
+        layers.extend(
+            [
+                nn.Conv2d(in_channels, int(out_channels), kernel_size=3, stride=2, padding=1),
+                nn.GELU(),
+            ]
+        )
+        self.encoder = nn.Sequential(*layers)
+
+    def forward(self, plucker_map: Tensor, target_hw: tuple[int, int]) -> Tensor:
+        geom = self.encoder(plucker_map)
+        return F.adaptive_avg_pool2d(geom, output_size=(int(target_hw[0]), int(target_hw[1])))
+
+
 class ACT(nn.Module):
     """Action Chunking Transformer: The underlying neural network for ACTPolicy.
 
@@ -722,6 +835,24 @@ class ACT(nn.Module):
                 if config.freeze_vision_backbone:
                     for parameter in self.backbone.parameters():
                         parameter.requires_grad_(False)
+            if self.config.plucker_conditioning:
+                self.plucker_pose_keys = [
+                    self._plucker_pose_key_for_image_key(image_key)
+                    for image_key in list(self.config.image_features)
+                ]
+                self.plucker_encoder = ACTPluckerEncoder(
+                    out_channels=int(backbone_out_channels),
+                    hidden_channels=_parse_plucker_encoder_channels(self.config.plucker_encoder_channels),
+                )
+                self.register_buffer(
+                    "plucker_camera_local_unit_rays",
+                    make_camera_local_unit_rays(
+                        height=int(self.config.plucker_image_height),
+                        width=int(self.config.plucker_image_width),
+                        horizontal_fov_deg=float(self.config.plucker_horizontal_fov_deg),
+                    ),
+                    persistent=False,
+                )
 
         # Transformer (acts as VAE decoder when training with the variational objective).
         self.encoder = ACTEncoder(config)
@@ -739,8 +870,11 @@ class ACT(nn.Module):
             )
         self.encoder_latent_input_proj = nn.Linear(config.latent_dim, config.dim_model)
         if self.config.image_features:
+            img_proj_in_channels = int(backbone_out_channels)
+            if self.config.plucker_conditioning:
+                img_proj_in_channels += int(backbone_out_channels)
             self.encoder_img_feat_input_proj = nn.Conv2d(
-                backbone_out_channels, config.dim_model, kernel_size=1
+                img_proj_in_channels, config.dim_model, kernel_size=1
             )
         # Transformer encoder positional embeddings.
         n_1d_tokens = 1  # for the latent
@@ -763,6 +897,30 @@ class ACT(nn.Module):
         self._last_camera_gates: Tensor | None = None
         if self.config.camera_input_gating:
             self._init_camera_input_gating()
+
+    def _plucker_pose_key_for_image_key(self, image_key: str) -> str:
+        image_key_lower = str(image_key).lower()
+        if "front" in image_key_lower:
+            return str(self.config.plucker_front_pose_key)
+        if "wrist" in image_key_lower:
+            return str(self.config.plucker_wrist_pose_key)
+        raise ValueError(
+            "Could not infer Plücker camera pose key from image feature "
+            f"{image_key!r}; expected the key to contain 'front' or 'wrist'."
+        )
+
+    @staticmethod
+    def _camera_pose_tensor_from_batch(batch: dict[str, Tensor], pose_key: str, batch_size: int) -> Tensor:
+        if pose_key not in batch:
+            raise KeyError(
+                f"Plücker conditioning requires camera pose feature {pose_key!r}, but it is missing from the batch."
+            )
+        pose = batch[pose_key]
+        if pose.ndim >= 3:
+            pose = pose.reshape(int(batch_size), -1, 7)[:, -1]
+        else:
+            pose = pose.reshape(int(batch_size), 7)
+        return pose
 
     def _reset_parameters(self):
         """Xavier-uniform initialization of the transformer parameters as in the original code."""
@@ -910,9 +1068,16 @@ class ACT(nn.Module):
             # gradients remain stable (no explosions or NaNs).
             camera_feature_maps = []
             camera_pos_embeds = []
-            for img in batch[OBS_IMAGES]:
+            for camera_index, img in enumerate(batch[OBS_IMAGES]):
                 cam_features = self.backbone(img)["feature_map"]
                 cam_pos_embed = self.encoder_cam_feat_pos_embed(cam_features).to(dtype=cam_features.dtype)
+                if self.config.plucker_conditioning:
+                    pose_key = self.plucker_pose_keys[camera_index]
+                    camera_pose_base = self._camera_pose_tensor_from_batch(batch, pose_key, batch_size)
+                    camera_pose_base = camera_pose_base.to(device=cam_features.device, dtype=cam_features.dtype)
+                    plucker_map = make_plucker_map(camera_pose_base, self.plucker_camera_local_unit_rays)
+                    geom_features = self.plucker_encoder(plucker_map, target_hw=cam_features.shape[-2:])
+                    cam_features = torch.cat([cam_features, geom_features.to(dtype=cam_features.dtype)], dim=1)
                 cam_features = self.encoder_img_feat_input_proj(cam_features)
                 camera_feature_maps.append(cam_features)
                 camera_pos_embeds.append(cam_pos_embed)

@@ -37,6 +37,16 @@ REPO_ROOT = HIGH_LEVEL_ROOT.parents[0]
 
 import door_common as dc
 import isaacgym_a2w_ik_push_door_parallel as a2w_ik
+from door_twin import (
+    DoorTwinSpec,
+    RolloutTracker,
+    apply_program_to_args,
+    compute_skill_waypoints,
+    default_skill_program_from_args,
+    load_skill_program,
+    profile_from_program,
+    write_rollout_reports,
+)
 
 base_ik = dc.base_ik
 gymapi = dc.gymapi
@@ -60,6 +70,7 @@ try:
         DoorDPJsonlLogger,
         DoorDPPolicyController,
         RawDoorDPRecorder,
+        image_to_three_channel_uint8,
         make_state_feature_names,
         normalize_vision_mode,
         raw_image_keys_for_vision_mode,
@@ -69,6 +80,7 @@ except ImportError:
     DoorDPJsonlLogger = None
     DoorDPPolicyController = None
     RawDoorDPRecorder = None
+    image_to_three_channel_uint8 = None
     make_state_feature_names = None
     normalize_vision_mode = None
     raw_image_keys_for_vision_mode = None
@@ -82,6 +94,7 @@ DP_PHASE_NAMES = [
     "close_gripper",
     "rotate_handle",
     "push_door",
+    "traverse_door",
     "return_home",
     "hold_home",
 ]
@@ -96,6 +109,27 @@ A2W_FLOAT_IK_DEFAULT_CONFIG_PATH = SCRIPT_DIR / "config" / "a2w_float_ik_push_do
 A2W_FLOAT_IK_CONFIG_DERIVED_ATTRS = {
     "dp_print",
 }
+DOOR_TWIN_DEFAULT_LOG_ROOT = SCRIPT_DIR / "door_twin" / "experiments" / "runs"
+DOOR_TWIN_KEYFRAME_PHASES = (
+    "initial_hold",
+    "close_gripper",
+    "rotate_handle",
+    "push_door",
+    "traverse_door",
+    "return_home",
+    "hold_home",
+)
+DOOR_TWIN_CAMERA_VIEWS = (
+    "wrist",
+    "front",
+    "front_left",
+    "front_right",
+    "observer_left",
+    "observer_right",
+    "overhead",
+    "handle_closeup",
+)
+DOOR_TWIN_DEFAULT_CAMERA_VIEWS = ("wrist", "front", "observer_left", "observer_right", "handle_closeup")
 
 
 def default_a2w_float_ik_config_path():
@@ -207,6 +241,43 @@ def handle_viewer_pause(gym, sim, viewer):
     return False
 
 
+def configure_door_twin_args(args):
+    skill_ref = str(getattr(args, "skill_program_json", "") or "").strip()
+    program = None
+    if skill_ref:
+        if skill_ref.lower() in ("auto", "default"):
+            program = default_skill_program_from_args(args)
+        else:
+            program = load_skill_program(skill_ref)
+        apply_program_to_args(args, program)
+
+    if (bool(getattr(args, "save_failed_rollouts", False)) or bool(getattr(args, "dump_keyframe_images", False))) and not str(
+        getattr(args, "door_twin_log_dir", "") or ""
+    ).strip():
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        args.door_twin_log_dir = str(DOOR_TWIN_DEFAULT_LOG_ROOT / f"a2w_float_ik_{timestamp}")
+
+    args.door_twin_skill_program = program
+    args.door_twin_enabled = bool(
+        program is not None
+        or str(getattr(args, "door_twin_log_dir", "") or "").strip()
+        or bool(getattr(args, "save_failed_rollouts", False))
+        or bool(getattr(args, "dump_keyframe_images", False))
+    )
+    if (
+        args.door_twin_enabled
+        and str(getattr(args, "door_twin_log_dir", "") or "").strip()
+        and not bool(getattr(args, "disable_collision_geom_check", False))
+    ):
+        # Digital-twin success accounting needs at least the cheap geometric collision check.
+        args.enable_collision_geom_check = True
+    if program is not None:
+        print("DoorTwin skill_program:", json.dumps(program.to_dict(), ensure_ascii=False), flush=True)
+    if str(getattr(args, "door_twin_log_dir", "") or "").strip():
+        print(f"DoorTwin log dir: {args.door_twin_log_dir}", flush=True)
+    return args
+
+
 def parse_args():
     args = gymutil.parse_arguments(
         description="A2W+Z1 base+arm float IK door-push demo.",
@@ -231,6 +302,12 @@ def parse_args():
             {"name": "--door_cfg", "type": str, "default": str(DEFAULT_DOOR_CFG)},
             {"name": "--door_name", "type": str, "default": ""},
             {"name": "--door_index", "type": int, "default": -1},
+            {
+                "name": "--door_asset_path_override",
+                "type": str,
+                "default": "",
+                "help": "Override the selected door URDF path relative to assetFileDoor, useful for repaired digital-twin assets.",
+            },
             {
                 "name": "--door_selection",
                 "type": str,
@@ -308,6 +385,12 @@ def parse_args():
             {"name": "--door_push_steps", "type": int, "default": 300},
             {"name": "--return_home_steps", "type": int, "default": 150},
             {"name": "--return_home_target_chase_alpha", "type": float, "default": 0.08},
+            {
+                "name": "--ee_command_max_step",
+                "type": float,
+                "default": 0.025,
+                "help": "Maximum per-sim-step EE position command delta for DoorTwin skill mode; <=0 disables command smoothing.",
+            },
             {"name": "--hold_steps", "type": int, "default": 300},
             {"name": "--pregrasp_offset", "type": float, "default": 0.15},
             {"name": "--grasp_offset", "type": float, "default": 0.0},
@@ -372,6 +455,13 @@ def parse_args():
             {"name": "--no_base_door_collision_check", "dest": "enable_base_door_collision_check", "action": "store_false"},
             {"name": "--enable_collision_physx_check", "dest": "enable_collision_physx_check", "action": "store_true", "default": False},
             {"name": "--enable_collision_geom_check", "dest": "enable_collision_geom_check", "action": "store_true", "default": False},
+            {
+                "name": "--no_collision_geom_check",
+                "dest": "disable_collision_geom_check",
+                "action": "store_true",
+                "default": False,
+                "help": "Disable the cheap geometric base-door collision gate even when DoorTwin logging is enabled.",
+            },
             {"name": "--base_door_collision_distance", "type": float, "default": 0.04},
             {"name": "--base_collision_front_extent", "type": float, "default": 0.55},
             {"name": "--base_collision_rear_extent", "type": float, "default": 0.65},
@@ -501,6 +591,11 @@ def parse_args():
             },
             *dc.depth_aug_custom_parameters(),
             {"name": "--record_dp_dataset", "action": "store_true"},
+            {
+                "name": "--record_camera_pose",
+                "action": "store_true",
+                "help": "When recording raw DP data, save front/wrist camera optical-frame poses in robot base frame.",
+            },
             {"name": "--dp_raw_root", "type": str, "default": str(HIGH_LEVEL_ROOT / "data" / "door_dp_raw" / "local_door_dp")},
             {"name": "--dp_task", "type": str, "default": "push lever door open"},
             {"name": "--dp_record_env_id", "type": int, "default": 0},
@@ -516,6 +611,10 @@ def parse_args():
             {"name": "--dp_inference_steps", "type": int, "default": 10},
             {"name": "--dp_noise_scheduler_type", "type": str, "default": "DDIM"},
             {"name": "--dp_action_horizon", "type": int, "default": -1},
+            {"name": "--dp_temporal_ensemble", "action": "store_true"},
+            {"name": "--dp_temporal_prefetch_actions", "type": int, "default": 3},
+            {"name": "--dp_temporal_old_weight", "type": float, "default": 0.3},
+            {"name": "--dp_temporal_new_weight", "type": float, "default": 0.7},
             {"name": "--dp_log_path", "type": str, "default": ""},
             {"name": "--dp_log_interval", "type": int, "default": 25},
             {"name": "--no_dp_print", "dest": "dp_print", "action": "store_false", "default": True},
@@ -536,6 +635,46 @@ def parse_args():
             {"name": "--no_dp_warmstart_expert_obs", "dest": "dp_warmstart_expert_obs", "action": "store_false"},
             {"name": "--pass_open_angle_deg", "type": float, "default": 80.0},
             {"name": "--no_preview_trajectory_at_spawn", "action": "store_true"},
+            {
+                "name": "--skill_program_json",
+                "type": str,
+                "default": "",
+                "help": "Door Digital Twin skill program JSON path, or 'auto' to materialize defaults.",
+            },
+            {
+                "name": "--door_twin_log_dir",
+                "type": str,
+                "default": "",
+                "help": "Directory for Door Digital Twin rollout reports and keyframe images.",
+            },
+            {
+                "name": "--save_failed_rollouts",
+                "action": "store_true",
+                "help": "Keep lightweight failed-rollout traces in Door Digital Twin reports.",
+            },
+            {
+                "name": "--dump_keyframe_images",
+                "action": "store_true",
+                "help": "Dump multi-view RGB/depth/mask images at major Door Digital Twin phase transitions.",
+            },
+            {
+                "name": "--door_twin_camera_views",
+                "type": str,
+                "default": ",".join(DOOR_TWIN_DEFAULT_CAMERA_VIEWS),
+                "help": "Comma-separated Door Twin keyframe views; observer_* and handle_closeup views are fixed in the world.",
+            },
+            {
+                "name": "--door_twin_side_camera_yaw_deg",
+                "type": float,
+                "default": 30.0,
+                "help": "Yaw offset in degrees for the front_left/front_right Door Twin cameras.",
+            },
+            {"name": "--door_twin_observer_distance", "type": float, "default": 1.8},
+            {"name": "--door_twin_observer_lateral", "type": float, "default": 1.0},
+            {"name": "--door_twin_observer_height", "type": float, "default": 1.45},
+            {"name": "--door_twin_handle_closeup_distance", "type": float, "default": 0.55},
+            {"name": "--door_twin_handle_closeup_lateral", "type": float, "default": 0.25},
+            {"name": "--door_twin_handle_closeup_height_offset", "type": float, "default": 0.16},
         ],
     )
 
@@ -592,9 +731,15 @@ def parse_args():
     args.enable_collision_physx_check = args.enable_base_door_collision_check or bool(
         config_defaults.get("enable_collision_physx_check", False)
     ) or "--enable_collision_physx_check" in argv
-    args.enable_collision_geom_check = args.enable_base_door_collision_check or bool(
-        config_defaults.get("enable_collision_geom_check", False)
-    ) or "--enable_collision_geom_check" in argv
+    args.disable_collision_geom_check = bool(
+        getattr(args, "disable_collision_geom_check", False) or "--no_collision_geom_check" in argv
+    )
+    if args.disable_collision_geom_check:
+        args.enable_collision_geom_check = False
+    else:
+        args.enable_collision_geom_check = args.enable_base_door_collision_check or bool(
+            config_defaults.get("enable_collision_geom_check", False)
+        ) or "--enable_collision_geom_check" in argv
     args.dp_action_horizon = None if int(args.dp_action_horizon) < 0 else int(args.dp_action_horizon)
     if args.num_envs <= 0:
         raise ValueError("--num_envs must be positive.")
@@ -643,6 +788,7 @@ def parse_args():
     args.base_motion_period = 1.0
     args.door_motion_sign = -1.0
     args.pass_through_door = not bool(args.no_pass_through_door)
+    configure_door_twin_args(args)
     return args
 
 
@@ -750,8 +896,10 @@ class ParallelEnvState:
     base_start: np.ndarray
     base_stop: np.ndarray
     base_push: np.ndarray
+    base_traverse: np.ndarray
     yaw_start: float
     yaw_push: float
+    yaw_traverse: float
     traj: dict
     dp_recorder: object = None
     dp_record_success: bool = False
@@ -772,6 +920,312 @@ class ParallelEnvState:
     dp_gripper_latch_value: object = None
     base_door_collision_detected: bool = False
     base_door_collision_log_step: int = -10**9
+    door_twin_tracker: object = None
+
+
+def door_twin_profile_for_args(args):
+    program = getattr(args, "door_twin_skill_program", None)
+    if program is None:
+        return None
+    profile = getattr(args, "_door_twin_skill_profile", None)
+    if profile is None:
+        profile = profile_from_program(program, args)
+        setattr(args, "_door_twin_skill_profile", profile)
+    return profile
+
+
+def door_twin_legacy_replay_for_args(args):
+    program = getattr(args, "door_twin_skill_program", None)
+    if program is None:
+        return False
+    return str(program.metadata.get("execution_mode", "")).strip().lower() == "legacy_replay"
+
+
+def door_twin_tensor_to_numpy(value):
+    if value is None:
+        return None
+    if hasattr(value, "detach"):
+        return value.detach().cpu().numpy()
+    return np.asarray(value)
+
+
+def door_twin_camera_view_names(args):
+    raw = str(getattr(args, "door_twin_camera_views", "") or "")
+    requested = [name.strip().lower() for name in raw.split(",") if name.strip()]
+    unknown = sorted(set(requested) - set(DOOR_TWIN_CAMERA_VIEWS))
+    if unknown:
+        raise ValueError(
+            f"Unsupported --door_twin_camera_views value(s): {unknown}; "
+            f"choose from {list(DOOR_TWIN_CAMERA_VIEWS)}"
+        )
+    return tuple(dict.fromkeys(requested))
+
+
+def move_to_approach_yaw_delta(args):
+    explicit = getattr(args, "move_to_approach_yaw_delta", None)
+    if explicit is not None:
+        return float(explicit)
+    vyaw = float(getattr(args, "move_to_approach_vyaw", 0.0))
+    return vyaw * float(getattr(args, "walk_steps", 0)) * float(getattr(args, "sim_dt", 0.02))
+
+
+def door_twin_separate_traverse_for_args(args):
+    profile = door_twin_profile_for_args(args)
+    return bool(profile is not None and profile.traverse_required and not door_twin_legacy_replay_for_args(args))
+
+
+def compute_base_push_and_traverse_targets(args, base_stop, heading):
+    if not door_twin_separate_traverse_for_args(args):
+        base_push = compute_base_push_target(args, base_stop, heading)
+        return base_push, base_push
+
+    heading = np.asarray(heading, dtype=np.float32)
+    heading_norm = float(np.linalg.norm(heading))
+    if heading_norm > 1.0e-6:
+        heading = heading / heading_norm
+    push_distance = max(0.0, float(getattr(args, "push_base_distance", 0.0)))
+    base_push = np.asarray(base_stop, dtype=np.float32) + heading * push_distance
+    traverse_distance = getattr(args, "traverse_distance", None)
+    if traverse_distance is None:
+        base_traverse = dc.compute_base_pass_target(args, heading)
+    else:
+        base_traverse = base_push + heading * max(0.0, float(traverse_distance))
+    return base_push.astype(np.float32), np.asarray(base_traverse, dtype=np.float32)
+
+
+def init_door_twin_tracker(st):
+    if not bool(getattr(st.args, "door_twin_enabled", False)):
+        return None
+    door_spec = DoorTwinSpec.from_runtime(st.door).to_dict()
+    profile = door_twin_profile_for_args(st.args)
+    require_traverse = bool(profile.traverse_required) if profile is not None else False
+    camera_required = bool(
+        getattr(st.args, "record_dp_dataset", False)
+        or getattr(st.args, "dump_keyframe_images", False)
+    )
+    handle_lower = float(st.door.dof_lower[1]) if len(st.door.dof_lower) > 1 else 0.0
+    tracker = RolloutTracker(
+        st.index,
+        st.door.spec.get("name", f"door_{st.index}"),
+        door_spec,
+        None if getattr(st.args, "door_twin_skill_program", None) is None else st.args.door_twin_skill_program.to_dict(),
+        pass_open_angle_deg=float(getattr(st.args, "pass_open_angle_deg", 80.0)),
+        door_motion_sign=float(getattr(st.args, "door_motion_sign", -1.0)),
+        handle_lower=handle_lower,
+        handle_unlock_threshold=float(getattr(st.door, "handle_unlock_threshold", 0.0)),
+        require_traverse=require_traverse,
+        camera_required=camera_required,
+        save_trace=bool(getattr(st.args, "save_failed_rollouts", False)),
+        base_start=st.base_start,
+        base_push=st.base_traverse if require_traverse else st.base_push,
+    )
+    st.door_twin_tracker = tracker
+    tracker.add_artifact(
+        "camera_views",
+        {
+            "requested": list(door_twin_camera_view_names(st.args))
+            if getattr(st.args, "dump_keyframe_images", False)
+            else [],
+            "created": sorted(st.camera_handles),
+        },
+    )
+    return tracker
+
+
+def update_door_twin_tracker(st, step, door_pos_record):
+    tracker = getattr(st, "door_twin_tracker", None)
+    if tracker is None:
+        return
+    ee_pos, _ee_quat = current_ee_pose_from_refreshed_tensors(st.ik_state)
+    camera_required = bool(getattr(st.args, "record_dp_dataset", False) or getattr(st.args, "dump_keyframe_images", False))
+    camera_available = not camera_required
+    if getattr(st.args, "record_dp_dataset", False):
+        camera_available = bool(getattr(getattr(st, "dp_recorder", None), "frame_count", 0) > 0)
+    elif getattr(st.args, "dump_keyframe_images", False):
+        camera_available = bool(getattr(st, "_door_twin_dumped_keyframes", set()))
+    base_xy = st.traj.get("base_xy", st.base_start)
+    base_yaw = float(st.traj.get("yaw", st.yaw_start))
+    base_vx, base_vyaw = base_command_from_targets(
+        base_xy,
+        base_yaw,
+        st.prev_base_xy,
+        st.prev_yaw,
+        float(getattr(st.args, "sim_dt", 0.02)),
+    )
+    tracker.update(
+        step=int(step),
+        phase=str(st.last_phase),
+        door_pos=door_pos_record,
+        handle_goal=st.last_handle_goal,
+        target_pos=st.last_target_pos,
+        ee_pos=ee_pos,
+        ee_tracking_error=float(getattr(st.ik_state, "last_pos_error", 0.0)),
+        base_xy=base_xy,
+        base_vx=base_vx,
+        base_vyaw=base_vyaw,
+        base_collision=bool(getattr(st, "base_door_collision_detected", False)),
+        camera_available=camera_available,
+        dof_positions=st.dof_positions,
+        lower=door_twin_tensor_to_numpy(getattr(st.ik_state, "lower", None)),
+        upper=door_twin_tensor_to_numpy(getattr(st.ik_state, "upper", None)),
+    )
+
+
+def door_twin_keyframe_dump_due(st):
+    if not bool(getattr(st.args, "dump_keyframe_images", False)):
+        return False
+    if not str(getattr(st.args, "door_twin_log_dir", "") or "").strip():
+        return False
+    if not st.camera_handles:
+        return False
+    phase = str(getattr(st, "last_phase", ""))
+    if phase not in DOOR_TWIN_KEYFRAME_PHASES:
+        return False
+    dumped = getattr(st, "_door_twin_dumped_keyframes", set())
+    return phase not in dumped
+
+
+def maybe_dump_door_twin_keyframe_images(gym, sim, st, step):
+    if not door_twin_keyframe_dump_due(st):
+        return False
+    if cv2 is None:
+        print("DoorTwin keyframe image dump skipped: cv2 is not available.", flush=True)
+        return False
+    out_dir = Path(st.args.door_twin_log_dir).expanduser() / "keyframes" / f"env_{int(st.index):04d}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    images = capture_dp_camera_images_from_rendered(gym, sim, st.env, st.camera_handles, st.args)
+    width = int(dc.DEFAULT_FRONT_CAMERA_CFG.get("resolution", dc.DEPTH_CAMERA_RESOLUTION)[0])
+    height = int(dc.DEFAULT_FRONT_CAMERA_CFG.get("resolution", dc.DEPTH_CAMERA_RESOLUTION)[1])
+    for camera_name, camera_handle in sorted(st.camera_handles.items()):
+        rgb_raw = gym.get_camera_image(sim, st.env, camera_handle, gymapi.IMAGE_COLOR)
+        if rgb_raw is not None:
+            images[f"{camera_name}_rgb"] = camera_color_to_rgb(rgb_raw, height, width)
+    phase = str(st.last_phase)
+    records = []
+    montage_inputs = []
+    for name, image in sorted(images.items()):
+        array = np.asarray(image)
+        valid_pixels = int(np.count_nonzero(array))
+        if array.ndim == 3 and array.shape[-1] >= 3:
+            bgr = array[..., :3]
+            if "rgb" in name:
+                bgr = bgr[..., ::-1]
+        elif array.ndim == 2:
+            bgr = array
+        else:
+            continue
+        filename = f"step_{int(step):05d}_{phase}_{name}.png"
+        path = out_dir / filename
+        if cv2.imwrite(str(path), np.ascontiguousarray(bgr)):
+            record = {
+                "step": int(step),
+                "phase": phase,
+                "image": name,
+                "path": str(path),
+                "shape": list(array.shape),
+                "nonzero_pixels": valid_pixels,
+                "valid": bool(valid_pixels > 0),
+            }
+            records.append(record)
+            if name.endswith("_rgb"):
+                labeled = np.ascontiguousarray(bgr.copy())
+                cv2.putText(
+                    labeled,
+                    name[:-4],
+                    (10, 24),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.65,
+                    (0, 255, 255),
+                    2,
+                    cv2.LINE_AA,
+                )
+                montage_inputs.append(labeled)
+    if montage_inputs:
+        tile_height = min(image.shape[0] for image in montage_inputs)
+        normalized = [
+            cv2.resize(image, (int(round(image.shape[1] * tile_height / image.shape[0])), tile_height))
+            for image in montage_inputs
+        ]
+        columns = 2
+        tile_width = max(image.shape[1] for image in normalized)
+        blank = np.zeros((tile_height, tile_width, 3), dtype=np.uint8)
+        rows = []
+        for offset in range(0, len(normalized), columns):
+            row_tiles = normalized[offset : offset + columns]
+            row_tiles += [blank] * (columns - len(row_tiles))
+            padded = [
+                cv2.copyMakeBorder(
+                    image,
+                    0,
+                    0,
+                    0,
+                    tile_width - image.shape[1],
+                    cv2.BORDER_CONSTANT,
+                    value=(0, 0, 0),
+                )
+                for image in row_tiles
+            ]
+            rows.append(cv2.hconcat(padded))
+        montage = cv2.vconcat(rows)
+        montage_path = out_dir / f"step_{int(step):05d}_{phase}_montage.png"
+        if cv2.imwrite(str(montage_path), montage):
+            records.append(
+                {
+                    "step": int(step),
+                    "phase": phase,
+                    "image": "multiview_montage",
+                    "views": [name for name in sorted(st.camera_handles)],
+                    "path": str(montage_path),
+                    "shape": list(montage.shape),
+                    "nonzero_pixels": int(np.count_nonzero(montage)),
+                    "valid": bool(np.count_nonzero(montage) > 0),
+                }
+            )
+    if records:
+        dumped = set(getattr(st, "_door_twin_dumped_keyframes", set()))
+        dumped.add(phase)
+        st._door_twin_dumped_keyframes = dumped
+        tracker = getattr(st, "door_twin_tracker", None)
+        if tracker is not None:
+            for record in records:
+                tracker.add_artifact("keyframe", record)
+            tracker.mark_camera_available(any(record.get("valid", False) for record in records))
+        manifest_path = out_dir / "manifest.jsonl"
+        with manifest_path.open("a", encoding="utf-8") as f:
+            for record in records:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        return True
+    return False
+
+
+def snapshot_raw_dp_episodes(env_states):
+    snapshots = {}
+    for st in env_states:
+        recorder = getattr(st, "dp_recorder", None)
+        raw_root = getattr(recorder, "raw_root", None)
+        if raw_root is None:
+            continue
+        snapshots[int(st.index)] = set(Path(raw_root).glob("episode_*.npz"))
+    return snapshots
+
+
+def attach_new_expert_trajectory_artifacts(env_states, snapshots):
+    for st in env_states:
+        tracker = getattr(st, "door_twin_tracker", None)
+        recorder = getattr(st, "dp_recorder", None)
+        raw_root = getattr(recorder, "raw_root", None)
+        if tracker is None or raw_root is None:
+            continue
+        before = snapshots.get(int(st.index), set())
+        for path in sorted(set(Path(raw_root).glob("episode_*.npz")) - before):
+            tracker.add_artifact(
+                "expert_trajectory",
+                {
+                    "path": str(path),
+                    "format": "door_dp_raw_npz_v1",
+                    "size_bytes": int(path.stat().st_size),
+                },
+            )
 
 
 def apply_dp_gripper_latch(st: ParallelEnvState, gripper: float, door_pos) -> float:
@@ -861,6 +1315,7 @@ def sample_env_value(rng, args, attr, half_attr, lower=None, upper=None):
 
 def make_env_args(args, env_index):
     env_args = SimpleNamespace(**vars(args))
+    env_args._camera_axis_local_poses = {}
     env_seed = seed_for_env(args, env_index)
     rng = np.random.default_rng(env_seed)
     env_args.env_seed = env_seed
@@ -1005,10 +1460,15 @@ compute_base_push_target = dc.compute_base_push_target
 get_body_pose = dc.get_body_pose
 get_actor_body_index = dc.get_actor_body_index
 gym_quat_to_np = dc.gym_quat_to_np
-local_camera_pose_from_cfg = dc.local_camera_pose_from_cfg
 draw_local_camera_axes = dc.draw_local_camera_axes
 make_camera_properties = dc.make_camera_properties
-attach_camera_to_actor_body = dc.attach_camera_to_actor_body
+
+
+def local_camera_transform_from_pose(local_pos, local_quat):
+    return gymapi.Transform(
+        gymapi.Vec3(float(local_pos[0]), float(local_pos[1]), float(local_pos[2])),
+        gymapi.Quat(float(local_quat[0]), float(local_quat[1]), float(local_quat[2]), float(local_quat[3])),
+    )
 
 
 def local_camera_transform_from_cfg(camera_cfg, local_rot_override=None, args=None):
@@ -1020,17 +1480,70 @@ def local_camera_transform_from_cfg(camera_cfg, local_rot_override=None, args=No
         local_pos, local_rot = dc.jitter_camera_pose_for_args(local_pos, local_rot, args)
     local_quat = gym_quat_to_np(gymapi.Quat.from_euler_zyx(*local_rot))
     local_quat = base_ik.normalize_quat(local_quat)
-    return local_pos, local_quat, gymapi.Transform(
-        gymapi.Vec3(float(local_pos[0]), float(local_pos[1]), float(local_pos[2])),
-        gymapi.Quat(float(local_quat[0]), float(local_quat[1]), float(local_quat[2]), float(local_quat[3])),
+    return local_pos, local_quat, local_camera_transform_from_pose(local_pos, local_quat)
+
+
+def camera_axis_pose_cache(args):
+    cache = getattr(args, "_camera_axis_local_poses", None)
+    if cache is None:
+        cache = {}
+        setattr(args, "_camera_axis_local_poses", cache)
+    return cache
+
+
+def cached_local_camera_transform_from_cfg(camera_name, camera_cfg, local_rot_override=None, args=None):
+    if args is not None and camera_name:
+        cache = camera_axis_pose_cache(args)
+        cached = cache.get(camera_name)
+        if cached is not None:
+            local_pos = np.asarray(cached["local_pos"], dtype=np.float32).copy()
+            local_quat = base_ik.normalize_quat(np.asarray(cached["local_quat"], dtype=np.float32)).astype(np.float32)
+            return local_pos, local_quat, local_camera_transform_from_pose(local_pos, local_quat)
+    local_pos, local_quat, local_transform = local_camera_transform_from_cfg(
+        camera_cfg,
+        local_rot_override,
+        args=args,
     )
+    if args is not None and camera_name:
+        camera_axis_pose_cache(args)[camera_name] = {
+            "local_pos": np.asarray(local_pos, dtype=np.float32).copy(),
+            "local_quat": np.asarray(local_quat, dtype=np.float32).copy(),
+        }
+    return local_pos, local_quat, local_transform
 
 
-def attach_camera_to_actor_root_body(gym, env, actor, camera_cfg, local_rot_override=None, args=None):
+def attach_camera_to_actor_body_cached(
+    gym,
+    env,
+    actor,
+    body_name,
+    camera_cfg,
+    local_rot_override=None,
+    args=None,
+    camera_name=None,
+):
+    body_handle = gym.find_actor_rigid_body_handle(env, actor, body_name)
+    if body_handle < 0:
+        return None
+    _local_pos, _local_quat, local_transform = cached_local_camera_transform_from_cfg(
+        camera_name,
+        camera_cfg,
+        local_rot_override,
+        args=args,
+    )
+    camera_handle = gym.create_camera_sensor(env, make_camera_properties(camera_cfg))
+    if camera_handle < 0:
+        return None
+    gym.attach_camera_to_body(camera_handle, env, body_handle, local_transform, gymapi.FOLLOW_TRANSFORM)
+    return camera_handle
+
+
+def attach_camera_to_actor_root_body(gym, env, actor, camera_cfg, local_rot_override=None, args=None, camera_name=None):
     root_handle = gym.get_actor_root_rigid_body_handle(env, actor)
     if int(root_handle) < 0:
         return None
-    _local_pos, _local_quat, local_transform = local_camera_transform_from_cfg(
+    _local_pos, _local_quat, local_transform = cached_local_camera_transform_from_cfg(
+        camera_name,
         camera_cfg,
         local_rot_override,
         args=args,
@@ -1042,11 +1555,12 @@ def attach_camera_to_actor_root_body(gym, env, actor, camera_cfg, local_rot_over
     return camera_handle
 
 
-def draw_root_camera_axes(gym, viewer, env, actor, camera_cfg, local_rot_override, args):
+def draw_root_camera_axes(gym, viewer, env, actor, camera_cfg, local_rot_override, args, camera_name="front"):
     root_handle = gym.get_actor_root_rigid_body_handle(env, actor)
     if int(root_handle) < 0:
         return False
-    local_pos, local_quat, _local_transform = local_camera_transform_from_cfg(
+    local_pos, local_quat, _local_transform = cached_local_camera_transform_from_cfg(
+        camera_name,
         camera_cfg,
         local_rot_override,
         args=args,
@@ -1068,7 +1582,12 @@ def draw_root_camera_axes(gym, viewer, env, actor, camera_cfg, local_rot_overrid
 
 def draw_low_level_camera_axes(gym, viewer, env, arm_actor, actor_handles, args):
     wrist_rot = dc.wrist_camera_rotation_radians_from_args(args)
-    wrist_pos, wrist_quat = local_camera_pose_from_cfg(dc.DEFAULT_WRIST_CAMERA_CFG, wrist_rot)
+    wrist_pos, wrist_quat, _wrist_transform = cached_local_camera_transform_from_cfg(
+        "wrist",
+        dc.DEFAULT_WRIST_CAMERA_CFG,
+        wrist_rot,
+        args=args,
+    )
     draw_local_camera_axes(
         gym,
         viewer,
@@ -1087,15 +1606,129 @@ def draw_low_level_camera_axes(gym, viewer, env, arm_actor, actor_handles, args)
         math.radians(float(args.front_camera_roll_deg)),
     ]
     base_actor = actor_handles[0] if len(actor_handles) > 1 else arm_actor
-    draw_root_camera_axes(gym, viewer, env, base_actor, dc.DEFAULT_FRONT_CAMERA_CFG, front_rot, args)
+    draw_root_camera_axes(gym, viewer, env, base_actor, dc.DEFAULT_FRONT_CAMERA_CFG, front_rot, args, camera_name="front")
 
 
-def create_low_level_cameras(gym, env, arm_actor, actor_handles, args):
+def door_twin_world_from_asset_local(args, door, local_xyz):
+    local = np.asarray(local_xyz, dtype=np.float32) * float(door.actor_scale)
+    yaw = float(door.actor_yaw)
+    c, s = math.cos(yaw), math.sin(yaw)
+    rotated_xy = np.asarray(
+        [c * local[0] - s * local[1], s * local[0] + c * local[1]],
+        dtype=np.float32,
+    )
+    actor_xy = np.asarray(
+        [
+            float(args.door_x) + float(door.actor_position_offset[0]),
+            float(args.door_y) + float(door.actor_position_offset[1]),
+        ],
+        dtype=np.float32,
+    )
+    return np.asarray(
+        [
+            actor_xy[0] + rotated_xy[0],
+            actor_xy[1] + rotated_xy[1],
+            float(getattr(args, "door_z_offset", 0.0))
+            + float(door.actor_position_offset[2])
+            + float(local[2]),
+        ],
+        dtype=np.float32,
+    )
+
+
+def door_twin_observer_target(args, door):
+    target_local = door.spec.get("observer_target_local")
+    if target_local is not None:
+        return door_twin_world_from_asset_local(args, door, target_local)
+    local_goal = np.asarray(
+        door.handle_bounding.get("goal_pos", [0.0, 0.0, 0.9]),
+        dtype=np.float32,
+    )
+    return door_twin_world_from_asset_local(args, door, local_goal)
+
+
+def door_twin_handle_closeup_target(args, door):
+    target_local = door.spec.get("handle_closeup_target_local")
+    if target_local is not None:
+        return door_twin_world_from_asset_local(args, door, target_local)
+    observer_target = door_twin_observer_target(args, door).copy()
+    if float(observer_target[2]) < 0.25:
+        observer_target[2] = float(getattr(args, "robot_z", 0.5)) + 0.55
+    return observer_target
+
+
+def create_door_twin_observer_camera(gym, env, args, door, name):
+    heading = np.asarray(
+        [math.cos(float(args.robot_yaw)), math.sin(float(args.robot_yaw))],
+        dtype=np.float32,
+    )
+    lateral = np.asarray([-heading[1], heading[0]], dtype=np.float32)
+    if name == "handle_closeup":
+        target = door_twin_handle_closeup_target(args, door)
+        distance = float(getattr(args, "door_twin_handle_closeup_distance", 0.55))
+        lateral_distance = float(getattr(args, "door_twin_handle_closeup_lateral", 0.25))
+        height_offset = float(getattr(args, "door_twin_handle_closeup_height_offset", 0.16))
+        position = np.asarray(
+            [
+                target[0] - heading[0] * distance + lateral[0] * lateral_distance,
+                target[1] - heading[1] * distance + lateral[1] * lateral_distance,
+                target[2] + height_offset,
+            ],
+            dtype=np.float32,
+        )
+    else:
+        target = door_twin_observer_target(args, door)
+        distance = float(getattr(args, "door_twin_observer_distance", 1.8))
+        lateral_distance = float(getattr(args, "door_twin_observer_lateral", 1.0))
+        height = float(getattr(args, "door_twin_observer_height", 1.45))
+    if name == "overhead":
+        position = np.asarray(
+            [target[0] - heading[0] * 0.35, target[1] - heading[1] * 0.35, target[2] + 2.0],
+            dtype=np.float32,
+        )
+    elif name != "handle_closeup":
+        side = 1.0 if name == "observer_left" else -1.0
+        position = np.asarray(
+            [
+                target[0] - heading[0] * distance + side * lateral[0] * lateral_distance,
+                target[1] - heading[1] * distance + side * lateral[1] * lateral_distance,
+                height,
+            ],
+            dtype=np.float32,
+        )
+    camera = gym.create_camera_sensor(env, make_camera_properties(dc.DEFAULT_FRONT_CAMERA_CFG))
+    if camera < 0:
+        return None
+    gym.set_camera_location(
+        camera,
+        env,
+        gymapi.Vec3(float(position[0]), float(position[1]), float(position[2])),
+        gymapi.Vec3(float(target[0]), float(target[1]), float(target[2])),
+    )
+    return camera
+
+
+def create_low_level_cameras(gym, env, arm_actor, actor_handles, door, args):
     cameras = {}
-    if args.enable_wrist_camera:
+    door_twin_views = (
+        set(door_twin_camera_view_names(args))
+        if bool(getattr(args, "dump_keyframe_images", False))
+        else set()
+    )
+    regular_camera_use = bool(
+        args.show_camera_images or args.record_dp_dataset or args.dp_policy_checkpoint
+    )
+    if args.enable_wrist_camera and (regular_camera_use or "wrist" in door_twin_views):
         wrist_rot = dc.wrist_camera_rotation_radians_from_args(args)
-        wrist_camera = attach_camera_to_actor_body(
-            gym, env, arm_actor, "link06", dc.DEFAULT_WRIST_CAMERA_CFG, wrist_rot, args=args
+        wrist_camera = attach_camera_to_actor_body_cached(
+            gym,
+            env,
+            arm_actor,
+            "link06",
+            dc.DEFAULT_WRIST_CAMERA_CFG,
+            wrist_rot,
+            args=args,
+            camera_name="wrist",
         )
         if wrist_camera is None:
             print("⚠️📷 Wrist camera sensor creation failed; wrist camera image display is disabled.", flush=True)
@@ -1103,7 +1736,7 @@ def create_low_level_cameras(gym, env, arm_actor, actor_handles, args):
             cameras["wrist"] = wrist_camera
             print(f"Wrist camera sensor enabled: handle={wrist_camera} body=link06")
 
-    if args.enable_front_camera:
+    if args.enable_front_camera and (regular_camera_use or "front" in door_twin_views):
         front_rot = [
             math.radians(float(args.front_camera_yaw_deg)),
             math.radians(float(args.front_camera_pitch_deg)),
@@ -1111,13 +1744,52 @@ def create_low_level_cameras(gym, env, arm_actor, actor_handles, args):
         ]
         base_actor = actor_handles[0] if len(actor_handles) > 1 else arm_actor
         front_camera = attach_camera_to_actor_root_body(
-            gym, env, base_actor, dc.DEFAULT_FRONT_CAMERA_CFG, front_rot, args=args
+            gym,
+            env,
+            base_actor,
+            dc.DEFAULT_FRONT_CAMERA_CFG,
+            front_rot,
+            args=args,
+            camera_name="front",
         )
         if front_camera is None:
             print("⚠️📷 Front camera sensor creation failed; front camera image display is disabled.", flush=True)
         else:
             cameras["front"] = front_camera
             print(f"Front camera sensor enabled: handle={front_camera} body=root")
+    base_actor = actor_handles[0] if len(actor_handles) > 1 else arm_actor
+    side_yaw = float(getattr(args, "door_twin_side_camera_yaw_deg", 30.0))
+    for name, yaw_offset in (("front_left", side_yaw), ("front_right", -side_yaw)):
+        if name not in door_twin_views:
+            continue
+        side_rot = [
+            math.radians(float(args.front_camera_yaw_deg) + yaw_offset),
+            math.radians(float(args.front_camera_pitch_deg)),
+            math.radians(float(args.front_camera_roll_deg)),
+        ]
+        camera = attach_camera_to_actor_root_body(
+            gym,
+            env,
+            base_actor,
+            dc.DEFAULT_FRONT_CAMERA_CFG,
+            side_rot,
+            args=args,
+            camera_name=name,
+        )
+        if camera is None:
+            print(f"DoorTwin {name} camera sensor creation failed.", flush=True)
+        else:
+            cameras[name] = camera
+            print(f"DoorTwin {name} camera sensor enabled: handle={camera} body=root")
+    for name in ("observer_left", "observer_right", "overhead", "handle_closeup"):
+        if name not in door_twin_views:
+            continue
+        camera = create_door_twin_observer_camera(gym, env, args, door, name)
+        if camera is None:
+            print(f"DoorTwin {name} camera sensor creation failed.", flush=True)
+        else:
+            cameras[name] = camera
+            print(f"DoorTwin {name} camera sensor enabled: handle={camera} frame=world")
     if args.show_camera_images:
         if cv2 is None:
             print("⚠️📷 cv2 is not available; camera image windows are disabled.", flush=True)
@@ -1386,13 +2058,36 @@ def prefill_dp_controller_from_expert_obs(controller, data, step, vision_mode, e
         controller.reset_envs([int(env_id)])
     start = max(0, int(step) - int(controller.obs_horizon) + 1)
     for idx in range(start, int(step) + 1):
-        args = (
-            np.asarray(data["state"][idx], dtype=np.float32),
-            np.asarray(data[image_keys[0]][idx], dtype=np.uint8),
-            np.asarray(data[image_keys[1]][idx], dtype=np.uint8),
-            np.asarray(data[image_keys[2]][idx], dtype=np.uint8),
-            np.asarray(data[image_keys[3]][idx], dtype=np.uint8),
-        )
+        if bool(getattr(controller, "config", {}).get("plucker_conditioning", False)):
+            if "front_camera_pose_base" not in data.files or "wrist_camera_pose_base" not in data.files:
+                raise ValueError("Plücker warm-start requires raw front/wrist camera pose arrays.")
+            front_pose = np.asarray(data["front_camera_pose_base"][idx], dtype=np.float32)
+            wrist_pose = np.asarray(data["wrist_camera_pose_base"][idx], dtype=np.float32)
+        else:
+            front_pose = None
+            wrist_pose = None
+        if vision_mode == "depth_only":
+            wrist_depth = image_to_three_channel_uint8(data[image_keys[0]][idx])
+            front_depth = image_to_three_channel_uint8(data[image_keys[1]][idx])
+            args = (
+                np.asarray(data["state"][idx], dtype=np.float32),
+                np.zeros_like(wrist_depth),
+                wrist_depth,
+                None,
+                front_depth,
+                front_pose,
+                wrist_pose,
+            )
+        else:
+            args = (
+                np.asarray(data["state"][idx], dtype=np.float32),
+                np.asarray(data[image_keys[0]][idx], dtype=np.uint8),
+                np.asarray(data[image_keys[1]][idx], dtype=np.uint8),
+                np.asarray(data[image_keys[2]][idx], dtype=np.uint8),
+                np.asarray(data[image_keys[3]][idx], dtype=np.uint8),
+                front_pose,
+                wrist_pose,
+            )
         if env_id is None:
             controller.append_observation(*args)
         else:
@@ -1431,6 +2126,32 @@ update_arm_ik_targets = dc.update_arm_ik_targets
 refresh_current_ee_pose = dc.refresh_current_ee_pose
 
 
+def smooth_door_twin_ee_command(args, traj, phase, target_pos):
+    """Limit DoorTwin skill EE command jumps before recording/replay action export."""
+
+    if phase == "walk" or door_twin_legacy_replay_for_args(args):
+        return np.asarray(target_pos, dtype=np.float32).copy()
+    if door_twin_profile_for_args(args) is None:
+        return np.asarray(target_pos, dtype=np.float32).copy()
+    max_step = float(getattr(args, "ee_command_max_step", 0.0) or 0.0)
+    if max_step <= 0.0 or "last_target_pos" not in traj:
+        return np.asarray(target_pos, dtype=np.float32).copy()
+
+    previous = np.asarray(traj["last_target_pos"], dtype=np.float32)
+    target = np.asarray(target_pos, dtype=np.float32).copy()
+    delta = target - previous
+    distance = float(np.linalg.norm(delta))
+    if distance <= max_step or distance <= 1.0e-8:
+        return target
+
+    traj["ee_command_smoothing"] = {
+        "phase": str(phase),
+        "requested_delta": distance,
+        "max_step": max_step,
+    }
+    return previous + delta * (max_step / distance)
+
+
 def trajectory_targets(
     step,
     args,
@@ -1442,8 +2163,10 @@ def trajectory_targets(
     base_start,
     base_stop,
     base_push,
+    base_traverse,
     yaw_start,
     yaw_push,
+    yaw_traverse,
     traj,
 ):
     handle_pos, handle_quat = get_body_pose(gym, env, door_actor, door.handle_body_index)
@@ -1455,22 +2178,32 @@ def trajectory_targets(
     if np.linalg.norm(approach_dir) < 1.0e-5:
         approach_dir = np.array([math.cos(yaw_start), math.sin(yaw_start), 0.0], dtype=np.float32)
 
-    pregrasp = handle_goal + approach_dir * args.pregrasp_offset
-    grasp = handle_goal + approach_dir * args.grasp_offset
-    pregrasp[0] += args.grasp_x_offset
-    pregrasp[2] += args.grasp_z_offset
-    if dc.door_asset_family(door) == "wc4":
-        pregrasp[2] += float(getattr(args, "wc4_pregrasp_z_offset", 0.0))
-    grasp[0] += args.grasp_x_offset
-    grasp[2] += args.grasp_z_offset
-    if dc.door_asset_family(door) == "wc4":
-        grasp[2] += float(getattr(args, "wc4_grasp_z_offset", 0.0))
-    goal_quat = forward_ee_quat(args, yaw_start)
+    skill_profile = door_twin_profile_for_args(args)
+    legacy_skill_replay = door_twin_legacy_replay_for_args(args)
+    if skill_profile is not None and not legacy_skill_replay:
+        skill_points = compute_skill_waypoints(handle_goal, approach_dir, skill_profile)
+        pregrasp = skill_points.pregrasp
+        grasp = skill_points.grasp
+        rotate_pos = skill_points.rotate
+    else:
+        pregrasp = handle_goal + approach_dir * args.pregrasp_offset
+        grasp = handle_goal + approach_dir * args.grasp_offset
+        pregrasp[0] += args.grasp_x_offset
+        pregrasp[2] += args.grasp_z_offset
+        if dc.door_asset_family(door) == "wc4":
+            pregrasp[2] += float(getattr(args, "wc4_pregrasp_z_offset", 0.0))
+        grasp[0] += args.grasp_x_offset
+        grasp[2] += args.grasp_z_offset
+        if dc.door_asset_family(door) == "wc4":
+            grasp[2] += float(getattr(args, "wc4_grasp_z_offset", 0.0))
+    yaw_stop = yaw_start if legacy_skill_replay else yaw_start + move_to_approach_yaw_delta(args)
+    goal_quat = forward_ee_quat(args, yaw_stop)
 
-    rotate_offset = np.zeros(3, dtype=np.float32)
-    rotate_offset[1] = args.handle_rotate_right_distance
-    rotate_offset[2] = -args.handle_rotate_down_distance
-    rotate_pos = grasp + rotate_offset
+    if skill_profile is None or legacy_skill_replay:
+        rotate_offset = np.zeros(3, dtype=np.float32)
+        rotate_offset[1] = args.handle_rotate_right_distance
+        rotate_offset[2] = -args.handle_rotate_down_distance
+        rotate_pos = grasp + rotate_offset
     pull_dir = quat_axis(handle_quat, axis=2)
     pull_dir[2] = 0.0
     fallback_pull_dir = approach_dir.copy()
@@ -1489,7 +2222,10 @@ def trajectory_targets(
     close_end = grasp_hold_end + args.gripper_close_steps
     rotate_end = close_end + args.handle_rotate_steps
     push_end = rotate_end + args.door_push_steps
-    return_home_end = push_end + args.return_home_steps
+    separate_traverse = door_twin_separate_traverse_for_args(args)
+    traverse_steps = int(getattr(args, "traverse_steps", 0)) if separate_traverse else 0
+    traverse_end = push_end + max(0, traverse_steps)
+    return_home_end = traverse_end + args.return_home_steps
 
     gripper_closed = args.gripper_open + (args.gripper_closed - args.gripper_open) * args.gripper_close_ratio
     gripper_open_stage = args.gripper_open + (
@@ -1514,8 +2250,22 @@ def trajectory_targets(
             traj["home_ee_base_quat"] = world_quat_to_base(ik_state.current_quat_np, home_yaw)
 
     if step < walk_end:
-        t = smoothstep((step + 1) / max(1, args.walk_steps))
+        walk_alpha = float(np.clip((step + 1) / max(1, args.walk_steps), 0.0, 1.0))
+        t = (
+            walk_alpha
+            if skill_profile is not None
+            and not legacy_skill_replay
+            and "approach" in skill_profile.base_moves
+            else smoothstep(walk_alpha)
+        )
         base_xy = lerp(base_start, base_stop, t)
+        yaw = float(
+            lerp(
+                np.array([yaw_start], dtype=np.float32),
+                np.array([yaw_stop], dtype=np.float32),
+                t,
+            )[0]
+        )
         target_pos = ik_state.current_pos_np.copy() if ik_state.current_pos_np is not None else pregrasp.copy()
         target_quat = None if args.ik_position_only else ik_state.target_quat_np
     else:
@@ -1537,6 +2287,7 @@ def trajectory_targets(
                 traj["initial_hold_start_quat"] = base_ik.normalize_quat(start_quat).astype(np.float32)
 
         base_xy = base_stop.copy()
+        yaw = yaw_stop
         target_pos = traj["pregrasp"].copy()
         target_quat = None if args.ik_position_only else traj["goal_quat"].copy()
         phase = "initial_hold"
@@ -1577,7 +2328,22 @@ def trajectory_targets(
             phase = "rotate_handle"
         elif step < push_end:
             t = smoothstep((step - rotate_end + 1) / max(1, args.door_push_steps))
-            base_t = smoothstep((step - rotate_end + 1) / max(1.0, args.door_push_steps * args.base_push_time_scale))
+            if skill_profile is not None and not legacy_skill_replay and any(
+                stage in skill_profile.base_moves for stage in ("push",)
+            ):
+                base_t = float(
+                    np.clip(
+                        (step - rotate_end + 1)
+                        / max(1, int(getattr(args, "move_to_push_steps", args.door_push_steps))),
+                        0.0,
+                        1.0,
+                    )
+                )
+            else:
+                base_t = smoothstep(
+                    (step - rotate_end + 1)
+                    / max(1.0, args.door_push_steps * args.base_push_time_scale)
+                )
             turned_quat = base_ik.quat_multiply(
                 traj["goal_quat"],
                 quat_from_angle_axis(
@@ -1610,6 +2376,12 @@ def trajectory_targets(
                 and t <= args.handle_follow_push_ratio
                 and "handle_contact_offset_local" in traj
             )
+            hold_handle_for_skill = (
+                skill_profile is not None
+                and not legacy_skill_replay
+                and door.open_stage
+                and "handle_contact_offset_local" in traj
+            )
             freeze_ee_target = False
             door_pos, _ = get_actor_dof_state(gym, env, door_actor)
             door_open_ratio = (
@@ -1620,7 +2392,12 @@ def trajectory_targets(
                 handle_target_pos = handle_goal + handle_contact_offset + live_push_dir * args.push_contact_bias
             else:
                 handle_target_pos = handle_goal.copy()
-            if (
+            if hold_handle_for_skill:
+                target_pos = handle_target_pos.copy()
+                target_quat = None
+                if args.push_follow_orientation and not args.ik_position_only and "handle_contact_quat_local" in traj:
+                    target_quat = base_ik.quat_multiply(handle_quat, traj["handle_contact_quat_local"])
+            elif (
                 door.open_stage
                 and len(door_pos) > 0
                 and ik_state.current_pos_np is not None
@@ -1658,7 +2435,13 @@ def trajectory_targets(
             else:
                 target_quat = None if args.ik_position_only else turned_quat
             base_xy = lerp(base_stop, base_push, base_t)
-            yaw = float(lerp(np.array([yaw_start], dtype=np.float32), np.array([yaw_push], dtype=np.float32), base_t)[0])
+            yaw = float(
+                lerp(
+                    np.array([yaw_stop], dtype=np.float32),
+                    np.array([yaw_push], dtype=np.float32),
+                    base_t,
+                )[0]
+            )
             gripper = gripper_closed
             if door.open_stage:
                 if "gripper_loosen_start_step" not in traj:
@@ -1672,37 +2455,98 @@ def trajectory_targets(
                     loosen_t,
                 )[0])
             phase = "push_door"
-        elif step < return_home_end:
-            t = smoothstep((step - push_end + 1) / max(1, args.return_home_steps))
-            if "return_home_start_base_xy" not in traj:
-                traj["return_home_start_base_xy"] = traj.get("base_xy", base_push).copy()
-                traj["return_home_start_yaw"] = float(traj.get("yaw", yaw_push))
-            base_xy = lerp(traj["return_home_start_base_xy"], base_push, t)
+        elif step < traverse_end:
+            traverse_step = step - push_end
+            t = float(np.clip((traverse_step + 1) / max(1, traverse_steps), 0.0, 1.0))
+            if "traverse_start_base_xy" not in traj:
+                traj["traverse_start_base_xy"] = traj.get("base_xy", base_push).copy()
+                traj["traverse_start_yaw"] = float(traj.get("yaw", yaw_push))
+                traj["traverse_hold_target_pos"] = (
+                    traj["last_target_pos"].copy()
+                    if "last_target_pos" in traj
+                    else (
+                        ik_state.current_pos_np.copy()
+                        if ik_state.current_pos_np is not None
+                        else traj["push"].copy()
+                    )
+                )
+                if not args.ik_position_only:
+                    if "last_target_quat" in traj and traj["last_target_quat"] is not None:
+                        traj["traverse_hold_target_quat"] = traj["last_target_quat"].copy()
+                    elif ik_state.current_quat_np is not None:
+                        traj["traverse_hold_target_quat"] = base_ik.normalize_quat(ik_state.current_quat_np).astype(np.float32)
+            base_xy = lerp(traj["traverse_start_base_xy"], base_traverse, t)
             yaw = float(lerp(
-                np.array([traj["return_home_start_yaw"]], dtype=np.float32),
-                np.array([yaw_push], dtype=np.float32),
+                np.array([traj["traverse_start_yaw"]], dtype=np.float32),
+                np.array([yaw_traverse], dtype=np.float32),
                 t,
             )[0])
-            target_pos, target_quat = chase_target_to_current_ee(
-                traj,
-                ik_state,
-                args,
-                traj["push"].copy(),
-                traj.get("goal_quat"),
+            target_pos = traj["traverse_hold_target_pos"].copy()
+            target_quat = None
+            if not args.ik_position_only and "traverse_hold_target_quat" in traj:
+                target_quat = traj["traverse_hold_target_quat"].copy()
+            gripper = float(traj.get("last_gripper", gripper_closed))
+            phase = "traverse_door"
+        elif step < return_home_end:
+            final_base = base_traverse if separate_traverse else base_push
+            final_yaw = yaw_traverse if separate_traverse else yaw_push
+            t = smoothstep((step - traverse_end + 1) / max(1, args.return_home_steps))
+            if "return_home_start_base_xy" not in traj:
+                traj["return_home_start_base_xy"] = traj.get("base_xy", final_base).copy()
+                traj["return_home_start_yaw"] = float(traj.get("yaw", final_yaw))
+                traj["return_home_start_target_pos"] = (
+                    traj["last_target_pos"].copy()
+                    if "last_target_pos" in traj
+                    else (
+                        ik_state.current_pos_np.copy()
+                        if ik_state.current_pos_np is not None
+                        else traj["push"].copy()
+                    )
+                )
+                if not args.ik_position_only:
+                    if "last_target_quat" in traj and traj["last_target_quat"] is not None:
+                        traj["return_home_start_target_quat"] = traj["last_target_quat"].copy()
+                    elif ik_state.current_quat_np is not None:
+                        traj["return_home_start_target_quat"] = base_ik.normalize_quat(ik_state.current_quat_np).astype(np.float32)
+            base_xy = lerp(traj["return_home_start_base_xy"], final_base, t)
+            yaw = float(lerp(
+                np.array([traj["return_home_start_yaw"]], dtype=np.float32),
+                np.array([final_yaw], dtype=np.float32),
+                t,
+            )[0])
+            home_base_pos = traj.get("home_ee_base_pos")
+            return_home_goal_pos = (
+                base_pos_to_world(home_base_pos, base_xy, args.robot_z, yaw)
+                if home_base_pos is not None
+                else traj["push"].copy()
             )
+            target_pos = lerp(traj["return_home_start_target_pos"], return_home_goal_pos, t)
+            target_quat = None
+            if not args.ik_position_only:
+                return_home_goal_quat = (
+                    base_quat_to_world(traj["home_ee_base_quat"], yaw)
+                    if "home_ee_base_quat" in traj
+                    else traj.get("goal_quat")
+                )
+                if "return_home_start_target_quat" in traj and return_home_goal_quat is not None:
+                    target_quat = quat_nlerp(traj["return_home_start_target_quat"], return_home_goal_quat, t)
+                elif return_home_goal_quat is not None:
+                    target_quat = return_home_goal_quat
             gripper = args.gripper_open
             traj["return_home_alpha"] = t
             phase = "return_home"
         else:
+            final_base = base_traverse if separate_traverse else base_push
+            final_yaw = yaw_traverse if separate_traverse else yaw_push
             home_base_pos = traj.get("home_ee_base_pos")
             fallback_pos = (
-                base_pos_to_world(home_base_pos, base_push, args.robot_z, yaw_push)
+                base_pos_to_world(home_base_pos, final_base, args.robot_z, final_yaw)
                 if home_base_pos is not None
                 else traj["push"].copy()
             )
             fallback_quat = None
             if not args.ik_position_only and "home_ee_base_quat" in traj:
-                fallback_quat = base_quat_to_world(traj["home_ee_base_quat"], yaw_push)
+                fallback_quat = base_quat_to_world(traj["home_ee_base_quat"], final_yaw)
             target_pos, target_quat = chase_target_to_current_ee(
                 traj,
                 ik_state,
@@ -1710,12 +2554,13 @@ def trajectory_targets(
                 fallback_pos,
                 fallback_quat,
             )
-            base_xy = base_push.copy()
-            yaw = yaw_push
+            base_xy = final_base.copy()
+            yaw = final_yaw
             gripper = args.gripper_open
             traj["return_home_alpha"] = 1.0
             phase = "hold_home"
 
+    target_pos = smooth_door_twin_ee_command(args, traj, phase, target_pos)
     traj["base_xy"] = base_xy.copy()
     traj["yaw"] = float(yaw)
     traj["last_target_pos"] = np.asarray(target_pos, dtype=np.float32).copy()
@@ -1724,6 +2569,7 @@ def trajectory_targets(
         if target_quat is None
         else base_ik.normalize_quat(np.asarray(target_quat, dtype=np.float32)).astype(np.float32)
     )
+    traj["last_gripper"] = float(gripper)
     return phase, base_xy, yaw, target_pos, target_quat, gripper, handle_goal
 
 
@@ -1796,11 +2642,21 @@ def run_demo(
 
     yaw_start, heading, base_start, base_stop = dc.compute_base_walk_targets(args, door)
     dc.configure_dynamic_walk_steps(args, base_start, base_stop)
-    base_push = compute_base_push_target(args, base_stop, heading)
-    yaw_push = yaw_start + args.push_base_yaw_delta
+    base_push, base_traverse = compute_base_push_and_traverse_targets(args, base_stop, heading)
+    yaw_push = yaw_start + move_to_approach_yaw_delta(args) + args.push_base_yaw_delta
+    yaw_traverse = yaw_push + float(getattr(args, "traverse_yaw_delta", 0.0))
     traj = {"base_xy": base_start.copy()}
 
-    print("base_start:", base_start.tolist(), "base_stop:", base_stop.tolist(), "base_push:", base_push.tolist())
+    print(
+        "base_start:",
+        base_start.tolist(),
+        "base_stop:",
+        base_stop.tolist(),
+        "base_push:",
+        base_push.tolist(),
+        "base_traverse:",
+        base_traverse.tolist(),
+    )
     print(
         "pass_through_door:",
         bool(args.pass_through_door),
@@ -1856,6 +2712,8 @@ def run_demo(
             ik_state=ik_state,
             base_start=base_start,
             yaw_start=yaw_start,
+            base_traverse=base_traverse,
+            yaw_traverse=yaw_traverse,
             traj=traj,
             dp_recorder=dp_recorder,
             dp_record_success=False,
@@ -1879,8 +2737,10 @@ def run_demo(
             base_start,
             base_stop,
             base_push,
+            base_traverse,
             yaw_start,
             yaw_push,
+            yaw_traverse,
             traj,
         )
         set_robot_base_pose(
@@ -2040,8 +2900,9 @@ def initialize_parallel_env_state(
 
     yaw_start, heading, base_start, base_stop = dc.compute_base_walk_targets(args, door)
     dc.configure_dynamic_walk_steps(args, base_start, base_stop, env_index=index)
-    base_push = compute_base_push_target(args, base_stop, heading)
-    return ParallelEnvState(
+    base_push, base_traverse = compute_base_push_and_traverse_targets(args, base_stop, heading)
+    yaw_push = yaw_start + move_to_approach_yaw_delta(args) + args.push_base_yaw_delta
+    state = ParallelEnvState(
         index=int(index),
         args=args,
         env=env,
@@ -2056,11 +2917,15 @@ def initialize_parallel_env_state(
         base_start=base_start,
         base_stop=base_stop,
         base_push=base_push,
+        base_traverse=base_traverse,
         yaw_start=yaw_start,
-        yaw_push=yaw_start + args.push_base_yaw_delta,
+        yaw_push=yaw_push,
+        yaw_traverse=yaw_push + float(getattr(args, "traverse_yaw_delta", 0.0)),
         traj={"base_xy": base_start.copy()},
         dp_recorder=dp_recorder,
     )
+    init_door_twin_tracker(state)
+    return state
 
 
 def create_parallel_env_states(
@@ -2107,10 +2972,27 @@ def create_parallel_env_states(
     env_states = []
     for env_index, env_args, env, arm_actor, actor_handles, door, door_actor in created:
         camera_handles = {}
-        if (env_args.show_camera_images or env_args.record_dp_dataset or env_args.dp_policy_checkpoint) and (
-            env_args.enable_wrist_camera or env_args.enable_front_camera
+        if (
+            env_args.show_camera_images
+            or env_args.record_dp_dataset
+            or env_args.dp_policy_checkpoint
+            or env_args.dump_keyframe_images
+        ) and (
+            env_args.enable_wrist_camera
+            or env_args.enable_front_camera
+            or any(
+                view in ("front_left", "front_right", "observer_left", "observer_right", "overhead", "handle_closeup")
+                for view in door_twin_camera_view_names(env_args)
+            )
         ):
-            camera_handles = create_low_level_cameras(gym, env, arm_actor, actor_handles, env_args)
+            camera_handles = create_low_level_cameras(
+                gym,
+                env,
+                arm_actor,
+                actor_handles,
+                door,
+                env_args,
+            )
         ik_state = base_ik.setup_ik_controller(gym, sim, env, arm_actor, arm_asset, dof_names, lower, upper, env_args)
         dp_recorder = None
         if env_args.record_dp_dataset and env_index in record_env_ids:
@@ -2171,7 +3053,16 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
         flush=True,
     )
     first = env_states[0]
-    print("base_start:", first.base_start.tolist(), "base_stop:", first.base_stop.tolist(), "base_push:", first.base_push.tolist())
+    print(
+        "base_start:",
+        first.base_start.tolist(),
+        "base_stop:",
+        first.base_stop.tolist(),
+        "base_push:",
+        first.base_push.tolist(),
+        "base_traverse:",
+        first.base_traverse.tolist(),
+    )
     print(
         "pass_through_door:",
         bool(args.pass_through_door),
@@ -2319,8 +3210,10 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                     st.base_start,
                     st.base_stop,
                     st.base_push,
+                    st.base_traverse,
                     st.yaw_start,
                     st.yaw_push,
+                    st.yaw_traverse,
                     st.traj,
                 )
                 dp_action = None
@@ -2423,7 +3316,11 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
             args.record_dp_dataset
             and any(st.camera_handles and dc.float_dp_record_frame_due(st, dt) for st in env_states)
         )
-        need_camera_render = bool(any(st.camera_handles for st in env_states) and (args.show_camera_images or record_camera_due))
+        door_twin_dump_due = bool(any(door_twin_keyframe_dump_due(st) for st in env_states))
+        need_camera_render = bool(
+            any(st.camera_handles for st in env_states)
+            and (args.show_camera_images or record_camera_due or door_twin_dump_due)
+        )
         if viewer is not None and need_camera_render and (
             args.draw_ik_target or args.draw_camera_axes or args.draw_scripted_trajectory
         ):
@@ -2444,8 +3341,10 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
             door_pos_record, door_vel_record = get_actor_dof_state(gym, st.env, st.door_actor)
             st.last_door_pos = door_pos_record
             dc.monitor_base_door_collision(gym, step, st)
+            if door_twin_dump_due:
+                maybe_dump_door_twin_keyframe_images(gym, sim, st, step)
             if st.dp_recorder is not None:
-                dc.record_float_dp_frame(
+                frame_recorded = dc.record_float_dp_frame(
                     gym,
                     sim,
                     st,
@@ -2456,6 +3355,10 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                     door_pos_record,
                     door_vel_record,
                 )
+                tracker = getattr(st, "door_twin_tracker", None)
+                if tracker is not None and frame_recorded:
+                    tracker.mark_camera_available(True)
+            update_door_twin_tracker(st, step, door_pos_record)
             st.prev_base_xy = np.asarray(st.traj.get("base_xy", st.base_start), dtype=np.float32).copy()
             st.prev_yaw = float(st.traj.get("yaw", st.yaw_start))
 
@@ -2514,7 +3417,29 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
 
     elapsed = time.time() - start
     print(f"Done after {step} steps ({elapsed:.2f}s).")
+    raw_episode_snapshots = snapshot_raw_dp_episodes(env_states)
     dc.finish_float_dp_recorders(env_states, args)
+    attach_new_expert_trajectory_artifacts(env_states, raw_episode_snapshots)
+    if str(getattr(args, "door_twin_log_dir", "") or "").strip():
+        trackers = [st.door_twin_tracker for st in env_states if getattr(st, "door_twin_tracker", None) is not None]
+        if trackers:
+            summary = write_rollout_reports(
+                trackers,
+                args.door_twin_log_dir,
+                run_metadata={
+                    "mode": "a2w_float_ik",
+                    "steps": int(step),
+                    "elapsed_s": float(elapsed),
+                    "seed": int(getattr(args, "seed", 0)),
+                    "skill_program_json": str(getattr(args, "skill_program_json", "") or ""),
+                    "record_dp_dataset": bool(getattr(args, "record_dp_dataset", False)),
+                },
+            )
+            print(
+                f"DoorTwin rollout summary: {summary.get('success_count', 0)}/{summary.get('num_envs', 0)} "
+                f"success -> {summary.get('summary_path')}",
+                flush=True,
+            )
     if dp_logger is not None:
         dp_logger.close()
 

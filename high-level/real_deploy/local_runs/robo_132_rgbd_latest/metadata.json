@@ -1,0 +1,217 @@
+{
+  "requested": {
+    "width": 1280,
+    "height": 720,
+    "fps": 30,
+    "frames": 3,
+    "align_to": "color",
+    "near_m": 0.2,
+    "far_m": 1.5
+  },
+  "connected_devices": [
+    {
+      "name": "Intel RealSense D435I",
+      "serial": "261222075566",
+      "firmware": "5.15.1.55",
+      "usb": "3.2",
+      "physical_port": "/sys/devices/pci0000:00/0000:00:1a.0/0000:07:00.0/0000:08:02.0/0000:55:00.0/usb4/4-2/4-2.3/4-2.3:1.0/video4linux/video4",
+      "product_line": "D400"
+    }
+  ],
+  "output_dir": "/home/robo/txc/rgbd/latest",
+  "saved_frames": [
+    {
+      "index": 0,
+      "frame_number": 34,
+      "timestamp_ms": 1783000881957.8813,
+      "rgb_shape": [
+        720,
+        1280,
+        3
+      ],
+      "depth_shape": [
+        720,
+        1280
+      ],
+      "depth_units_dtype": "uint16",
+      "depth_m_min": 0.6240000128746033,
+      "depth_m_mean": 3.2499873638153076,
+      "depth_m_max": 65.53500366210938,
+      "depth_intrinsics_after_align": {
+        "width": 1280,
+        "height": 720,
+        "fx": 907.106201171875,
+        "fy": 905.7008056640625,
+        "cx": 653.6356201171875,
+        "cy": 361.2338562011719,
+        "model": "distortion.inverse_brown_conrady",
+        "coeffs": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "fov_x_deg": 70.40902220274576,
+        "fov_y_deg": 43.35388587572343
+      },
+      "color_intrinsics_after_align": {
+        "width": 1280,
+        "height": 720,
+        "fx": 907.106201171875,
+        "fy": 905.7008056640625,
+        "cx": 653.6356201171875,
+        "cy": 361.2338562011719,
+        "model": "distortion.inverse_brown_conrady",
+        "coeffs": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "fov_x_deg": 70.40902220274576,
+        "fov_y_deg": 43.35388587572343
+      },
+      "files": {
+        "rgb": "frame_000_rgb.png",
+        "aligned_depth_mm": "frame_000_aligned_depth_mm.png",
+        "depth_gray": "frame_000_depth_gray_0p2_1p5.png",
+        "depth_color": "frame_000_depth_color_0p2_1p5.png",
+        "contact": "frame_000_contact.png"
+      }
+    },
+    {
+      "index": 1,
+      "frame_number": 52,
+      "timestamp_ms": 1783000882556.0134,
+      "rgb_shape": [
+        720,
+        1280,
+        3
+      ],
+      "depth_shape": [
+        720,
+        1280
+      ],
+      "depth_units_dtype": "uint16",
+      "depth_m_min": 0.6220000386238098,
+      "depth_m_mean": 3.230560302734375,
+      "depth_m_max": 5.531000137329102,
+      "depth_intrinsics_after_align": {
+        "width": 1280,
+        "height": 720,
+        "fx": 907.106201171875,
+        "fy": 905.7008056640625,
+        "cx": 653.6356201171875,
+        "cy": 361.2338562011719,
+        "model": "distortion.inverse_brown_conrady",
+        "coeffs": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "fov_x_deg": 70.40902220274576,
+        "fov_y_deg": 43.35388587572343
+      },
+      "color_intrinsics_after_align": {
+        "width": 1280,
+        "height": 720,
+        "fx": 907.106201171875,
+        "fy": 905.7008056640625,
+        "cx": 653.6356201171875,
+        "cy": 361.2338562011719,
+        "model": "distortion.inverse_brown_conrady",
+        "coeffs": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "fov_x_deg": 70.40902220274576,
+        "fov_y_deg": 43.35388587572343
+      },
+      "files": {
+        "rgb": "frame_001_rgb.png",
+        "aligned_depth_mm": "frame_001_aligned_depth_mm.png",
+        "depth_gray": "frame_001_depth_gray_0p2_1p5.png",
+        "depth_color": "frame_001_depth_color_0p2_1p5.png",
+        "contact": "frame_001_contact.png"
+      }
+    },
+    {
+      "index": 2,
+      "frame_number": 69,
+      "timestamp_ms": 1783000883121.7595,
+      "rgb_shape": [
+        720,
+        1280,
+        3
+      ],
+      "depth_shape": [
+        720,
+        1280
+      ],
+      "depth_units_dtype": "uint16",
+      "depth_m_min": 0.6170000433921814,
+      "depth_m_mean": 3.2410967350006104,
+      "depth_m_max": 60.19200134277344,
+      "depth_intrinsics_after_align": {
+        "width": 1280,
+        "height": 720,
+        "fx": 907.106201171875,
+        "fy": 905.7008056640625,
+        "cx": 653.6356201171875,
+        "cy": 361.2338562011719,
+        "model": "distortion.inverse_brown_conrady",
+        "coeffs": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "fov_x_deg": 70.40902220274576,
+        "fov_y_deg": 43.35388587572343
+      },
+      "color_intrinsics_after_align": {
+        "width": 1280,
+        "height": 720,
+        "fx": 907.106201171875,
+        "fy": 905.7008056640625,
+        "cx": 653.6356201171875,
+        "cy": 361.2338562011719,
+        "model": "distortion.inverse_brown_conrady",
+        "coeffs": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "fov_x_deg": 70.40902220274576,
+        "fov_y_deg": 43.35388587572343
+      },
+      "files": {
+        "rgb": "frame_002_rgb.png",
+        "aligned_depth_mm": "frame_002_aligned_depth_mm.png",
+        "depth_gray": "frame_002_depth_gray_0p2_1p5.png",
+        "depth_color": "frame_002_depth_color_0p2_1p5.png",
+        "contact": "frame_002_contact.png"
+      }
+    }
+  ],
+  "device": {
+    "name": "Intel RealSense D435I",
+    "serial": "261222075566",
+    "firmware": "5.15.1.55",
+    "usb": "3.2",
+    "physical_port": "/sys/devices/pci0000:00/0000:00:1a.0/0000:07:00.0/0000:08:02.0/0000:55:00.0/usb4/4-2/4-2.3/4-2.3:1.0/video4linux/video4",
+    "product_line": "D400"
+  },
+  "depth_scale_m_per_unit": 0.0010000000474974513,
+  "elapsed_capture_s": 1.771636685996782
+}
