@@ -247,18 +247,10 @@ class ACTConfig(PreTrainedConfig):
                     "ACT Plücker conditioning v1 only supports ResNet backbones because it fuses after the "
                     f"ResNet feature map. Got vision_backbone={self.vision_backbone!r}."
                 )
-            image_keys = list(self.image_features)
-            if len(image_keys) != 2:
-                raise ValueError(
-                    "ACT Plücker conditioning v1 expects exactly two image features (front and wrist). "
-                    f"Got {image_keys}."
-                )
-            lower_keys = [str(key).lower() for key in image_keys]
-            if not any("front" in key for key in lower_keys) or not any("wrist" in key for key in lower_keys):
-                raise ValueError(
-                    "ACT Plücker conditioning needs one front image key and one wrist image key so it can "
-                    f"select the matching camera pose. Got {image_keys}."
-                )
+            # `input_features` are usually inferred from the dataset later in
+            # `make_policy()`, after the CLI config has already been decoded.
+            # Therefore, only validate feature names in `validate_features()`,
+            # where dataset-derived features are available.
             if not self.plucker_front_pose_key or not self.plucker_wrist_pose_key:
                 raise ValueError("Plücker conditioning requires front and wrist camera pose keys.")
             if self.plucker_image_width <= 0 or self.plucker_image_height <= 0:
@@ -310,6 +302,29 @@ class ACTConfig(PreTrainedConfig):
     def validate_features(self) -> None:
         if not self.image_features and not self.env_state_feature:
             raise ValueError("You must provide at least one image or the environment state among the inputs.")
+        if self.plucker_conditioning:
+            image_keys = list(self.image_features)
+            if len(image_keys) != 2:
+                raise ValueError(
+                    "ACT Plücker conditioning v1 expects exactly two image features (front and wrist). "
+                    f"Got {image_keys}."
+                )
+            lower_keys = [str(key).lower() for key in image_keys]
+            if not any("front" in key for key in lower_keys) or not any("wrist" in key for key in lower_keys):
+                raise ValueError(
+                    "ACT Plücker conditioning needs one front image key and one wrist image key so it can "
+                    f"select the matching camera pose. Got {image_keys}."
+                )
+            missing_pose_keys = [
+                key
+                for key in (self.plucker_front_pose_key, self.plucker_wrist_pose_key)
+                if key not in (self.input_features or {})
+            ]
+            if missing_pose_keys:
+                raise ValueError(
+                    "ACT Plücker conditioning requires camera pose features in the dataset. "
+                    f"Missing {missing_pose_keys}; available input features are {list((self.input_features or {}).keys())}."
+                )
 
     @property
     def observation_delta_indices(self) -> None:
