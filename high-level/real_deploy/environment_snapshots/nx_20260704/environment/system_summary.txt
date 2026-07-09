@@ -1,0 +1,104 @@
+=== identity ===
+2026-07-04T18:34:20+08:00
+ Static hostname: ubuntu
+       Icon name: computer
+      Machine ID: 5bb9844d95d94338a38ee89dbcececa5
+         Boot ID: fb02c4863ce0498582ed80a4b2b46164
+Operating System: Ubuntu 22.04.5 LTS
+          Kernel: Linux 5.15.185-tegra
+    Architecture: arm64
+ Hardware Vendor: NVIDIA
+  Hardware Model: NVIDIA Jetson Orin NX Engineering Reference Developer Kit Super
+Linux ubuntu 5.15.185-tegra #1 SMP PREEMPT Thu Jan 15 19:24:38 PST 2026 aarch64 aarch64 aarch64 GNU/Linux
+PRETTY_NAME="Ubuntu 22.04.5 LTS"
+NAME="Ubuntu"
+VERSION_ID="22.04"
+VERSION="22.04.5 LTS (Jammy Jellyfish)"
+VERSION_CODENAME=jammy
+ID=ubuntu
+ID_LIKE=debian
+HOME_URL="https://www.ubuntu.com/"
+SUPPORT_URL="https://help.ubuntu.com/"
+BUG_REPORT_URL="https://bugs.launchpad.net/ubuntu/"
+PRIVACY_POLICY_URL="https://www.ubuntu.com/legal/terms-and-policies/privacy-policy"
+UBUNTU_CODENAME=jammy
+=== jetson ===
+# R36 (release), REVISION: 5.0, GCID: 43688277, BOARD: generic, EABI: aarch64, DATE: Fri Jan 16 03:50:45 UTC 2026
+# KERNEL_VARIANT: oot
+TARGET_USERSPACE_LIB_DIR=nvidia
+TARGET_USERSPACE_LIB_DIR_PATH=usr/lib/aarch64-linux-gnu/nvidia
+/usr/sbin/nvidia-smi
+Sat Jul  4 18:34:20 2026       
++---------------------------------------------------------------------------------------+
+| NVIDIA-SMI 540.5.0                Driver Version: 540.5.0      CUDA Version: 12.6     |
+|-----------------------------------------+----------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |         Memory-Usage | GPU-Util  Compute M. |
+|                                         |                      |               MIG M. |
+|=========================================+======================+======================|
+|   0  Orin (nvgpu)                  N/A  | N/A              N/A |                  N/A |
+| N/A   N/A  N/A               N/A /  N/A | Not Supported        |     N/A          N/A |
+|                                         |                      |                  N/A |
++-----------------------------------------+----------------------+----------------------+
+                                                                                         
++---------------------------------------------------------------------------------------+
+| Processes:                                                                            |
+|  GPU   GI   CI        PID   Type   Process name                            GPU Memory |
+|        ID   ID                                                             Usage      |
+|=======================================================================================|
+|  No running processes found                                                           |
++---------------------------------------------------------------------------------------+
+=== python ===
+/usr/bin/python3
+Python 3.10.12
+pip 22.0.2 from /usr/lib/python3/dist-packages/pip (python 3.10)
+torch version= 2.11.0 path= /home/anx/.local/lib/python3.10/site-packages/torch/__init__.py
+torchvision version= 0.26.0 path= /home/anx/.local/lib/python3.10/site-packages/torchvision/__init__.py
+numpy version= 1.24.0 path= /home/anx/.local/lib/python3.10/site-packages/numpy/__init__.py
+cv2 version= 4.11.0 path= /home/anx/.local/lib/python3.10/site-packages/cv2/__init__.py
+pyrealsense2 version= n/a path= /home/anx/.local/lib/python3.10/site-packages/pyrealsense2/__init__.py
+PIL version= 12.2.0 path= /home/anx/.local/lib/python3.10/site-packages/PIL/__init__.py
+scipy version= 1.8.0 path= /usr/lib/python3/dist-packages/scipy/__init__.py
+einops version= 0.8.2 path= /home/anx/.local/lib/python3.10/site-packages/einops/__init__.py
+transformers ERROR ModuleNotFoundError("No module named 'transformers'")
+=== ros after source ===
+rclpy n/a /opt/ros/humble/local/lib/python3.10/dist-packages/rclpy/__init__.py
+=== realsense ===
+/opt/ros/humble/bin/rs-enumerate-devices
+
+rs-enumerate-devices  version: 2.57.7.0
+
+	librealsense2.so.2.58 (libc6,AArch64) => /lib/aarch64-linux-gnu/librealsense2.so.2.58
+	librealsense2.so (libc6,AArch64) => /lib/aarch64-linux-gnu/librealsense2.so
+	librealsense2-gl.so.2.58 (libc6,AArch64) => /lib/aarch64-linux-gnu/librealsense2-gl.so.2.58
+=== network ===
+lo               UNKNOWN        127.0.0.1/8 ::1/128 
+eno1             UP             192.168.124.25/24 
+wlP1p1s0         UP             192.168.1.173/24 2403:d400:1228:3fa:2cf8:61df:b27e:46f0/64 2403:d400:1228:3fa:8a5e:d084:c707:f364/64 fe80::5561:d764:dbb6:38/64 
+can0             DOWN           
+l4tbr0           DOWN           
+usb0             DOWN           
+usb1             DOWN           
+a2w003_nx        UNKNOWN        10.10.0.8/32 fe80::c474:ed6e:18fc:8fef/64 
+docker0          DOWN           172.17.0.1/16 
+default via 192.168.1.1 dev wlP1p1s0 proto dhcp metric 600 
+10.10.0.0/24 dev a2w003_nx scope link 
+169.254.0.0/16 dev a2w003_nx scope link metric 1000 
+172.17.0.0/16 dev docker0 proto kernel scope link src 172.17.0.1 linkdown 
+192.168.1.0/24 dev wlP1p1s0 proto kernel scope link src 192.168.1.173 metric 600 
+192.168.124.0/24 dev eno1 proto kernel scope link src 192.168.124.25 metric 100 
+NAME                UUID                                  TYPE      DEVICE    
+HCAI_5G             421d998e-9c8a-4693-9cd4-60b05919b631  wifi      wlP1p1s0  
+a2w003_nx           7bdd8ef6-1591-48c7-a303-bc3689931f23  tun       a2w003_nx 
+docker0             e46c5e87-e8b3-4f2b-8921-beb730f46bbe  bridge    docker0   
+eno1                9cc52a81-32be-4a4f-8cd9-878b9b1c0d81  ethernet  eno1      
+Wired connection 1  abcc8a47-0a83-394d-a54c-0c66c036dcbf  ethernet  --        
+=== storage ===
+Filesystem       Size  Used Avail Use% Mounted on
+/dev/nvme0n1p1   233G  125G   97G  57% /
+tmpfs            7.7G  136K  7.7G   1% /dev/shm
+tmpfs            3.1G   27M  3.1G   1% /run
+tmpfs            5.0M  4.0K  5.0M   1% /run/lock
+/dev/nvme0n1p10   63M   78K   63M   1% /boot/efi
+tmpfs            1.6G   80K  1.6G   1% /run/user/1000
+tmpfs            1.6G   96K  1.6G   1% /run/user/128

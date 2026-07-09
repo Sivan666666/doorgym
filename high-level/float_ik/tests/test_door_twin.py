@@ -49,6 +49,20 @@ def test_door_twin_spec_loads_button_door_from_cfg():
     assert spec.handle_goal_pos == pytest.approx([0.0845, 0.068, 0.0])
 
 
+def test_door_twin_spec_loads_fire_door_from_cfg():
+    specs = load_specs_from_config(REPO_ROOT / "high-level/data/cfg/b1z1_opendoor.yaml", door_name="fire_door")
+    assert len(specs) == 1
+    spec = specs[0]
+    assert spec.name == "fire_door"
+    assert spec.supported
+    assert spec.door_motion_sign_multiplier == pytest.approx(1.0)
+    assert spec.actor_yaw_offset == pytest.approx(-np.pi / 2.0)
+    assert spec.robot_alignment_y_offset == pytest.approx(0.18)
+    assert spec.door_dof_name == "frame_to_fire_door"
+    assert spec.handle_dof_name == "door_to_lever_handle"
+    assert spec.handle_goal_pos == pytest.approx([-0.0575, -0.06, 0.0])
+
+
 def test_door_twin_spec_loads_aigc_reference_export():
     export_dir = Path("/home/sivan/whole_body/door_aigc/reference_export")
     if not export_dir.is_dir():

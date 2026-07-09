@@ -1,0 +1,92 @@
+{
+  "version": "door_skill_program_v1",
+  "metadata": {
+    "name": "glass_door_push_traverse",
+    "asset_name": "glass_door",
+    "source_round": "glass_door_resistance_check_v2",
+    "purpose": "Open the single-DOF central glass door by grasping its vertical pull handle from the robot side, pushing the door open, then traversing straight through.",
+    "notes": {
+      "base_speed_mps": 0.2,
+      "push_forward_distance_m": 1.2,
+      "traverse_forward_distance_m": 0.74,
+      "total_forward_distance_m": 1.94,
+      "dt_s": 0.02,
+      "handle_type": "vertical pull handle fixed on the door panel; no separate handle DOF",
+      "grasp_target": "lower half of the vertical handle at local z 0.95 m",
+      "base_alignment": "handle-side partial offset; robot y=-0.24 while handle world y is about -0.44 at spawn",
+      "door_motion": "uses negative hinge travel for push-open behavior from the robot side",
+      "handle_goal_bias_world": [-0.035, -0.02, -0.015],
+      "ee_roll_offset": 1.5707963267948966,
+      "validated_with_resistance_overrides": {
+        "door_joint_friction": 0.25,
+        "door_joint_damping": 0.18,
+        "door_open_resistance": 0.08,
+        "door_open_damping": 0.05,
+        "door_auto_open_force": 0.0
+      }
+    }
+  },
+  "skill_program": [
+    {
+      "name": "MoveTo",
+      "stage": "approach",
+      "vx": 0.2,
+      "vyaw": 0.0,
+      "stop_distance": 0.16
+    },
+    {
+      "name": "ApproachDoor",
+      "base_offset": 0.16,
+      "yaw_align": true
+    },
+    {
+      "name": "MoveEEToHandle",
+      "pregrasp_offset": [0.16, 0.0, -0.02],
+      "grasp_offset": [0.0, 0.0, -0.02],
+      "handle_goal_bias_world": [-0.035, -0.02, -0.015],
+      "ee_roll_offset": 1.5707963267948966,
+      "duration_steps": 50
+    },
+    {
+      "name": "CloseGripper",
+      "force": 0.8,
+      "duration_steps": 50
+    },
+    {
+      "name": "RotateHandle",
+      "angle": 0.05,
+      "duration_steps": 50,
+      "local_delta": [0.0, 0.0, 0.0]
+    },
+    {
+      "name": "PushDoor",
+      "distance": 1.1,
+      "duration_steps": 300,
+      "contact_bias": 0.025
+    },
+    {
+      "name": "MoveTo",
+      "stage": "push",
+      "vx": 0.2,
+      "vyaw": 0.0,
+      "distance": 1.2,
+      "duration_steps": 300
+    },
+    {
+      "name": "TraverseDoor",
+      "door_angle_target": 80
+    },
+    {
+      "name": "MoveTo",
+      "stage": "traverse",
+      "vx": 0.2,
+      "vyaw": 0.0,
+      "distance": 0.74,
+      "duration_steps": 185
+    },
+    {
+      "name": "ReleaseAndRetract",
+      "duration_steps": 150
+    }
+  ]
+}

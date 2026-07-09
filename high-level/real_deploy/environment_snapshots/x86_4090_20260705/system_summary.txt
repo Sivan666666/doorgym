@@ -1,0 +1,59 @@
+2026-07-05T16:27:14+08:00
+ Static hostname: robo
+       Icon name: computer-desktop
+         Chassis: desktop
+      Machine ID: 476e25e321544495835e0c127786f5de
+         Boot ID: 90635587633349cca7cc6a6d6e809295
+Operating System: Ubuntu 22.04.5 LTS
+          Kernel: Linux 6.8.0-124-generic
+    Architecture: x86-64
+ Hardware Vendor: FEVM
+  Hardware Model: FN70G
+Linux robo 6.8.0-124-generic #124~22.04.1-Ubuntu SMP PREEMPT_DYNAMIC Tue May 26 21:05:19 UTC  x86_64 x86_64 x86_64 GNU/Linux
+===GPU===
+Sun Jul  5 16:27:14 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 595.71.05              Driver Version: 595.71.05      CUDA Version: 13.2     |
++-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA GeForce RTX 4090 ...    Off |   00000000:01:00.0 Off |                  N/A |
+| N/A   38C    P8              2W /  115W |     295MiB /  16376MiB |      0%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|    0   N/A  N/A            1349      G   /usr/lib/xorg/Xorg                      166MiB |
+|    0   N/A  N/A            1550      G   /usr/bin/gnome-shell                     11MiB |
+|    0   N/A  N/A            4226      G   .../4848/usr/lib/firefox/firefox         42MiB |
+|    0   N/A  N/A           37372      G   gnome-control-center                      3MiB |
++-----------------------------------------------------------------------------------------+
+nvcc: NVIDIA (R) Cuda compiler driver
+Copyright (c) 2005-2021 NVIDIA Corporation
+Built on Thu_Nov_18_09:45:30_PST_2021
+Cuda compilation tools, release 11.5, V11.5.119
+Build cuda_11.5.r11.5/compiler.30672275_0
+===PYTHON===
+torch 2.11.0+cu130 torch_cuda 13.0 cuda_available True
+gpu NVIDIA GeForce RTX 4090 Laptop GPU
+torchvision 0.26.0+cu130
+numpy 1.24.0
+opencv 4.11.0
+realsense_devices 0
+===NETWORK===
+lo               UNKNOWN        127.0.0.1/8 ::1/128 
+enp3s0           DOWN           
+enp5s0           DOWN           
+wlp4s0           UP             192.168.1.124/24 2403:d400:1228:3fa:be3d:c731:415a:cc2a/64 2403:d400:1228:3fa:2946:d996:ef78:f775/64 fe80::32a1:bd47:c1e3:ccbd/64 
+default via 192.168.1.1 dev wlp4s0 proto dhcp metric 600 
+169.254.0.0/16 dev wlp4s0 scope link metric 1000 
+192.168.1.0/24 dev wlp4s0 proto kernel scope link src 192.168.1.124 metric 600 
+===Z1_BUILD===
+/home/robo/txc/door_act_deploy/z1_controller/build/z1_ctrl: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, BuildID[sha1]=39b744f3236dff2f64d8408b1a78ed7853af8b5c, for GNU/Linux 3.2.0, not stripped
+/home/robo/txc/door_act_deploy/z1_sdk/lib/unitree_arm_interface.cpython-310-x86_64-linux-gnu.so: ELF 64-bit LSB shared object, x86-64, version 1 (SYSV), dynamically linked, BuildID[sha1]=0705e71269a3b80895df66387b0d31ee70b9cc55, stripped

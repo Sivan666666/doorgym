@@ -29,7 +29,7 @@ def parse_args():
     parser.add_argument("--root", type=str, default=str(HIGH_LEVEL_ROOT / "data" / "lerobot"))
     parser.add_argument("--repo_id", type=str, default="local/door_dp")
     parser.add_argument("--run_name", type=str, default="act_debug")
-    parser.add_argument("--steps", type=int, default=100000)
+    parser.add_argument("--steps", type=int, default=50000)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-5)
     parser.add_argument("--lr_backbone", type=float, default=1e-5)

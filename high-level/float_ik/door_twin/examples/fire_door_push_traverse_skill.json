@@ -1,0 +1,87 @@
+{
+  "version": "door_skill_program_v1",
+  "metadata": {
+    "name": "fire_door_push_traverse",
+    "asset_name": "fire_door",
+    "source_round": "fire_door_round_03_wc4_like_y_offset",
+    "final_run_dir": "high-level/float_ik/door_twin/experiments/runs/fire_door_round_03_wc4_like_y_offset",
+    "purpose": "Open the gray metal fire_door by pushing from the robot side, then traverse straight through.",
+    "notes": {
+      "base_speed_mps": 0.2,
+      "push_forward_distance_m": 1.2,
+      "traverse_forward_distance_m": 0.74,
+      "total_forward_distance_m": 1.94,
+      "dt_s": 0.02,
+      "grasp_z_offset_m": -0.04,
+      "base_alignment": "wc4_like_right_offset_0.18m",
+      "actor_yaw": "pi/2 equivalent so the lever protrudes toward the robot side",
+      "door_motion": "uses the default negative DoorTwin door_motion_sign because this URDF door hinge axis is 0 0 -1",
+      "human_feedback_fixes": [
+        "do not align the dog all the way to the handle; use a wc4-like 0.18 m handle-side base offset",
+        "lower pregrasp/grasp z by another 1 cm so the gripper wraps the handle better"
+      ]
+    }
+  },
+  "skill_program": [
+    {
+      "name": "MoveTo",
+      "stage": "approach",
+      "vx": 0.2,
+      "vyaw": 0.0,
+      "stop_distance": 0.16
+    },
+    {
+      "name": "ApproachDoor",
+      "base_offset": 0.16,
+      "yaw_align": true
+    },
+    {
+      "name": "MoveEEToHandle",
+      "pregrasp_offset": [0.15, 0.0, -0.04],
+      "grasp_offset": [0.0, 0.0, -0.04],
+      "handle_goal_bias_world": [0.0, 0.0, 0.0],
+      "duration_steps": 50
+    },
+    {
+      "name": "CloseGripper",
+      "force": 0.8,
+      "duration_steps": 50
+    },
+    {
+      "name": "RotateHandle",
+      "angle": 1.05,
+      "duration_steps": 100,
+      "local_delta": [0.0, 0.03, -0.03]
+    },
+    {
+      "name": "PushDoor",
+      "distance": 1.1,
+      "duration_steps": 300,
+      "contact_bias": 0.025
+    },
+    {
+      "name": "MoveTo",
+      "stage": "push",
+      "vx": 0.2,
+      "vyaw": 0.0,
+      "distance": 1.2,
+      "duration_steps": 300
+    },
+    {
+      "name": "TraverseDoor",
+      "door_angle_target": 80
+    },
+    {
+      "name": "MoveTo",
+      "stage": "traverse",
+      "vx": 0.2,
+      "vyaw": 0.0,
+      "distance": 0.74,
+      "duration_steps": 185
+    },
+    {
+      "name": "ReleaseAndRetract",
+      "duration_steps": 150
+    }
+  ]
+}

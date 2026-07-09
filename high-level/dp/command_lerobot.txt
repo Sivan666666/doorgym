@@ -54,7 +54,7 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
     --policy.num_inference_steps=10 \
     --policy.clip_sample_range=7.0 \
     --batch_size=16 \
-    --steps=100000 \
+    --steps=50000 \
     --num_workers=4 \
     --save_freq=10000 \
     --log_freq=10 \
@@ -89,7 +89,7 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
     --policy.vision_backbone=resnet18 \
     --policy.pretrained_backbone_weights=ResNet18_Weights.IMAGENET1K_V1 \
     --batch_size=16 \
-    --steps=100000 \
+    --steps=50000 \
     --num_workers=4 \
     --save_freq=10000 \
     --log_freq=10 \
@@ -135,7 +135,7 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
     --policy.dinov2_image_size=224 \
     --policy.dinov2_feature_grid_size=6 \
     --batch_size=16 \
-    --steps=100000 \
+    --steps=50000 \
     --num_workers=4 \
     --save_freq=10000 \
     --log_freq=10 \
@@ -177,7 +177,7 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
     --policy.defm_depth_far=2.0 \
     --policy.defm_pretrained=true \
     --batch_size=8 \
-    --steps=100000 \
+    --steps=50000 \
     --num_workers=4 \
     --save_freq=10000 \
     --log_freq=10 \
@@ -281,7 +281,7 @@ export PYTHONPATH="$PROJECT_ROOT/high-level/lerobot/src:${PYTHONPATH:-}"
 
 export DOOR_DP_LEROBOT_CONDA_ENV=b1z1_lerobot
 
-ACT_CKPT="$OUTPUT_ROOT/$ACT_RUN_NAME/checkpoints/100000"
+ACT_CKPT="$OUTPUT_ROOT/$ACT_RUN_NAME/checkpoints/050000"
 
 python "$PROJECT_ROOT/high-level/dp/play/play_door_policy.py" \
     --mode ikpush \

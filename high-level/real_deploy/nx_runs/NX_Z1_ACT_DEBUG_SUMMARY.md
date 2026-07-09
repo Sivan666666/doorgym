@@ -1663,3 +1663,197 @@ high-level/real_deploy/nx_runs/<run_name>/
 ```
 
 并在本文增加简短实验结论。
+
+## 15. 2026-07-04 NX / PC2 实机代码与环境备份
+
+- NX Wi-Fi DHCP 地址已由旧的 `192.168.1.154` 变为
+  `192.168.1.173`；NX 有线机器人网仍是 `192.168.124.25/24`。
+- PC2 `192.168.124.162` 可由 NX 稳定访问。
+- 本机备份根目录：
+
+```text
+/home/sivan/whole_body/backups/nx_pc2_20260704_183407
+```
+
+- NX 已备份：
+  - 实机 `/home/anx/door_act_deploy/z1_controller`
+  - 实机 `/home/anx/door_act_deploy/z1_sdk`
+  - 实机 `/home/anx/door_act_deploy/visual_whole_body`
+  - ARM/aarch64 编译产物、启动脚本和 CycloneDDS 配置
+  - `pip freeze`、dpkg/apt、ROS 包、JetPack/CUDA、RealSense、网络和文件清单
+- PC2 已备份：
+  - `/home/unitree/whole_body/robot_control`
+  - `/home/unitree/whole_body/build/robot_control`
+  - `/home/unitree/whole_body/install/robot_control`
+  - PC2 Python、dpkg/apt、ROS 和文件清单
+- 两个压缩包均已用远端生成的 SHA256 在本机验证通过。
+- 与本机旧副本对比后确认：
+  - NX `z1_controller/config/config.xml` 与本机旧配置不同。
+  - NX `z1_sdk` 多出实际使用的 aarch64 Python 扩展。
+  - PC2 launch 多出 `a2_sport_udp_helper` 所需的
+    `/usr/local/lib` `LD_LIBRARY_PATH` 修复。
+  - NX 主要真机部署 Python 文件与本机一致；差异主要是两个测试和历史
+    `.bak` 文件。
+- 该备份是“源码 + build/install + 配置 + 环境版本清单”，不是完整 NVMe
+  镜像；未重复复制 checkpoint、数据集、日志和 NX 约 1.7 GB 的完整
+  `site-packages`。裸机恢复仍应使用 JetPack R36.5 基础系统或额外制作磁盘镜像。
+
+### 15.1 CycloneDDS / x86 小主机迁移快照
+
+- NX 当前 DDS 配置已单独归档到：
+
+```text
+high-level/real_deploy/environment_snapshots/nx_20260704/nx_dds_backup_20260704/
+```
+
+- 归档内容：
+  - `/home/anx/cyclonedds.xml`
+  - `/etc/sysctl.d/60-cyclonedds.conf`
+  - `/etc/sysctl.d/99-cyclonedds-buffers.conf`
+  - CycloneDDS、`rmw_cyclonedds`、`unitree_ros2` 源码快照与提交号
+  - NX/PC2 Python、ROS、apt/dpkg 和系统环境清单
+- 当前 XML 固定使用 NX 接口 `eno1`，并将 PC2
+  `192.168.124.162` 配为 discovery peer。迁移到 x86 后必须替换为新主机
+  124 网段接口名。
+- x86 完整部署、重编译 Z1 Python 3.10 扩展和通信验证步骤见：
+
+```text
+high-level/real_deploy/X86_MINIPC_DEPLOYMENT.md
+```
+
+## 16. 2026-07-05 RTX 4090 x86 小主机迁移
+
+- 主机：`robo@192.168.1.124`，本机 SSH 别名：`ssh 4090`
+- 部署目录：`/home/robo/txc/door_act_deploy`
+- Python venv：`/home/robo/txc/venvs/door_act`
+- 已迁移 NX 真机代码、DDS 快照、Z1 SDK/controller 和 100000 checkpoint。
+- 已完成：
+  - torch `2.11.0+cu130` / torchvision `0.26.0+cu130` CUDA 验证；
+  - checkpoint SHA256 对账；
+  - 真实 checkpoint dummy observation 100 步推理；
+  - 稳定 ACT forward 约 `11.3 ms`，控制循环 `25.078 Hz`；
+  - Z1 SDK CPython 3.10 x86 扩展和 `z1_ctrl` 重编译；
+  - Z1 FK/IK 往返与 bridge UDP dry-run；
+  - ROS Humble CycloneDDS 本机 publisher/echo 测试。
+- 机器人网络后续已接入 `enp5s0`：
+  - 持久地址 `192.168.124.25/24`；
+  - PC2 ping 0% 丢包，约 `0.1 ms`；
+  - 跨机器 CycloneDDS 已发现 `/cmd_vel_safe` 和 `/vel_state`；
+  - PC2 `robot_control` launch 已在后台启动；
+  - 4090 只发布过一次全零 Twist，PC2 返回全零 `/vel_state`。
+- 尚未做真实 Z1/相机测试：
+  - Z1 `192.168.124.110` ARP `FAILED`、ping 不通；
+  - 4090 当前未连接 D435；
+  - 没有发送 LOWCMD、`backToStart()` 或真实机械臂运动命令。
+- 4090 的最终环境、DDS XML 和验收摘要已回存本机：
+
+```text
+high-level/real_deploy/environment_snapshots/x86_4090_20260705/
+```
+
+- 完整状态与接线后命令：
+
+```text
+high-level/real_deploy/X86_4090_DEPLOYMENT_STATUS.md
+```
+
+## 16. 2026-07-05 robo ZED 2i 交互式 RGBD 采集
+
+- `capture_zed2i_aligned_frames.py` 新增 `--interactive`：
+  - 实时显示 ZED 左目 RGB 与对齐到左目坐标系的 depth。
+  - 每按一次空格保存一组 RGBD；默认保存满 3 组后退出。
+  - `Q` 或 `Esc` 可提前退出。
+  - 每组仍保存 RGB、毫米 PNG、米制 NPY、深度可视化、拼图及
+    `metadata.json` 相机内参。
+- `robo` 运行命令：
+
+```bash
+cd ~/txc/rgbd
+RUN_DIR=~/txc/rgbd/zed2i_manual_$(date +%Y%m%d_%H%M%S)
+python3 capture_zed2i_aligned_frames.py \
+  --interactive \
+  --frames 3 \
+  --resolution HD2K \
+  --fps 15 \
+  --depth_mode NEURAL_PLUS \
+  --out_dir "$RUN_DIR"
+```
+
+## 17. 2026-07-09 Z1 EE 键盘控制 / 录制 / 回放
+
+- 新增脚本：
+
+```text
+high-level/real_deploy/keyboard_z1_ee_teleop.py
+```
+
+- 控制路径：
+  - 脚本只通过 UDP 给 `z1_act_ee_bridge.py` 发 Door-ACT 10D EE action；
+  - 不直接调用 Z1 SDK、不直接发 LOWCMD；
+  - IK、关节限速、online quintic 平滑、夹爪平滑仍全部由 `z1_act_ee_bridge.py`
+    统一处理。
+- 运行前必须先启动：
+  1. `z1_ctrl`
+  2. `z1_act_ee_bridge.py`
+- NX 默认端口：
+  - action UDP：`127.0.0.1:15011`
+  - bridge state UDP：`127.0.0.1:15013`
+
+### 17.1 键盘实时控制并录制
+
+```bash
+cd /home/anx/door_act_deploy/visual_whole_body
+
+RUN_DIR=/tmp/z1_keyboard_$(date +%Y%m%d_%H%M%S)
+mkdir -p "$RUN_DIR"
+
+python3 high-level/real_deploy/keyboard_z1_ee_teleop.py \
+  --record_path "$RUN_DIR/z1_keyboard_record.jsonl" \
+  --hz 25 \
+  --position_step 0.005 \
+  --rotation_step_deg 2.0 \
+  --gripper_step 0.05
+```
+
+键位：
+
+```text
+w/s : ACT-frame x +/-
+a/d : ACT-frame y +/-
+r/f : ACT-frame z +/-
+u/o : roll +/-
+i/k : pitch +/-
+j/l : yaw +/-
+[   : 夹爪张开一步
+]   : 夹爪闭合一步
+g   : 夹爪全开 -pi/2
+c   : 夹爪闭合 0
+h   : target 重置为当前反馈 EE
+p   : 暂停/继续发布
+space: 录制 mark
+q/Esc: 退出
+```
+
+### 17.2 回放录制轨迹
+
+```bash
+cd /home/anx/door_act_deploy/visual_whole_body
+
+python3 high-level/real_deploy/keyboard_z1_ee_teleop.py \
+  --replay_path /tmp/z1_keyboard_YYYYmmdd_HHMMSS/z1_keyboard_record.jsonl \
+  --record_path /tmp/z1_keyboard_replay_$(date +%Y%m%d_%H%M%S).jsonl \
+  --replay_speed 1.0 \
+  --hz 25
+```
+
+### 17.3 安全检查
+
+- 脚本启动后会先等待 bridge state，初始 target 取当前真实反馈 EE，
+  不会凭空跳到固定姿态。
+- `--dry_run` 可检查键盘、录制和回放流程，但不发送 UDP action。
+- `p` 暂停发布后，bridge 会因为 action stale 而按自身逻辑平滑刹停。
+- 如果需要限制工作空间，可加：
+
+```bash
+--min_xyz XMIN YMIN ZMIN --max_xyz XMAX YMAX ZMAX
+```

@@ -1,0 +1,3 @@
+dda1adc2102e97fe4a4722aebb3ecd492116af841b24c588221cb13c1ef25671  /home/robo/txc/door_act_deploy/checkpoints/leroact_a2w_state10_wc4_newfov_randomized_200_depthonly_chunk100_exec50_bs16_0625_0212/100000/model_latest/policy/model.safetensors
+8b630c13394a136ee50b8b4c25c758a6737dc67d572918a38081ab6f4275e5d4  /home/robo/txc/door_act_deploy/z1_controller/build/z1_ctrl
+a86eccf0a935b902002ee70751c19526ae8ce8370b4b462554266d3be880eb4b  /home/robo/txc/door_act_deploy/z1_sdk/lib/unitree_arm_interface.cpython-310-x86_64-linux-gnu.so

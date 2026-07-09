@@ -113,6 +113,7 @@ class SkillTrajectoryProfile:
     grasp_local: list[float]
     handle_goal_bias_world: list[float]
     rotate_local_delta: list[float]
+    ee_roll_offset: float
     base_moves: dict[str, dict[str, Any]]
     traverse_required: bool
     raw_program: dict[str, Any]
@@ -223,6 +224,13 @@ def profile_from_program(program: SkillProgram, args: Any | None = None) -> Skil
     pregrasp = _as_float_list(None if move is None else move.params.get("pregrasp_offset"), 3, pregrasp_default)
     grasp = _as_float_list(None if move is None else move.params.get("grasp_offset"), 3, grasp_default)
     bias = _as_float_list(None if move is None else move.params.get("handle_goal_bias_world"), 3, [0.0, 0.0, 0.0])
+    ee_roll_offset = 0.0
+    if move is not None:
+        roll_value = move.params.get("ee_roll_offset", move.params.get("gripper_roll_offset"))
+        if roll_value is not None:
+            ee_roll_offset = float(roll_value)
+            if abs(ee_roll_offset) > 2.0 * math.pi:
+                ee_roll_offset = math.radians(ee_roll_offset)
     rotate_delta = _as_float_list(
         None if rotate is None else rotate.params.get("local_delta"),
         3,
@@ -243,6 +251,7 @@ def profile_from_program(program: SkillProgram, args: Any | None = None) -> Skil
         grasp_local=grasp,
         handle_goal_bias_world=bias,
         rotate_local_delta=rotate_delta,
+        ee_roll_offset=ee_roll_offset,
         base_moves=base_moves,
         traverse_required=traverse_required,
         raw_program=program.to_dict(),

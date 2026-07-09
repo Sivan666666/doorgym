@@ -1,0 +1,22 @@
+{
+  "engine": "/home/robo/txc/tests/ffs_trt_single_640x480_vi4_d128/fast_foundationstereo_vi4_d128_fp16_castfix.engine",
+  "config": "/home/robo/txc/tests/ffs_trt_single_640x480_vi4_d128/fast_foundationstereo_vi4_d128.yaml",
+  "snapshot_dir": "/home/robo/txc/tests/dual_d435_ffs_20260705_171537",
+  "cameras": {
+    "wrist": {
+      "infer_ms": 89.91210100066382,
+      "trt_depth_nonzero_ratio": 1.0,
+      "trt_depth_mean_m": 0.7512586712837219,
+      "raw_depth_nonzero_ratio": 0.84185546875,
+      "raw_depth_mean_m": 0.7969483137130737
+    },
+    "front": {
+      "infer_ms": 38.312520999170374,
+      "trt_depth_nonzero_ratio": 1.0,
+      "trt_depth_mean_m": 2.4664199352264404,
+      "raw_depth_nonzero_ratio": 0.44302734375,
+      "raw_depth_mean_m": 2.7591142654418945
+    }
+  },
+  "full_comparison": "/home/robo/txc/tests/ffs_trt_visual_20260705_181341_vi4/dual_d435_trt_ffs_valid_iters4_comparison.png"
+}

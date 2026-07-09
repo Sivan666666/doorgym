@@ -511,8 +511,10 @@ def main():
     fps = int(first_raw["fps"]) if "fps" in first_raw.files else int((raw_sidecar or {}).get("fps", 50))
     action_frame = detect_action_frame(first_raw, raw_sidecar)
     ikpush_state_version = detect_ikpush_state_version(first_raw, raw_sidecar)
-    if action_frame not in ("world", "base"):
-        raise ValueError(f"Unsupported action_frame={action_frame!r}; expected 'world' or 'base'.")
+    if action_frame not in ("world", "base", "robot_base_full", "base_full", "arm_base", "robot_base", "true_base"):
+        raise ValueError(
+            f"Unsupported action_frame={action_frame!r}; expected 'world', 'base', or 'robot_base_full'."
+        )
     if lerobot_action_frame != action_frame:
         raise ValueError(
             f"LeRobot data action_frame={lerobot_action_frame!r}, but raw data action_frame={action_frame!r}."

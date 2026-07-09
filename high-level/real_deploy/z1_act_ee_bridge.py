@@ -483,7 +483,12 @@ class SharedBridgeState:
     lock: threading.Lock = field(default_factory=threading.Lock)
     action: np.ndarray = field(default_factory=lambda: np.zeros(ACT_DIM, dtype=np.float32))
     action_stamp: float = 0.0
+    action_keepalive_stamp: float = 0.0
     action_source: str = ""
+    action_vr_provider_stamp: float = 0.0
+    action_vr_monitor_stamp: float = 0.0
+    action_teleop_write_stamp: float = 0.0
+    action_sent_count: int = 0
     has_action: bool = False
     action_mode: str = "ee"
     joint_target: np.ndarray = field(default_factory=lambda: np.zeros(6, dtype=np.float32))
@@ -534,7 +539,22 @@ class SharedBridgeState:
                 "state": np.round(act_state, 6).tolist(),
                 "vel_state": np.round(vel, 6).tolist(),
                 "vel_state_age_s": None if not self.has_vel_state else round(now - self.vel_state_stamp, 4),
-                "action_age_s": None if not self.has_action else round(now - self.action_stamp, 4),
+                "action_age_s": (
+                    None
+                    if not self.has_action
+                    else round(now - max(self.action_stamp, self.action_keepalive_stamp), 4)
+                ),
+                "action_sent_count": int(self.action_sent_count),
+                "latency_provider_to_bridge_s": (
+                    None
+                    if not self.has_action or self.action_vr_provider_stamp <= 0.0
+                    else round(now - self.action_vr_provider_stamp, 4)
+                ),
+                "latency_teleop_to_bridge_s": (
+                    None
+                    if not self.has_action or self.action_teleop_write_stamp <= 0.0
+                    else round(now - self.action_teleop_write_stamp, 4)
+                ),
                 "ee_pos": np.round(self.ee_pos_act, 6).tolist(),
                 "ee_quat_xyzw": np.round(self.ee_quat_act, 6).tolist(),
                 "gripper": round(float(self.gripper), 6),
@@ -697,11 +717,18 @@ def update_shared_gripper_latch_status(
 
 def get_action_snapshot(
     shared: SharedBridgeState,
-) -> tuple[np.ndarray, bool, float, float, str, np.ndarray | None]:
+) -> tuple[np.ndarray, bool, float, float, str, np.ndarray | None, dict[str, float]]:
     now = time.time()
     with shared.lock:
-        age = float("inf") if not shared.has_action else now - shared.action_stamp
+        action_alive_stamp = max(shared.action_stamp, shared.action_keepalive_stamp)
+        age = float("inf") if not shared.has_action else now - action_alive_stamp
         joint_target = shared.joint_target.copy() if shared.has_joint_target else None
+        timing = {
+            "vr_provider_stamp": float(shared.action_vr_provider_stamp),
+            "vr_monitor_stamp": float(shared.action_vr_monitor_stamp),
+            "teleop_write_stamp": float(shared.action_teleop_write_stamp),
+            "action_sent_count": float(shared.action_sent_count),
+        }
         return (
             shared.action.copy(),
             bool(shared.has_action),
@@ -709,6 +736,7 @@ def get_action_snapshot(
             float(shared.action_stamp),
             str(shared.action_mode),
             joint_target,
+            timing,
         )
 
 
@@ -1208,7 +1236,7 @@ def send_lowcmd_joint_target(
     gripper_qd: float,
     joint_min: np.ndarray,
     joint_max: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, float]:
     q_next = np.asarray(q_target, dtype=np.float64).reshape(6)
     qd_cmd = np.asarray(qd_target, dtype=np.float64).reshape(6)
     qdd_cmd = np.asarray(qdd_target, dtype=np.float64).reshape(6)
@@ -1221,13 +1249,40 @@ def send_lowcmd_joint_target(
         # Some SDK builds expose jointProtect but do not accept writable Eigen refs cleanly.
         q_next = np.clip(q_next, joint_min, joint_max)
 
+    send_start = time.perf_counter()
     with sdk_lock:
         tau_cmd = arm_model.inverseDynamics(q_next, qd_cmd, qdd_cmd, np.zeros(6))
         arm.setArmCmd(q_next, qd_cmd, tau_cmd)
         if gripper_target is not None:
             arm.setGripperCmd(float(gripper_target), float(gripper_qd), 0.0)
         arm.sendRecv()
-    return q_next, qd_cmd
+    send_ms = 1000.0 * (time.perf_counter() - send_start)
+    return q_next, qd_cmd, send_ms
+
+
+def apply_arm_gain_scale(arm, scale: float) -> None:
+    scale = float(scale)
+    if scale < 0.0:
+        raise ValueError("--arm_gain_scale must be non-negative")
+    if abs(scale - 1.0) <= 1.0e-9:
+        return
+    if not hasattr(arm, "setArmGainScale"):
+        raise RuntimeError(
+            "unitree_arm_interface does not expose setArmGainScale(); "
+            "rebuild z1_sdk/examples_py/arm_python_interface.cpp first."
+        )
+    before_kp, before_kd = arm.getArmGains() if hasattr(arm, "getArmGains") else ([], [])
+    arm.setArmGainScale(scale)
+    after_kp, after_kd = arm.getArmGains() if hasattr(arm, "getArmGains") else ([], [])
+    print(
+        "z1_bridge arm LOWCMD gain scale applied "
+        f"scale={scale:.3f} "
+        f"kp_before={np.round(np.asarray(before_kp[:6], dtype=np.float64), 3).tolist()} "
+        f"kd_before={np.round(np.asarray(before_kd[:6], dtype=np.float64), 3).tolist()} "
+        f"kp_after={np.round(np.asarray(after_kp[:6], dtype=np.float64), 3).tolist()} "
+        f"kd_after={np.round(np.asarray(after_kd[:6], dtype=np.float64), 3).tolist()}",
+        flush=True,
+    )
 
 
 def startup_home_sample_is_stable(
@@ -1408,7 +1463,7 @@ def confirm_z1_startup_home(
                 gripper_open_sent = gripper_open_step >= gripper_open_duration
             else:
                 gripper_to_send = None
-        q_next, qd_cmd = send_lowcmd_joint_target(
+        q_next, qd_cmd, _ = send_lowcmd_joint_target(
             arm,
             arm_model,
             sdk_lock,
@@ -1572,7 +1627,7 @@ def arm_command_loop(
         ee_quat = normalize_quat_xyzw(args.dry_run_initial_ee_quat).astype(np.float32)
         print("z1_bridge dry_run=1; --no_enable_arm was set, so no LOWCMD is sent.", flush=True)
         while not stop_event.is_set():
-            action, has_action, action_age, action_stamp, _, _ = get_action_snapshot(shared)
+            action, has_action, action_age, action_stamp, _, _, _ = get_action_snapshot(shared)
             if has_action and action_age <= args.command_timeout_s:
                 ee_pos = action[EE_POS_SLICE].astype(np.float32)
                 ee_quat = normalize_quat_xyzw(action[EE_QUAT_SLICE]).astype(np.float32)
@@ -1677,6 +1732,7 @@ def arm_command_loop(
 
     with sdk_lock:
         arm.setFsmLowcmd()
+        apply_arm_gain_scale(arm, args.arm_gain_scale)
         q_cmd = np.asarray(arm.lowstate.getQ(), dtype=np.float64).reshape(6)
         qd_cmd = np.zeros(6, dtype=np.float64)
         gripper_cmd = float(np.clip(float(arm.lowstate.getGripperQ()), args.gripper_min, args.gripper_max))
@@ -1730,6 +1786,10 @@ def arm_command_loop(
         name="z1-state",
     )
     state_thread.start()
+    latency_debug = bool(getattr(args, "latency_debug", False))
+    latency_debug_hz = max(0.1, float(getattr(args, "latency_debug_hz", 2.0)))
+    latency_print_period = 1.0 / latency_debug_hz
+    last_latency_print_wall = 0.0
 
     try:
         while not stop_event.is_set():
@@ -1747,7 +1807,12 @@ def arm_command_loop(
                 break
 
             loop_now = time.monotonic()
+            loop_wall = time.time()
             last_error = ""
+            ik_total_ms = 0.0
+            sdk_ik_ms = 0.0
+            sdk_ik_calls = 0
+            send_ms = 0.0
             (
                 action,
                 has_action,
@@ -1755,6 +1820,7 @@ def arm_command_loop(
                 action_stamp,
                 action_mode,
                 explicit_joint_target,
+                action_timing,
             ) = get_action_snapshot(shared)
             q_plan, _, _ = joint_trajectory.sample(loop_now)
             with sdk_lock:
@@ -1764,10 +1830,10 @@ def arm_command_loop(
             ee_transform_act_meas = act_from_arm @ ee_transform_arm_meas
             q_feedback = q_meas if np.isfinite(q_meas).all() else q_cmd
             pose_q_cache.add_transform(ee_transform_act_meas, q_feedback)
-            # Solve around the joint state that is being commanded now. This
-            # prevents an unexecuted, far-ahead q_goal from dragging local IK
-            # onto another solution branch.
-            q_seed = q_plan.copy() if np.isfinite(q_plan).all() else q_feedback
+            # Seed IK from measured feedback, not the planned trajectory. When
+            # the arm lags behind a fast VR target, q_plan can be far ahead of
+            # the real robot and can make IK jump to a distant branch.
+            q_seed = q_feedback.copy()
 
             ik_ok = False
             ik_source = ""
@@ -1803,6 +1869,7 @@ def arm_command_loop(
                     )
                 gripper_idle_neutral_sent = False
                 if new_command:
+                    ik_total_start = time.perf_counter()
                     last_processed_action_stamp = action_stamp
                     target_pos_act = action[EE_POS_SLICE].astype(np.float64)
                     target_quat_act = normalize_quat_xyzw(action[EE_QUAT_SLICE])
@@ -1840,19 +1907,28 @@ def arm_command_loop(
                         target_tool_transform_arm = arm_from_act @ target_transform_act
                         target_sdk_transform_arm = target_tool_transform_arm @ sdk_ee_from_act_ee
 
-                        for check_in_workspace, source_name in ((False, "local"), (True, "global")):
+                        ik_attempts = [(False, "local")]
+                        if bool(getattr(args, "ik_global_fallback", True)):
+                            ik_attempts.append((True, "global"))
+                        for check_in_workspace, source_name in ik_attempts:
                             try:
                                 with sdk_lock:
+                                    ik_call_start = time.perf_counter()
                                     has_ik, ik_result = arm_model.inverseKinematics(
                                         target_sdk_transform_arm,
                                         q_seed.astype(np.float64),
                                         bool(check_in_workspace),
                                     )
+                                    sdk_ik_ms += 1000.0 * (time.perf_counter() - ik_call_start)
+                                    sdk_ik_calls += 1
                                 if bool(has_ik):
                                     proposed = np.asarray(ik_result, dtype=np.float64).reshape(6)
                                     proposed = np.clip(proposed, joint_min, joint_max)
                                     candidate_delta = float(np.max(np.abs(proposed - q_seed)))
-                                    if candidate_delta > float(args.ik_max_joint_delta):
+                                    delta_limit = float(args.ik_max_joint_delta)
+                                    if source_name == "global":
+                                        delta_limit = min(delta_limit, float(args.ik_global_max_joint_delta))
+                                    if candidate_delta > delta_limit:
                                         attempt_errors.append(f"{source_name}_jump:{candidate_delta:.3f}")
                                         continue
                                     candidate = proposed
@@ -1944,26 +2020,40 @@ def arm_command_loop(
                             velocity_alpha * raw_waypoint_velocity
                             + (1.0 - velocity_alpha) * last_waypoint_velocity
                         )
-                        segment_duration = joint_trajectory.retarget(
-                            q_goal,
-                            waypoint_velocity,
-                            loop_now,
-                            args.joint_trajectory_duration_s,
-                            joint_speed_limit,
-                            joint_acceleration_limit,
-                        )
-                        last_successful_waypoint = q_goal.copy()
-                        last_successful_waypoint_stamp = action_stamp
-                        last_waypoint_velocity = waypoint_velocity.copy()
-                        last_brake_action_stamp = -1.0
-                        last_target_pos_act = target_pos_act.copy()
-                        last_target_quat_act = target_quat_act.copy()
-                        last_ik_source = ik_source
-                        ik_ok = True
-                        last_error = candidate_note
-                        if segment_duration > float(args.joint_trajectory_duration_s) * 1.05:
-                            extension_note = f"trajectory_extended:{segment_duration:.4f}s"
-                            last_error = f"{last_error};{extension_note}" if last_error else extension_note
+                        try:
+                            segment_duration = joint_trajectory.retarget(
+                                q_goal,
+                                waypoint_velocity,
+                                loop_now,
+                                args.joint_trajectory_duration_s,
+                                joint_speed_limit,
+                                joint_acceleration_limit,
+                            )
+                        except Exception as exc:
+                            ik_fail_count += 1
+                            last_error = f"trajectory_retarget_failed:{type(exc).__name__}:{exc}"
+                            if last_brake_action_stamp != action_stamp:
+                                joint_trajectory.brake(
+                                    loop_now,
+                                    args.joint_brake_duration_s,
+                                    joint_speed_limit,
+                                    joint_acceleration_limit,
+                                )
+                                last_brake_action_stamp = action_stamp
+                                last_waypoint_velocity[:] = 0.0
+                        else:
+                            last_successful_waypoint = q_goal.copy()
+                            last_successful_waypoint_stamp = action_stamp
+                            last_waypoint_velocity = waypoint_velocity.copy()
+                            last_brake_action_stamp = -1.0
+                            last_target_pos_act = target_pos_act.copy()
+                            last_target_quat_act = target_quat_act.copy()
+                            last_ik_source = ik_source
+                            ik_ok = True
+                            last_error = candidate_note
+                            if segment_duration > float(args.joint_trajectory_duration_s) * 1.05:
+                                extension_note = f"trajectory_extended:{segment_duration:.4f}s"
+                                last_error = f"{last_error};{extension_note}" if last_error else extension_note
                     elif not ik_ok:
                         ik_fail_count += 1
                         last_error = "ik_failed:" + ",".join(attempt_errors)
@@ -1976,6 +2066,7 @@ def arm_command_loop(
                             )
                             last_brake_action_stamp = action_stamp
                             last_waypoint_velocity[:] = 0.0
+                    ik_total_ms = 1000.0 * (time.perf_counter() - ik_total_start)
                 else:
                     ik_ok = True
                     ik_source = f"hold:{last_ik_source}" if last_ik_source else "hold"
@@ -2034,7 +2125,7 @@ def arm_command_loop(
                 gripper_to_send = None
                 gripper_qd_cmd = 0.0
 
-            q_next, qd_cmd = send_lowcmd_joint_target(
+            q_next, qd_cmd, send_ms = send_lowcmd_joint_target(
                 arm,
                 arm_model,
                 sdk_lock,
@@ -2046,6 +2137,67 @@ def arm_command_loop(
                 joint_min,
                 joint_max,
             )
+            if latency_debug and new_command and loop_wall - last_latency_print_wall >= latency_print_period:
+                last_latency_print_wall = loop_wall
+                provider_stamp = float(action_timing.get("vr_provider_stamp", 0.0) or 0.0)
+                monitor_stamp = float(action_timing.get("vr_monitor_stamp", 0.0) or 0.0)
+                teleop_write_stamp = float(action_timing.get("teleop_write_stamp", 0.0) or 0.0)
+                provider_to_monitor_ms = (
+                    1000.0 * (monitor_stamp - provider_stamp)
+                    if provider_stamp > 0.0 and monitor_stamp > 0.0
+                    else float("nan")
+                )
+                monitor_to_teleop_ms = (
+                    1000.0 * (teleop_write_stamp - monitor_stamp)
+                    if monitor_stamp > 0.0 and teleop_write_stamp > 0.0
+                    else float("nan")
+                )
+                teleop_to_bridge_ms = (
+                    1000.0 * (loop_wall - teleop_write_stamp)
+                    if teleop_write_stamp > 0.0
+                    else float("nan")
+                )
+                provider_to_bridge_ms = (
+                    1000.0 * (loop_wall - provider_stamp)
+                    if provider_stamp > 0.0
+                    else float("nan")
+                )
+                target_actual_err = float(
+                    np.linalg.norm(target_pos_act - ee_transform_act_meas[:3, 3])
+                )
+                q_err = float(np.max(np.abs(q_goal - q_meas)))
+                print(
+                    "[z1-latency]",
+                    "sent=",
+                    int(action_timing.get("action_sent_count", 0.0) or 0),
+                    "provider_to_monitor_ms=",
+                    "nan" if not np.isfinite(provider_to_monitor_ms) else f"{provider_to_monitor_ms:.1f}",
+                    "monitor_to_teleop_ms=",
+                    "nan" if not np.isfinite(monitor_to_teleop_ms) else f"{monitor_to_teleop_ms:.1f}",
+                    "teleop_to_bridge_ms=",
+                    "nan" if not np.isfinite(teleop_to_bridge_ms) else f"{teleop_to_bridge_ms:.1f}",
+                    "provider_to_bridge_ms=",
+                    "nan" if not np.isfinite(provider_to_bridge_ms) else f"{provider_to_bridge_ms:.1f}",
+                    "ik_total_ms=",
+                    f"{ik_total_ms:.2f}",
+                    "sdk_ik_ms=",
+                    f"{sdk_ik_ms:.2f}",
+                    "ik_calls=",
+                    sdk_ik_calls,
+                    "send_ms=",
+                    f"{send_ms:.2f}",
+                    "target_actual_err_m=",
+                    f"{target_actual_err:.4f}",
+                    "q_goal_meas_err_rad=",
+                    f"{q_err:.4f}",
+                    "action_age_ms=",
+                    f"{1000.0 * action_age:.1f}",
+                    "ik_source=",
+                    ik_source,
+                    "last_error=",
+                    last_error,
+                    flush=True,
+                )
 
             q_cmd = q_next
             update_shared_control_status(
@@ -2202,6 +2354,7 @@ def io_loop(
                         with shared.lock:
                             shared.action = action.astype(np.float32)
                             shared.action_stamp = now
+                            shared.action_keepalive_stamp = now
                             shared.action_source = f"{addr[0]}:{addr[1]}"
                             shared.has_action = True
                             shared.action_mode = action_mode
@@ -2403,7 +2556,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--ik_workspace_check",
         action="store_true",
-        help="Deprecated compatibility flag; the controller now always tries local IK then global IK.",
+        help="Deprecated compatibility flag; use --no-ik_global_fallback to force local-only IK.",
+    )
+    add_bool_argument(
+        parser,
+        "--ik_global_fallback",
+        default=True,
+        help_text="After local SDK IK fails, try SDK workspace/global IK.",
     )
     add_bool_argument(parser, "--ik_cache", default=True, help_text="Use observed FK pose->q cache when both IK modes fail.")
     parser.add_argument("--ik_cache_size", type=int, default=2000)
@@ -2489,10 +2648,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--joint_trajectory_duration_s",
         type=float,
-        default=0.04,
+        default=0.02,
         help=(
-            "Nominal duration for each online IK waypoint segment. The default 0.04 s "
-            "maps one 25 Hz EE waypoint to twenty 500 Hz LOWCMD samples; far targets "
+            "Nominal duration for each online IK waypoint segment. The default 0.02 s "
+            "maps one 50 Hz EE waypoint to ten 500 Hz LOWCMD samples; far targets "
             "are automatically stretched to respect the speed and acceleration limits."
         ),
     )
@@ -2507,6 +2666,15 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.08,
         help="minimum smooth braking duration after an IK failure or stale command.",
+    )
+    parser.add_argument(
+        "--arm_gain_scale",
+        type=float,
+        default=1.0,
+        help=(
+            "Scale the Z1 LOWCMD arm Kp/Kd gains after entering LOWCMD. "
+            "1.0 keeps SDK defaults; 0.5 halves both Kp and Kd for the six arm joints."
+        ),
     )
     parser.add_argument(
         "--max_gripper_speed",

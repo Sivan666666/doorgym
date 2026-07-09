@@ -121,6 +121,10 @@ class WandBLogger:
     def log_policy(self, checkpoint_dir: Path):
         """Checkpoints the policy to wandb."""
         if self.cfg.disable_artifact:
+            logging.info(
+                "Skipping WandB model artifact upload because wandb.disable_artifact=true. "
+                f"Checkpoint is saved locally at {checkpoint_dir}."
+            )
             return
 
         step_id = checkpoint_dir.name

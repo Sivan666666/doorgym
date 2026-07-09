@@ -292,7 +292,7 @@ conda run -n b1z1_lerobot python high-level/dp/train/train_door_dp.py \
   --root /home/sivan/whole_body/visual_whole_body/data/lerobot/local/door_dp \
   --repo_id local/door_dp \
   --run_name door_dp_v1 \
-  --steps 100000 \
+  --steps 50000 \
   --batch_size 64 \
   --num_workers 4 \
   --device cuda:0

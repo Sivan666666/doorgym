@@ -30,7 +30,7 @@ lerobot-train \
 --policy.type=wall_x \
 --dataset.repo_id=your/dataset \
 --batch_size=32 \
---steps=100000
+--steps=50000
 ```
 """
 

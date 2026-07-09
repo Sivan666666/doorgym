@@ -116,7 +116,7 @@ lerobot-train \
   --policy.path=lerobot/[BASE_CHECKPOINT] \
   --policy.dtype=bfloat16 \
   --policy.device=cuda \
-  --steps=100000 \
+  --steps=50000 \
   --batch_size=4
 ```
 

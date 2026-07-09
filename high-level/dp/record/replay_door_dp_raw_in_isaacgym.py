@@ -19,6 +19,7 @@ FLOAT_IK_SOURCE_SCRIPTS = (
     "isaacgym_float_ik_b1z1_basearn_push_door.py",
     "isaacgym_float_ik_b1z1_basearn_push_door_parallel.py",
     "isaacgym_float_ik_b1z1_basearn_pull_door_parallel.py",
+    "isaacgym_float_ik_a2w_basearn_push_door_parallel.py",
 )
 REPLAY_STATE_KEYS = (
     "state",
@@ -196,6 +197,9 @@ def parse_args():
     parser.add_argument("--camera_depth_clip_far", type=float, default=2.0)
     parser.add_argument("--camera_display_scale", type=int, default=1)
     parser.add_argument("--wrist_camera_down_tilt", type=float, default=0.20)
+    parser.add_argument("--wrist_camera_yaw_deg", type=float, default=0.0)
+    parser.add_argument("--wrist_camera_pitch_deg", type=float, default=0.0)
+    parser.add_argument("--wrist_camera_roll_deg", type=float, default=0.0)
     parser.add_argument("--front_camera_yaw_deg", type=float, default=0.0)
     parser.add_argument("--front_camera_pitch_deg", type=float, default=-60.0)
     parser.add_argument("--front_camera_roll_deg", type=float, default=0.0)
@@ -312,6 +316,10 @@ def is_float_ik_episode(data):
     return any(source_script.endswith(name) for name in FLOAT_IK_SOURCE_SCRIPTS)
 
 
+def is_a2w_float_ik_episode(data):
+    return source_script_from_episode(data).endswith("isaacgym_float_ik_a2w_basearn_push_door_parallel.py")
+
+
 def door_asset_selection_from_episode(data, args):
     name = args.door_asset_name
     index = args.door_asset_index
@@ -357,11 +365,14 @@ def load_play_module(mode):
     return importlib.import_module(module_name)
 
 
-def load_float_ik_module(mode):
+def load_float_ik_module(mode, data=None):
     if mode == "ikpull":
         module_path = HIGH_LEVEL_ROOT / "float_ik" / "isaacgym_float_ik_b1z1_basearn_pull_door_parallel.py"
     elif mode == "ikpush":
-        module_path = HIGH_LEVEL_ROOT / "float_ik" / "isaacgym_float_ik_b1z1_basearn_push_door_parallel.py"
+        if data is not None and is_a2w_float_ik_episode(data):
+            module_path = HIGH_LEVEL_ROOT / "float_ik" / "isaacgym_float_ik_a2w_basearn_push_door_parallel.py"
+        else:
+            module_path = HIGH_LEVEL_ROOT / "float_ik" / "isaacgym_float_ik_b1z1_basearn_push_door_parallel.py"
     else:
         raise ValueError(f"Unsupported float_ik replay mode: {mode!r}")
     for path in (str(module_path.parent), str(HIGH_LEVEL_ROOT), str(DP_ROOT), str(REPO_ROOT), str(LOW_LEVEL_ROOT)):
@@ -916,8 +927,12 @@ def prepare_float_ik_replay_args(float_mod, args, data, mode):
     if args.graphics_device_id is None:
         args.graphics_device_id = compute_device_id if compute_device_id >= 0 else 0
 
-    set_missing_attr(args, "asset_root", str(float_mod.base_ik.DEFAULT_ASSET_ROOT))
-    set_missing_attr(args, "asset_file", float_mod.base_ik.DEFAULT_ASSET_FILE)
+    if hasattr(float_mod, "A2WZ1_DEFAULT_ASSET_ROOT"):
+        set_missing_attr(args, "asset_root", str(float_mod.A2WZ1_DEFAULT_ASSET_ROOT))
+        set_missing_attr(args, "asset_file", float_mod.A2WZ1_DEFAULT_ASSET_FILE)
+    else:
+        set_missing_attr(args, "asset_root", str(float_mod.base_ik.DEFAULT_ASSET_ROOT))
+        set_missing_attr(args, "asset_file", float_mod.base_ik.DEFAULT_ASSET_FILE)
     set_missing_attr(args, "single_asset", False)
     set_missing_attr(args, "flip_visual_attachments", False)
     set_missing_attr(args, "disable_arm_visual_flip", False)
@@ -1008,6 +1023,36 @@ def yaw_from_quat_xyzw(quat):
     return math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
 
 
+def pitch_from_quat_xyzw(quat):
+    q = np.asarray(quat, dtype=np.float32).reshape(-1)
+    if q.size < 4:
+        return 0.0
+    x, y, z, w = [float(v) for v in q[:4]]
+    value = 2.0 * (w * y - z * x)
+    return math.asin(float(np.clip(value, -1.0, 1.0)))
+
+
+def normalize_replay_action_frame(float_mod, action_frame):
+    if hasattr(float_mod, "normalize_float_dp_pose_frame"):
+        return float_mod.normalize_float_dp_pose_frame(action_frame)
+    frame = str(action_frame or "base").strip().lower()
+    aliases = {
+        "full_base": "robot_base_full",
+        "base_with_pitch": "robot_base_full",
+        "arm_base_full": "robot_base_full",
+        "base_yaw": "base",
+        "yaw_base": "base",
+    }
+    return aliases.get(frame, frame)
+
+
+def is_replay_full_base_frame(float_mod, action_frame):
+    frame = normalize_replay_action_frame(float_mod, action_frame)
+    if hasattr(float_mod, "is_full_base_pose_frame"):
+        return bool(float_mod.is_full_base_pose_frame(frame))
+    return frame in {"robot_base_full", "base_full", "arm_base", "robot_base", "true_base"}
+
+
 def set_float_actor_root_pose(float_mod, gym, env, actor, root_state):
     root = np.asarray(root_state, dtype=np.float32).reshape(-1)
     if root.size < 7:
@@ -1072,7 +1117,8 @@ def apply_float_ik_state_frame(
 
     root_state = np.asarray(data["replay_root_state"][frame_idx], dtype=np.float32)
     yaw = yaw_from_quat_xyzw(root_state[3:7])
-    float_mod.set_robot_base_pose(gym, env, actor_handles, root_state[:2], root_state[2], yaw)
+    pitch = pitch_from_quat_xyzw(root_state[3:7])
+    float_mod.set_robot_base_pose(gym, env, actor_handles, root_state[:2], root_state[2], yaw, pitch=pitch)
 
     dof_vel = data["replay_dof_vel"][frame_idx] if "replay_dof_vel" in data.files else None
     set_float_ik_arm_dofs(float_mod, gym, env, arm_actor, dof_names, data["replay_dof_pos"][frame_idx], dof_vel)
@@ -1138,19 +1184,31 @@ def float_ik_action_target_world(float_mod, data, frame_idx, action):
     target_quat = np.asarray(action[5:9], dtype=np.float32)
     if action_frame == "world":
         return target_pos, target_quat
-    if action_frame != "base":
-        raise ValueError(f"Unsupported float_ik action_frame={action_frame!r}; expected 'world' or 'base'.")
+    normalized_frame = normalize_replay_action_frame(float_mod, action_frame)
+    if normalized_frame != "base" and not is_replay_full_base_frame(float_mod, normalized_frame):
+        raise ValueError(
+            f"Unsupported float_ik action_frame={action_frame!r}; "
+            "expected 'world', 'base', or 'robot_base_full'."
+        )
     if "replay_root_state" not in data.files:
         raise ValueError("float_ik base-frame action visualization requires replay_root_state.")
     root_state = np.asarray(data["replay_root_state"][frame_idx], dtype=np.float32)
     yaw = yaw_from_quat_xyzw(root_state[3:7])
+    pitch = pitch_from_quat_xyzw(root_state[3:7])
     return (
-        float_mod.base_pos_to_world(target_pos, root_state[:2], root_state[2], yaw),
-        float_mod.base_quat_to_world(target_quat, yaw),
+        float_mod.base_pos_to_world(
+            target_pos,
+            root_state[:2],
+            root_state[2],
+            yaw,
+            base_pitch=pitch,
+            pose_frame=normalized_frame,
+        ),
+        float_mod.base_quat_to_world(target_quat, yaw, base_pitch=pitch, pose_frame=normalized_frame),
     )
 
 
-def apply_float_ik_recorded_action(float_mod, action, base_xy, base_z, yaw, dt, action_frame):
+def apply_float_ik_recorded_action(float_mod, action, base_xy, base_z, yaw, dt, action_frame, base_pitch=0.0):
     action = np.asarray(action, dtype=np.float32).reshape(-1)
     if action.shape[0] < 10:
         raise ValueError(f"Door DP action must have at least 10 values, got shape {action.shape}")
@@ -1161,17 +1219,35 @@ def apply_float_ik_recorded_action(float_mod, action, base_xy, base_z, yaw, dt, 
     base_xy_next = np.asarray(base_xy, dtype=np.float32) + heading * (vx * float(dt))
     target_pos_action = np.asarray(action[2:5], dtype=np.float32).copy()
     target_quat_action = float_mod.base_ik.normalize_quat(np.asarray(action[5:9], dtype=np.float32))
-    action_frame = str(action_frame or "base").lower()
+    action_frame = normalize_replay_action_frame(float_mod, action_frame)
     if action_frame == "base":
         # Float IK raw actions encode vx/yaw_rate for prev->current, and encode
         # the target pose in that current-frame base. Reconstruct the same frame.
         target_pos = float_mod.base_pos_to_world(target_pos_action, base_xy_next, base_z, yaw_next)
         target_quat = float_mod.base_quat_to_world(target_quat_action, yaw_next)
+    elif is_replay_full_base_frame(float_mod, action_frame):
+        target_pos = float_mod.base_pos_to_world(
+            target_pos_action,
+            base_xy_next,
+            base_z,
+            yaw_next,
+            base_pitch=base_pitch,
+            pose_frame=action_frame,
+        )
+        target_quat = float_mod.base_quat_to_world(
+            target_quat_action,
+            yaw_next,
+            base_pitch=base_pitch,
+            pose_frame=action_frame,
+        )
     elif action_frame == "world":
         target_pos = target_pos_action
         target_quat = target_quat_action
     else:
-        raise ValueError(f"Unsupported float_ik action_frame={action_frame!r}; expected 'base' or 'world'.")
+        raise ValueError(
+            f"Unsupported float_ik action_frame={action_frame!r}; "
+            "expected 'base', 'robot_base_full', or 'world'."
+        )
     gripper = float(action[9])
     return base_xy_next.astype(np.float32), yaw_next, target_pos, target_quat, gripper
 
@@ -1313,6 +1389,8 @@ def initialize_float_ik_action_replay(
     root_state = np.asarray(data["replay_root_state"][frame_idx], dtype=np.float32)
     base_xy = root_state[:2].astype(np.float32).copy()
     yaw = yaw_from_quat_xyzw(root_state[3:7])
+    pitch = pitch_from_quat_xyzw(root_state[3:7])
+    args.robot_pitch = float(pitch)
     door_pos, _door_vel = float_mod.get_actor_dof_state(gym, env, door_actor)
     update_float_ik_open_stage(float_mod, door, door_pos, args)
     float_mod.current_ee_pose(gym, sim, ik_state)
@@ -1360,8 +1438,17 @@ def step_float_ik_action_replay(
         yaw,
         dt,
         action_frame=action_frame,
+        base_pitch=float(getattr(args, "robot_pitch", 0.0)),
     )
-    float_mod.set_robot_base_pose(gym, env, actor_handles, base_xy, args.robot_z, yaw)
+    float_mod.set_robot_base_pose(
+        gym,
+        env,
+        actor_handles,
+        base_xy,
+        args.robot_z,
+        yaw,
+        pitch=float(getattr(args, "robot_pitch", 0.0)),
+    )
     float_mod.set_ik_target(ik_state, target_pos, target_quat)
     float_mod.update_arm_ik_targets(gym, sim, dof_positions, ik_state, args, len(dof_positions))
     if "jointGripper" in dof_names:
@@ -1406,7 +1493,7 @@ def print_float_ik_replay_log(data, frame_idx, replay_step, mode, action=None, s
 
 
 def replay_float_ik_episode(args, episode_path, data, vision_mode, mode):
-    float_mod = load_float_ik_module(mode)
+    float_mod = load_float_ik_module(mode, data)
     door_asset_selection = prepare_float_ik_replay_args(float_mod, args, data, mode)
     preload_keys = ["action"]
     if args.replay_mode == "state":
@@ -1420,8 +1507,12 @@ def replay_float_ik_episode(args, episode_path, data, vision_mode, mode):
     if args.replay_mode == "action" and (actions is None or actions.ndim != 2 or actions.shape[1] < 10):
         raise ValueError(f"{mode} action replay requires raw episode field action with shape [T, 10]")
     action_frame = action_frame_from_data(data)
-    if action_frame not in ("world", "base"):
-        raise ValueError(f"Unsupported {mode} action_frame={action_frame!r}; expected 'world' or 'base'.")
+    valid_action_frames = ("world", "base", "robot_base_full", "base_full", "arm_base", "robot_base", "true_base")
+    if action_frame not in valid_action_frames:
+        raise ValueError(
+            f"Unsupported {mode} action_frame={action_frame!r}; "
+            "expected 'world', 'base', or 'robot_base_full'."
+        )
     total_frames = int(actions.shape[0] if actions is not None else data["state"].shape[0])
     indices = frame_indices(args, total_frames)
     if not indices:
@@ -1453,8 +1544,15 @@ def replay_float_ik_episode(args, episode_path, data, vision_mode, mode):
         plane_params = float_mod.gymapi.PlaneParams()
         plane_params.normal = float_mod.gymapi.Vec3(0.0, 0.0, 1.0)
         gym.add_ground(sim, plane_params)
-        with tempfile.TemporaryDirectory(prefix="b1z1_float_ik_replay_assets_") as temp_dir:
-            base_asset, arm_asset = float_mod.base_ik.load_robot_assets(gym, sim, args, Path(temp_dir))
+        asset_prefix = "a2wz1_float_ik_replay_assets_" if hasattr(float_mod, "load_a2wz1_float_robot_assets") else "b1z1_float_ik_replay_assets_"
+        with tempfile.TemporaryDirectory(prefix=asset_prefix) as temp_dir:
+            base_dof_data = None
+            if hasattr(float_mod, "load_a2wz1_float_robot_assets"):
+                base_asset, arm_asset = float_mod.load_a2wz1_float_robot_assets(gym, sim, args, Path(temp_dir))
+                if hasattr(float_mod, "configure_a2w_base_visual_dofs"):
+                    base_dof_data = float_mod.configure_a2w_base_visual_dofs(gym, base_asset, args)
+            else:
+                base_asset, arm_asset = float_mod.base_ik.load_robot_assets(gym, sim, args, Path(temp_dir))
             door = float_mod.load_door_asset(gym, sim, args)
             dof_data = float_mod.base_ik.configure_dofs(gym, arm_asset, args)
             dof_names, dof_props, dof_states, dof_positions, lower, upper, defaults, speeds, selected = dof_data
@@ -1465,6 +1563,8 @@ def replay_float_ik_episode(args, episode_path, data, vision_mode, mode):
             env, arm_actor, actor_handles, door_actor, _ = float_mod.create_env_actors(
                 gym, sim, base_asset, arm_asset, door, dof_props, dof_states, args
             )
+            if base_dof_data is not None and hasattr(float_mod, "apply_a2w_base_visual_dofs"):
+                float_mod.apply_a2w_base_visual_dofs(gym, env, actor_handles, base_dof_data)
             viewer = float_mod.setup_viewer(gym, sim, args)
             camera_handles = {}
             ik_state = None
@@ -1473,7 +1573,10 @@ def replay_float_ik_episode(args, episode_path, data, vision_mode, mode):
             if args.replay_mode == "action":
                 args.show_camera_images = bool(args.show_seg)
                 if args.show_seg and (args.enable_wrist_camera or args.enable_front_camera):
-                    camera_handles = float_mod.create_low_level_cameras(gym, env, arm_actor, actor_handles, args)
+                    if hasattr(float_mod, "load_a2wz1_float_robot_assets"):
+                        camera_handles = float_mod.create_low_level_cameras(gym, env, arm_actor, actor_handles, door, args)
+                    else:
+                        camera_handles = float_mod.create_low_level_cameras(gym, env, arm_actor, actor_handles, args)
                 ik_state = float_mod.base_ik.setup_ik_controller(
                     gym,
                     sim,

@@ -29,7 +29,7 @@ def parse_args():
     parser.add_argument("--root", type=str, default=str(HIGH_LEVEL_ROOT / "data" / "lerobot"))
     parser.add_argument("--repo_id", type=str, default="local/door_dp")
     parser.add_argument("--run_name", type=str, default="debug")
-    parser.add_argument("--steps", type=int, default=100000)
+    parser.add_argument("--steps", type=int, default=50000)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--weight_decay", type=float, default=1e-6)
@@ -148,8 +148,11 @@ def main():
             f"{'--rgb' if args.rgb else 'depth mode'}."
         )
     action_frame = str(sidecar_data.get("action_frame", sidecar_data.get("action_pose_frame", "world"))).lower()
-    if action_frame not in ("world", "base"):
-        raise ValueError(f"LeRobot dataset action_frame={action_frame!r}; expected 'world' or 'base'.")
+    if action_frame not in ("world", "base", "robot_base_full", "base_full", "arm_base", "robot_base", "true_base"):
+        raise ValueError(
+            f"LeRobot dataset action_frame={action_frame!r}; "
+            "expected 'world', 'base', or 'robot_base_full'."
+        )
     controller_mode = str(sidecar_data.get("door_dp_mode", sidecar_data.get("controller_mode", "legacy")))
 
     dataset = DoorPolicySequenceDataset(

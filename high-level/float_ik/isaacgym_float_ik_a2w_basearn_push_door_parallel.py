@@ -208,6 +208,46 @@ def apply_a2w_float_ik_config_defaults(args, argv):
     return args
 
 
+def _resolve_a2w_runtime_path(path_value):
+    if path_value is None:
+        return path_value
+    text = str(path_value).strip()
+    if not text:
+        return path_value
+    expanded = Path(text).expanduser()
+    if expanded.exists():
+        return str(expanded)
+
+    # Config files are often copied between machines and may still contain an
+    # absolute path like /home/sivan/.../high-level/data/asset/a2wz1.  If that
+    # path does not exist locally, keep the part after "high-level/" and map it
+    # onto this checkout's HIGH_LEVEL_ROOT.
+    parts = expanded.parts
+    if "high-level" in parts:
+        high_level_idx = parts.index("high-level")
+        suffix = Path(*parts[high_level_idx + 1 :])
+        candidate = HIGH_LEVEL_ROOT / suffix
+        if candidate.exists():
+            return str(candidate)
+
+    # Also support repo-root relative paths such as high-level/data/... and
+    # high-level-root relative paths such as data/...
+    candidates = []
+    if not expanded.is_absolute():
+        candidates.extend([REPO_ROOT / expanded, HIGH_LEVEL_ROOT / expanded])
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    return str(expanded)
+
+
+def normalize_a2w_runtime_paths(args):
+    for attr in ("asset_root", "door_cfg", "depth_aug_config", "dp_raw_root"):
+        if hasattr(args, attr):
+            setattr(args, attr, _resolve_a2w_runtime_path(getattr(args, attr)))
+    return args
+
+
 def setup_viewer_pause_shortcut(gym, viewer):
     if viewer is None:
         return
@@ -590,12 +630,77 @@ def parse_args():
                 "default": float(dc.DEFAULT_FRONT_CAMERA_CFG["rotation_deg"][2]),
             },
             *dc.depth_aug_custom_parameters(),
+            {
+                "name": "--ee_pose_frame",
+                "type": str,
+                "default": "robot_base_full",
+                "help": (
+                    "Frame used to record/decode 10D EE pose state/action. "
+                    "'base' keeps the legacy yaw-only base frame; "
+                    "'robot_base_full' uses the true robot base frame including pitch."
+                ),
+            },
             {"name": "--record_dp_dataset", "action": "store_true"},
             {
                 "name": "--record_camera_pose",
                 "action": "store_true",
                 "help": "When recording raw DP data, save front/wrist camera optical-frame poses in robot base frame.",
             },
+            {
+                "name": "--record_handle_bbox",
+                "action": "store_true",
+                "help": (
+                    "When recording raw DP data, save front/wrist handle bbox supervision "
+                    "from rendered segmentation masks for offline handle-latent targets."
+                ),
+            },
+            {
+                "name": "--record_gripper_handle_contact",
+                "action": "store_true",
+                "help": (
+                    "When recording raw DP data, save per-frame gripperStator/gripperMover "
+                    "vs handle rigid-contact scores for grasp-quality filtering."
+                ),
+            },
+            {
+                "name": "--filter_gripper_handle_contact",
+                "action": "store_true",
+                "help": (
+                    "Only save successful raw episodes whose close/rotate phases contain enough "
+                    "gripper-handle contact frames."
+                ),
+            },
+            {
+                "name": "--gripper_handle_contact_gripper_bodies",
+                "type": str,
+                "default": "gripperStator,gripperMover",
+                "help": "Comma-separated arm rigid body names treated as the two gripper contact sides.",
+            },
+            {
+                "name": "--gripper_handle_contact_handle_bodies",
+                "type": str,
+                "default": "",
+                "help": "Optional comma-separated door rigid body names treated as handles; empty uses the selected door handle body.",
+            },
+            {"name": "--gripper_handle_contact_score_threshold", "type": float, "default": 1.0e-6},
+            {"name": "--filter_gripper_handle_contact_min_frames", "type": int, "default": 5},
+            {
+                "name": "--filter_gripper_handle_contact_require_both",
+                "dest": "filter_gripper_handle_contact_require_both",
+                "action": "store_true",
+                "default": True,
+            },
+            {
+                "name": "--no_filter_gripper_handle_contact_require_both",
+                "dest": "filter_gripper_handle_contact_require_both",
+                "action": "store_false",
+            },
+            {
+                "name": "--filter_gripper_handle_contact_phase_names",
+                "type": str,
+                "default": "close_gripper,rotate_handle",
+            },
+            {"name": "--debug_gripper_handle_contact", "action": "store_true"},
             {"name": "--dp_raw_root", "type": str, "default": str(HIGH_LEVEL_ROOT / "data" / "door_dp_raw" / "local_door_dp")},
             {"name": "--dp_task", "type": str, "default": "push lever door open"},
             {"name": "--dp_record_env_id", "type": int, "default": 0},
@@ -680,6 +785,7 @@ def parse_args():
 
     argv_list = sys.argv[1:]
     apply_a2w_float_ik_config_defaults(args, argv_list)
+    normalize_a2w_runtime_paths(args)
 
     # gymutil's wrapper does not preserve default=True for store_true custom args,
     # so keep these visualization helpers on by default and let --no_* flags opt out.
@@ -1832,6 +1938,8 @@ world_pos_to_base = dc.world_pos_to_base
 base_pos_to_world = dc.base_pos_to_world
 world_quat_to_base = dc.world_quat_to_base
 base_quat_to_world = dc.base_quat_to_world
+normalize_float_dp_pose_frame = dc.normalize_float_dp_pose_frame
+is_full_base_pose_frame = dc.is_full_base_pose_frame
 make_float_dp_action = dc.make_float_dp_action
 apply_float_dp_action = dc.apply_float_dp_action
 apply_float_dp_joint_action9 = dc.apply_float_dp_joint_action9
@@ -2198,6 +2306,14 @@ def trajectory_targets(
             grasp[2] += float(getattr(args, "wc4_grasp_z_offset", 0.0))
     yaw_stop = yaw_start if legacy_skill_replay else yaw_start + move_to_approach_yaw_delta(args)
     goal_quat = forward_ee_quat(args, yaw_stop)
+    if skill_profile is not None and not legacy_skill_replay and abs(float(skill_profile.ee_roll_offset)) > 1.0e-6:
+        goal_quat = base_ik.quat_multiply(
+            goal_quat,
+            quat_from_angle_axis(
+                float(skill_profile.ee_roll_offset),
+                np.array([1.0, 0.0, 0.0], dtype=np.float32),
+            ),
+        )
 
     if skill_profile is None or legacy_skill_replay:
         rotate_offset = np.zeros(3, dtype=np.float32)
@@ -3194,6 +3310,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                         yaw_current,
                         dt,
                         action_frame=getattr(dp_controller, "action_frame", "world"),
+                        base_pitch=float(getattr(st.args, "robot_pitch", 0.0)),
                     )
                 st.traj["base_xy"] = np.asarray(base_xy, dtype=np.float32).copy()
                 st.traj["yaw"] = float(yaw)

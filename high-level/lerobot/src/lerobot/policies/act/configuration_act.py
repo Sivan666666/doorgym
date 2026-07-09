@@ -78,6 +78,10 @@ class ACTConfig(PreTrainedConfig):
         plucker_image_width / plucker_image_height: Full-resolution image size used to generate the ray-map.
         plucker_horizontal_fov_deg: Horizontal FOV used to derive default pinhole intrinsics. v1 assumes front
             and wrist depth cameras share this intrinsics model.
+        handle_latent_aux: Enable the training-only DINOv2 handle-latent reconstruction auxiliary loss.
+            Disabled by default; inference does not require the aux latent targets.
+        handle_latent_dim: Dimensionality of the frozen DINOv2-small patch-mean latent target.
+        handle_latent_loss_weight: Scalar multiplier λ for the handle-latent auxiliary loss.
         pre_norm: Whether to use "pre-norm" in the transformer blocks.
         dim_model: The transformer blocks' main hidden dimension.
         n_heads: The number of heads to use in the transformer blocks' multi-head attention.
@@ -146,6 +150,14 @@ class ACTConfig(PreTrainedConfig):
     plucker_image_width: int = 640
     plucker_image_height: int = 480
     plucker_horizontal_fov_deg: float = 69.0
+    # Optional training-only DINOv2 handle-latent reconstruction auxiliary task.
+    handle_latent_aux: bool = False
+    handle_latent_dim: int = 384
+    handle_latent_loss_weight: float = 0.1
+    handle_latent_front_key: str = "aux.front_handle_latent"
+    handle_latent_front_valid_key: str = "aux.front_handle_latent_valid"
+    handle_latent_wrist_key: str = "aux.wrist_handle_latent"
+    handle_latent_wrist_valid_key: str = "aux.wrist_handle_latent_valid"
     # Transformer layers.
     pre_norm: bool = False
     dim_model: int = 512
@@ -275,6 +287,22 @@ class ACTConfig(PreTrainedConfig):
                     "`plucker_encoder_channels` must contain at least one positive channel size. "
                     f"Got {self.plucker_encoder_channels!r}."
                 )
+        if self.handle_latent_aux:
+            if self.handle_latent_dim <= 0:
+                raise ValueError(f"`handle_latent_dim` must be positive. Got {self.handle_latent_dim}.")
+            if self.handle_latent_loss_weight < 0.0:
+                raise ValueError(
+                    "`handle_latent_loss_weight` must be non-negative. "
+                    f"Got {self.handle_latent_loss_weight}."
+                )
+            for key_name in (
+                "handle_latent_front_key",
+                "handle_latent_front_valid_key",
+                "handle_latent_wrist_key",
+                "handle_latent_wrist_valid_key",
+            ):
+                if not str(getattr(self, key_name, "")):
+                    raise ValueError(f"`{key_name}` must be non-empty when handle_latent_aux is enabled.")
         if self.temporal_ensemble_coeff is not None and self.n_action_steps > 1:
             raise NotImplementedError(
                 "`n_action_steps` must be 1 when using temporal ensembling. This is "
@@ -324,6 +352,19 @@ class ACTConfig(PreTrainedConfig):
                 raise ValueError(
                     "ACT Plücker conditioning requires camera pose features in the dataset. "
                     f"Missing {missing_pose_keys}; available input features are {list((self.input_features or {}).keys())}."
+                )
+        if self.handle_latent_aux:
+            image_keys = list(self.image_features)
+            if len(image_keys) != 2:
+                raise ValueError(
+                    "ACT handle-latent auxiliary loss expects exactly two image features (front and wrist). "
+                    f"Got {image_keys}."
+                )
+            lower_keys = [str(key).lower() for key in image_keys]
+            if not any("front" in key for key in lower_keys) or not any("wrist" in key for key in lower_keys):
+                raise ValueError(
+                    "ACT handle-latent auxiliary loss needs one front image key and one wrist image key. "
+                    f"Got {image_keys}."
                 )
 
     @property

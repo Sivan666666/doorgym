@@ -1,6 +1,15 @@
 # Door ACT real-deploy notes
 
-Target tested on `anx@192.168.1.154`:
+NX 环境快照、CycloneDDS 备份以及迁移到 x86 小主机的完整说明见：
+
+```text
+high-level/real_deploy/X86_MINIPC_DEPLOYMENT.md
+high-level/real_deploy/X86_4090_DEPLOYMENT_STATUS.md
+high-level/real_deploy/environment_snapshots/x86_4090_20260705/
+```
+
+Target tested on NX（2026-07-04 Wi-Fi DHCP 地址为
+`anx@192.168.1.173`，机器人有线网地址固定为 `192.168.124.25/24`）：
 
 - Jetson Orin NX Super, Ubuntu 22.04 / L4T R36.5, CUDA 12.6
 - Python 3.10.12 with Jetson CUDA PyTorch 2.11.0

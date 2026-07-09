@@ -3423,6 +3423,59 @@ env:
             handle_joint_damping: 0.5
             handle_spring_stiffness: 0.5
             handle_spring_damping: 0.5
+        "669":
+          bounding_box: "fire_door/bounding_box.json"
+          handle_bounding: "fire_door/handle_bounding.json"
+          name: "fire_door"
+          path: "fire_door/model.urdf"
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          bounds_yaw_offset_override: 0.0
+          observer_target_local: [0.3775, -0.0925, 0.945]
+          handle_closeup_target_local: [0.3775, -0.0925, 0.945]
+          robot_alignment_y_offset: 0.18
+          door_motion_sign_multiplier: 1.0
+          door_body_name: "fire_door"
+          handle_body_name: "lever_handle"
+          door_dof_name: "frame_to_fire_door"
+          handle_dof_name: "door_to_lever_handle"
+          controller_multipliers:
+            door_joint_friction: 0.5
+            door_joint_damping: 0.5
+            handle_joint_friction: 0.5
+            handle_joint_damping: 0.5
+            handle_spring_stiffness: 0.5
+            handle_spring_damping: 0.5
+        "670":
+          bounding_box: "glass_door/bounding_box.json"
+          handle_bounding: "glass_door/handle_bounding.json"
+          name: "glass_door"
+          path: "glass_door/model.urdf"
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          bounds_yaw_offset_override: 0.0
+          observer_target_local: [-0.44, -0.058, 0.95]
+          handle_closeup_target_local: [-0.44, -0.058, 0.95]
+          robot_alignment_y_offset: -0.24
+          door_motion_sign_multiplier: 1.0
+          door_body_name: "glass_door"
+          handle_body_name: "glass_door"
+          door_dof_name: "wall_to_glass_door"
+          handle_dof_name: ""
+          handle_unlock_angle: 0.0
+          controller_multipliers:
+            door_joint_friction: 0.5
+            door_joint_damping: 0.5
+            handle_joint_friction: 0.5
+            handle_joint_damping: 0.5
+            handle_spring_stiffness: 0.5
+            handle_spring_damping: 0.5
+          controller_overrides:
+            door_joint_friction: 0.25
+            door_joint_damping: 0.18
+            door_open_resistance: 0.08
+            door_open_damping: 0.05
+            door_auto_open_force: 0.0
 
     control:
       stiffness: {"joint": 80, "z1": 5}

@@ -6,20 +6,30 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
+import torch
+import torch.nn.functional as F
 
 try:
     from .door_dp_common import (
         ACTION_NAMES,
         ACTION_LOSS_WEIGHT_FEATURE,
         FRONT_CAMERA_POSE_FEATURE,
+        FRONT_HANDLE_LATENT_FEATURE,
+        FRONT_HANDLE_LATENT_VALID_FEATURE,
         RAW_FRONT_CAMERA_POSE_KEY,
+        RAW_FRONT_HANDLE_BBOX_KEY,
+        RAW_FRONT_HANDLE_BBOX_VALID_KEY,
         RAW_WRIST_CAMERA_POSE_KEY,
+        RAW_WRIST_HANDLE_BBOX_KEY,
+        RAW_WRIST_HANDLE_BBOX_VALID_KEY,
         DATASET_METADATA_KEYS,
         DEFAULT_KEYFRAME_LOSS_RADIUS,
         DEFAULT_KEYFRAME_LOSS_WEIGHT,
         DEFAULT_NEAR_ZERO_RATE_EPS,
         DoorDPLeRobotRecorder,
         RAW_ACTION_LOSS_WEIGHT_KEY,
+        WRIST_HANDLE_LATENT_FEATURE,
+        WRIST_HANDLE_LATENT_VALID_FEATURE,
         WRIST_CAMERA_POSE_FEATURE,
         apply_door_dp_action_preprocess,
         apply_door_dp_state_preprocess,
@@ -40,14 +50,22 @@ except ImportError:
         ACTION_NAMES,
         ACTION_LOSS_WEIGHT_FEATURE,
         FRONT_CAMERA_POSE_FEATURE,
+        FRONT_HANDLE_LATENT_FEATURE,
+        FRONT_HANDLE_LATENT_VALID_FEATURE,
         RAW_FRONT_CAMERA_POSE_KEY,
+        RAW_FRONT_HANDLE_BBOX_KEY,
+        RAW_FRONT_HANDLE_BBOX_VALID_KEY,
         RAW_WRIST_CAMERA_POSE_KEY,
+        RAW_WRIST_HANDLE_BBOX_KEY,
+        RAW_WRIST_HANDLE_BBOX_VALID_KEY,
         DATASET_METADATA_KEYS,
         DEFAULT_KEYFRAME_LOSS_RADIUS,
         DEFAULT_KEYFRAME_LOSS_WEIGHT,
         DEFAULT_NEAR_ZERO_RATE_EPS,
         DoorDPLeRobotRecorder,
         RAW_ACTION_LOSS_WEIGHT_KEY,
+        WRIST_HANDLE_LATENT_FEATURE,
+        WRIST_HANDLE_LATENT_VALID_FEATURE,
         WRIST_CAMERA_POSE_FEATURE,
         apply_door_dp_action_preprocess,
         apply_door_dp_state_preprocess,
@@ -148,6 +166,17 @@ def parse_args():
             "When set, loss.action_weight is recomputed from keyframe_indices."
         ),
     )
+    parser.add_argument(
+        "--add_handle_latent",
+        action="store_true",
+        help="Precompute frozen DINOv2 handle depth-crop latent targets and store them as aux.* features.",
+    )
+    parser.add_argument("--handle_latent_teacher_model", type=str, default="facebook/dinov2-small")
+    parser.add_argument("--handle_latent_crop_size", type=int, default=224)
+    parser.add_argument("--handle_latent_bbox_margin", type=float, default=0.2)
+    parser.add_argument("--handle_bbox_min_area", type=float, default=20.0)
+    parser.add_argument("--handle_bbox_min_size", type=float, default=3.0)
+    parser.add_argument("--handle_latent_batch_size", type=int, default=64)
     return parser.parse_args()
 
 
@@ -171,6 +200,151 @@ def scalar_str(value):
     if arr.shape == ():
         return str(arr.item())
     return str(arr.reshape(-1)[0])
+
+
+def _normalize_handle_bbox_array(value, frame_count, key, path):
+    array = np.asarray(value, dtype=np.float32).reshape(-1, 4)
+    if array.shape[0] != frame_count:
+        raise ValueError(f"Episode {path} has {key} length {array.shape[0]}, expected {frame_count}.")
+    return array
+
+
+def _normalize_handle_valid_array(value, frame_count, key, path):
+    array = np.asarray(value, dtype=np.float32).reshape(-1, 1)
+    if array.shape[0] != frame_count:
+        raise ValueError(f"Episode {path} has {key} length {array.shape[0]}, expected {frame_count}.")
+    return array
+
+
+def _square_depth_crop_with_padding(depth_u8, bbox_xyxy, crop_size, margin, min_area, min_size, valid=True):
+    if not valid:
+        return None
+    image = np.asarray(depth_u8)
+    if image.ndim == 3:
+        image = image[..., 0]
+    if image.ndim != 2:
+        return None
+    height, width = image.shape
+    x0, y0, x1, y1 = [float(v) for v in np.asarray(bbox_xyxy, dtype=np.float32).reshape(4)]
+    bw = max(0.0, x1 - x0)
+    bh = max(0.0, y1 - y0)
+    if bw < float(min_size) or bh < float(min_size) or bw * bh < float(min_area):
+        return None
+    cx = 0.5 * (x0 + x1)
+    cy = 0.5 * (y0 + y1)
+    side = max(bw, bh) * (1.0 + 2.0 * max(0.0, float(margin)))
+    if side < float(min_size):
+        return None
+    left = int(np.floor(cx - 0.5 * side))
+    top = int(np.floor(cy - 0.5 * side))
+    right = int(np.ceil(cx + 0.5 * side))
+    bottom = int(np.ceil(cy + 0.5 * side))
+    if right <= left or bottom <= top:
+        return None
+
+    pad_left = max(0, -left)
+    pad_top = max(0, -top)
+    pad_right = max(0, right - width)
+    pad_bottom = max(0, bottom - height)
+    padded = np.pad(
+        image,
+        ((pad_top, pad_bottom), (pad_left, pad_right)),
+        mode="constant",
+        constant_values=0,
+    )
+    crop = padded[top + pad_top : bottom + pad_top, left + pad_left : right + pad_left]
+    if crop.size <= 0:
+        return None
+    crop_t = torch.from_numpy(crop.astype(np.float32, copy=False)).view(1, 1, crop.shape[0], crop.shape[1]) / 255.0
+    crop_t = F.interpolate(crop_t, size=(int(crop_size), int(crop_size)), mode="bilinear", align_corners=False)
+    crop_t = crop_t.repeat(1, 3, 1, 1).squeeze(0)
+    return crop_t
+
+
+class DINOv2HandleLatentTeacher:
+    def __init__(self, model_name, device=None):
+        try:
+            from transformers import AutoModel
+        except Exception as exc:
+            raise RuntimeError(
+                "DINOv2 handle-latent conversion requires the `transformers` package. "
+                "Run this converter in the b1z1_lerobot environment."
+            ) from exc
+        self.device = torch.device(device or ("cuda:0" if torch.cuda.is_available() else "cpu"))
+        self.model = AutoModel.from_pretrained(str(model_name)).to(self.device)
+        self.model.eval()
+        for parameter in self.model.parameters():
+            parameter.requires_grad_(False)
+        hidden_size = int(getattr(self.model.config, "hidden_size"))
+        if hidden_size != 384:
+            raise ValueError(
+                f"Handle latent v1 expects DINOv2-small hidden size 384, got {hidden_size} from {model_name!r}."
+            )
+        self.registered_model_name = str(model_name)
+        self.mean = torch.tensor([0.485, 0.456, 0.406], dtype=torch.float32, device=self.device).view(1, 3, 1, 1)
+        self.std = torch.tensor([0.229, 0.224, 0.225], dtype=torch.float32, device=self.device).view(1, 3, 1, 1)
+
+    @torch.no_grad()
+    def encode_crops(self, crops, batch_size=64):
+        if not crops:
+            return np.zeros((0, 384), dtype=np.float32)
+        latents = []
+        batch_size = max(1, int(batch_size))
+        for start in range(0, len(crops), batch_size):
+            batch = torch.stack(crops[start : start + batch_size], dim=0).to(self.device, dtype=torch.float32)
+            batch = (batch - self.mean) / self.std
+            outputs = self.model(pixel_values=batch)
+            patch_tokens = outputs.last_hidden_state[:, 1:, :]
+            pooled = F.normalize(patch_tokens.mean(dim=1), p=2, dim=-1)
+            latents.append(pooled.detach().cpu().to(torch.float32).numpy())
+        return np.concatenate(latents, axis=0).astype(np.float32, copy=False)
+
+
+def compute_episode_handle_latents(
+    payload,
+    teacher,
+    *,
+    crop_size,
+    margin,
+    min_area,
+    min_size,
+    batch_size,
+):
+    n = int(payload["n"])
+    outputs = {
+        "front_handle_latent": np.zeros((n, 384), dtype=np.float32),
+        "front_handle_latent_valid": np.zeros((n, 1), dtype=np.float32),
+        "wrist_handle_latent": np.zeros((n, 384), dtype=np.float32),
+        "wrist_handle_latent_valid": np.zeros((n, 1), dtype=np.float32),
+    }
+    for view, depth_key, bbox_key, valid_key in (
+        ("front", "front_second", "front_handle_bbox_xyxy", "front_handle_bbox_valid"),
+        ("wrist", "wrist_second", "wrist_handle_bbox_xyxy", "wrist_handle_bbox_valid"),
+    ):
+        crops = []
+        crop_indices = []
+        depths = payload[depth_key]
+        bboxes = payload[bbox_key]
+        valids = payload[valid_key].reshape(-1)
+        for idx in range(n):
+            crop = _square_depth_crop_with_padding(
+                depths[idx],
+                bboxes[idx],
+                crop_size=crop_size,
+                margin=margin,
+                min_area=min_area,
+                min_size=min_size,
+                valid=bool(valids[idx] > 0.5),
+            )
+            if crop is None:
+                continue
+            crops.append(crop)
+            crop_indices.append(idx)
+        latents = teacher.encode_crops(crops, batch_size=batch_size)
+        if crop_indices:
+            outputs[f"{view}_handle_latent"][np.asarray(crop_indices, dtype=np.int64)] = latents
+            outputs[f"{view}_handle_latent_valid"][np.asarray(crop_indices, dtype=np.int64), 0] = 1.0
+    return outputs
 
 
 def array_to_str_list(value):
@@ -410,6 +584,46 @@ def load_episode_payload(
         else:
             front_camera_pose_base = None
             wrist_camera_pose_base = None
+        has_handle_bbox = RAW_FRONT_HANDLE_BBOX_KEY in data.files or RAW_WRIST_HANDLE_BBOX_KEY in data.files
+        if has_handle_bbox:
+            required_bbox = [
+                RAW_FRONT_HANDLE_BBOX_KEY,
+                RAW_FRONT_HANDLE_BBOX_VALID_KEY,
+                RAW_WRIST_HANDLE_BBOX_KEY,
+                RAW_WRIST_HANDLE_BBOX_VALID_KEY,
+            ]
+            missing_bbox = [key for key in required_bbox if key not in data.files]
+            if missing_bbox:
+                raise ValueError(f"Episode {path} has incomplete handle bbox fields; missing {missing_bbox}.")
+            front_handle_bbox_xyxy = _normalize_handle_bbox_array(
+                data[RAW_FRONT_HANDLE_BBOX_KEY],
+                states.shape[0],
+                RAW_FRONT_HANDLE_BBOX_KEY,
+                path,
+            )
+            front_handle_bbox_valid = _normalize_handle_valid_array(
+                data[RAW_FRONT_HANDLE_BBOX_VALID_KEY],
+                states.shape[0],
+                RAW_FRONT_HANDLE_BBOX_VALID_KEY,
+                path,
+            )
+            wrist_handle_bbox_xyxy = _normalize_handle_bbox_array(
+                data[RAW_WRIST_HANDLE_BBOX_KEY],
+                states.shape[0],
+                RAW_WRIST_HANDLE_BBOX_KEY,
+                path,
+            )
+            wrist_handle_bbox_valid = _normalize_handle_valid_array(
+                data[RAW_WRIST_HANDLE_BBOX_VALID_KEY],
+                states.shape[0],
+                RAW_WRIST_HANDLE_BBOX_VALID_KEY,
+                path,
+            )
+        else:
+            front_handle_bbox_xyxy = None
+            front_handle_bbox_valid = None
+            wrist_handle_bbox_xyxy = None
+            wrist_handle_bbox_valid = None
         override_keyframe_weight = (
             keyframe_loss_weight_override is not None or keyframe_loss_radius_override is not None
         )
@@ -466,6 +680,13 @@ def load_episode_payload(
         front_camera_pose_base.shape[0] != n or wrist_camera_pose_base.shape[0] != n
     ):
         raise ValueError(f"Episode {path} has camera pose length inconsistent with frame count.")
+    if front_handle_bbox_xyxy is not None and (
+        front_handle_bbox_xyxy.shape[0] != n
+        or front_handle_bbox_valid.shape[0] != n
+        or wrist_handle_bbox_xyxy.shape[0] != n
+        or wrist_handle_bbox_valid.shape[0] != n
+    ):
+        raise ValueError(f"Episode {path} has handle bbox length inconsistent with frame count.")
     return {
         "path_name": Path(path).name,
         "task": task,
@@ -480,6 +701,11 @@ def load_episode_payload(
         "front_camera_pose_base": front_camera_pose_base,
         "wrist_camera_pose_base": wrist_camera_pose_base,
         "has_camera_pose": front_camera_pose_base is not None,
+        "has_handle_bbox": front_handle_bbox_xyxy is not None,
+        "front_handle_bbox_xyxy": front_handle_bbox_xyxy,
+        "front_handle_bbox_valid": front_handle_bbox_valid,
+        "wrist_handle_bbox_xyxy": wrist_handle_bbox_xyxy,
+        "wrist_handle_bbox_valid": wrist_handle_bbox_valid,
         "n": n,
     }
 
@@ -540,6 +766,28 @@ def main():
             f"{RAW_FRONT_CAMERA_POSE_KEY}={RAW_FRONT_CAMERA_POSE_KEY in first.files}, "
             f"{RAW_WRIST_CAMERA_POSE_KEY}={RAW_WRIST_CAMERA_POSE_KEY in first.files}."
         )
+    has_handle_bbox = RAW_FRONT_HANDLE_BBOX_KEY in first.files or RAW_WRIST_HANDLE_BBOX_KEY in first.files
+    if args.add_handle_latent:
+        required_bbox = [
+            RAW_FRONT_HANDLE_BBOX_KEY,
+            RAW_FRONT_HANDLE_BBOX_VALID_KEY,
+            RAW_WRIST_HANDLE_BBOX_KEY,
+            RAW_WRIST_HANDLE_BBOX_VALID_KEY,
+        ]
+        missing_bbox = [key for key in required_bbox if key not in first.files]
+        if missing_bbox:
+            raise ValueError(
+                "--add_handle_latent requires raw episodes recorded with --record_handle_bbox. "
+                f"The first episode is missing {missing_bbox}."
+            )
+    if args.handle_latent_crop_size <= 0:
+        raise ValueError("--handle_latent_crop_size must be positive")
+    if args.handle_latent_bbox_margin < 0.0:
+        raise ValueError("--handle_latent_bbox_margin must be non-negative")
+    if args.handle_bbox_min_area < 0.0 or args.handle_bbox_min_size < 0.0:
+        raise ValueError("--handle_bbox_min_area and --handle_bbox_min_size must be non-negative")
+    if args.handle_latent_batch_size <= 0:
+        raise ValueError("--handle_latent_batch_size must be positive")
     if first["action"].shape[-1] != len(action_names):
         raise ValueError(
             f"Raw action_dim={first['action'].shape[-1]} does not match action_names={len(action_names)}: "
@@ -565,8 +813,11 @@ def main():
     action_frame = detect_action_frame(first, sidecar)
     ikpush_state_version = detect_ikpush_state_version(first, sidecar)
     controller_mode = detect_controller_mode(first, sidecar)
-    if action_frame not in ("world", "base"):
-        raise ValueError(f"Unsupported raw action_frame={action_frame!r}; expected 'world' or 'base'.")
+    if action_frame not in ("world", "base", "robot_base_full", "base_full", "arm_base", "robot_base", "true_base"):
+        raise ValueError(
+            f"Unsupported raw action_frame={action_frame!r}; "
+            "expected 'world', 'base', or 'robot_base_full'."
+        )
     if raw_vision_mode != vision_mode:
         raise ValueError(
             f"Raw data vision_mode={raw_vision_mode!r}, but converter was run with "
@@ -659,6 +910,17 @@ def main():
         inherited_metadata.setdefault("camera_pose_features", [FRONT_CAMERA_POSE_FEATURE, WRIST_CAMERA_POSE_FEATURE])
         inherited_metadata.setdefault("camera_pose_frame", "robot_base")
         inherited_metadata.setdefault("camera_pose_convention", "optical_frame")
+    if has_handle_bbox:
+        inherited_metadata.setdefault(
+            "handle_bbox_features",
+            [
+                RAW_FRONT_HANDLE_BBOX_KEY,
+                RAW_FRONT_HANDLE_BBOX_VALID_KEY,
+                RAW_WRIST_HANDLE_BBOX_KEY,
+                RAW_WRIST_HANDLE_BBOX_VALID_KEY,
+            ],
+        )
+        inherited_metadata.setdefault("handle_bbox_convention", "xyxy_half_open_pixels")
     converted_keyframe_loss_weight = (
         float(args.keyframe_loss_weight)
         if args.keyframe_loss_weight is not None
@@ -706,6 +968,14 @@ def main():
     converted_state_normalized = bool(state_preprocess_config.get("applied", False))
     state_sanitize_config = make_door_dp_sanitize_config(state_names, eps=args.near_zero_rate_eps)
     action_sanitize_config = make_door_dp_sanitize_config(action_names, eps=args.near_zero_rate_eps)
+    handle_latent_teacher = None
+    if args.add_handle_latent:
+        print(
+            f"Loading frozen handle-latent teacher {args.handle_latent_teacher_model!r} "
+            f"for {len(files)} raw episodes...",
+            flush=True,
+        )
+        handle_latent_teacher = DINOv2HandleLatentTeacher(args.handle_latent_teacher_model)
     recorder = DoorDPLeRobotRecorder(
         root=args.root,
         repo_id=args.repo_id,
@@ -719,6 +989,7 @@ def main():
         video_codec=args.video_codec,
         include_action_loss_weight=True,
         include_camera_pose=has_camera_pose,
+        include_handle_latent=bool(args.add_handle_latent),
         metadata={
             **inherited_metadata,
             "action_frame": action_frame,
@@ -737,6 +1008,23 @@ def main():
             "action_loss_weight_feature": ACTION_LOSS_WEIGHT_FEATURE,
             "keyframe_loss_weight": converted_keyframe_loss_weight,
             "keyframe_loss_radius": converted_keyframe_loss_radius,
+            **(
+                {
+                    "handle_latent_features": [
+                        FRONT_HANDLE_LATENT_FEATURE,
+                        FRONT_HANDLE_LATENT_VALID_FEATURE,
+                        WRIST_HANDLE_LATENT_FEATURE,
+                        WRIST_HANDLE_LATENT_VALID_FEATURE,
+                    ],
+                    "handle_latent_teacher_model": args.handle_latent_teacher_model,
+                    "handle_latent_crop_size": int(args.handle_latent_crop_size),
+                    "handle_latent_bbox_margin": float(args.handle_latent_bbox_margin),
+                    "handle_bbox_min_area": float(args.handle_bbox_min_area),
+                    "handle_bbox_min_size": float(args.handle_bbox_min_size),
+                }
+                if args.add_handle_latent
+                else {}
+            ),
         },
     )
     payloads = iter_episode_payloads(
@@ -773,8 +1061,24 @@ def main():
                 f"Episode {payload['path_name']} camera-pose presence does not match the first episode. "
                 "Do not mix Plücker-ready and legacy raw episodes in one conversion."
             )
+        if bool(payload.get("has_handle_bbox", False)) != bool(has_handle_bbox):
+            raise ValueError(
+                f"Episode {payload['path_name']} handle-bbox presence does not match the first episode. "
+                "Do not mix handle-latent-ready and legacy raw episodes in one conversion."
+            )
         front_camera_pose_base = payload.get("front_camera_pose_base")
         wrist_camera_pose_base = payload.get("wrist_camera_pose_base")
+        handle_latents = None
+        if args.add_handle_latent:
+            handle_latents = compute_episode_handle_latents(
+                payload,
+                handle_latent_teacher,
+                crop_size=args.handle_latent_crop_size,
+                margin=args.handle_latent_bbox_margin,
+                min_area=args.handle_bbox_min_area,
+                min_size=args.handle_bbox_min_size,
+                batch_size=args.handle_latent_batch_size,
+            )
         n = payload["n"]
         for i in range(n):
             recorder.add_frame(
@@ -788,6 +1092,10 @@ def main():
                 action_loss_weight=action_loss_weight[i],
                 front_camera_pose_base=None if front_camera_pose_base is None else front_camera_pose_base[i],
                 wrist_camera_pose_base=None if wrist_camera_pose_base is None else wrist_camera_pose_base[i],
+                front_handle_latent=None if handle_latents is None else handle_latents["front_handle_latent"][i],
+                front_handle_latent_valid=None if handle_latents is None else handle_latents["front_handle_latent_valid"][i],
+                wrist_handle_latent=None if handle_latents is None else handle_latents["wrist_handle_latent"][i],
+                wrist_handle_latent_valid=None if handle_latents is None else handle_latents["wrist_handle_latent_valid"][i],
             )
         recorder.save_episode()
         print(f"Converted {payload['path_name']}: {n} frames task={task!r} ({ep_idx + 1}/{len(files)})", flush=True)
@@ -821,6 +1129,26 @@ def main():
         sidecar_payload["camera_pose_features"] = [FRONT_CAMERA_POSE_FEATURE, WRIST_CAMERA_POSE_FEATURE]
         sidecar_payload["camera_pose_frame"] = "robot_base"
         sidecar_payload["camera_pose_convention"] = "optical_frame"
+    if has_handle_bbox:
+        sidecar_payload["handle_bbox_features"] = [
+            RAW_FRONT_HANDLE_BBOX_KEY,
+            RAW_FRONT_HANDLE_BBOX_VALID_KEY,
+            RAW_WRIST_HANDLE_BBOX_KEY,
+            RAW_WRIST_HANDLE_BBOX_VALID_KEY,
+        ]
+        sidecar_payload["handle_bbox_convention"] = "xyxy_half_open_pixels"
+    if args.add_handle_latent:
+        sidecar_payload["handle_latent_features"] = [
+            FRONT_HANDLE_LATENT_FEATURE,
+            FRONT_HANDLE_LATENT_VALID_FEATURE,
+            WRIST_HANDLE_LATENT_FEATURE,
+            WRIST_HANDLE_LATENT_VALID_FEATURE,
+        ]
+        sidecar_payload["handle_latent_teacher_model"] = args.handle_latent_teacher_model
+        sidecar_payload["handle_latent_crop_size"] = int(args.handle_latent_crop_size)
+        sidecar_payload["handle_latent_bbox_margin"] = float(args.handle_latent_bbox_margin)
+        sidecar_payload["handle_bbox_min_area"] = float(args.handle_bbox_min_area)
+        sidecar_payload["handle_bbox_min_size"] = float(args.handle_bbox_min_size)
     if sidecar:
         for key in DATASET_METADATA_KEYS:
             if key in sidecar and key not in sidecar_payload:

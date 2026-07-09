@@ -1,0 +1,495 @@
+{
+  "margin": 0.2,
+  "tight_color": "red",
+  "expanded_square_color": "green",
+  "episodes": [
+    {
+      "episode": "episode_000000.npz",
+      "events": {
+        "pregrasp": {
+          "frame": 104,
+          "front": {
+            "valid": true,
+            "bbox_xyxy": [
+              572.0,
+              274.0,
+              640.0,
+              304.0
+            ],
+            "width": 68.0,
+            "height": 30.0,
+            "area": 2040.0,
+            "margin_square_xyxy": [
+              558,
+              241,
+              654,
+              337
+            ]
+          },
+          "wrist": {
+            "valid": true,
+            "bbox_xyxy": [
+              292.0,
+              0.0,
+              559.0,
+              129.0
+            ],
+            "width": 267.0,
+            "height": 129.0,
+            "area": 34443.0,
+            "margin_square_xyxy": [
+              238,
+              -123,
+              613,
+              252
+            ]
+          }
+        },
+        "grasp": {
+          "frame": 129,
+          "front": {
+            "valid": true,
+            "bbox_xyxy": [
+              572.0,
+              275.0,
+              624.0,
+              304.0
+            ],
+            "width": 52.0,
+            "height": 29.0,
+            "area": 1508.0,
+            "margin_square_xyxy": [
+              561,
+              253,
+              635,
+              326
+            ]
+          },
+          "wrist": {
+            "valid": true,
+            "bbox_xyxy": [
+              296.0,
+              265.0,
+              640.0,
+              428.0
+            ],
+            "width": 344.0,
+            "height": 163.0,
+            "area": 56072.0,
+            "margin_square_xyxy": [
+              227,
+              105,
+              709,
+              588
+            ]
+          }
+        },
+        "rotate": {
+          "frame": 199,
+          "front": {
+            "valid": true,
+            "bbox_xyxy": [
+              632.0,
+              347.0,
+              640.0,
+              367.0
+            ],
+            "width": 8.0,
+            "height": 20.0,
+            "area": 160.0,
+            "margin_square_xyxy": [
+              622,
+              343,
+              650,
+              371
+            ]
+          },
+          "wrist": {
+            "valid": true,
+            "bbox_xyxy": [
+              306.0,
+              331.0,
+              633.0,
+              441.0
+            ],
+            "width": 327.0,
+            "height": 110.0,
+            "area": 35970.0,
+            "margin_square_xyxy": [
+              240,
+              157,
+              699,
+              615
+            ]
+          }
+        }
+      }
+    },
+    {
+      "episode": "episode_000001.npz",
+      "events": {
+        "pregrasp": {
+          "frame": 148,
+          "front": {
+            "valid": true,
+            "bbox_xyxy": [
+              517.0,
+              255.0,
+              640.0,
+              313.0
+            ],
+            "width": 123.0,
+            "height": 58.0,
+            "area": 7134.0,
+            "margin_square_xyxy": [
+              492,
+              197,
+              665,
+              371
+            ]
+          },
+          "wrist": {
+            "valid": true,
+            "bbox_xyxy": [
+              301.0,
+              0.0,
+              437.0,
+              38.0
+            ],
+            "width": 136.0,
+            "height": 38.0,
+            "area": 5168.0,
+            "margin_square_xyxy": [
+              273,
+              -77,
+              465,
+              115
+            ]
+          }
+        },
+        "grasp": {
+          "frame": 173,
+          "front": {
+            "valid": true,
+            "bbox_xyxy": [
+              517.0,
+              255.0,
+              566.0,
+              286.0
+            ],
+            "width": 49.0,
+            "height": 31.0,
+            "area": 1519.0,
+            "margin_square_xyxy": [
+              507,
+              236,
+              576,
+              305
+            ]
+          },
+          "wrist": {
+            "valid": true,
+            "bbox_xyxy": [
+              289.0,
+              177.0,
+              640.0,
+              328.0
+            ],
+            "width": 351.0,
+            "height": 151.0,
+            "area": 53001.0,
+            "margin_square_xyxy": [
+              218,
+              6,
+              711,
+              499
+            ]
+          }
+        },
+        "rotate": {
+          "frame": 252,
+          "front": {
+            "valid": true,
+            "bbox_xyxy": [
+              565.0,
+              333.0,
+              618.0,
+              372.0
+            ],
+            "width": 53.0,
+            "height": 39.0,
+            "area": 2067.0,
+            "margin_square_xyxy": [
+              554,
+              315,
+              629,
+              390
+            ]
+          },
+          "wrist": {
+            "valid": true,
+            "bbox_xyxy": [
+              300.0,
+              244.0,
+              638.0,
+              353.0
+            ],
+            "width": 338.0,
+            "height": 109.0,
+            "area": 36842.0,
+            "margin_square_xyxy": [
+              232,
+              61,
+              706,
+              536
+            ]
+          }
+        }
+      }
+    },
+    {
+      "episode": "episode_000002.npz",
+      "events": {
+        "pregrasp": {
+          "frame": 179,
+          "front": {
+            "valid": true,
+            "bbox_xyxy": [
+              482.0,
+              193.0,
+              627.0,
+              249.0
+            ],
+            "width": 145.0,
+            "height": 56.0,
+            "area": 8120.0,
+            "margin_square_xyxy": [
+              453,
+              119,
+              656,
+              323
+            ]
+          },
+          "wrist": {
+            "valid": true,
+            "bbox_xyxy": [
+              295.0,
+              3.0,
+              565.0,
+              114.0
+            ],
+            "width": 270.0,
+            "height": 111.0,
+            "area": 29970.0,
+            "margin_square_xyxy": [
+              241,
+              -131,
+              619,
+              248
+            ]
+          }
+        },
+        "grasp": {
+          "frame": 204,
+          "front": {
+            "valid": true,
+            "bbox_xyxy": [
+              482.0,
+              193.0,
+              516.0,
+              221.0
+            ],
+            "width": 34.0,
+            "height": 28.0,
+            "area": 952.0,
+            "margin_square_xyxy": [
+              475,
+              183,
+              523,
+              231
+            ]
+          },
+          "wrist": {
+            "valid": true,
+            "bbox_xyxy": [
+              265.0,
+              286.0,
+              618.0,
+              410.0
+            ],
+            "width": 353.0,
+            "height": 124.0,
+            "area": 43772.0,
+            "margin_square_xyxy": [
+              194,
+              100,
+              689,
+              596
+            ]
+          }
+        },
+        "rotate": {
+          "frame": 284,
+          "front": {
+            "valid": true,
+            "bbox_xyxy": [
+              522.0,
+              259.0,
+              576.0,
+              297.0
+            ],
+            "width": 54.0,
+            "height": 38.0,
+            "area": 2052.0,
+            "margin_square_xyxy": [
+              511,
+              240,
+              587,
+              316
+            ]
+          },
+          "wrist": {
+            "valid": true,
+            "bbox_xyxy": [
+              269.0,
+              339.0,
+              601.0,
+              454.0
+            ],
+            "width": 332.0,
+            "height": 115.0,
+            "area": 38180.0,
+            "margin_square_xyxy": [
+              202,
+              164,
+              668,
+              629
+            ]
+          }
+        }
+      }
+    },
+    {
+      "episode": "episode_000003.npz",
+      "events": {
+        "pregrasp": {
+          "frame": 160,
+          "front": {
+            "valid": true,
+            "bbox_xyxy": [
+              496.0,
+              298.0,
+              640.0,
+              351.0
+            ],
+            "width": 144.0,
+            "height": 53.0,
+            "area": 7632.0,
+            "margin_square_xyxy": [
+              467,
+              223,
+              669,
+              426
+            ]
+          },
+          "wrist": {
+            "valid": true,
+            "bbox_xyxy": [
+              299.0,
+              0.0,
+              354.0,
+              12.0
+            ],
+            "width": 55.0,
+            "height": 12.0,
+            "area": 660.0,
+            "margin_square_xyxy": [
+              288,
+              -33,
+              365,
+              45
+            ]
+          }
+        },
+        "grasp": {
+          "frame": 185,
+          "front": {
+            "valid": true,
+            "bbox_xyxy": [
+              496.0,
+              298.0,
+              540.0,
+              326.0
+            ],
+            "width": 44.0,
+            "height": 28.0,
+            "area": 1232.0,
+            "margin_square_xyxy": [
+              487,
+              281,
+              549,
+              343
+            ]
+          },
+          "wrist": {
+            "valid": true,
+            "bbox_xyxy": [
+              273.0,
+              177.0,
+              640.0,
+              319.0
+            ],
+            "width": 367.0,
+            "height": 142.0,
+            "area": 52114.0,
+            "margin_square_xyxy": [
+              199,
+              -9,
+              714,
+              505
+            ]
+          }
+        },
+        "rotate": {
+          "frame": 264,
+          "front": {
+            "valid": true,
+            "bbox_xyxy": [
+              545.0,
+              374.0,
+              594.0,
+              412.0
+            ],
+            "width": 49.0,
+            "height": 38.0,
+            "area": 1862.0,
+            "margin_square_xyxy": [
+              535,
+              358,
+              604,
+              428
+            ]
+          },
+          "wrist": {
+            "valid": true,
+            "bbox_xyxy": [
+              294.0,
+              238.0,
+              640.0,
+              353.0
+            ],
+            "width": 346.0,
+            "height": 115.0,
+            "area": 39790.0,
+            "margin_square_xyxy": [
+              224,
+              53,
+              710,
+              538
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

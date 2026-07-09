@@ -1,0 +1,14 @@
+cyclonedds	5041f3560c088c99e5088b2b8520b69169621196
+cyclonedds remote origin	https://github.com/eclipse-cyclonedds/cyclonedds (fetch)
+cyclonedds remote origin	https://github.com/eclipse-cyclonedds/cyclonedds (push)
+rmw_cyclonedds	fa8831b9f331d669c3ea408fd00606a223c6bbd9
+rmw_cyclonedds remote origin	https://github.com/ros2/rmw_cyclonedds (fetch)
+rmw_cyclonedds remote origin	https://github.com/ros2/rmw_cyclonedds (push)
+unitree	3ff13ea08ec619496c2651fd21b172f7958dd5a5
+unitree remote origin	https://github.com/unitreerobotics/unitree_ros2.git (fetch)
+unitree remote origin	https://github.com/unitreerobotics/unitree_ros2.git (push)
+unitree status  M ../cyclonedds.xml
+unitree status  M ../../../setup.sh
+unitree status ?? ../cyclonedds/
+unitree status ?? ../rmw_cyclonedds/
+unitree status ?? ../../../setup.sh.bak

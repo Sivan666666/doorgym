@@ -80,6 +80,7 @@ class RolloutTracker:
         self.door_spec = door_spec
         self.skill_program = skill_program
         self.asset_supported = bool((door_spec or {}).get("supported", True))
+        self.has_handle_dof = True if door_spec is None else bool(str(door_spec.get("handle_dof_name", "") or "").strip())
         self.pass_open_angle_deg = float(pass_open_angle_deg)
         self.door_motion_sign = float(door_motion_sign)
         self.handle_lower = float(handle_lower)
@@ -102,7 +103,7 @@ class RolloutTracker:
         self.base_collision = False
         self.body_passed = False
         self.camera_available = not self.camera_required
-        self.handle_unlocked = False
+        self.handle_unlocked = not self.has_handle_dof
         self.joint_limit_hit = False
         self.pre_push_joint_limit_hit = False
         self.last_base_xy: list[float] | None = None
@@ -254,7 +255,7 @@ class RolloutTracker:
             return "handle_not_unlocked"
         if self.max_ee_tracking_error > 0.12 or self.joint_limit_hit:
             return "arm_joint_limit_or_ik_bad"
-        if self.max_push_ee_handle_dist > 0.20:
+        if self.has_handle_dof and self.max_push_ee_handle_dist > 0.20:
             return "contact_lost"
         if self.max_door_open_deg < self.pass_open_angle_deg:
             return "door_push_insufficient"
@@ -321,7 +322,7 @@ class RolloutTracker:
             failures.append("handle_not_unlocked")
         if self.base_collision:
             failures.append("base_collision")
-        if self.max_push_ee_handle_dist > 0.20:
+        if self.has_handle_dof and self.max_push_ee_handle_dist > 0.20:
             failures.append("contact_lost")
         if self.max_door_open_deg < self.pass_open_angle_deg:
             failures.append("door_push_insufficient")

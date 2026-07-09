@@ -427,6 +427,26 @@ class ACTPolicy(PreTrainedPolicy):
             per_sample_loss = l1_per_sample
             loss = l1_loss
 
+        handle_latent_loss = self.model._last_handle_latent_loss
+        if handle_latent_loss is not None:
+            handle_weight = float(self.config.handle_latent_loss_weight)
+            loss = loss + handle_weight * handle_latent_loss
+            per_sample_loss = per_sample_loss + handle_weight * handle_latent_loss
+            loss_dict["handle_latent_loss"] = float(handle_latent_loss.detach().cpu())
+            loss_dict["handle_latent_loss_weight"] = handle_weight
+            if self.model._last_handle_latent_front_loss is not None:
+                loss_dict["handle_latent_front_loss"] = float(
+                    self.model._last_handle_latent_front_loss.detach().cpu()
+                )
+            if self.model._last_handle_latent_wrist_loss is not None:
+                loss_dict["handle_latent_wrist_loss"] = float(
+                    self.model._last_handle_latent_wrist_loss.detach().cpu()
+                )
+            if self.model._last_handle_latent_valid_count is not None:
+                loss_dict["handle_latent_valid_count"] = float(
+                    self.model._last_handle_latent_valid_count.detach().cpu()
+                )
+
         if reduction == "none":
             return per_sample_loss, loss_dict
         if reduction != "mean":
@@ -731,6 +751,33 @@ class ACTPluckerEncoder(nn.Module):
         return F.adaptive_avg_pool2d(geom, output_size=(int(target_hw[0]), int(target_hw[1])))
 
 
+class ACTHandleLatentHead(nn.Module):
+    """Predict a frozen-teacher handle latent from one camera view's image tokens."""
+
+    def __init__(self, dim_model: int, n_heads: int, latent_dim: int, dropout: float) -> None:
+        super().__init__()
+        self.query = nn.Embedding(1, int(dim_model))
+        self.cross_attn = nn.MultiheadAttention(int(dim_model), int(n_heads), dropout=float(dropout))
+        self.head = nn.Sequential(
+            nn.LayerNorm(int(dim_model)),
+            nn.Linear(int(dim_model), int(dim_model)),
+            nn.GELU(),
+            nn.Linear(int(dim_model), int(latent_dim)),
+        )
+
+    def forward(self, image_tokens: Tensor) -> Tensor:
+        """Return B×latent_dim from image tokens shaped S×B×D."""
+        if image_tokens.ndim != 3:
+            raise ValueError(
+                "ACTHandleLatentHead expects image tokens shaped (sequence, batch, dim); "
+                f"got {tuple(image_tokens.shape)}."
+            )
+        batch_size = int(image_tokens.shape[1])
+        query = self.query.weight.unsqueeze(1).expand(-1, batch_size, -1)
+        handle_token = self.cross_attn(query=query, key=image_tokens, value=image_tokens)[0][0]
+        return self.head(handle_token)
+
+
 class ACT(nn.Module):
     """Action Chunking Transformer: The underlying neural network for ACTPolicy.
 
@@ -895,8 +942,14 @@ class ACT(nn.Module):
 
         self._reset_parameters()
         self._last_camera_gates: Tensor | None = None
+        self._last_handle_latent_loss: Tensor | None = None
+        self._last_handle_latent_front_loss: Tensor | None = None
+        self._last_handle_latent_wrist_loss: Tensor | None = None
+        self._last_handle_latent_valid_count: Tensor | None = None
         if self.config.camera_input_gating:
             self._init_camera_input_gating()
+        if self.config.handle_latent_aux:
+            self._init_handle_latent_aux()
 
     def _plucker_pose_key_for_image_key(self, image_key: str) -> str:
         image_key_lower = str(image_key).lower()
@@ -921,6 +974,143 @@ class ACT(nn.Module):
         else:
             pose = pose.reshape(int(batch_size), 7)
         return pose
+
+    def _init_handle_latent_aux(self) -> None:
+        image_keys = list(self.config.image_features)
+
+        def resolve_camera_index(camera_name: str) -> int:
+            candidates = [index for index, key in enumerate(image_keys) if camera_name in str(key).lower()]
+            if len(candidates) != 1:
+                raise ValueError(
+                    f"Could not uniquely infer the {camera_name} camera for handle-latent aux from ACT image "
+                    f"features {image_keys}."
+                )
+            return candidates[0]
+
+        self.handle_latent_front_index = resolve_camera_index("front")
+        self.handle_latent_wrist_index = resolve_camera_index("wrist")
+        if self.handle_latent_front_index == self.handle_latent_wrist_index:
+            raise ValueError("Front and wrist handle-latent aux keys must refer to different image features.")
+        self.front_handle_latent_head = ACTHandleLatentHead(
+            dim_model=self.config.dim_model,
+            n_heads=self.config.n_heads,
+            latent_dim=self.config.handle_latent_dim,
+            dropout=self.config.dropout,
+        )
+        self.wrist_handle_latent_head = ACTHandleLatentHead(
+            dim_model=self.config.dim_model,
+            n_heads=self.config.n_heads,
+            latent_dim=self.config.handle_latent_dim,
+            dropout=self.config.dropout,
+        )
+
+    def _handle_latent_target_from_batch(
+        self,
+        batch: dict[str, Tensor],
+        *,
+        target_key: str,
+        valid_key: str,
+        batch_size: int,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> tuple[Tensor, Tensor] | tuple[None, None]:
+        missing = [key for key in (target_key, valid_key) if key not in batch]
+        if missing:
+            if self.training:
+                raise KeyError(
+                    "ACT handle-latent aux is enabled, but the training batch is missing "
+                    f"{missing}. Re-convert the dataset with --add_handle_latent, or disable "
+                    "--policy.handle_latent_aux."
+                )
+            return None, None
+        target = batch[target_key].to(device=device, dtype=dtype).reshape(int(batch_size), -1)
+        if target.shape[-1] != int(self.config.handle_latent_dim):
+            raise ValueError(
+                f"Handle latent target {target_key!r} must have dim {self.config.handle_latent_dim}; "
+                f"got shape {tuple(target.shape)}."
+            )
+        valid = batch[valid_key].to(device=device, dtype=dtype).reshape(int(batch_size), -1)[:, 0]
+        valid = torch.clamp(valid, min=0.0, max=1.0)
+        return target, valid
+
+    def _compute_handle_latent_aux_loss(
+        self,
+        batch: dict[str, Tensor],
+        encoder_out: Tensor,
+        camera_token_spans: dict[int, tuple[int, int]],
+        *,
+        batch_size: int,
+    ) -> None:
+        self._last_handle_latent_loss = None
+        self._last_handle_latent_front_loss = None
+        self._last_handle_latent_wrist_loss = None
+        self._last_handle_latent_valid_count = None
+
+        if not self.config.handle_latent_aux or not self.training:
+            return
+
+        device = encoder_out.device
+        dtype = encoder_out.dtype
+        numerator = encoder_out.new_zeros(())
+        denom = encoder_out.new_zeros(())
+
+        def view_loss(
+            *,
+            camera_index: int,
+            head: ACTHandleLatentHead,
+            target_key: str,
+            valid_key: str,
+        ) -> tuple[Tensor, Tensor, Tensor]:
+            if camera_index not in camera_token_spans:
+                raise RuntimeError(
+                    f"Internal ACT error: no image token span recorded for camera index {camera_index}."
+                )
+            start, end = camera_token_spans[camera_index]
+            pred = head(encoder_out[start:end])
+            target, valid = self._handle_latent_target_from_batch(
+                batch,
+                target_key=target_key,
+                valid_key=valid_key,
+                batch_size=batch_size,
+                device=device,
+                dtype=dtype,
+            )
+            if target is None or valid is None:
+                zero = encoder_out.new_zeros(())
+                return zero, zero, zero
+            pred = F.normalize(pred, p=2, dim=-1)
+            target = F.normalize(target, p=2, dim=-1)
+            per_sample = 1.0 - (pred * target).sum(dim=-1)
+            valid_sum = valid.sum()
+            weighted_sum = (valid * per_sample).sum()
+            mean_valid_loss = weighted_sum / torch.clamp(valid_sum, min=1.0)
+            return weighted_sum, valid_sum, mean_valid_loss
+
+        front_sum, front_valid_sum, front_loss = view_loss(
+            camera_index=self.handle_latent_front_index,
+            head=self.front_handle_latent_head,
+            target_key=str(self.config.handle_latent_front_key),
+            valid_key=str(self.config.handle_latent_front_valid_key),
+        )
+        wrist_sum, wrist_valid_sum, wrist_loss = view_loss(
+            camera_index=self.handle_latent_wrist_index,
+            head=self.wrist_handle_latent_head,
+            target_key=str(self.config.handle_latent_wrist_key),
+            valid_key=str(self.config.handle_latent_wrist_valid_key),
+        )
+        numerator = numerator + front_sum + wrist_sum
+        denom = denom + front_valid_sum + wrist_valid_sum
+        self._last_handle_latent_loss = numerator / torch.clamp(denom, min=1.0)
+        # If no handle target is valid in the batch, explicitly keep the loss at
+        # zero without letting invalid samples dilute valid-sample batches.
+        self._last_handle_latent_loss = torch.where(
+            denom > 0.0,
+            self._last_handle_latent_loss,
+            numerator.detach() * 0.0,
+        )
+        self._last_handle_latent_front_loss = front_loss
+        self._last_handle_latent_wrist_loss = wrist_loss
+        self._last_handle_latent_valid_count = denom.detach()
 
     def _reset_parameters(self):
         """Xavier-uniform initialization of the transformer parameters as in the original code."""
@@ -995,6 +1185,10 @@ class ACT(nn.Module):
                 "actions must be provided when using the variational objective in training mode."
             )
         self._last_camera_gates = None
+        self._last_handle_latent_loss = None
+        self._last_handle_latent_front_loss = None
+        self._last_handle_latent_wrist_loss = None
+        self._last_handle_latent_valid_count = None
 
         batch_size = batch[OBS_IMAGES][0].shape[0] if OBS_IMAGES in batch else batch[OBS_ENV_STATE].shape[0]
 
@@ -1055,6 +1249,7 @@ class ACT(nn.Module):
         # Prepare transformer encoder inputs.
         encoder_in_tokens = [self.encoder_latent_input_proj(latent_sample)]
         encoder_in_pos_embed = list(self.encoder_1d_feature_pos_embed.weight.unsqueeze(1))
+        camera_token_spans: dict[int, tuple[int, int]] = {}
         # Robot state token.
         if self.config.robot_state_feature:
             encoder_in_tokens.append(self.encoder_robot_state_input_proj(batch[OBS_STATE]))
@@ -1101,6 +1296,9 @@ class ACT(nn.Module):
                 # Rearrange features to (sequence, batch, dim).
                 cam_features = einops.rearrange(cam_features, "b c h w -> (h w) b c")
                 cam_pos_embed = einops.rearrange(cam_pos_embed, "b c h w -> (h w) b c")
+                token_start = len(encoder_in_tokens)
+                token_end = token_start + int(cam_features.shape[0])
+                camera_token_spans[int(camera_index)] = (token_start, token_end)
 
                 # Extend immediately instead of accumulating and concatenating
                 # Convert to list to extend properly
@@ -1113,6 +1311,12 @@ class ACT(nn.Module):
 
         # Forward pass through the transformer modules.
         encoder_out = self.encoder(encoder_in_tokens, pos_embed=encoder_in_pos_embed)
+        self._compute_handle_latent_aux_loss(
+            batch,
+            encoder_out,
+            camera_token_spans,
+            batch_size=batch_size,
+        )
         # TODO(rcadene, alexander-soare): remove call to `device` ; precompute and use buffer
         decoder_in = torch.zeros(
             (self.config.chunk_size, batch_size, self.config.dim_model),

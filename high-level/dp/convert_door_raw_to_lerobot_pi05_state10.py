@@ -342,8 +342,11 @@ def main():
     action_frame = detect_action_frame(first, sidecar)
     ikpush_state_version = detect_ikpush_state_version(first, sidecar)
     controller_mode = detect_controller_mode(first, sidecar)
-    if action_frame not in ("world", "base"):
-        raise ValueError(f"Unsupported raw action_frame={action_frame!r}; expected 'world' or 'base'.")
+    if action_frame not in ("world", "base", "robot_base_full", "base_full", "arm_base", "robot_base", "true_base"):
+        raise ValueError(
+            f"Unsupported raw action_frame={action_frame!r}; "
+            "expected 'world', 'base', or 'robot_base_full'."
+        )
     if raw_vision_mode != vision_mode:
         raise ValueError(
             f"Raw data vision_mode={raw_vision_mode!r}, but converter was run with "

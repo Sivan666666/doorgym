@@ -16,6 +16,10 @@ Outputs:
   - frame_000_contact.png
   - contact_all_3frames.png
   - metadata.json                         # intrinsics, resolution, SDK info
+
+With ``--interactive``, a live aligned RGB/depth window is shown. Press SPACE
+to save one RGBD sample, or Q/ESC to quit. The program exits automatically
+after ``--frames`` samples have been saved.
 """
 
 from __future__ import annotations
@@ -148,6 +152,95 @@ def _depth_stats(depth_m: np.ndarray) -> dict[str, Any]:
     }
 
 
+def _save_rgbd_sample(
+    out_dir: Path,
+    saved: int,
+    rgb: np.ndarray,
+    depth_m: np.ndarray,
+    near_m: float,
+    far_m: float,
+) -> dict[str, Any]:
+    depth_mm = np.zeros(depth_m.shape, dtype=np.uint16)
+    valid = np.isfinite(depth_m) & (depth_m > 0)
+    depth_mm[valid] = np.clip(
+        np.rint(depth_m[valid] * 1000.0), 0, np.iinfo(np.uint16).max
+    ).astype(np.uint16)
+    depth_gray = _depth_to_u8(depth_m, near_m, far_m)
+    depth_color = _depth_to_color_rgb(depth_gray)
+    contact = _make_contact(rgb, depth_gray, depth_color)
+
+    stem = f"frame_{saved:03d}"
+    _save_png(out_dir / f"{stem}_rgb.png", rgb)
+    _save_png(out_dir / f"{stem}_depth_mm.png", depth_mm)
+    np.save(out_dir / f"{stem}_depth_m.npy", depth_m)
+    _save_png(out_dir / f"{stem}_depth_gray_0p2_1p5.png", depth_gray)
+    _save_png(out_dir / f"{stem}_depth_color_0p2_1p5.png", depth_color)
+    _save_png(out_dir / f"{stem}_contact.png", contact)
+
+    frame_meta = {
+        "index": saved,
+        "rgb_shape": list(rgb.shape),
+        "depth_shape": list(depth_m.shape),
+        "depth_dtype": str(depth_m.dtype),
+        "depth_stats": _depth_stats(depth_m),
+        "files": {
+            "rgb": f"{stem}_rgb.png",
+            "depth_mm": f"{stem}_depth_mm.png",
+            "depth_m": f"{stem}_depth_m.npy",
+            "depth_gray": f"{stem}_depth_gray_0p2_1p5.png",
+            "depth_color": f"{stem}_depth_color_0p2_1p5.png",
+            "contact": f"{stem}_contact.png",
+        },
+    }
+    print(
+        f"saved {stem}: rgb={rgb.shape} depth={depth_m.shape} "
+        f"valid={frame_meta['depth_stats']['valid_ratio']:.3f}"
+    )
+    return frame_meta
+
+
+def _show_interactive_preview(
+    rgb: np.ndarray,
+    depth_m: np.ndarray,
+    near_m: float,
+    far_m: float,
+    saved: int,
+    target: int,
+    preview_width: int,
+    window_name: str,
+) -> int:
+    import cv2
+
+    depth_gray = _depth_to_u8(depth_m, near_m, far_m)
+    width = max(640, int(preview_width))
+    panel_width = width // 2
+    scale = min(1.0, panel_width / float(rgb.shape[1]))
+    panel_size = (
+        max(1, int(round(rgb.shape[1] * scale))),
+        max(1, int(round(rgb.shape[0] * scale))),
+    )
+    rgb_small = cv2.resize(rgb, panel_size, interpolation=cv2.INTER_AREA)
+    depth_small = cv2.resize(depth_gray, panel_size, interpolation=cv2.INTER_NEAREST)
+    rgb_bgr = cv2.cvtColor(rgb_small, cv2.COLOR_RGB2BGR)
+    depth_bgr = cv2.applyColorMap(depth_small, cv2.COLORMAP_TURBO)
+    depth_bgr[depth_small == 0] = 0
+    preview_bgr = np.concatenate((rgb_bgr, depth_bgr), axis=1)
+
+    cv2.rectangle(preview_bgr, (0, 0), (preview_bgr.shape[1], 42), (0, 0, 0), -1)
+    cv2.putText(
+        preview_bgr,
+        f"ZED RGB | aligned depth   SPACE: save {saved}/{target}   Q/ESC: quit",
+        (12, 29),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.72,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+    cv2.imshow(window_name, preview_bgr)
+    return cv2.waitKey(1) & 0xFF
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--frames", type=int, default=3)
@@ -161,6 +254,17 @@ def main() -> None:
     parser.add_argument("--near_m", type=float, default=0.2)
     parser.add_argument("--far_m", type=float, default=1.5)
     parser.add_argument("--out_dir", default="")
+    parser.add_argument(
+        "--interactive",
+        action="store_true",
+        help="Show live RGB/depth; SPACE saves one sample and Q/ESC exits.",
+    )
+    parser.add_argument(
+        "--preview_width",
+        type=int,
+        default=1600,
+        help="Maximum width of the interactive preview window.",
+    )
     args = parser.parse_args()
 
     import pyzed.sl as sl
@@ -234,7 +338,7 @@ def main() -> None:
             if err != sl.ERROR_CODE.SUCCESS:
                 continue
             idx += 1
-            if args.stride > 1 and idx % args.stride != 0:
+            if not args.interactive and args.stride > 1 and idx % args.stride != 0:
                 continue
 
             zed.retrieve_image(image, sl.VIEW.LEFT)
@@ -247,49 +351,45 @@ def main() -> None:
             # ZED images are returned in BGRA order for OpenCV-style usage.
             rgb = bgra[..., :3][..., ::-1].copy()
 
-            depth_mm = np.zeros(depth_m.shape, dtype=np.uint16)
-            valid = np.isfinite(depth_m) & (depth_m > 0)
-            depth_mm[valid] = np.clip(np.rint(depth_m[valid] * 1000.0), 0, np.iinfo(np.uint16).max).astype(
-                np.uint16
+            if args.interactive:
+                key = _show_interactive_preview(
+                    rgb,
+                    depth_m,
+                    args.near_m,
+                    args.far_m,
+                    saved,
+                    args.frames,
+                    args.preview_width,
+                    "ZED 2i RGBD capture",
+                )
+                if key in (ord("q"), ord("Q"), 27):
+                    print(f"interactive capture stopped after {saved}/{args.frames} samples")
+                    break
+                if key != ord(" "):
+                    continue
+
+            frame_meta = _save_rgbd_sample(
+                out_dir,
+                saved,
+                rgb,
+                depth_m,
+                args.near_m,
+                args.far_m,
             )
-            depth_gray = _depth_to_u8(depth_m, args.near_m, args.far_m)
-            depth_color = _depth_to_color_rgb(depth_gray)
-            contact = _make_contact(rgb, depth_gray, depth_color)
-
-            stem = f"frame_{saved:03d}"
-            _save_png(out_dir / f"{stem}_rgb.png", rgb)
-            _save_png(out_dir / f"{stem}_depth_mm.png", depth_mm)
-            np.save(out_dir / f"{stem}_depth_m.npy", depth_m)
-            _save_png(out_dir / f"{stem}_depth_gray_0p2_1p5.png", depth_gray)
-            _save_png(out_dir / f"{stem}_depth_color_0p2_1p5.png", depth_color)
-            _save_png(out_dir / f"{stem}_contact.png", contact)
-
-            frame_meta = {
-                "index": saved,
-                "rgb_shape": list(rgb.shape),
-                "depth_shape": list(depth_m.shape),
-                "depth_dtype": str(depth_m.dtype),
-                "depth_stats": _depth_stats(depth_m),
-                "files": {
-                    "rgb": f"{stem}_rgb.png",
-                    "depth_mm": f"{stem}_depth_mm.png",
-                    "depth_m": f"{stem}_depth_m.npy",
-                    "depth_gray": f"{stem}_depth_gray_0p2_1p5.png",
-                    "depth_color": f"{stem}_depth_color_0p2_1p5.png",
-                    "contact": f"{stem}_contact.png",
-                },
-            }
             meta["saved_frames"].append(frame_meta)
-            print(
-                f"saved {stem}: rgb={rgb.shape} depth={depth_m.shape} "
-                f"valid={frame_meta['depth_stats']['valid_ratio']:.3f}"
-            )
             saved += 1
 
         meta["elapsed_capture_s"] = time.perf_counter() - t0
         _make_contact_all(out_dir, len(meta["saved_frames"]))
     finally:
         zed.close()
+        if args.interactive:
+            try:
+                import cv2
+
+                cv2.destroyAllWindows()
+            except Exception:
+                pass
 
     with (out_dir / "metadata.json").open("w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2, ensure_ascii=False)

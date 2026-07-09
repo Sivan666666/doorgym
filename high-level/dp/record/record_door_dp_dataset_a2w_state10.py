@@ -141,6 +141,45 @@ def parse_args():
             "front/wrist camera poses for Plücker-conditioned ACT."
         ),
     )
+    parser.add_argument(
+        "--record_handle_bbox",
+        action="store_true",
+        help=(
+            "Forward --record_handle_bbox to save front/wrist handle bbox supervision for "
+            "offline DINOv2 handle-latent targets."
+        ),
+    )
+    parser.add_argument(
+        "--record_gripper_handle_contact",
+        action="store_true",
+        help="Forward --record_gripper_handle_contact so raw episodes include gripper-vs-handle contact features.",
+    )
+    parser.add_argument(
+        "--filter_gripper_handle_contact",
+        action="store_true",
+        help=(
+            "Forward --filter_gripper_handle_contact to discard successful rollouts whose "
+            "close/rotate phases do not contain enough gripper-handle contact."
+        ),
+    )
+    parser.add_argument("--filter_gripper_handle_contact_min_frames", type=int, default=5)
+    parser.add_argument(
+        "--filter_gripper_handle_contact_require_both",
+        dest="filter_gripper_handle_contact_require_both",
+        action="store_true",
+        default=True,
+    )
+    parser.add_argument(
+        "--no_filter_gripper_handle_contact_require_both",
+        dest="filter_gripper_handle_contact_require_both",
+        action="store_false",
+    )
+    parser.add_argument(
+        "--filter_gripper_handle_contact_phase_names",
+        type=str,
+        default="close_gripper,rotate_handle",
+    )
+    parser.add_argument("--gripper_handle_contact_score_threshold", type=float, default=1.0e-6)
     parser.add_argument("--no_preview_trajectory_at_spawn", action="store_true", default=True)
     parser.add_argument(
         "--run_log_root",
@@ -475,6 +514,26 @@ def run_one(mode, rollout_idx, args):
             cmd.append("--no_keyframe_loss_weights")
         if args.record_camera_pose:
             cmd.append("--record_camera_pose")
+        if args.record_handle_bbox:
+            cmd.append("--record_handle_bbox")
+        if args.record_gripper_handle_contact or args.filter_gripper_handle_contact:
+            cmd.append("--record_gripper_handle_contact")
+            cmd += [
+                "--gripper_handle_contact_score_threshold",
+                str(args.gripper_handle_contact_score_threshold),
+            ]
+        if args.filter_gripper_handle_contact:
+            cmd.append("--filter_gripper_handle_contact")
+            cmd += [
+                "--filter_gripper_handle_contact_min_frames",
+                str(args.filter_gripper_handle_contact_min_frames),
+                "--filter_gripper_handle_contact_phase_names",
+                str(args.filter_gripper_handle_contact_phase_names),
+            ]
+            if args.filter_gripper_handle_contact_require_both:
+                cmd.append("--filter_gripper_handle_contact_require_both")
+            else:
+                cmd.append("--no_filter_gripper_handle_contact_require_both")
         if args.rgb and args.depth_only:
             raise ValueError("--rgb and --depth_only are mutually exclusive.")
         if args.rgb:

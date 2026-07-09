@@ -40,10 +40,26 @@ CAMERA_POSE_FEATURES = [FRONT_CAMERA_POSE_FEATURE, WRIST_CAMERA_POSE_FEATURE]
 CAMERA_POSE_NAMES = ["x", "y", "z", "qx", "qy", "qz", "qw"]
 RAW_FRONT_CAMERA_POSE_KEY = "front_camera_pose_base"
 RAW_WRIST_CAMERA_POSE_KEY = "wrist_camera_pose_base"
+RAW_FRONT_HANDLE_BBOX_KEY = "front_handle_bbox_xyxy"
+RAW_FRONT_HANDLE_BBOX_VALID_KEY = "front_handle_bbox_valid"
+RAW_WRIST_HANDLE_BBOX_KEY = "wrist_handle_bbox_xyxy"
+RAW_WRIST_HANDLE_BBOX_VALID_KEY = "wrist_handle_bbox_valid"
+FRONT_HANDLE_LATENT_FEATURE = "aux.front_handle_latent"
+FRONT_HANDLE_LATENT_VALID_FEATURE = "aux.front_handle_latent_valid"
+WRIST_HANDLE_LATENT_FEATURE = "aux.wrist_handle_latent"
+WRIST_HANDLE_LATENT_VALID_FEATURE = "aux.wrist_handle_latent_valid"
+HANDLE_LATENT_FEATURES = [
+    FRONT_HANDLE_LATENT_FEATURE,
+    FRONT_HANDLE_LATENT_VALID_FEATURE,
+    WRIST_HANDLE_LATENT_FEATURE,
+    WRIST_HANDLE_LATENT_VALID_FEATURE,
+]
 DATASET_METADATA_KEYS = (
     "action_frame",
     "action_pose_frame",
     "target_pose_frame",
+    "state_pose_frame",
+    "ee_pose_frame",
     "ikpush_state_version",
     "door_dp_mode",
     "controller_mode",
@@ -69,6 +85,14 @@ DATASET_METADATA_KEYS = (
     "camera_pose_frame",
     "camera_pose_convention",
     "camera_pose_features",
+    "handle_bbox_features",
+    "handle_bbox_convention",
+    "handle_latent_features",
+    "handle_latent_teacher_model",
+    "handle_latent_crop_size",
+    "handle_latent_bbox_margin",
+    "handle_bbox_min_area",
+    "handle_bbox_min_size",
     "phase_names",
     "keyframe_loss_enabled",
     "keyframe_loss_weight",
@@ -1244,6 +1268,7 @@ class DoorDPLeRobotRecorder:
         action_feature_names=None,
         include_action_loss_weight=False,
         include_camera_pose=False,
+        include_handle_latent=False,
     ):
         from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
@@ -1260,6 +1285,7 @@ class DoorDPLeRobotRecorder:
         self.action_names = list(action_feature_names or ACTION_NAMES)
         self.include_action_loss_weight = bool(include_action_loss_weight)
         self.include_camera_pose = bool(include_camera_pose)
+        self.include_handle_latent = bool(include_handle_latent)
         self.metadata = dict(metadata or {})
         self.root.mkdir(parents=True, exist_ok=True)
         self.dataset_root = self.root / repo_id
@@ -1289,6 +1315,27 @@ class DoorDPLeRobotRecorder:
                     "shape": (len(CAMERA_POSE_NAMES),),
                     "names": CAMERA_POSE_NAMES,
                 }
+        if self.include_handle_latent:
+            features[FRONT_HANDLE_LATENT_FEATURE] = {
+                "dtype": "float32",
+                "shape": (384,),
+                "names": [f"dino_patch_mean_{i}" for i in range(384)],
+            }
+            features[FRONT_HANDLE_LATENT_VALID_FEATURE] = {
+                "dtype": "float32",
+                "shape": (1,),
+                "names": ["valid"],
+            }
+            features[WRIST_HANDLE_LATENT_FEATURE] = {
+                "dtype": "float32",
+                "shape": (384,),
+                "names": [f"dino_patch_mean_{i}" for i in range(384)],
+            }
+            features[WRIST_HANDLE_LATENT_VALID_FEATURE] = {
+                "dtype": "float32",
+                "shape": (1,),
+                "names": ["valid"],
+            }
         for key in lerobot_image_keys_for_vision_mode(self.vision_mode):
             features[key] = {
                 "dtype": self.image_storage,
@@ -1332,6 +1379,8 @@ class DoorDPLeRobotRecorder:
             sidecar["camera_pose_features"] = CAMERA_POSE_FEATURES
             sidecar.setdefault("camera_pose_frame", "robot_base")
             sidecar.setdefault("camera_pose_convention", "optical_frame")
+        if self.include_handle_latent:
+            sidecar["handle_latent_features"] = HANDLE_LATENT_FEATURES
         if self.vision_mode != "depth":
             sidecar["vision_mode"] = self.vision_mode
         for key in DATASET_METADATA_KEYS:
@@ -1354,6 +1403,10 @@ class DoorDPLeRobotRecorder:
         action_loss_weight=None,
         front_camera_pose_base=None,
         wrist_camera_pose_base=None,
+        front_handle_latent=None,
+        front_handle_latent_valid=None,
+        wrist_handle_latent=None,
+        wrist_handle_latent_valid=None,
     ):
         if self.vision_mode == "depth":
             front_mask_rgb = _zero_image_like(wrist_mask_rgb) if front_mask_rgb is None else front_mask_rgb
@@ -1377,6 +1430,19 @@ class DoorDPLeRobotRecorder:
                 raise ValueError("LeRobot camera-pose dataset frames require both front and wrist camera poses.")
             frame[FRONT_CAMERA_POSE_FEATURE] = np.asarray(front_camera_pose_base, dtype=np.float32).reshape(7)
             frame[WRIST_CAMERA_POSE_FEATURE] = np.asarray(wrist_camera_pose_base, dtype=np.float32).reshape(7)
+        if self.include_handle_latent:
+            if front_handle_latent is None or wrist_handle_latent is None:
+                raise ValueError("LeRobot handle-latent frames require both front and wrist latent arrays.")
+            frame[FRONT_HANDLE_LATENT_FEATURE] = np.asarray(front_handle_latent, dtype=np.float32).reshape(384)
+            frame[FRONT_HANDLE_LATENT_VALID_FEATURE] = np.asarray(
+                [0.0 if front_handle_latent_valid is None else float(np.asarray(front_handle_latent_valid).reshape(-1)[0])],
+                dtype=np.float32,
+            )
+            frame[WRIST_HANDLE_LATENT_FEATURE] = np.asarray(wrist_handle_latent, dtype=np.float32).reshape(384)
+            frame[WRIST_HANDLE_LATENT_VALID_FEATURE] = np.asarray(
+                [0.0 if wrist_handle_latent_valid is None else float(np.asarray(wrist_handle_latent_valid).reshape(-1)[0])],
+                dtype=np.float32,
+            )
         if self.vision_mode == "depth_only":
             frame[image_keys[0]] = np.asarray(wrist_second_rgb, dtype=np.uint8)
             frame[image_keys[1]] = np.asarray(front_second_rgb, dtype=np.uint8)

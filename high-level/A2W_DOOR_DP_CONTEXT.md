@@ -772,7 +772,7 @@ conda run --no-capture-output -n b1z1_lerobot python \
   - `chunk_size=100`：25Hz 下预测 4s。
   - `n_action_steps=50`：25Hz 下每次推理执行 2s。训练时也会进入 policy config，但主要影响 rollout/inference 的执行步数；训练监督主要由 chunk/action 序列决定。
   - `batch_size=16`
-  - `steps=100000`
+  - `steps=50000`
 
 ### 11.1 A2W 10D EE ACT
 
@@ -802,7 +802,7 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
   --policy.vision_backbone=resnet18 \
   --policy.pretrained_backbone_weights=ResNet18_Weights.IMAGENET1K_V1 \
   --batch_size=16 \
-  --steps=100000 \
+  --steps=50000 \
   --num_workers=4 \
   --save_freq=10000 \
   --log_freq=10 \
@@ -843,7 +843,7 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
   --policy.vision_backbone=resnet18 \
   --policy.pretrained_backbone_weights=ResNet18_Weights.IMAGENET1K_V1 \
   --batch_size=16 \
-  --steps=100000 \
+  --steps=50000 \
   --num_workers=4 \
   --save_freq=10000 \
   --log_freq=10 \
@@ -902,6 +902,7 @@ Official LeRobot checkpoint 转 Door checkpoint 时会同步保存这些 gating 
 
 - `--num-processes=1` 是 accelerate 只启动一个训练进程，适合单卡。
 - `--wandb.disable_artifact=true` 是不把 checkpoint/dataset 作为 wandb artifact 上传，减少网络和存储开销。
+- 2026-07-08 起，本仓库 LeRobot 的 `WandBConfig.disable_artifact` 默认值已改成 `true`；也就是说即使命令漏写该参数，默认也只记录 metrics，不上传 pt/safetensors artifact。若确实需要上传 checkpoint artifact，需要显式加 `--wandb.disable_artifact=false`。
 
 ## 12. Play / Eval 命令模板
 
@@ -1307,4 +1308,106 @@ max ||d|| error: ~1e-7
 max |d·m|: ~2e-8
 ACT forward shape: (1, chunk, 10)
 plucker_conditioning=false 时 state_dict 无 plucker 参数
+```
+
+## DINOv2 Handle-Latent ACT 辅助任务（默认关闭）
+
+在 Plücker ACT 基础上新增一个训练期辅助任务：用 frozen DINOv2-small 从 front / wrist 的把手 depth crop 中生成 handle latent target，ACT 从完整观测的视觉 tokens 中分别预测这两个 latent。推理 / play / 实机部署时不需要 DINOv2、不需要 bbox、不需要 crop。
+
+录制新增参数：
+
+```text
+--record_handle_bbox
+```
+
+启用后 raw episode 会保存：
+
+```text
+front_handle_bbox_xyxy: T x 4
+front_handle_bbox_valid: T x 1
+wrist_handle_bbox_xyxy: T x 4
+wrist_handle_bbox_valid: T x 1
+```
+
+转换新增参数：
+
+```text
+--add_handle_latent
+--handle_latent_teacher_model facebook/dinov2-small
+--handle_latent_crop_size 224
+--handle_latent_bbox_margin 0.2
+--handle_bbox_min_area 20
+--handle_bbox_min_size 3
+--handle_latent_batch_size 64
+```
+
+crop / latent 规则：
+
+1. depth image + handle bbox。
+2. bbox invalid、面积太小、宽高太小时 latent valid=0。
+3. bbox 按 margin 扩大后做 center square crop；超出图像边界用 padding，不截断变形。
+4. resize 到 `224x224`，uint8 depth / 255 到 `[0, 1]`，repeat 成 3 channel。
+5. frozen DINOv2-small 输出 patch tokens，mean pooling 后 L2 normalize，得到 `float32[384]`。
+
+LeRobot 新增 feature：
+
+```text
+aux.front_handle_latent
+aux.front_handle_latent_valid
+aux.wrist_handle_latent
+aux.wrist_handle_latent_valid
+```
+
+ACT 新增训练参数：
+
+```text
+--policy.handle_latent_aux=true
+--policy.handle_latent_dim=384
+--policy.handle_latent_loss_weight=0.1
+--policy.handle_latent_front_key=aux.front_handle_latent
+--policy.handle_latent_front_valid_key=aux.front_handle_latent_valid
+--policy.handle_latent_wrist_key=aux.wrist_handle_latent
+--policy.handle_latent_wrist_valid_key=aux.wrist_handle_latent_valid
+```
+
+模型结构：
+
+```text
+front encoder image tokens -> learnable front handle query cross-attention -> front z_hat
+wrist encoder image tokens -> learnable wrist handle query cross-attention -> wrist z_hat
+
+z_hat -> LayerNorm -> Linear -> GELU -> Linear(384)
+```
+
+loss：
+
+```text
+L_front = 1 - cosine(normalize(z_hat_front), normalize(z_front))
+L_wrist = 1 - cosine(normalize(z_hat_wrist), normalize(z_wrist))
+
+denom = valid_front.sum() + valid_wrist.sum()
+L_handle = (valid_front * L_front + valid_wrist * L_wrist).sum() / max(denom, 1)
+L = L_action + KL + lambda_handle * L_handle
+```
+
+注意：
+
+1. `handle_latent_aux=false` 时 ACT state_dict 不包含 handle head，旧 checkpoint 行为不变。
+2. `handle_latent_aux=true` 训练时如果 batch 缺 `aux.*` latent，会明确报错，提示重新用 `--add_handle_latent` 转换数据。
+3. play / inference 是 eval mode，不计算 handle latent loss，也不需要 aux features。
+4. LeRobot preprocessor 已补充保留 `aux.*` 和 `loss.*` side-channel 字段，避免训练 batch 中辅助 target / keyframe loss weight 被丢掉。
+
+相关实现：
+
+```text
+high-level/dp/convert_door_raw_to_lerobot.py
+high-level/dp/door_dp_common.py
+high-level/float_ik/door_common.py
+high-level/float_ik/isaacgym_float_ik_a2w_basearn_push_door_parallel.py
+high-level/dp/record/record_door_dp_dataset_a2w_state10.py
+high-level/lerobot/src/lerobot/policies/act/configuration_act.py
+high-level/lerobot/src/lerobot/policies/act/modeling_act.py
+high-level/lerobot/src/lerobot/processor/converters.py
+high-level/dp/door_policy_backend.py
+high-level/dp/export_official_lerobot_act_to_door_checkpoint.py
 ```

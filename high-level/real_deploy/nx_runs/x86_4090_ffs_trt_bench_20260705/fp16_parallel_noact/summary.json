@@ -1,0 +1,71 @@
+{
+  "mode": "saved_dual_snapshot_trt_parallel",
+  "engine": "/home/robo/txc/tests/ffs_trt_single_640x480_vi4_d128/fast_foundationstereo_vi4_d128_fp16_castfix.engine",
+  "config": "/home/robo/txc/tests/ffs_trt_single_640x480_vi4_d128/fast_foundationstereo_vi4_d128.yaml",
+  "snapshot_dir": "/home/robo/txc/tests/dual_d435_ffs_20260705_171537",
+  "checkpoint": "",
+  "iters": 60,
+  "warmup_iters": 10,
+  "elapsed_measured_s": 3.047544637000101,
+  "end_to_end_hz": 19.68798070142853,
+  "wrist_engine_ms": {
+    "mean": 51.08045831660396,
+    "p50": 49.45406149909104,
+    "p95": 62.129139850003405,
+    "min": 43.31883099985134,
+    "max": 64.93234499976097,
+    "hz_from_mean": 19.57695825283825,
+    "hz_from_p50": 20.220786113156347
+  },
+  "front_engine_ms": {
+    "mean": 50.98238856665679,
+    "p50": 49.35220599963941,
+    "p95": 62.19105575064531,
+    "min": 43.45558799832361,
+    "max": 64.6565000006376,
+    "hz_from_mean": 19.61461650021659,
+    "hz_from_p50": 20.26251876172073
+  },
+  "wrist_total_ms": {
+    "mean": 51.59759448324621,
+    "p50": 49.99263699846779,
+    "p95": 62.64059584927963,
+    "min": 43.823830999826896,
+    "max": 65.42963299943949,
+    "hz_from_mean": 19.38074846347151,
+    "hz_from_p50": 20.002945634387096
+  },
+  "front_total_ms": {
+    "mean": 51.54015663332151,
+    "p50": 49.94480499954079,
+    "p95": 62.826528000732644,
+    "min": 44.00306499701401,
+    "max": 65.2656250003929,
+    "hz_from_mean": 19.40234693337126,
+    "hz_from_p50": 20.022102399022167
+  },
+  "ffs_pair_wall_ms": {
+    "mean": 51.87912640000528,
+    "p50": 50.276203499379335,
+    "p95": 63.027275150489,
+    "min": 44.19472600056906,
+    "max": 65.56589599858853,
+    "hz_from_mean": 19.275575156945937,
+    "hz_from_p50": 19.890125554375743
+  },
+  "act_forward_ms": {},
+  "act_prep_ms": {},
+  "loop_total_ms": {
+    "mean": 51.879426516582804,
+    "p50": 50.276695000320615,
+    "p95": 63.02765255049962,
+    "min": 44.19492200031527,
+    "max": 65.56618499962497,
+    "hz_from_mean": 19.27546364993759,
+    "hz_from_p50": 19.889931110102264
+  },
+  "gpu_memory": {
+    "max_allocated_mb": 21.09375,
+    "max_reserved_mb": 84.0
+  }
+}

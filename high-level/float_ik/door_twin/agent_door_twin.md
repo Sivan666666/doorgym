@@ -238,6 +238,46 @@ See:
 
 `doc/button_door_debug_to_final.md`
 
+### `fire_door_push_traverse_skill.json`
+
+Gray metal fire-door example adapted as a push door.
+
+Important properties:
+
+- normal asset path `fire_door/model.urdf`,
+- actor yaw places the short lever on the robot side,
+- default negative door motion sign is kept because the hinge axis is `0 0 -1`,
+- side-wall bbox yaw override fixes the doorway opening,
+- final base stance uses a wc4-like handle-side offset of `0.18 m`,
+- final grasp/pregrasp z offset is `-0.04`,
+- multi-view keyframes are converted into a keyframe trajectory mp4.
+
+See:
+
+`doc/fire_door_debug_to_video.md`
+
+Repair history:
+
+`experiments/runs/fire_door_repair_history.md`
+
+### `glass_door_push_traverse_skill.json`
+
+Single-DOF glass-door example adapted as a push door.
+
+Important properties:
+
+- normal asset path `glass_door/model.urdf`,
+- no separate handle DOF; the vertical handle is fixed on the moving panel,
+- `ee_roll_offset = pi/2` turns the gripper sideways for the vertical handle,
+- door motion sign is configured for push-open behavior,
+- `handle_closeup` target is configured for visual grasp checks,
+- final config increases hinge resistance so the door does not open from a tiny
+  touch while still reaching about 90 degrees.
+
+See:
+
+`doc/glass_door_debug_to_final.md`
+
 ## Debug Documents
 
 Detailed per-door notes live in `doc/`.
@@ -247,6 +287,8 @@ Currently documented:
 - `wc4_skill_alignment_notes.md`
 - `99692809960048_debug_to_final.md`
 - `button_door_debug_to_final.md`
+- `fire_door_debug_to_video.md`
+- `glass_door_debug_to_final.md`
 
 These files record the actual debugging path: what failed, what was changed, and
 which command/run confirmed the final behavior. New generated doors should get a
@@ -334,6 +376,10 @@ Implemented so far:
 - Generated door `99692809960048` adapted with repaired frame-collision asset.
 - `button_door` adapted from raw `model.urdf` with metadata, wall fix, grasp fix,
   and closeup camera target.
+- `fire_door` adapted as a push-door video/data example with wc4-like base
+  stance and documented user-corrected grasp/stance fixes.
+- `glass_door` adapted as a single-DOF push door with 90 degree gripper roll,
+  push-direction sign fix, and tuned door resistance.
 
 ## Known Limitations
 
@@ -393,3 +439,7 @@ The automated Agent should treat the examples and debug docs as prior experience
 - wc4: scripted reference and smooth-command baseline.
 - 99692809960048: generated-door adaptation and frame-collision repair.
 - button_door: new raw asset adaptation, wall geometry fix, grasp-quality camera.
+- fire_door: stance correction, wall correction, and 1 cm grasp lowering from
+  user visual feedback.
+- glass_door: fixed-handle vertical grasp, push/pull sign correction, and
+  realistic hinge resistance tuning.

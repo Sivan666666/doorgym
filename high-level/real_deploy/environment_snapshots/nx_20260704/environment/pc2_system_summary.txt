@@ -1,0 +1,50 @@
+2026-07-04T18:37:19+08:00
+ Static hostname: unitree-a2-pc2
+       Icon name: computer-desktop
+         Chassis: desktop
+      Machine ID: 8d5035a17adb49b389514774f530ea7d
+         Boot ID: 1e32a5fa41424b3981db5263442d63b5
+Operating System: Ubuntu 22.04.4 LTS
+          Kernel: Linux 6.5.2-rt8
+    Architecture: x86-64
+Linux unitree-a2-pc2 6.5.2-rt8 #1 SMP PREEMPT_RT Thu Sep  5 16:48:39 CST 2024 x86_64 x86_64 x86_64 GNU/Linux
+PRETTY_NAME="Ubuntu 22.04.4 LTS"
+NAME="Ubuntu"
+VERSION_ID="22.04"
+VERSION="22.04.4 LTS (Jammy Jellyfish)"
+VERSION_CODENAME=jammy
+ID=ubuntu
+ID_LIKE=debian
+HOME_URL="https://www.ubuntu.com/"
+SUPPORT_URL="https://help.ubuntu.com/"
+BUG_REPORT_URL="https://bugs.launchpad.net/ubuntu/"
+PRIVACY_POLICY_URL="https://www.ubuntu.com/legal/terms-and-policies/privacy-policy"
+UBUNTU_CODENAME=jammy
+=== python ===
+Python 3.10.12
+pip 26.0.1 from /home/unitree/.local/lib/python3.10/site-packages/pip (python 3.10)
+=== network ===
+lo               UNKNOWN        127.0.0.1/8 ::1/128 
+net1             UP             192.168.124.162/24 fe80::2e0:4cff:fea2:ca4/64 
+eth0             UP             192.168.123.162/24 fe80::106f:a0ff:fe96:86af/64 
+a2w              UNKNOWN        10.100.0.23/32 
+docker0          DOWN           172.17.0.1/16 
+default via 192.168.124.1 dev net1 
+10.100.0.0/24 dev a2w scope link 
+169.254.0.0/16 dev eth0 scope link metric 1000 
+172.17.0.0/16 dev docker0 proto kernel scope link src 172.17.0.1 linkdown 
+192.168.123.0/24 dev eth0 proto kernel scope link src 192.168.123.162 metric 100 
+192.168.124.0/24 dev net1 proto kernel scope link src 192.168.124.162 metric 101 
+=== ros ===
+CYCLONEDDS_URI=/home/unitree/slam_config/cyclonedds_go2_B2_ws/cyclonedds.xml
+LD_LIBRARY_PATH=/home/unitree/navigation/numa-system/cyclonedds_ws/install/unitree_hg/lib:/home/unitree/navigation/numa-system/cyclonedds_ws/install/unitree_go/lib:/home/unitree/navigation/numa-system/cyclonedds_ws/install/unitree_api/lib:/home/unitree/foxglove_ws/install/foxglove_bridge/lib:/home/unitree/slam_config/cyclonedds_go2_B2_ws/install/rmw_cyclonedds_cpp/lib:/home/unitree/slam_config/cyclonedds_go2_B2_ws/install/cyclonedds/lib:/opt/ros/humble/opt/rviz_ogre_vendor/lib:/opt/ros/humble/lib/x86_64-linux-gnu:/opt/ros/humble/lib
+RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+ROS_DISTRO=humble
+ROS_LOCALHOST_ONLY=0
+ROS_PYTHON_VERSION=3
+ROS_VERSION=2
+=== unitree libs ===
+	libddscxx.so.0 (libc6,x86-64) => /usr/local/lib/libddscxx.so.0
+	libddscxx.so.0 (libc6,x86-64) => /unitree/opt/lib/libddscxx.so.0
+	libddsc.so.0 (libc6,x86-64) => /usr/local/lib/libddsc.so.0
+	libddsc.so.0 (libc6,x86-64) => /unitree/opt/lib/libddsc.so.0

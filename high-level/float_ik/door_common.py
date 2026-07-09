@@ -47,6 +47,7 @@ DEFAULT_DOOR_ASSET_NAMES = (
     "99655039960006",
     "wc4",
 )
+DEFAULT_PARTNET_NUMERIC_GRASP_Z_OFFSET = -0.042
 DEFAULT_UNSAFE_DOOR_ASSET_NAMES = (
     # This asset can segfault PhysX convex cooking in Isaac Gym after VHACD:
     # Cooking::cookConvexMesh: user-provided convex mesh descriptor is invalid.
@@ -220,6 +221,12 @@ def door_asset_family(door):
     if name.startswith("rec_") or "record_materialization" in path:
         return "record_materialization"
     return "partnet_numeric"
+
+
+def is_partnet_numeric_door(door):
+    """True for the original PartNet numeric door assets, not wc4/generated doors."""
+    name = str(door.spec.get("name", ""))
+    return door_asset_family(door) == "partnet_numeric" and name.isdigit()
 
 
 def door_wall_opening_axis(door):
@@ -689,18 +696,24 @@ def load_door_assets(gym, sim, args):
 
         body_names = gym.get_asset_rigid_body_names(door_asset)
         dof_names = gym.get_asset_dof_names(door_asset)
-        if len(dof_names) < 2:
+        if len(dof_names) < 1:
+            raise RuntimeError(f"Door {spec['name']!r} must expose a door DOF; loaded DOFs: {dof_names}")
+        expected_door_dof = spec.get("door_dof_name", dof_names[0])
+        if dof_names[0] != expected_door_dof:
             raise RuntimeError(
-                f"Door {spec['name']!r} must expose door and handle DOFs; loaded DOFs: {dof_names}"
+                f"Door {spec['name']!r} first DOF must be {expected_door_dof!r}, loaded {dof_names[0]!r}"
             )
-        expected_dofs = (
-            spec.get("door_dof_name", dof_names[0]),
-            spec.get("handle_dof_name", dof_names[1]),
-        )
-        if tuple(dof_names[:2]) != expected_dofs:
-            raise RuntimeError(
-                f"Door {spec['name']!r} DOF order must be {expected_dofs}, loaded {tuple(dof_names[:2])}"
-            )
+        expected_handle_dof = str(spec.get("handle_dof_name", "") or "")
+        if expected_handle_dof:
+            if len(dof_names) < 2:
+                raise RuntimeError(
+                    f"Door {spec['name']!r} expected handle DOF {expected_handle_dof!r}, "
+                    f"but loaded DOFs: {dof_names}"
+                )
+            if dof_names[1] != expected_handle_dof:
+                raise RuntimeError(
+                    f"Door {spec['name']!r} second DOF must be {expected_handle_dof!r}, loaded {dof_names[1]!r}"
+                )
         handle_body_name = spec.get("handle_body_name")
         door_body_name = spec.get("door_body_name")
         if handle_body_name and handle_body_name not in body_names:
@@ -729,12 +742,12 @@ def load_door_assets(gym, sim, args):
         gym.set_asset_rigid_shape_properties(door_asset, shape_props)
 
         handle_goal_offset = actor_scale * np.asarray(handle_bounding["goal_pos"], dtype=np.float32)
-        handle_range = max(1.0e-6, float(upper[1] - lower[1]) if len(upper) >= 2 else 1.0)
+        handle_range = max(1.0e-6, float(upper[1] - lower[1]) if len(upper) >= 2 else 0.0)
         handle_unlock_angle = spec.get("handle_unlock_angle")
         handle_unlock_threshold = (
             float(handle_unlock_angle)
             if handle_unlock_angle is not None
-            else args.handle_unlock_ratio * handle_range
+            else (args.handle_unlock_ratio * handle_range if len(upper) >= 2 else 0.0)
         )
         print("door_dofs:", dof_names)
         print("door_bodies:", body_names)
@@ -793,6 +806,13 @@ def apply_door_runtime_overrides(args, door):
     if bool(getattr(args, "flip_door_motion_sign", False)):
         args.door_motion_sign *= -1.0
     adjusted_controller_values = {}
+    if is_partnet_numeric_door(door) and not cli_flag_was_set(args, "--grasp_z_offset"):
+        # The original numeric PartNet lever doors need a slightly lower
+        # scripted grasp than wc4 / button_door / generated digital-twin doors.
+        # Keep this as a per-door runtime default so explicit CLI overrides and
+        # per-asset custom doors are unaffected.
+        args.grasp_z_offset = DEFAULT_PARTNET_NUMERIC_GRASP_Z_OFFSET
+        adjusted_controller_values["grasp_z_offset"] = float(args.grasp_z_offset)
     if not bool(getattr(args, "ignore_door_controller_overrides", False)):
         for name, multiplier in door.spec.get("controller_multipliers", {}).items():
             if not hasattr(args, name):
@@ -900,12 +920,12 @@ def configure_door_actor_dofs(gym, env, door_actor, door, args):
 
     door.dof_lower = np.asarray(door_dof_props["lower"], dtype=np.float32).copy()
     door.dof_upper = np.asarray(door_dof_props["upper"], dtype=np.float32).copy()
-    handle_range = max(1.0e-6, float(door.dof_upper[1] - door.dof_lower[1]) if len(door.dof_upper) >= 2 else 1.0)
+    handle_range = max(1.0e-6, float(door.dof_upper[1] - door.dof_lower[1]) if len(door.dof_upper) >= 2 else 0.0)
     handle_unlock_angle = door.spec.get("handle_unlock_angle")
     door.handle_unlock_threshold = (
         float(handle_unlock_angle)
         if handle_unlock_angle is not None
-        else args.handle_unlock_ratio * handle_range
+        else (args.handle_unlock_ratio * handle_range if len(door.dof_upper) >= 2 else 0.0)
     )
 
 
@@ -1392,6 +1412,160 @@ def contact_field(contact, name):
         return contact[name]
     except Exception:
         return None
+
+
+def _numeric_contact_value(value):
+    if value is None:
+        return None
+    try:
+        arr = np.asarray(value, dtype=np.float32)
+    except Exception:
+        return None
+    if arr.size == 0:
+        return None
+    if not np.all(np.isfinite(arr)):
+        return None
+    if arr.shape == ():
+        return float(abs(arr.item()))
+    return float(np.linalg.norm(arr.reshape(-1)))
+
+
+def contact_magnitude(contact):
+    """Best-effort contact strength for Isaac Gym rigid contact records.
+
+    PhysX contact record fields vary a bit across Isaac Gym builds.  Prefer
+    force-like fields, then fall back to penetration/overlap, and finally to a
+    unit count so old builds still produce a usable binary contact signal.
+    """
+    for name in (
+        "lambda",
+        "normal_force",
+        "force",
+        "contact_force",
+        "impulse",
+        "normal",
+    ):
+        magnitude = _numeric_contact_value(contact_field(contact, name))
+        if magnitude is not None and magnitude > 0.0:
+            return magnitude
+    for name in ("initial_overlap", "min_dist"):
+        magnitude = _numeric_contact_value(contact_field(contact, name))
+        if magnitude is not None and magnitude > 0.0:
+            return magnitude
+    return 1.0
+
+
+def parse_csv_names(value, default):
+    text = str(value or "").strip()
+    if not text:
+        return list(default)
+    return [item.strip() for item in text.split(",") if item.strip()]
+
+
+def _get_contact_body_handle(gym, env, actor, body_name):
+    try:
+        handle = gym.find_actor_rigid_body_handle(env, actor, body_name)
+    except Exception:
+        handle = -1
+    return int(handle)
+
+
+def init_gripper_handle_contact_tracking(gym, st):
+    if hasattr(st, "gripper_handle_contact_initialized"):
+        return
+    st.gripper_handle_contact_initialized = True
+    default_gripper_names = ["gripperStator", "gripperMover"]
+    gripper_names = parse_csv_names(
+        getattr(st.args, "gripper_handle_contact_gripper_bodies", ""),
+        default_gripper_names,
+    )
+    gripper_handles = {}
+    for body_name in gripper_names:
+        body_handle = _get_contact_body_handle(gym, st.env, st.arm_actor, body_name)
+        if body_handle >= 0:
+            gripper_handles[str(body_name)] = body_handle
+
+    handle_names = []
+    try:
+        if 0 <= int(st.door.handle_body_index) < len(st.door.body_names):
+            handle_names.append(str(st.door.body_names[int(st.door.handle_body_index)]))
+    except Exception:
+        pass
+    handle_names.extend(
+        parse_csv_names(
+            getattr(st.args, "gripper_handle_contact_handle_bodies", ""),
+            [],
+        )
+    )
+    # Keep order while deduplicating.
+    handle_names = list(dict.fromkeys(handle_names))
+    handle_handles = {}
+    for body_name in handle_names:
+        body_handle = _get_contact_body_handle(gym, st.env, st.door_actor, body_name)
+        if body_handle >= 0:
+            handle_handles[str(body_name)] = body_handle
+
+    st.gripper_handle_contact_gripper_names = list(gripper_handles.keys())
+    st.gripper_handle_contact_gripper_handles = dict(gripper_handles)
+    st.gripper_handle_contact_handle_names = list(handle_handles.keys())
+    st.gripper_handle_contact_handle_handles = dict(handle_handles)
+    if bool(getattr(st.args, "debug_gripper_handle_contact", False)):
+        print(
+            f"[GripperHandleContact:init] env={int(st.index)} "
+            f"gripper={st.gripper_handle_contact_gripper_handles} "
+            f"handle={st.gripper_handle_contact_handle_handles}",
+            flush=True,
+        )
+
+
+def gripper_handle_contact_snapshot(gym, st):
+    """Return per-record-frame gripper-vs-handle contact features.
+
+    The first two slots correspond to the configured/default gripper bodies
+    (`gripperStator`, `gripperMover`).  If Isaac Gym does not expose a numeric
+    force field, score becomes a contact count proxy.
+    """
+    init_gripper_handle_contact_tracking(gym, st)
+    gripper_items = list(getattr(st, "gripper_handle_contact_gripper_handles", {}).items())
+    handle_set = set(getattr(st, "gripper_handle_contact_handle_handles", {}).values())
+    scores = np.zeros(2, dtype=np.float32)
+    counts = np.zeros(2, dtype=np.float32)
+    if not gripper_items or not handle_set:
+        return {
+            "gripper_handle_contact_score": scores,
+            "gripper_handle_contact_count": counts,
+            "gripper_handle_contact_any": np.asarray([0.0], dtype=np.float32),
+            "gripper_handle_contact_both": np.asarray([0.0], dtype=np.float32),
+        }
+    gripper_by_handle = {int(handle): idx for idx, (_name, handle) in enumerate(gripper_items[:2])}
+    try:
+        contacts = gym.get_env_rigid_contacts(st.env)
+    except Exception:
+        contacts = []
+    for contact in contacts:
+        body0 = contact_field(contact, "body0")
+        body1 = contact_field(contact, "body1")
+        if body0 is None or body1 is None:
+            continue
+        body0 = int(body0)
+        body1 = int(body1)
+        idx = None
+        if body0 in gripper_by_handle and body1 in handle_set:
+            idx = gripper_by_handle[body0]
+        elif body1 in gripper_by_handle and body0 in handle_set:
+            idx = gripper_by_handle[body1]
+        if idx is None or idx < 0 or idx >= 2:
+            continue
+        counts[idx] += 1.0
+        scores[idx] += float(contact_magnitude(contact))
+    min_score = float(getattr(st.args, "gripper_handle_contact_score_threshold", 1.0e-6))
+    active = np.logical_or(scores > min_score, counts > 0.0)
+    return {
+        "gripper_handle_contact_score": scores,
+        "gripper_handle_contact_count": counts,
+        "gripper_handle_contact_any": np.asarray([float(np.any(active))], dtype=np.float32),
+        "gripper_handle_contact_both": np.asarray([float(np.all(active))], dtype=np.float32),
+    }
 
 
 def point_segment_distance_2d(point, a, b):
@@ -2677,6 +2851,31 @@ def dp_image_inputs_from_cpu_cameras(camera_images, args):
     )
 
 
+def handle_bbox_from_mask_image(mask_image):
+    """Return ([x0, y0, x1, y1], valid) from a rendered handle mask image.
+
+    Coordinates use the half-open pixel convention [x0, y0, x1, y1).  The
+    bbox is intentionally not filtered for minimum size here; visibility
+    thresholds are applied when generating DINO handle-latent targets.
+    """
+    if mask_image is None:
+        return np.zeros(4, dtype=np.float32), np.asarray([0.0], dtype=np.float32)
+    mask = np.asarray(mask_image)
+    if mask.ndim == 3:
+        mask = mask[..., 0]
+    mask = np.squeeze(mask)
+    if mask.ndim != 2:
+        return np.zeros(4, dtype=np.float32), np.asarray([0.0], dtype=np.float32)
+    ys, xs = np.nonzero(mask > 0)
+    if xs.size <= 0 or ys.size <= 0:
+        return np.zeros(4, dtype=np.float32), np.asarray([0.0], dtype=np.float32)
+    bbox = np.asarray(
+        [float(xs.min()), float(ys.min()), float(xs.max() + 1), float(ys.max() + 1)],
+        dtype=np.float32,
+    )
+    return bbox, np.asarray([1.0], dtype=np.float32)
+
+
 def get_actor_dof_state(gym, env, actor):
     states = gym.get_actor_dof_states(env, actor, gymapi.STATE_ALL)
     return np.asarray(states["pos"], dtype=np.float32), np.asarray(states["vel"], dtype=np.float32)
@@ -2829,23 +3028,60 @@ def base_position(base_xy, base_z):
     return np.asarray([base_xy[0], base_xy[1], base_z], dtype=np.float32)
 
 
-def world_pos_to_base(pos_world, base_xy, base_z, yaw):
+FULL_BASE_ACTION_FRAMES = {
+    "robot_base_full",
+    "base_full",
+    "arm_base",
+    "robot_base",
+    "true_base",
+}
+
+
+def normalize_float_dp_pose_frame(frame):
+    frame = str(frame or "base").strip().lower()
+    aliases = {
+        "world_frame": "world",
+        "base_yaw": "base",
+        "yaw_base": "base",
+        "yaw_only_base": "base",
+        "full_base": "robot_base_full",
+        "base_with_pitch": "robot_base_full",
+        "arm_base_full": "robot_base_full",
+    }
+    return aliases.get(frame, frame)
+
+
+def is_full_base_pose_frame(frame):
+    return normalize_float_dp_pose_frame(frame) in FULL_BASE_ACTION_FRAMES
+
+
+def base_frame_quat_np(yaw, base_pitch=0.0, pose_frame="base"):
+    if is_full_base_pose_frame(pose_frame):
+        return robot_base_quat_np(float(base_pitch), float(yaw))
+    return base_ik.yaw_quat(float(yaw))
+
+
+def world_pos_to_base(pos_world, base_xy, base_z, yaw, base_pitch=0.0, pose_frame="base"):
     rel = np.asarray(pos_world, dtype=np.float32) - base_position(base_xy, base_z)
-    return quat_apply(base_ik.quat_conjugate(base_ik.yaw_quat(float(yaw))), rel).astype(np.float32)
+    base_quat = base_frame_quat_np(yaw, base_pitch, pose_frame)
+    return quat_apply(base_ik.quat_conjugate(base_quat), rel).astype(np.float32)
 
 
-def base_pos_to_world(pos_base, base_xy, base_z, yaw):
-    return (base_position(base_xy, base_z) + quat_apply(base_ik.yaw_quat(float(yaw)), pos_base)).astype(np.float32)
+def base_pos_to_world(pos_base, base_xy, base_z, yaw, base_pitch=0.0, pose_frame="base"):
+    base_quat = base_frame_quat_np(yaw, base_pitch, pose_frame)
+    return (base_position(base_xy, base_z) + quat_apply(base_quat, pos_base)).astype(np.float32)
 
 
-def world_quat_to_base(quat_world, yaw):
+def world_quat_to_base(quat_world, yaw, base_pitch=0.0, pose_frame="base"):
+    base_quat = base_frame_quat_np(yaw, base_pitch, pose_frame)
     return base_ik.normalize_quat(
-        base_ik.quat_multiply(base_ik.quat_conjugate(base_ik.yaw_quat(float(yaw))), quat_world)
+        base_ik.quat_multiply(base_ik.quat_conjugate(base_quat), quat_world)
     ).astype(np.float32)
 
 
-def base_quat_to_world(quat_base, yaw):
-    return base_ik.normalize_quat(base_ik.quat_multiply(base_ik.yaw_quat(float(yaw)), quat_base)).astype(np.float32)
+def base_quat_to_world(quat_base, yaw, base_pitch=0.0, pose_frame="base"):
+    base_quat = base_frame_quat_np(yaw, base_pitch, pose_frame)
+    return base_ik.normalize_quat(base_ik.quat_multiply(base_quat, quat_base)).astype(np.float32)
 
 
 def map_float_dofs_to_dp(dof_names, dof_pos, dof_vel):
@@ -2902,17 +3138,28 @@ def make_float_dp_state(
     yaw_rate,
     gripper,
     last_dp_action=None,
+    base_pitch=0.0,
+    pose_frame="base",
 ):
     dp_dof_pos, dp_dof_vel = map_float_dofs_to_dp(dof_names, dof_pos, dof_vel)
     base_roll_pitch = np.asarray([0.0, 0.0], dtype=np.float32)
     base_ang_vel = np.asarray([0.0, 0.0, yaw_rate], dtype=np.float32)
     last_low_action = make_last_low_action_from_dp(last_dp_action)
     foot_contacts = np.zeros(4, dtype=np.float32)
-    base_pos = np.asarray([base_xy[0], base_xy[1], base_z], dtype=np.float32)
-    rel = np.asarray(ee_pos, dtype=np.float32) - base_pos
-    c = math.cos(-float(yaw))
-    s = math.sin(-float(yaw))
-    ee_base = np.asarray([c * rel[0] - s * rel[1], s * rel[0] + c * rel[1], rel[2]], dtype=np.float32)
+    ee_base = world_pos_to_base(
+        ee_pos,
+        base_xy,
+        base_z,
+        yaw,
+        base_pitch=base_pitch,
+        pose_frame=pose_frame,
+    )
+    ee_quat_base = world_quat_to_base(
+        base_ik.normalize_quat(ee_quat),
+        yaw,
+        base_pitch=base_pitch,
+        pose_frame=pose_frame,
+    )
     return np.concatenate(
         [
             base_roll_pitch,
@@ -2922,7 +3169,7 @@ def make_float_dp_state(
             last_low_action,
             foot_contacts,
             ee_base,
-            base_ik.normalize_quat(ee_quat).astype(np.float32),
+            ee_quat_base,
             np.asarray([gripper], dtype=np.float32),
         ],
         axis=0,
@@ -3017,9 +3264,25 @@ def a2w_joint_values_from_dofs(dof_names, dof_pos, joint_names=A2W_Z1_JOINT_NAME
     return out
 
 
-def make_pi05_current_state10(vx, yaw_rate, ee_pos, ee_quat, base_xy, base_z, yaw, gripper):
-    ee_pos_base = world_pos_to_base(ee_pos, base_xy, base_z, yaw)
-    ee_quat_base = world_quat_to_base(base_ik.normalize_quat(ee_quat), yaw)
+def make_pi05_current_state10(
+    vx,
+    yaw_rate,
+    ee_pos,
+    ee_quat,
+    base_xy,
+    base_z,
+    yaw,
+    gripper,
+    base_pitch=0.0,
+    pose_frame="base",
+):
+    ee_pos_base = world_pos_to_base(ee_pos, base_xy, base_z, yaw, base_pitch=base_pitch, pose_frame=pose_frame)
+    ee_quat_base = world_quat_to_base(
+        base_ik.normalize_quat(ee_quat),
+        yaw,
+        base_pitch=base_pitch,
+        pose_frame=pose_frame,
+    )
     return np.concatenate(
         [
             np.asarray([vx, yaw_rate], dtype=np.float32),
@@ -3031,13 +3294,28 @@ def make_pi05_current_state10(vx, yaw_rate, ee_pos, ee_quat, base_xy, base_z, ya
     ).astype(np.float32)
 
 
-def make_pi05_last_command_state10(last_dp_action, ee_pos, ee_quat, base_xy, base_z, yaw, gripper):
+def make_pi05_last_command_state10(
+    last_dp_action,
+    ee_pos,
+    ee_quat,
+    base_xy,
+    base_z,
+    yaw,
+    gripper,
+    base_pitch=0.0,
+    pose_frame="base",
+):
     last_command = np.zeros(2, dtype=np.float32)
     if last_dp_action is not None:
         values = np.asarray(last_dp_action, dtype=np.float32).reshape(-1)
         last_command[: min(2, values.shape[0])] = values[:2]
-    ee_pos_base = world_pos_to_base(ee_pos, base_xy, base_z, yaw)
-    ee_quat_base = world_quat_to_base(base_ik.normalize_quat(ee_quat), yaw)
+    ee_pos_base = world_pos_to_base(ee_pos, base_xy, base_z, yaw, base_pitch=base_pitch, pose_frame=pose_frame)
+    ee_quat_base = world_quat_to_base(
+        base_ik.normalize_quat(ee_quat),
+        yaw,
+        base_pitch=base_pitch,
+        pose_frame=pose_frame,
+    )
     return np.concatenate(
         [
             last_command,
@@ -3077,10 +3355,23 @@ def make_float_dp_observation_state(
     last_dp_action=None,
     vx=0.0,
     state_mode=FLOAT_DP_STATE_MODE_FULL,
+    base_pitch=0.0,
+    pose_frame="base",
 ):
     state_mode = normalize_float_dp_state_mode(state_mode)
     if state_mode == FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10:
-        return make_pi05_current_state10(vx, yaw_rate, ee_pos, ee_quat, base_xy, base_z, yaw, gripper)
+        return make_pi05_current_state10(
+            vx,
+            yaw_rate,
+            ee_pos,
+            ee_quat,
+            base_xy,
+            base_z,
+            yaw,
+            gripper,
+            base_pitch=base_pitch,
+            pose_frame=pose_frame,
+        )
     if state_mode == FLOAT_DP_STATE_MODE_PI05_LAST_COMMAND_STATE10:
         return make_pi05_last_command_state10(
             last_dp_action,
@@ -3090,6 +3381,8 @@ def make_float_dp_observation_state(
             base_z,
             yaw,
             gripper,
+            base_pitch=base_pitch,
+            pose_frame=pose_frame,
         )
     if state_mode == FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE9:
         return make_a2w_last_command_joint_state9(last_dp_action, dof_names, dof_pos)
@@ -3105,6 +3398,8 @@ def make_float_dp_observation_state(
         yaw_rate,
         gripper,
         last_dp_action,
+        base_pitch=base_pitch,
+        pose_frame=pose_frame,
     )
 
 
@@ -3120,6 +3415,8 @@ def make_float_dp_action(
     action_mode=None,
     dof_names=None,
     dof_pos=None,
+    base_pitch=0.0,
+    pose_frame="base",
 ):
     if str(action_mode or "").lower() == "a2w_joint_action9":
         action_names = A2W_JOINT_ACTION9_NAMES
@@ -3135,8 +3432,20 @@ def make_float_dp_action(
             ],
             axis=0,
         ).astype(np.float32)
-    target_pos_base = world_pos_to_base(target_pos, base_xy, base_z, yaw)
-    target_quat_base = world_quat_to_base(base_ik.normalize_quat(target_quat), yaw)
+    target_pos_base = world_pos_to_base(
+        target_pos,
+        base_xy,
+        base_z,
+        yaw,
+        base_pitch=base_pitch,
+        pose_frame=pose_frame,
+    )
+    target_quat_base = world_quat_to_base(
+        base_ik.normalize_quat(target_quat),
+        yaw,
+        base_pitch=base_pitch,
+        pose_frame=pose_frame,
+    )
     return np.concatenate(
         [
             np.asarray([vx, yaw_rate], dtype=np.float32),
@@ -3148,7 +3457,7 @@ def make_float_dp_action(
     ).astype(np.float32)
 
 
-def apply_float_dp_action(action, base_xy, base_z, yaw, dt, action_frame="base"):
+def apply_float_dp_action(action, base_xy, base_z, yaw, dt, action_frame="base", base_pitch=0.0):
     action = np.asarray(action, dtype=np.float32).reshape(-1)
     if action.shape[0] < 10:
         raise ValueError(f"Door DP action must have at least 10 values, got shape {action.shape}")
@@ -3159,18 +3468,36 @@ def apply_float_dp_action(action, base_xy, base_z, yaw, dt, action_frame="base")
     base_xy_next = np.asarray(base_xy, dtype=np.float32) + heading * (vx * float(dt))
     target_pos_action = np.asarray(action[2:5], dtype=np.float32).copy()
     target_quat_action = base_ik.normalize_quat(np.asarray(action[5:9], dtype=np.float32))
-    action_frame = str(action_frame or "base").lower()
+    action_frame = normalize_float_dp_pose_frame(action_frame)
     if action_frame == "base":
         # Recorded float_ik actions store base velocity for prev->current, while
         # target pose is encoded in the current-frame base. Decode after applying
         # the base delta so action replay and policy rollout use the same frame.
         target_pos = base_pos_to_world(target_pos_action, base_xy_next, base_z, yaw_next)
         target_quat = base_quat_to_world(target_quat_action, yaw_next)
+    elif is_full_base_pose_frame(action_frame):
+        target_pos = base_pos_to_world(
+            target_pos_action,
+            base_xy_next,
+            base_z,
+            yaw_next,
+            base_pitch=base_pitch,
+            pose_frame=action_frame,
+        )
+        target_quat = base_quat_to_world(
+            target_quat_action,
+            yaw_next,
+            base_pitch=base_pitch,
+            pose_frame=action_frame,
+        )
     elif action_frame == "world":
         target_pos = target_pos_action
         target_quat = target_quat_action
     else:
-        raise ValueError(f"Unsupported float_ik action_frame={action_frame!r}; expected 'base' or 'world'.")
+        raise ValueError(
+            f"Unsupported float_ik action_frame={action_frame!r}; "
+            "expected 'base', 'robot_base_full', or 'world'."
+        )
     gripper = float(action[9])
     return base_xy_next.astype(np.float32), yaw_next, target_pos, target_quat, gripper
 
@@ -3428,6 +3755,13 @@ def float_dp_camera_images_for_record_frame(gym, sim, st):
     )
     if should_capture:
         camera_images = capture_dp_camera_images_from_rendered(gym, sim, st.env, st.camera_handles, st.args)
+        if bool(getattr(st.args, "record_handle_bbox", False)):
+            wrist_bbox, wrist_bbox_valid = handle_bbox_from_mask_image(camera_images.get("wrist_handle_mask"))
+            front_bbox, front_bbox_valid = handle_bbox_from_mask_image(camera_images.get("front_handle_mask"))
+            st.last_wrist_handle_bbox = wrist_bbox.copy()
+            st.last_wrist_handle_bbox_valid = wrist_bbox_valid.copy()
+            st.last_front_handle_bbox = front_bbox.copy()
+            st.last_front_handle_bbox_valid = front_bbox_valid.copy()
         wrist_mask_rgb, wrist_second_rgb, front_mask_rgb, front_second_rgb = dp_image_inputs_from_cpu_cameras(
             camera_images, st.args
         )
@@ -3480,6 +3814,7 @@ def make_float_dp_recorder(
 ):
     state_mode = normalize_float_dp_state_mode(getattr(args, "dp_record_state_mode", FLOAT_DP_STATE_MODE_FULL))
     action_names = float_dp_action_feature_names(state_mode=state_mode)
+    pose_frame = normalize_float_dp_pose_frame(getattr(args, "ee_pose_frame", "base"))
     if state_mode == FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10:
         state_source = "current_vx_yaw_rate_ee_base_gripper"
     elif state_mode == FLOAT_DP_STATE_MODE_PI05_LAST_COMMAND_STATE10:
@@ -3498,9 +3833,11 @@ def make_float_dp_recorder(
         "door_motion_sign": float(args.door_motion_sign),
         "door_cfg": str(args.door_cfg),
         "source_script": Path(sys.argv[0]).name,
-        "action_frame": "base",
-        "action_pose_frame": "base",
-        "target_pose_frame": "base",
+        "action_frame": pose_frame,
+        "action_pose_frame": pose_frame,
+        "target_pose_frame": pose_frame,
+        "state_pose_frame": pose_frame,
+        "ee_pose_frame": pose_frame,
         "ikpush_state_version": str(state_version),
         "door_dp_mode": str(mode_name),
         "controller_mode": str(mode_name),
@@ -3546,6 +3883,51 @@ def make_float_dp_recorder(
                     "observation.camera_pose.front",
                     "observation.camera_pose.wrist",
                 ],
+            }
+        )
+    if bool(getattr(args, "record_handle_bbox", False)):
+        metadata.update(
+            {
+                "handle_bbox_features": [
+                    "front_handle_bbox_xyxy",
+                    "front_handle_bbox_valid",
+                    "wrist_handle_bbox_xyxy",
+                    "wrist_handle_bbox_valid",
+                ],
+                "handle_bbox_convention": "xyxy_half_open_pixels",
+            }
+        )
+    if bool(getattr(args, "record_gripper_handle_contact", False)):
+        metadata.update(
+            {
+                "gripper_handle_contact_features": [
+                    "gripper_handle_contact_score",
+                    "gripper_handle_contact_count",
+                    "gripper_handle_contact_any",
+                    "gripper_handle_contact_both",
+                ],
+                "gripper_handle_contact_gripper_bodies": parse_csv_names(
+                    getattr(args, "gripper_handle_contact_gripper_bodies", ""),
+                    ["gripperStator", "gripperMover"],
+                ),
+                "gripper_handle_contact_handle_bodies": parse_csv_names(
+                    getattr(args, "gripper_handle_contact_handle_bodies", ""),
+                    [],
+                ),
+                "gripper_handle_contact_score_threshold": float(
+                    getattr(args, "gripper_handle_contact_score_threshold", 1.0e-6)
+                ),
+                "filter_gripper_handle_contact": bool(getattr(args, "filter_gripper_handle_contact", False)),
+                "filter_gripper_handle_contact_min_frames": int(
+                    getattr(args, "filter_gripper_handle_contact_min_frames", 5)
+                ),
+                "filter_gripper_handle_contact_require_both": bool(
+                    getattr(args, "filter_gripper_handle_contact_require_both", True)
+                ),
+                "filter_gripper_handle_contact_phase_names": parse_csv_names(
+                    getattr(args, "filter_gripper_handle_contact_phase_names", ""),
+                    ["close_gripper", "rotate_handle"],
+                ),
             }
         )
     metadata.update(depth_camera_randomization_metadata(args))
@@ -3803,10 +4185,11 @@ def setup_float_dp_policy_controller(
             f"DP checkpoint vision_mode={getattr(dp_controller, 'vision_mode', 'depth')!r}, "
             f"but {mode_name} play was run with {expected_vision_mode!r}."
         )
-    if getattr(dp_controller, "action_frame", "world") not in ("world", "base"):
+    controller_action_frame = normalize_float_dp_pose_frame(getattr(dp_controller, "action_frame", "world"))
+    if controller_action_frame not in ("world", "base") and not is_full_base_pose_frame(controller_action_frame):
         raise ValueError(
             f"DP checkpoint action_frame={getattr(dp_controller, 'action_frame', None)!r}; "
-            "expected 'world' or 'base'."
+            "expected 'world', 'base', or 'robot_base_full'."
         )
     checkpoint_state_version = str(dp_controller.config.get("ikpush_state_version", "legacy"))
     if checkpoint_state_version != str(state_version):
@@ -3826,7 +4209,7 @@ def setup_float_dp_policy_controller(
         raise ValueError(f"DP checkpoint door_dp_mode={checkpoint_mode!r}, but this script is --mode {mode_name}.")
     controlled_states = [env_states[env_id] for env_id in dp_control_env_ids]
     for controlled_state in controlled_states:
-        controlled_state.dp_action_frame = getattr(dp_controller, "action_frame", "world")
+        controlled_state.dp_action_frame = controller_action_frame
         if bool(getattr(args, "dp_temporal_ensemble", False)):
             controlled_state.dp_temporal_action_buffer = FloatDPActionOverlapBuffer(
                 old_weight=float(getattr(args, "dp_temporal_old_weight", 0.3)),
@@ -4001,6 +4384,8 @@ def collect_float_dp_policy_actions(gym, sim, env_states, dof_names, gripper_idx
             st.last_dp_action,
             vx=vx_state,
             state_mode=state_mode,
+            base_pitch=float(getattr(st.args, "robot_pitch", 0.0)),
+            pose_frame=getattr(dp_controller, "action_frame", "base"),
         )
         camera_images = capture_dp_camera_images_from_rendered(gym, sim, st.env, st.camera_handles, st.args)
         maybe_dump_initial_depth_images(st, camera_images)
@@ -4161,6 +4546,8 @@ def record_float_dp_frame(gym, sim, st, dof_names, gripper_idx, dt, phase_id, do
         st.last_dp_action,
         vx=vx_cmd,
         state_mode=state_mode,
+        base_pitch=float(getattr(st.args, "robot_pitch", 0.0)),
+        pose_frame=getattr(st.args, "ee_pose_frame", "base"),
     )
     dp_action = make_float_dp_action(
         vx_cmd,
@@ -4174,6 +4561,8 @@ def record_float_dp_frame(gym, sim, st, dof_names, gripper_idx, dt, phase_id, do
         action_mode=state_mode,
         dof_names=dof_names,
         dof_pos=st.dof_positions,
+        base_pitch=float(getattr(st.args, "robot_pitch", 0.0)),
+        pose_frame=getattr(st.args, "ee_pose_frame", "base"),
     )
     replay_snapshot = make_float_replay_snapshot(
         st.args,
@@ -4194,6 +4583,25 @@ def record_float_dp_frame(gym, sim, st, dof_names, gripper_idx, dt, phase_id, do
         front_pose_base, wrist_pose_base = float_camera_pose_base(gym, st)
         replay_snapshot["front_camera_pose_base"] = front_pose_base
         replay_snapshot["wrist_camera_pose_base"] = wrist_pose_base
+    if bool(getattr(st.args, "record_handle_bbox", False)):
+        replay_snapshot["front_handle_bbox_xyxy"] = np.asarray(
+            getattr(st, "last_front_handle_bbox", np.zeros(4, dtype=np.float32)),
+            dtype=np.float32,
+        ).reshape(4)
+        replay_snapshot["front_handle_bbox_valid"] = np.asarray(
+            getattr(st, "last_front_handle_bbox_valid", np.zeros(1, dtype=np.float32)),
+            dtype=np.float32,
+        ).reshape(1)
+        replay_snapshot["wrist_handle_bbox_xyxy"] = np.asarray(
+            getattr(st, "last_wrist_handle_bbox", np.zeros(4, dtype=np.float32)),
+            dtype=np.float32,
+        ).reshape(4)
+        replay_snapshot["wrist_handle_bbox_valid"] = np.asarray(
+            getattr(st, "last_wrist_handle_bbox_valid", np.zeros(1, dtype=np.float32)),
+            dtype=np.float32,
+        ).reshape(1)
+    if bool(getattr(st.args, "record_gripper_handle_contact", False)):
+        replay_snapshot.update(gripper_handle_contact_snapshot(gym, st))
     st.dp_recorder.add_frame(
         dp_state,
         wrist_mask_rgb,
@@ -4214,6 +4622,67 @@ def record_float_dp_frame(gym, sim, st, dof_names, gripper_idx, dt, phase_id, do
     return True
 
 
+def gripper_handle_contact_quality_from_recorder(st):
+    recorder = getattr(st, "dp_recorder", None)
+    if recorder is None or recorder.frame_count <= 0:
+        return False, {
+            "reason": "no_recorder_frames",
+            "contact_frames": 0,
+            "required_frames": int(getattr(st.args, "filter_gripper_handle_contact_min_frames", 5)),
+        }
+    if "gripper_handle_contact_both" not in recorder.frames and "gripper_handle_contact_any" not in recorder.frames:
+        return False, {
+            "reason": "missing_gripper_handle_contact_fields",
+            "contact_frames": 0,
+            "required_frames": int(getattr(st.args, "filter_gripper_handle_contact_min_frames", 5)),
+        }
+
+    phase_names = list(recorder.metadata.get("phase_names", []))
+    requested_phases = parse_csv_names(
+        getattr(st.args, "filter_gripper_handle_contact_phase_names", ""),
+        ["close_gripper", "rotate_handle"],
+    )
+    phase_ids = {phase_names.index(name) for name in requested_phases if name in phase_names}
+    subtask = np.asarray(recorder.frames.get("subtask_index", []), dtype=np.int64).reshape(-1)
+    if phase_ids:
+        phase_mask = np.asarray([int(x) in phase_ids for x in subtask], dtype=bool)
+    else:
+        phase_mask = np.ones(recorder.frame_count, dtype=bool)
+
+    require_both = bool(getattr(st.args, "filter_gripper_handle_contact_require_both", True))
+    key = "gripper_handle_contact_both" if require_both else "gripper_handle_contact_any"
+    values = recorder.frames.get(key)
+    if not values:
+        return False, {
+            "reason": f"missing_{key}",
+            "contact_frames": 0,
+            "required_frames": int(getattr(st.args, "filter_gripper_handle_contact_min_frames", 5)),
+        }
+    contact_mask = np.asarray(values, dtype=np.float32).reshape(-1) > 0.5
+    usable = contact_mask & phase_mask[: contact_mask.shape[0]]
+    contact_frames = int(np.count_nonzero(usable))
+    required_frames = int(getattr(st.args, "filter_gripper_handle_contact_min_frames", 5))
+    score_values = recorder.frames.get("gripper_handle_contact_score", [])
+    if score_values:
+        score_arr = np.asarray(score_values, dtype=np.float32).reshape(len(score_values), -1)
+        score_window = score_arr[phase_mask[: score_arr.shape[0]]] if phase_mask.size else score_arr
+        total_score = float(np.sum(score_window))
+        max_score = float(np.max(score_window)) if score_window.size else 0.0
+    else:
+        total_score = 0.0
+        max_score = 0.0
+    ok = contact_frames >= required_frames
+    return ok, {
+        "reason": "ok" if ok else "insufficient_gripper_handle_contact",
+        "contact_frames": contact_frames,
+        "required_frames": required_frames,
+        "require_both": require_both,
+        "phase_names": requested_phases,
+        "total_score": total_score,
+        "max_score": max_score,
+    }
+
+
 def finish_float_dp_recorders(env_states, args):
     saved = 0
     total_recorders = sum(st.dp_recorder is not None for st in env_states)
@@ -4221,7 +4690,12 @@ def finish_float_dp_recorders(env_states, args):
         if st.dp_recorder is None:
             continue
         collision_detected = bool(getattr(st, "base_door_collision_detected", False))
-        valid_success = bool(st.dp_record_success) and not collision_detected
+        contact_ok = True
+        contact_quality = None
+        if bool(getattr(st.args, "filter_gripper_handle_contact", False)):
+            contact_ok, contact_quality = gripper_handle_contact_quality_from_recorder(st)
+            st.dp_recorder.metadata["gripper_handle_contact_quality"] = contact_quality
+        valid_success = bool(st.dp_record_success) and not collision_detected and contact_ok
         if valid_success and st.dp_recorder.frame_count > 0:
             recorded_frames = st.dp_recorder.frame_count
             st.dp_recorder.save_episode()
@@ -4238,11 +4712,14 @@ def finish_float_dp_recorders(env_states, args):
                 flush=True,
             )
         else:
-            reason = (
-                "base-door collision detected"
-                if collision_detected
-                else f"door did not reach {args.pass_open_angle_deg} deg"
-            )
+            if collision_detected:
+                reason = "base-door collision detected"
+            elif not bool(st.dp_record_success):
+                reason = f"door did not reach {args.pass_open_angle_deg} deg"
+            elif not contact_ok:
+                reason = f"gripper-handle contact filter failed: {contact_quality}"
+            else:
+                reason = "unknown"
             print(
                 f"Finished raw Door DP recording env={st.index}: saved_successful=0/1 "
                 f"frames={st.dp_recorder.frame_count} reason={reason}",
@@ -4285,10 +4762,20 @@ def door_success(door_pos, args):
 
 def compute_door_efforts(door, dof_pos, dof_vel, args):
     efforts = np.zeros(len(dof_pos), dtype=np.float32)
-    if len(dof_pos) < 2:
+    if len(dof_pos) == 0:
         return efforts
 
     door_angle = float(dof_pos[0])
+    if len(dof_pos) < 2:
+        door.open_stage = True
+        hinge_range = max(abs(float(door.dof_upper[0])), abs(float(door.dof_lower[0])), 1.0e-3)
+        if abs(door_angle) < args.door_auto_open_target_ratio * hinge_range:
+            auto_torque = args.door_auto_open_force * args.door_motion_sign * args.door_auto_open_sign
+        else:
+            auto_torque = 0.0
+        efforts[0] = auto_torque - args.door_open_resistance * door_angle - args.door_open_damping * float(dof_vel[0])
+        return efforts
+
     handle_angle_from_lower = float(dof_pos[1] - door.dof_lower[1])
     if handle_angle_from_lower >= door.handle_unlock_threshold:
         door.open_stage = True

@@ -184,7 +184,14 @@ def resolve_path(path: str) -> Path:
 def success_metric_for_mode(mode: str, metric: str) -> str:
     if metric != "auto":
         return metric
-    return "abs" if mode in ("pull", "ikpull") else "signed"
+    # Use absolute hinge angle by default.  Different door assets encode their
+    # hinge opening direction with different signs, and some assets (e.g. wc4)
+    # flip args.door_motion_sign at runtime through per-door cfg multipliers.
+    # The JSONL policy log stores raw hinge DOF, not the runtime signed
+    # door_open_deg printed to stdout, so signed evaluation can count a
+    # correctly-opened door as a failure.  Keep explicit --success_metric signed
+    # available for direction-sensitive debugging.
+    return "abs"
 
 
 def read_jsonl(path: Path):
@@ -543,10 +550,27 @@ def main() -> None:
             result = future.result()
             remove_progress_line(spec)
             if result.returncode != 0:
-                tail = tail_text(spec.stdout_path)
-                if tail:
-                    safe_print(tail)
-                raise RuntimeError(f"Play batch {spec.batch_idx} failed with exit code {result.returncode}.")
+                progress = scan_log_progress(
+                    spec.log_path,
+                    threshold_deg=float(args.pass_open_angle_deg),
+                    metric=metric,
+                    door_motion_sign=float(args.door_motion_sign),
+                )
+                max_step = progress.get("max_step")
+                completed_steps = max_step is not None and int(max_step) >= max(0, int(args.steps) - 1)
+                completed_envs = len(progress.get("env_ids", set())) >= int(spec.batch_envs)
+                if completed_steps and completed_envs:
+                    safe_print(
+                        f"[batch {spec.batch_idx:04d}] warning: play subprocess exited with code "
+                        f"{result.returncode}, but policy log reached step {max_step}/{int(args.steps)} "
+                        f"for {len(progress.get('env_ids', set()))}/{spec.batch_envs} envs. "
+                        "Treating this as a completed batch; Isaac Gym can segfault during shutdown."
+                    )
+                else:
+                    tail = tail_text(spec.stdout_path)
+                    if tail:
+                        safe_print(tail)
+                    raise RuntimeError(f"Play batch {spec.batch_idx} failed with exit code {result.returncode}.")
             if not spec.log_path.exists():
                 tail = tail_text(spec.stdout_path)
                 if tail:

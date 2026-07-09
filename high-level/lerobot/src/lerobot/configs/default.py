@@ -40,8 +40,10 @@ class DatasetConfig:
 @dataclass
 class WandBConfig:
     enable: bool = False
-    # Set to true to disable saving an artifact despite training.save_checkpoint=True
-    disable_artifact: bool = False
+    # Disable saving/uploading model checkpoint artifacts to WandB by default.
+    # This keeps scalar metric logging enabled while avoiding large pt/safetensors uploads.
+    # Set --wandb.disable_artifact=false explicitly if checkpoint artifact upload is desired.
+    disable_artifact: bool = True
     project: str = "lerobot"
     entity: str | None = None
     notes: str | None = None

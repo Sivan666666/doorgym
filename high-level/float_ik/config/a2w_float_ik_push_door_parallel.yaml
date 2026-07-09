@@ -22,7 +22,9 @@ door_selection:
   door_selection: diverse
   door_prefer_name: wc4
   door_max_unique_assets: 0
-  door_actor_scale: 1.0
+  # Default for PartNet/generated 4door assets.  wc4/button_door override this
+  # per-asset in b1z1_opendoor.yaml with actor_scale: 1.0.
+  door_actor_scale: 1.2
   flip_door_motion_sign: false
   ignore_door_controller_overrides: false
   door_use_urdf_rgba: false

@@ -1,0 +1,52 @@
+Captured: 2026-07-05 Asia/Shanghai
+
+[HOST]
+hostname=robo
+architecture=x86_64
+os=Ubuntu 22.04.5 LTS
+gpu=NVIDIA GeForce RTX 4090 Laptop GPU
+driver=595.71.05
+gpu_memory=16376 MiB
+torch=2.11.0+cu130
+torch_cuda_runtime=13.0
+cuda_available=true
+
+[ROBOT_NETWORK]
+profile=door-robot-124
+interface=enp5s0
+address=192.168.124.25/24
+route=192.168.124.0/24 dev enp5s0 src 192.168.124.25 metric 100
+pc2=192.168.124.162, ping 3/3, average 0.104 ms
+z1=192.168.124.110, ping 0/3, unreachable
+
+[DDS]
+rmw=rmw_cyclonedds_cpp
+domain_id=0
+interface=enp5s0
+peer=192.168.124.162
+/cmd_vel_safe type=geometry_msgs/msg/Twist
+/cmd_vel_safe subscriber=robot_control_node
+/vel_state publisher=robot_control_node
+/vel_state measured_rate=50.000 Hz
+/vel_state sample=linear.x 0.0, angular.z 0.0
+
+[ACT]
+checkpoint=leroact_a2w_state10_wc4_newfov_randomized_200_depthonly_chunk100_exec50_bs16_0625_0212/100000/model_latest.pt
+checkpoint_model_sha256=dda1adc2102e97fe4a4722aebb3ecd492116af841b24c588221cb13c1ef25671
+dummy_depth_steps=100/100
+warm_forward_ms=11.3
+steady_control_hz=25.078
+ros_publish=false
+z1_publish=false
+
+[Z1_SOFTWARE]
+python_extension=unitree_arm_interface.cpython-310-x86_64-linux-gnu.so
+z1_ctrl=x86-64 ELF
+fk_ik_roundtrip_max_error_rad=4.44e-16
+bridge_dry_run=passed
+real_lowcmd_test=not_run, Z1 network unreachable
+
+[CAMERAS]
+pyrealsense2=2.57.7.10387
+connected_device_count=0
+real_dual_D435_test=not_run

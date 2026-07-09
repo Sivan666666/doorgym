@@ -131,7 +131,7 @@ def parse_args():
     parser.add_argument("--stage", choices=("teacher", "student", "eval_teacher", "eval_student"), default="teacher")
     parser.add_argument("--mode", choices=("both", "pull", "push"), default="both")
     parser.add_argument("--num_envs", type=int, default=64)
-    parser.add_argument("--timesteps", type=int, default=100000)
+    parser.add_argument("--timesteps", type=int, default=50000)
     parser.add_argument("--debug_cycle_timesteps", type=int, default=2000)
     parser.add_argument("--headless", dest="headless", action="store_true", default=None)
     parser.add_argument("--viewer", dest="headless", action="store_false")
@@ -190,7 +190,7 @@ def parse_args():
     args = parser.parse_args()
     if args.headless is None:
         args.headless = args.stage not in ("eval_teacher", "eval_student")
-    if args.reward_curriculum != "full" and args.timesteps == 100000:
+    if args.reward_curriculum != "full" and args.timesteps == 50000:
         args.timesteps = args.debug_cycle_timesteps
     if args.teacher_initial_log_std is None and args.reward_curriculum != "full":
         args.teacher_initial_log_std = -2.0
