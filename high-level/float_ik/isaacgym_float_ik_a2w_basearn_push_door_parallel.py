@@ -34,6 +34,11 @@ except Exception:
 SCRIPT_DIR = Path(__file__).resolve().parent
 HIGH_LEVEL_ROOT = SCRIPT_DIR.parents[0]
 REPO_ROOT = HIGH_LEVEL_ROOT.parents[0]
+KINEMATICS_DIR = SCRIPT_DIR / "kinematics"
+if str(KINEMATICS_DIR) not in sys.path:
+    sys.path.insert(0, str(KINEMATICS_DIR))
+
+from joint_trajectory_smoothing import evaluate_polynomial, polynomial_coefficients
 
 import door_common as dc
 import isaacgym_a2w_ik_push_door_parallel as a2w_ik
@@ -59,6 +64,10 @@ ThickAxesGeometry = dc.ThickAxesGeometry
 DoorRuntime = dc.DoorRuntime
 A2WZ1_DEFAULT_ASSET_ROOT = HIGH_LEVEL_ROOT / "data" / "asset" / "a2wz1"
 A2WZ1_DEFAULT_ASSET_FILE = "urdf/a2wz1.urdf"
+DEFAULT_Z1_TRACIK_URDF = HIGH_LEVEL_ROOT / "data" / "asset" / "z1" / "urdf" / "z1_arm.urdf"
+DEFAULT_Z1_TRACIK_EE_LINK = "ee_gripper_link"
+DEFAULT_Z1_TRACIK_MOUNT_CORRECTION = (0.026, 0.0, -0.042)
+Z1_ARM_JOINT_NAMES = tuple(f"joint{index}" for index in range(1, 7))
 
 DP_ROOT = HIGH_LEVEL_ROOT / "dp"
 if str(DP_ROOT) not in sys.path:
@@ -130,6 +139,191 @@ DOOR_TWIN_CAMERA_VIEWS = (
     "handle_closeup",
 )
 DOOR_TWIN_DEFAULT_CAMERA_VIEWS = ("wrist", "front", "observer_left", "observer_right", "handle_closeup")
+
+
+class SimOnlineQuinticTrajectory:
+    """Causal C2 joint trajectory matching the real Z1 episode player."""
+
+    def __init__(self, initial, max_speed, max_acceleration, max_duration):
+        self.dof = int(np.asarray(initial).size)
+        self.max_speed = np.broadcast_to(np.asarray(max_speed, dtype=np.float64), (self.dof,)).copy()
+        self.max_acceleration = np.broadcast_to(
+            np.asarray(max_acceleration, dtype=np.float64),
+            (self.dof,),
+        ).copy()
+        self.max_duration = float(max_duration)
+        self.coefficients = None
+        self.start_time = 0.0
+        self.duration = 0.0
+        self.hold = np.asarray(initial, dtype=np.float64).reshape(self.dof).copy()
+
+    def sample(self, now):
+        if self.coefficients is None:
+            zeros = np.zeros(self.dof, dtype=np.float64)
+            return self.hold.copy(), zeros.copy(), zeros.copy(), zeros.copy()
+        tau = float(np.clip(float(now) - self.start_time, 0.0, self.duration))
+        values = evaluate_polynomial(self.coefficients, np.asarray([tau]))
+        return tuple(value[0] for value in values)
+
+    def retarget(self, goal, now, nominal_duration, goal_velocity=None):
+        q0, qd0, qdd0, _ = self.sample(now)
+        goal = np.asarray(goal, dtype=np.float64).reshape(self.dof)
+        zeros = np.zeros(self.dof, dtype=np.float64)
+        if goal_velocity is None:
+            goal_velocity = zeros
+        else:
+            goal_velocity = np.asarray(goal_velocity, dtype=np.float64).reshape(self.dof)
+            goal_velocity = np.clip(goal_velocity, -self.max_speed, self.max_speed)
+        duration = max(float(nominal_duration), 1.0e-4)
+        for _ in range(12):
+            coefficients = polynomial_coefficients(
+                q0,
+                goal,
+                qd0,
+                goal_velocity,
+                qdd0,
+                zeros,
+                zeros,
+                zeros,
+                duration,
+                "quintic_hermite",
+            )
+            samples = evaluate_polynomial(coefficients, np.linspace(0.0, duration, 101))
+            speed_ratio = float(np.max(np.abs(samples[1]) / np.maximum(self.max_speed, 1.0e-9)))
+            acceleration_ratio = float(
+                np.max(np.abs(samples[2]) / np.maximum(self.max_acceleration, 1.0e-9))
+            )
+            if speed_ratio <= 1.0001 and acceleration_ratio <= 1.0001:
+                break
+            scale = max(speed_ratio, np.sqrt(acceleration_ratio), 1.01) * 1.02
+            duration *= scale
+            if duration > self.max_duration:
+                raise RuntimeError(
+                    f"Quintic segment needs {duration:.3f}s, above "
+                    f"max_duration={self.max_duration:.3f}s"
+                )
+        self.coefficients = coefficients
+        self.start_time = float(now)
+        self.duration = float(duration)
+        self.hold = goal.copy()
+        return self.duration
+
+
+class TracIKTrajectoryController:
+    """25 Hz TRAC-IK waypoint solver with 50 Hz online joint interpolation."""
+
+    def __init__(self, solver, initial_q, lower, upper, sim_dt, args, seed):
+        self.solver = solver
+        self.lower = np.asarray(lower, dtype=np.float64).reshape(6)
+        self.upper = np.asarray(upper, dtype=np.float64).reshape(6)
+        self.sim_dt = float(sim_dt)
+        requested_hz = max(float(args.tracik_command_hz), 1.0e-6)
+        self.command_stride = max(1, int(round(1.0 / (requested_hz * self.sim_dt))))
+        self.command_period = self.command_stride * self.sim_dt
+        self.max_restarts = max(1, int(args.tracik_max_restarts))
+        self.max_waypoint_step = float(args.tracik_max_waypoint_step)
+        self.velocity_alpha = float(args.tracik_waypoint_velocity_alpha)
+        self.rng = np.random.default_rng(int(seed))
+        initial_q = np.clip(np.asarray(initial_q, dtype=np.float64).reshape(6), self.lower, self.upper)
+        self.trajectory = SimOnlineQuinticTrajectory(
+            initial_q,
+            args.tracik_max_joint_speed,
+            args.tracik_max_joint_acceleration,
+            args.tracik_max_segment_duration,
+        )
+        self.last_solution = initial_q.copy()
+        self.last_waypoint_velocity = np.zeros(6, dtype=np.float64)
+        self.last_solve_step = None
+        self.solve_count = 0
+        self.failure_count = 0
+        self.last_solve_ms = 0.0
+        self.last_segment_duration = 0.0
+        self.last_error = ""
+        self.last_target_pose = None
+        self.last_candidate = None
+        self.last_waypoint_step = 0.0
+
+    def reset(self, q, sim_time):
+        q = np.clip(np.asarray(q, dtype=np.float64).reshape(6), self.lower, self.upper)
+        self.trajectory = SimOnlineQuinticTrajectory(
+            q,
+            self.trajectory.max_speed,
+            self.trajectory.max_acceleration,
+            self.trajectory.max_duration,
+        )
+        self.trajectory.start_time = float(sim_time)
+        self.last_solution = q.copy()
+        self.last_waypoint_velocity[:] = 0.0
+        self.last_solve_step = None
+        self.last_error = ""
+
+    def update(self, step, target_pose, position_only=False):
+        step = int(step)
+        now = step * self.sim_dt
+        solve_due = self.last_solve_step is None or step - self.last_solve_step >= self.command_stride
+        if solve_due:
+            first_solve_after_reset = self.last_solve_step is None
+            self.last_target_pose = np.asarray(target_pose, dtype=np.float64).copy()
+            start_ns = time.perf_counter_ns()
+            solution = self.solver.ik(
+                target_pose,
+                seed_joints=self.last_solution,
+                position_only=bool(position_only),
+                max_restarts=1,
+                strict_seed=True,
+            )
+            if solution is None and self.max_restarts > 1:
+                solution = self.solver.ik(
+                    target_pose,
+                    seed_joints=self.last_solution,
+                    position_only=bool(position_only),
+                    max_restarts=self.max_restarts,
+                    strict_seed=False,
+                    rng=self.rng,
+                )
+            self.last_solve_ms = (time.perf_counter_ns() - start_ns) * 1.0e-6
+            self.solve_count += 1
+            self.last_solve_step = step
+            if solution is None:
+                self.failure_count += 1
+                self.last_error = "ik_failed"
+            else:
+                solution = np.clip(np.asarray(solution, dtype=np.float64).reshape(6), self.lower, self.upper)
+                self.last_candidate = solution.copy()
+                waypoint_step = float(np.max(np.abs(solution - self.last_solution)))
+                self.last_waypoint_step = waypoint_step
+                if (
+                    not first_solve_after_reset
+                    and self.max_waypoint_step > 0.0
+                    and waypoint_step > self.max_waypoint_step
+                ):
+                    self.failure_count += 1
+                    self.last_error = (
+                        f"ik_waypoint_jump:{waypoint_step:.4f}>"
+                        f"{self.max_waypoint_step:.4f}"
+                    )
+                else:
+                    raw_velocity = (solution - self.last_solution) / self.command_period
+                    raw_velocity = np.clip(
+                        raw_velocity,
+                        -self.trajectory.max_speed,
+                        self.trajectory.max_speed,
+                    )
+                    waypoint_velocity = (
+                        self.velocity_alpha * raw_velocity
+                        + (1.0 - self.velocity_alpha) * self.last_waypoint_velocity
+                    )
+                    self.last_segment_duration = self.trajectory.retarget(
+                        solution,
+                        now,
+                        self.command_period,
+                        goal_velocity=waypoint_velocity,
+                    )
+                    self.last_solution = solution.copy()
+                    self.last_waypoint_velocity = waypoint_velocity.copy()
+                    self.last_error = ""
+        q_command, qd_command, qdd_command, _ = self.trajectory.sample(now + self.sim_dt)
+        return q_command, qd_command, qdd_command
 
 
 def default_a2w_float_ik_config_path():
@@ -552,6 +746,31 @@ def parse_args():
             {"name": "--ik_position_only", "action": "store_true"},
             {"name": "--ik_include_gripper", "action": "store_true"},
             {"name": "--ik_ee_link", "type": str, "default": base_ik.EE_GRIPPER_LINK},
+            {
+                "name": "--arm_ik_solver",
+                "type": str,
+                "default": "gym_jacobian",
+                "help": "Arm IK backend: gym_jacobian (original) or tracik (absolute IK plus quintic trajectory).",
+            },
+            {"name": "--tracik_urdf", "type": str, "default": str(DEFAULT_Z1_TRACIK_URDF)},
+            {"name": "--tracik_ee_link", "type": str, "default": DEFAULT_Z1_TRACIK_EE_LINK},
+            {"name": "--tracik_timeout", "type": float, "default": 0.005},
+            {"name": "--tracik_epsilon", "type": float, "default": 3.0e-3},
+            {"name": "--tracik_solver_type", "type": str, "default": "Speed"},
+            {"name": "--tracik_max_restarts", "type": int, "default": 30},
+            {"name": "--tracik_command_hz", "type": float, "default": 25.0},
+            {"name": "--tracik_max_joint_speed", "type": float, "default": 3.0},
+            {"name": "--tracik_max_joint_acceleration", "type": float, "default": 80.0},
+            {"name": "--tracik_waypoint_velocity_alpha", "type": float, "default": 0.5},
+            {"name": "--tracik_max_segment_duration", "type": float, "default": 3.0},
+            {"name": "--tracik_max_waypoint_step", "type": float, "default": 0.20},
+            {
+                "name": "--tracik_mount_correction",
+                "type": float,
+                "nargs": 3,
+                "default": list(DEFAULT_Z1_TRACIK_MOUNT_CORRECTION),
+                "help": "Standalone Z1 URDF base translation minus the simulated A2W Z1 mount translation.",
+            },
             {"name": "--stiffness", "type": float, "default": 80.0},
             {"name": "--damping", "type": float, "default": 8.0},
             {"name": "--speed_scale", "type": float, "default": 0.6},
@@ -847,6 +1066,19 @@ def parse_args():
             config_defaults.get("enable_collision_geom_check", False)
         ) or "--enable_collision_geom_check" in argv
     args.dp_action_horizon = None if int(args.dp_action_horizon) < 0 else int(args.dp_action_horizon)
+    args.arm_ik_solver = str(args.arm_ik_solver).strip().lower()
+    if args.arm_ik_solver not in ("gym_jacobian", "tracik"):
+        raise ValueError("--arm_ik_solver must be gym_jacobian or tracik.")
+    if str(args.tracik_solver_type) not in ("Speed", "Distance", "Manip1", "Manip2"):
+        raise ValueError("--tracik_solver_type must be Speed, Distance, Manip1, or Manip2.")
+    if float(args.tracik_command_hz) <= 0.0:
+        raise ValueError("--tracik_command_hz must be positive.")
+    if not 0.0 <= float(args.tracik_waypoint_velocity_alpha) <= 1.0:
+        raise ValueError("--tracik_waypoint_velocity_alpha must be in [0, 1].")
+    if int(args.tracik_max_restarts) <= 0:
+        raise ValueError("--tracik_max_restarts must be positive.")
+    if args.arm_ik_solver == "tracik" and str(args.ik_ee_link) != str(args.tracik_ee_link):
+        raise ValueError("--ik_ee_link and --tracik_ee_link must match in TRAC-IK mode.")
     if args.num_envs <= 0:
         raise ValueError("--num_envs must be positive.")
     if not args.dp_record_all_envs and (args.dp_record_env_id < 0 or args.dp_record_env_id >= args.num_envs):
@@ -896,6 +1128,36 @@ def parse_args():
     args.pass_through_door = not bool(args.no_pass_through_door)
     configure_door_twin_args(args)
     return args
+
+
+def create_tracik_solver_if_requested(args):
+    if str(getattr(args, "arm_ik_solver", "gym_jacobian")) != "tracik":
+        print("Arm IK backend: gym_jacobian (original Isaac Gym Jacobian DLS).", flush=True)
+        return None
+    try:
+        from ik_solvers.z1_tracik_kinematics import Z1TracIKKinematics
+    except Exception as exc:
+        raise RuntimeError(
+            "TRAC-IK mode requires the b1z1 environment with trac_ik installed."
+        ) from exc
+    solver = Z1TracIKKinematics(
+        args.tracik_urdf,
+        ee_link=args.tracik_ee_link,
+        timeout=args.tracik_timeout,
+        epsilon=args.tracik_epsilon,
+        solver_type=args.tracik_solver_type,
+    )
+    args._tracik_solver = solver
+    print(
+        "Arm IK backend: tracik + online quintic "
+        f"command_hz={float(args.tracik_command_hz):.1f} "
+        f"max_speed={float(args.tracik_max_joint_speed):.2f}rad/s "
+        f"max_acceleration={float(args.tracik_max_joint_acceleration):.2f}rad/s^2 "
+        f"waypoint_velocity_alpha={float(args.tracik_waypoint_velocity_alpha):.2f} "
+        f"mount_correction={np.asarray(args.tracik_mount_correction, dtype=np.float64).tolist()}",
+        flush=True,
+    )
+    return solver
 
 
 # Shared door/IK helpers live in door_common; keep local names to avoid changing push control code.
@@ -1027,6 +1289,8 @@ class ParallelEnvState:
     base_door_collision_detected: bool = False
     base_door_collision_log_step: int = -10**9
     door_twin_tracker: object = None
+    tracik_controller: object = None
+    tracik_joint_indices: object = None
 
 
 def door_twin_profile_for_args(args):
@@ -1568,6 +1832,66 @@ get_actor_body_index = dc.get_actor_body_index
 gym_quat_to_np = dc.gym_quat_to_np
 draw_local_camera_axes = dc.draw_local_camera_axes
 make_camera_properties = dc.make_camera_properties
+
+
+def tracik_target_pose_in_standalone_base(gym, st):
+    root_pos, root_quat = get_body_pose(gym, st.env, st.arm_actor, 0)
+    target_pos_world = np.asarray(st.ik_state.target_pos_np, dtype=np.float32).reshape(3)
+    root_quat_inv = base_ik.quat_conjugate(root_quat)
+    target_pos_local = quat_apply(root_quat_inv, target_pos_world - root_pos)
+    target_pos_local = target_pos_local + np.asarray(
+        st.args.tracik_mount_correction,
+        dtype=np.float32,
+    )
+    if st.ik_state.target_quat_np is None:
+        return target_pos_local.astype(np.float64), True
+    target_quat_world = base_ik.normalize_quat(
+        np.asarray(st.ik_state.target_quat_np, dtype=np.float32)
+    )
+    target_quat_local = base_ik.normalize_quat(
+        base_ik.quat_multiply(root_quat_inv, target_quat_world)
+    )
+    return np.concatenate([target_pos_local, target_quat_local]).astype(np.float64), False
+
+
+def reset_tracik_controller_to_targets(st, step, dt):
+    controller = getattr(st, "tracik_controller", None)
+    if controller is None:
+        return
+    controller.reset(
+        np.asarray(st.dof_positions, dtype=np.float64)[st.tracik_joint_indices],
+        float(step) * float(dt),
+    )
+
+
+def update_tracik_arm_targets_for_env(gym, st, step, dt):
+    controller = st.tracik_controller
+    if controller is None:
+        raise RuntimeError("TRAC-IK controller was not initialized for this environment.")
+    target_pose, position_only = tracik_target_pose_in_standalone_base(gym, st)
+    q_command, _qd_command, _qdd_command = controller.update(
+        step,
+        target_pose,
+        position_only=position_only,
+    )
+    st.dof_positions[st.tracik_joint_indices] = np.asarray(q_command, dtype=np.float32)
+
+    eef_state = st.ik_state.rb_states[st.ik_state.eef_body_sim_index]
+    current_pos = eef_state[:3].detach().cpu().numpy().astype(np.float32)
+    current_quat = base_ik.normalize_quat(
+        eef_state[3:7].detach().cpu().numpy().astype(np.float32)
+    )
+    st.ik_state.current_pos_np = current_pos.copy()
+    st.ik_state.current_quat_np = current_quat.copy()
+    st.ik_state.last_pos_error = float(
+        np.linalg.norm(np.asarray(st.ik_state.target_pos_np, dtype=np.float32) - current_pos)
+    )
+    if st.ik_state.target_quat_np is None:
+        st.ik_state.last_rot_error = None
+    else:
+        target_quat = base_ik.normalize_quat(st.ik_state.target_quat_np)
+        quat_dot = float(np.clip(abs(np.dot(target_quat, current_quat)), 0.0, 1.0))
+        st.ik_state.last_rot_error = float(2.0 * math.acos(quat_dot))
 
 
 def local_camera_transform_from_pose(local_pos, local_quat):
@@ -3040,6 +3364,29 @@ def initialize_parallel_env_state(
         traj={"base_xy": base_start.copy()},
         dp_recorder=dp_recorder,
     )
+    if str(getattr(args, "arm_ik_solver", "gym_jacobian")) == "tracik":
+        joint_indices = np.asarray([dof_names.index(name) for name in Z1_ARM_JOINT_NAMES], dtype=np.int64)
+        lower_np = ik_state.lower.detach().cpu().numpy()[joint_indices]
+        upper_np = ik_state.upper.detach().cpu().numpy()[joint_indices]
+        state.tracik_joint_indices = joint_indices
+        state.tracik_controller = TracIKTrajectoryController(
+            args._tracik_solver,
+            dof_positions[joint_indices],
+            lower_np,
+            upper_np,
+            float(args.sim_dt),
+            args,
+            seed=int(getattr(args, "env_seed", getattr(args, "seed", 0))),
+        )
+        if int(index) == 0:
+            controller = state.tracik_controller
+            print(
+                "TRAC-IK simulation cadence: "
+                f"sim_hz={1.0 / controller.sim_dt:.1f} "
+                f"command_stride={controller.command_stride} "
+                f"effective_command_hz={1.0 / controller.command_period:.1f}",
+                flush=True,
+            )
     init_door_twin_tracker(state)
     return state
 
@@ -3333,6 +3680,16 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                     st.yaw_traverse,
                     st.traj,
                 )
+                if (
+                    str(getattr(st.args, "arm_ik_solver", "gym_jacobian")) == "tracik"
+                    and phase == "initial_hold"
+                ):
+                    target_pos = np.asarray(st.traj["pregrasp"], dtype=np.float32).copy()
+                    target_quat = (
+                        None
+                        if st.args.ik_position_only
+                        else np.asarray(st.traj["goal_quat"], dtype=np.float32).copy()
+                    )
                 dp_action = None
                 dp_state = None
                 ee_pos = None
@@ -3384,11 +3741,14 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                 alpha = float(st.traj.get("return_home_alpha", 0.0))
                 st.dof_positions[:] = lerp(st.traj["return_home_start_dofs"], st.home_positions, alpha)
                 st.ik_state.last_pos_error = 0.0
+                reset_tracik_controller_to_targets(st, step, dt)
             elif phase in ("walk", "hold_home"):
                 st.dof_positions[:] = st.home_positions
                 st.ik_state.last_pos_error = 0.0
+                reset_tracik_controller_to_targets(st, step, dt)
             elif getattr(st, "dp_joint_action_active", False):
                 st.ik_state.last_pos_error = 0.0
+                reset_tracik_controller_to_targets(st, step, dt)
             else:
                 set_ik_target(st.ik_state, target_pos, target_quat)
 
@@ -3401,16 +3761,19 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                 if getattr(st, "dp_joint_action_active", False):
                     st.ik_state.last_pos_error = 0.0
                 else:
-                    update_arm_ik_targets_for_env(
-                        gym,
-                        st.env,
-                        st.arm_actor,
-                        st.index,
-                        st.dof_positions,
-                        st.ik_state,
-                        st.args,
-                        num_arm_dofs,
-                    )
+                    if str(getattr(st.args, "arm_ik_solver", "gym_jacobian")) == "tracik":
+                        update_tracik_arm_targets_for_env(gym, st, step, dt)
+                    else:
+                        update_arm_ik_targets_for_env(
+                            gym,
+                            st.env,
+                            st.arm_actor,
+                            st.index,
+                            st.dof_positions,
+                            st.ik_state,
+                            st.args,
+                            num_arm_dofs,
+                        )
                     if gripper_idx is not None:
                         st.dof_positions[gripper_idx] = np.clip(
                             st.last_gripper,
@@ -3525,9 +3888,32 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
             ]
             phases = [st.last_phase for st in shown]
             successes = sum(st.dp_record_success for st in env_states if st.dp_recorder is not None)
+            tracik_note = ""
+            if str(getattr(args, "arm_ik_solver", "gym_jacobian")) == "tracik":
+                controller = first.tracik_controller
+                tracik_note = (
+                    f" tracik_solve={controller.last_solve_ms:.3f}ms"
+                    f" failures={controller.failure_count}"
+                    f" segment={controller.last_segment_duration * 1000.0:.1f}ms"
+                    f" ik_pos_err={first.ik_state.last_pos_error:.4f}"
+                    f" tracik_error={controller.last_error or 'none'}"
+                )
+                if controller.last_error and controller.last_target_pose is not None:
+                    tracik_note += (
+                        " tracik_target="
+                        f"{np.round(controller.last_target_pose, 5).tolist()}"
+                    )
+                    if controller.last_candidate is not None:
+                        tracik_note += (
+                            " tracik_last_q="
+                            f"{np.round(controller.last_solution, 3).tolist()}"
+                            " tracik_candidate_q="
+                            f"{np.round(controller.last_candidate, 3).tolist()}"
+                        )
             print(
                 f"[{step:04d}] phases={phases} door_deg={door_deg} "
-                f"record_success={successes}/{sum(st.dp_recorder is not None for st in env_states)}",
+                f"record_success={successes}/{sum(st.dp_recorder is not None for st in env_states)}"
+                f"{tracik_note}",
                 flush=True,
             )
         step += 1
@@ -3563,6 +3949,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
 
 def main():
     args = parse_args()
+    create_tracik_solver_if_requested(args)
     seed = resolve_seed(args)
     print(f"ikpush seed={seed}", flush=True)
     gym = gymapi.acquire_gym()

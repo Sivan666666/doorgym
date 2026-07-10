@@ -20,7 +20,7 @@ from z1_pinocchio_ik import (
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-HIGH_LEVEL_ROOT = SCRIPT_DIR.parents[0]
+HIGH_LEVEL_ROOT = SCRIPT_DIR.parents[1]
 DEFAULT_ASSET_ROOT = HIGH_LEVEL_ROOT / "data" / "asset" / "z1"
 DEFAULT_ASSET_FILE = "urdf/z1_arm.urdf"
 ACTOR_NAME = "z1_arm_articulated"
@@ -36,10 +36,10 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--position_only", action="store_true")
     parser.add_argument("--gym_max_iter", type=int, default=100)
-    parser.add_argument("--pin_max_iter", type=int, default=100)
-    parser.add_argument("--pin_restarts", type=int, default=16)
-    parser.add_argument("--dt", type=float, default=0.4)
-    parser.add_argument("--damping", type=float, default=1.0e-4)
+    parser.add_argument("--pin_max_iter", type=int, default=1000)
+    parser.add_argument("--pin_restarts", type=int, default=30)
+    parser.add_argument("--dt", type=float, default=0.05)
+    parser.add_argument("--damping", type=float, default=1.0e-6)
     parser.add_argument("--max_step", type=float, default=0.08)
     parser.add_argument("--rot_weight", type=float, default=0.5)
     parser.add_argument("--target_delta", type=float, default=0.35)
@@ -380,7 +380,7 @@ def main():
                 max_restarts=int(args.pin_restarts),
                 dt=float(args.dt),
                 damping=float(args.damping),
-                threshold=float(args.pos_tol),
+                threshold=1.0e-4,
                 rotation_weight=float(args.rot_weight),
                 rng=rng,
             )

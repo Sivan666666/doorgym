@@ -1,7 +1,7 @@
-# A2W 5-door ACT 策略在 WC4 与 Button Door 上的评测汇总
+# A2W 5-door ACT 策略在 WC4 / Button Door / Fire Door 上的评测汇总
 
-日期：2026-07-09  
-任务：比较 4 种 50K checkpoint 在训练门 `wc4` 和 unseen door `button_door` 上的成功率。  
+日期：2026-07-09，更新：2026-07-10  
+任务：比较 4 种 50K checkpoint 在训练门 `wc4`、unseen door `button_door`、unseen `fire_door` 上的成功率，并记录 `fire_door` 50 条数据 finetune 后的变化。  
 
 ## 1. 对比的 4 种策略
 
@@ -19,10 +19,10 @@
 | robot | `a2wz1` |
 | mode | `ikpush` |
 | door cfg | `high-level/data/cfg/b1z1_opendoor.yaml` |
-| eval doors | `wc4`, `button_door` |
+| eval doors | `wc4`, `button_door`, `fire_door` |
 | trials | `64` |
 | num envs | `16` |
-| steps | `1000` |
+| steps | `wc4/button_door: 1000`, `fire_door: 1200` |
 | seed | `615455575` |
 | success threshold | `pass_open_angle_deg = 80` |
 | success metric | `abs` |
@@ -43,6 +43,7 @@
 
 - `wc4` 是训练门之一，用来检查 seen-door 性能。
 - `button_door` 没有参与这批 5-door 训练，用来检查 unseen-door 泛化。
+- `fire_door` 没有参与 5-door 训练，用来检查另一类 unseen-door 泛化；因为 `fire_door` skill 包含 traverse / return_home，评测 `steps=1200`，其余参数保持一致。
 - 本地 baseline 的 `wc4` 命令里虽然传了 `--success_metric auto`，日志实际解析为 `metric=abs`，因此和其他模型一致。
 - ps1 上第一次评测 `button_door` 失败是因为缺少 `high-level/data/asset/door_set/button_door/bounding_box.json`。补齐 `button_door` asset 后已重新评测，下面结果来自重新评测后的有效日志。
 
@@ -50,12 +51,30 @@
 
 ### 3.1 汇总表
 
-| 策略 | WC4 成功率 | Button Door 成功率 | WC4 → Button Door 泛化下降 |
+| 策略 | WC4 seen | Button Door unseen | Fire Door unseen | WC4 → Button | WC4 → Fire |
+|---|---:|---:|---:|---:|---:|
+| Baseline ACT | 58/64 = 90.62% | 3/64 = 4.69% | 56/64 = 87.50% | -85.94 pp | -3.12 pp |
+| Keyframe ACT | 43/64 = 67.19% | 6/64 = 9.38% | 未测 | -57.81 pp | - |
+| Plücker ACT FOV55 | 59/64 = 92.19% | 13/64 = 20.31% | 61/64 = 95.31% | -71.88 pp | +3.12 pp |
+| Keyframe + Plücker ACT | 49/64 = 76.56% | 19/64 = 29.69% | 61/64 = 95.31% | -46.88 pp | +18.75 pp |
+
+### 3.1.1 250 条 5-door 数据训练完 checkpoint 的 WC4 结果
+
+| 策略 | checkpoint step | Horizon | WC4 成功率 |
 |---|---:|---:|---:|
-| Baseline ACT | 58/64 = 90.62% | 3/64 = 4.69% | -85.94 pp |
-| Keyframe ACT | 43/64 = 67.19% | 6/64 = 9.38% | -57.81 pp |
-| Plücker ACT FOV55 | 59/64 = 92.19% | 13/64 = 20.31% | -71.88 pp |
-| Keyframe + Plücker ACT | 49/64 = 76.56% | 19/64 = 29.69% | -46.88 pp |
+| Baseline ACT | 50k | 25 | 58/64 = 90.62% |
+| Keyframe ACT | 50k | 25 | 43/64 = 67.19% |
+| Plücker ACT FOV55 | 50k | 25 | 59/64 = 92.19% |
+| Keyframe + Plücker ACT | 50k | 25 | 49/64 = 76.56% |
+
+### 3.1.2 Unseen Door 结果
+
+| 策略 | Button Door 成功率 | Fire Door 成功率 |
+|---|---:|---:|
+| Baseline ACT | 3/64 = 4.69% | 56/64 = 87.50% |
+| Keyframe ACT | 6/64 = 9.38% | 未测 |
+| Plücker ACT FOV55 | 13/64 = 20.31% | 61/64 = 95.31% |
+| Keyframe + Plücker ACT | 19/64 = 29.69% | 61/64 = 95.31% |
 
 ### 3.2 WC4 分 batch 结果
 
@@ -74,6 +93,42 @@
 | Keyframe ACT | 1/16 | 2/16 | 2/16 | 1/16 | 6/64 |
 | Plücker ACT FOV55 | 3/16 | 4/16 | 4/16 | 2/16 | 13/64 |
 | Keyframe + Plücker ACT | 3/16 | 5/16 | 6/16 | 5/16 | 19/64 |
+
+### 3.4 Fire Door 直接评测结果
+
+| 策略 | Horizon | Steps | 成功率 | 备注 |
+|---|---:|---:|---:|---|
+| Baseline ACT | 25 | 1200 | 56/64 = 87.50% | 本地评测 |
+| Keyframe ACT | 25 | 1200 | 未测 | 目前没有有效 fire_door 日志 |
+| Plücker ACT FOV55 | 25 | 1200 | 61/64 = 95.31% | ps1 评测 |
+| Keyframe + Plücker ACT | 25 | 1200 | 61/64 = 95.31% | ps1 评测 |
+
+确认：上表 `fire_door` 直接评测使用的是 **5-door 原始 50k checkpoint**，没有经过 fire door finetune。
+
+| 策略 | Fire Door 直接评测 checkpoint |
+|---|---|
+| Baseline ACT | `leroact_a2w_5door_baseline_act_50k_chunk100_exec50_bs16_0709_0206/checkpoints/050000` |
+| Plücker ACT FOV55 | `leroact_a2w_5door_plucker_fov55_50k_chunk100_exec50_bs16_0709_0209/checkpoints/050000` |
+| Keyframe + Plücker ACT | `leroact_a2w_5door_keyframe_w3_r3_sample30_plucker_fov55_50k_chunk100_exec50_bs16_0709_0209/checkpoints/050000` |
+
+### 3.5 Fire Door 50 条数据 Finetune 后结果
+
+| 初始策略 | Finetune 数据 | Finetune step | Horizon | Steps | Fire Door 成功率 | 对直接评测变化 |
+|---|---|---:|---:|---:|---:|---:|
+| Baseline ACT | `a2w_fire_door_robotbasefull_skill_contactcheck_50_step1200` | 5k | 25 | 1200 | 56/64 = 87.50% | +0.00 pp |
+| Baseline ACT | 同上 | 10k | 25 | 1200 | 52/64 = 81.25% | -6.25 pp |
+| Baseline ACT | 同上 | 20k | 25 | 1200 | 52/64 = 81.25% | -6.25 pp |
+| Plücker ACT FOV55 | 同上 | 20k | 25 | 1200 | 58/64 = 90.62% | -4.69 pp |
+| Keyframe + Plücker ACT | 同上 | 20k | 25 | 1200 | 59/64 = 92.19% | -3.12 pp |
+
+### 3.6 Baseline ACT Fire Door Finetune Step 对比
+
+| Baseline 版本 | Checkpoint | Fire Door 成功率 |
+|---|---|---:|
+| 5-door baseline，未 finetune | `leroact_a2w_5door_baseline_act_50k.../checkpoints/050000` | 56/64 = 87.50% |
+| Fire door finetune 5k | `finetune_firedoor50_from_5door_baseline.../checkpoints/005000` | 56/64 = 87.50% |
+| Fire door finetune 10k | `finetune_firedoor50_from_5door_baseline.../checkpoints/010000` | 52/64 = 81.25% |
+| Fire door finetune 20k | `finetune_firedoor50_from_5door_baseline.../checkpoints/020000` | 52/64 = 81.25% |
 
 ## 4. 初步分析
 
@@ -95,7 +150,40 @@ Keyframe + Plücker 达到 `19/64 = 29.69%`，是 button door 上最好的一组
 
 Keyframe ACT 从 baseline 的 `3/64` 提升到 `6/64`，有一点改善，但仍然很低。这说明只强调关键帧，不解决相机几何和空间对应关系，泛化帮助有限。换句话说，模型知道“关键阶段重要”还不够，它还需要知道“这个像素/这个把手在机器人坐标系里到底在哪里”。
 
-### 4.4 Horizon 固定为 25 的影响
+### 4.4 Fire Door 上没有出现 Button Door 那种泛化崩溃
+
+`fire_door` 上 baseline 直接达到 `56/64 = 87.50%`，Plücker 和 Keyframe+Plücker 都达到 `61/64 = 95.31%`。这说明 fire door 虽然是 unseen door，但它的几何和当前 scripted skill / 训练分布更接近模型已经学到的模式；不像 `button_door` 那样把交互模式推到明显 OOD。
+
+Plücker 在 fire door 上有小幅正收益：
+
+```text
+Baseline: 56/64
+Plucker:  61/64
+KF+Plucker: 61/64
+```
+
+这和 button door 的趋势一致：显式相机几何更容易在 unseen geometry 上帮到策略。但 fire door 的 baseline 已经很强，所以绝对提升空间比 button door 小。
+
+`button_door` 和 `fire_door` 都是 unseen door，但难度不是同一级别：
+
+1. `button_door` 的交互模式和 lever-handle 数据分布差异更大，策略不仅要定位新几何，还要产生不同的接触/按压动作。
+2. `fire_door` 虽然没参与 5-door 训练，但 skill 仍然更像 lever-handle push/traverse，和训练轨迹的阶段结构更接近。
+3. `fire_door` 评测给了 `1200` steps，而 `button_door` 是 `1000` steps；fire door 的 traverse / return_home skill 更长，客观上给了策略更多后续调整时间。
+4. `button_door` 的失败通常更像“接触模式不对”，不是单纯门开角不够；这类 OOD 不是靠多走几步就能修回来。
+5. 因此 `fire_door` 高成功率不能简单解释成“见过 fire door”，日志确认没有见过；更合理的解释是 fire door 这个 unseen 更接近训练分布，而 button door 是更强 OOD。
+
+### 4.5 Fire Door finetune 反而退化的可能原因
+
+Baseline ACT 用 50 条 fire door 数据 finetune 后没有提升：5k 与未 finetune 持平，10k/20k 下降到 `52/64`。这更像是小数据 finetune 的 closed-loop 过拟合，而不是模型容量不够。
+
+可能原因：
+
+1. 50 条 fire door 轨迹太少，finetune 很容易把原本 5-door 训练得到的泛化能力往单一轨迹模式拉窄。
+2. Fire door 直接评测已经有 `87.50%`，基线很高，finetune 的收益空间小，但破坏已有行为的风险大。
+3. ACT 的 chunk policy 对阶段时序敏感，finetune 会改变 gripper / rotate / push 的相对时序；即使 open-loop loss 更低，closed-loop 不一定更稳。
+4. 当前 finetune 没有 replay 原 250 条数据，容易出现轻微 forgetting；更稳的做法是混合 `250 old + 50 fire`，或者降低 LR / 冻结视觉 backbone / 减少训练步数。
+
+### 4.6 Horizon 固定为 25 的影响
 
 这次四个模型都使用 `dp_action_horizon=25`，因此结果可比。之前我们发现 ACT 的 closed-loop 效果对 horizon 很敏感，尤其 gripper 可能出现 close-open-close 的时序问题。这里固定 horizon=25 的好处是消除了 horizon sweep 带来的变量；但缺点是没有保证每个模型都在各自最优 horizon 下评测。
 
@@ -111,10 +199,13 @@ horizon = 10, 12, 14, 15, 25, 50
 
 1. `wc4` 上最强的是 Plücker ACT FOV55：`59/64 = 92.19%`，但和 baseline `58/64 = 90.62%` 差距很小。
 2. `button_door` unseen 泛化最强的是 Keyframe + Plücker：`19/64 = 29.69%`。
-3. Baseline ACT 在 seen door 很强，但 unseen door 泛化非常差：`3/64 = 4.69%`。
-4. Plücker conditioning 对 unseen door 有明确帮助：`3/64 → 13/64`。
-5. Keyframe 单独不够强，但和 Plücker 结合后在 unseen door 上最好：`19/64`。
-6. 目前所有 unseen-door 成功率仍偏低，说明新门泛化瓶颈还没有根本解决；下一步更值得排查的是门几何差异、把手/按钮交互模式、接触判断、轨迹阶段和训练数据覆盖，而不是只继续调 loss。
+3. `fire_door` unseen 上 Plücker 和 Keyframe + Plücker 最强，都是 `61/64 = 95.31%`。
+4. Baseline ACT 在 seen door 很强，但对 button door 泛化非常差：`3/64 = 4.69%`。
+5. Baseline ACT 对 fire door 直接评测已经很强：`56/64 = 87.50%`。
+6. Fire door 50 条数据 finetune 没有提升 baseline：5k 持平，10k/20k 退化。
+7. Plücker conditioning 对 unseen door 有明确帮助：button door `3/64 → 13/64`，fire door `56/64 → 61/64`。
+8. Keyframe 单独不够强，但和 Plücker 结合后在 button door 上最好：`19/64`。
+9. 目前最值得继续做的是更稳的 finetune protocol：混合旧数据 replay、降低 LR、冻结部分视觉 encoder、或只 finetune action head。
 
 ## 6. 日志位置
 
@@ -123,6 +214,10 @@ horizon = 10, 12, 14, 15, 25, 50
 ```text
 high-level/logs/door-policy-success/wc4_5door_baseline_act_50k_seed615455575
 high-level/logs/door-policy-success/button_door_5door_baseline_act_50k_seed615455575
+high-level/logs/door-policy-success/firedoor_eval_5door_baseline_act_50k_seed615455575
+high-level/logs/door-policy-success/fire_door_finetune5k_baseline_seed615455575
+high-level/logs/door-policy-success/fire_door_finetune10k_baseline_seed615455575
+high-level/logs/door-policy-success/fire_door_finetune20k_baseline_seed615455575
 ```
 
 ps1 三个模型：
@@ -135,4 +230,9 @@ ps1 三个模型：
 /home/ps/workspace/txc/doorgym/high-level/logs/door-policy-success/button_door_5door_keyframe_w3_r3_sample30_50k_seed615455575
 /home/ps/workspace/txc/doorgym/high-level/logs/door-policy-success/button_door_5door_plucker_fov55_50k_seed615455575
 /home/ps/workspace/txc/doorgym/high-level/logs/door-policy-success/button_door_5door_keyframe_w3_r3_sample30_plucker_fov55_50k_seed615455575
+
+/home/ps/workspace/txc/doorgym/high-level/logs/door-policy-success/firedoor_eval_5door_plucker_50k_seed615455575
+/home/ps/workspace/txc/doorgym/high-level/logs/door-policy-success/firedoor_eval_5door_kf_plucker_50k_seed615455575
+/home/ps/workspace/txc/doorgym/high-level/logs/door-policy-success/firedoor_eval_plucker_finetune20k_seed615455575_syncedcfg
+/home/ps/workspace/txc/doorgym/high-level/logs/door-policy-success/firedoor_eval_kf_plucker_finetune20k_seed615455575_syncedcfg
 ```

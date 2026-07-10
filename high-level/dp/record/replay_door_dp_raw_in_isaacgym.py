@@ -15,6 +15,8 @@ DP_ROOT = Path(__file__).resolve().parents[1]
 HIGH_LEVEL_ROOT = DP_ROOT.parent
 REPO_ROOT = HIGH_LEVEL_ROOT.parent
 LOW_LEVEL_ROOT = REPO_ROOT / "low-level"
+KINEMATICS_ROOT = HIGH_LEVEL_ROOT / "float_ik" / "kinematics"
+DEFAULT_TRACIK_URDF = HIGH_LEVEL_ROOT / "data" / "asset" / "z1" / "urdf" / "z1_arm.urdf"
 FLOAT_IK_SOURCE_SCRIPTS = (
     "isaacgym_float_ik_b1z1_basearn_push_door.py",
     "isaacgym_float_ik_b1z1_basearn_push_door_parallel.py",
@@ -141,6 +143,53 @@ def parse_args():
     parser.add_argument("--real_time", dest="real_time", action="store_true", default=True)
     parser.add_argument("--no_real_time", dest="real_time", action="store_false")
     parser.add_argument("--replay_fps", type=float, default=None)
+    parser.add_argument(
+        "--ik_solver",
+        choices=("gym_jacobian", "tracik"),
+        default="gym_jacobian",
+        help="Arm solver for float-IK action replay. State replay is unchanged.",
+    )
+    parser.add_argument(
+        "--trajectory_interpolation",
+        choices=("linear", "quintic", "septic"),
+        default="quintic",
+        help="Online joint interpolation used with --ik_solver tracik.",
+    )
+    parser.add_argument("--trajectory_control_hz", type=float, default=50.0)
+    parser.add_argument("--tracik_urdf", type=str, default=str(DEFAULT_TRACIK_URDF))
+    parser.add_argument("--tracik_timeout", type=float, default=0.005)
+    parser.add_argument("--tracik_epsilon", type=float, default=1.0e-5)
+    parser.add_argument("--tracik_solver_type", choices=("Speed", "Distance", "Manip1", "Manip2"), default="Speed")
+    parser.add_argument("--tracik_max_restarts", type=int, default=30)
+    parser.add_argument("--tracik_seed", type=int, default=7)
+    parser.add_argument(
+        "--draw_ik_trajectory",
+        dest="draw_ik_trajectory",
+        action="store_true",
+        default=True,
+        help="Draw realtime target, TRAC-IK FK, smoothed-command FK, and actual EE trajectories.",
+    )
+    parser.add_argument("--no_draw_ik_trajectory", dest="draw_ik_trajectory", action="store_false")
+    parser.add_argument(
+        "--ik_trajectory_history",
+        type=int,
+        default=2000,
+        help="Maximum points retained per realtime IK trajectory; <=0 keeps the whole episode.",
+    )
+    parser.add_argument(
+        "--tracik_target_source",
+        choices=("replay_ee", "action"),
+        default="replay_ee",
+        help="replay_ee streams the recorded reachable EE pose; action uses the raw policy target, which may be unreachable.",
+    )
+    parser.add_argument(
+        "--tracik_mount_correction",
+        type=float,
+        nargs=3,
+        default=None,
+        metavar=("X", "Y", "Z"),
+        help="Target translation from replay arm frame to standalone Z1 URDF frame; A2W auto-default is 0.026 0 -0.042.",
+    )
 
     parser.add_argument("--rl_device", type=str, default="cuda:0")
     parser.add_argument("--sim_device", type=str, default="cuda:0")
@@ -1208,6 +1257,74 @@ def float_ik_action_target_world(float_mod, data, frame_idx, action):
     )
 
 
+def float_ik_replay_ee_target_world(
+    float_mod,
+    data,
+    frame_idx,
+    current_base_xy,
+    current_base_z,
+    current_yaw,
+    current_pitch=0.0,
+):
+    required = ("replay_root_state", "replay_ee_pos", "replay_ee_quat")
+    missing = [key for key in required if key not in data.files]
+    if missing:
+        raise KeyError(f"--tracik_target_source replay_ee requires fields: {missing}")
+    recorded_root = np.asarray(data["replay_root_state"][frame_idx], dtype=np.float32)
+    recorded_ee_pos = np.asarray(data["replay_ee_pos"][frame_idx], dtype=np.float32)
+    recorded_ee_quat = np.asarray(data["replay_ee_quat"][frame_idx], dtype=np.float32)
+    recorded_yaw = yaw_from_quat_xyzw(recorded_root[3:7])
+    recorded_pitch = pitch_from_quat_xyzw(recorded_root[3:7])
+    try:
+        local_pos = float_mod.world_pos_to_base(
+            recorded_ee_pos,
+            recorded_root[:2],
+            recorded_root[2],
+            recorded_yaw,
+            base_pitch=recorded_pitch,
+            pose_frame="robot_base_full",
+        )
+        local_quat = float_mod.world_quat_to_base(
+            recorded_ee_quat,
+            recorded_yaw,
+            base_pitch=recorded_pitch,
+            pose_frame="robot_base_full",
+        )
+        target_pos = float_mod.base_pos_to_world(
+            local_pos,
+            current_base_xy,
+            current_base_z,
+            current_yaw,
+            base_pitch=current_pitch,
+            pose_frame="robot_base_full",
+        )
+        target_quat = float_mod.base_quat_to_world(
+            local_quat,
+            current_yaw,
+            base_pitch=current_pitch,
+            pose_frame="robot_base_full",
+        )
+    except TypeError:
+        local_pos = float_mod.world_pos_to_base(
+            recorded_ee_pos,
+            recorded_root[:2],
+            recorded_root[2],
+            recorded_yaw,
+        )
+        local_quat = float_mod.world_quat_to_base(recorded_ee_quat, recorded_yaw)
+        target_pos = float_mod.base_pos_to_world(
+            local_pos,
+            current_base_xy,
+            current_base_z,
+            current_yaw,
+        )
+        target_quat = float_mod.base_quat_to_world(local_quat, current_yaw)
+    return (
+        np.asarray(target_pos, dtype=np.float32),
+        float_mod.base_ik.normalize_quat(np.asarray(target_quat, dtype=np.float32)),
+    )
+
+
 def apply_float_ik_recorded_action(float_mod, action, base_xy, base_z, yaw, dt, action_frame, base_pitch=0.0):
     action = np.asarray(action, dtype=np.float32).reshape(-1)
     if action.shape[0] < 10:
@@ -1411,6 +1528,365 @@ def compute_float_ik_door_efforts(float_mod, door, door_pos, door_vel, args):
     return np.zeros_like(np.asarray(door_pos, dtype=np.float32))
 
 
+def create_tracik_solver(args):
+    if str(KINEMATICS_ROOT) not in sys.path:
+        sys.path.insert(0, str(KINEMATICS_ROOT))
+    if str(KINEMATICS_ROOT / "ik_solvers") not in sys.path:
+        sys.path.insert(0, str(KINEMATICS_ROOT / "ik_solvers"))
+    from ik_solvers.z1_tracik_kinematics import Z1TracIKKinematics
+
+    return Z1TracIKKinematics(
+        args.tracik_urdf,
+        timeout=float(args.tracik_timeout),
+        epsilon=float(args.tracik_epsilon),
+        solver_type=args.tracik_solver_type,
+    )
+
+
+def array_from_tensor_or_numpy(value):
+    if hasattr(value, "detach"):
+        value = value.detach()
+    if hasattr(value, "cpu"):
+        value = value.cpu()
+    if hasattr(value, "numpy"):
+        value = value.numpy()
+    return np.asarray(value)
+
+
+class FloatReplayTracIKController:
+    ARM_JOINT_NAMES = ("joint1", "joint2", "joint3", "joint4", "joint5", "joint6")
+
+    def __init__(
+        self,
+        solver,
+        args,
+        float_mod,
+        dof_names,
+        lower,
+        upper,
+        dof_positions,
+        sim_dt,
+        command_dt,
+        mount_correction,
+    ):
+        if str(KINEMATICS_ROOT) not in sys.path:
+            sys.path.insert(0, str(KINEMATICS_ROOT))
+        from joint_trajectory_smoothing import evaluate_polynomial, polynomial_coefficients
+
+        self.evaluate_polynomial = evaluate_polynomial
+        self.polynomial_coefficients = polynomial_coefficients
+        self.solver = solver
+        self.args = args
+        self.float_mod = float_mod
+        self.dof_names = list(dof_names)
+        self.arm_indices = np.asarray(
+            [self.dof_names.index(name) for name in self.ARM_JOINT_NAMES],
+            dtype=np.int64,
+        )
+        self.gripper_index = self.dof_names.index("jointGripper") if "jointGripper" in self.dof_names else None
+        self.lower = array_from_tensor_or_numpy(lower).astype(np.float64, copy=False)
+        self.upper = array_from_tensor_or_numpy(upper).astype(np.float64, copy=False)
+        self.sim_dt = float(sim_dt)
+        self.command_dt = float(command_dt)
+        self.substeps = int(round(self.command_dt / self.sim_dt))
+        if self.substeps < 1 or abs(self.substeps * self.sim_dt - self.command_dt) > 1.0e-8:
+            raise ValueError(
+                f"TRAC-IK replay requires command_dt/sim_dt to be an integer, got "
+                f"{self.command_dt:.6f}/{self.sim_dt:.6f}"
+            )
+        self.mount_correction = np.asarray(mount_correction, dtype=np.float64).reshape(3)
+        self.rng = np.random.default_rng(int(args.tracik_seed))
+        self.last_q = np.asarray(dof_positions, dtype=np.float64)[self.arm_indices].copy()
+        self.last_gripper = (
+            float(dof_positions[self.gripper_index]) if self.gripper_index is not None else float(args.gripper_open)
+        )
+        self.solve_ms = []
+        self.retry_count = 0
+        self.deadline_misses = 0
+        self.current_visual_poses = {}
+        self.visual_history = {
+            "target": [],
+            "solution": [],
+            "command": [],
+            "actual": [],
+        }
+
+    def clear_visualization(self):
+        self.current_visual_poses.clear()
+        for points in self.visual_history.values():
+            points.clear()
+
+    def _append_visual_pose(self, key, pose):
+        pose = np.asarray(pose, dtype=np.float64).reshape(7).copy()
+        self.current_visual_poses[key] = pose
+        points = self.visual_history[key]
+        points.append(pose[:3].copy())
+        history_limit = int(self.args.ik_trajectory_history)
+        if history_limit > 0 and len(points) > history_limit:
+            del points[: len(points) - history_limit]
+
+    def _solver_pose_to_world(self, solver_pose, base_xy, yaw, base_pitch):
+        solver_pose = np.asarray(solver_pose, dtype=np.float64).reshape(7)
+        local_pos = solver_pose[:3] - self.mount_correction
+        try:
+            world_pos = self.float_mod.base_pos_to_world(
+                local_pos,
+                base_xy,
+                self.args.robot_z,
+                yaw,
+                base_pitch=base_pitch,
+                pose_frame="robot_base_full",
+            )
+            world_quat = self.float_mod.base_quat_to_world(
+                solver_pose[3:7],
+                yaw,
+                base_pitch=base_pitch,
+                pose_frame="robot_base_full",
+            )
+        except TypeError:
+            world_pos = self.float_mod.base_pos_to_world(local_pos, base_xy, self.args.robot_z, yaw)
+            world_quat = self.float_mod.base_quat_to_world(solver_pose[3:7], yaw)
+        return np.concatenate(
+            [np.asarray(world_pos, dtype=np.float64), np.asarray(world_quat, dtype=np.float64)]
+        )
+
+    def record_command_and_actual(self, q_command, base_xy, yaw, base_pitch, actual_pos, actual_quat):
+        command_pose = self._solver_pose_to_world(
+            self.solver.fk(np.asarray(q_command, dtype=np.float64)),
+            base_xy,
+            yaw,
+            base_pitch,
+        )
+        actual_pose = np.concatenate(
+            [np.asarray(actual_pos, dtype=np.float64), np.asarray(actual_quat, dtype=np.float64)]
+        )
+        self._append_visual_pose("command", command_pose)
+        self._append_visual_pose("actual", actual_pose)
+
+    def _target_in_solver_frame(self, target_pos, target_quat, base_xy, yaw, base_pitch):
+        try:
+            local_pos = self.float_mod.world_pos_to_base(
+                target_pos,
+                base_xy,
+                self.args.robot_z,
+                yaw,
+                base_pitch=base_pitch,
+                pose_frame="robot_base_full",
+            )
+            local_quat = self.float_mod.world_quat_to_base(
+                target_quat,
+                yaw,
+                base_pitch=base_pitch,
+                pose_frame="robot_base_full",
+            )
+        except TypeError:
+            local_pos = self.float_mod.world_pos_to_base(
+                target_pos,
+                base_xy,
+                self.args.robot_z,
+                yaw,
+            )
+            local_quat = self.float_mod.world_quat_to_base(target_quat, yaw)
+        local_pos = np.asarray(local_pos, dtype=np.float64) + self.mount_correction
+        local_quat = self.float_mod.base_ik.normalize_quat(np.asarray(local_quat, dtype=np.float32))
+        return np.concatenate([local_pos, np.asarray(local_quat, dtype=np.float64)])
+
+    def solve(self, target_pos, target_quat, base_xy, yaw, base_pitch):
+        target_pose = self._target_in_solver_frame(target_pos, target_quat, base_xy, yaw, base_pitch)
+        start_ns = time.perf_counter_ns()
+        solution = self.solver.ik(
+            target_pose,
+            seed_joints=self.last_q,
+            max_restarts=1,
+            strict_seed=True,
+        )
+        if solution is None and int(self.args.tracik_max_restarts) > 1:
+            self.retry_count += 1
+            solution = self.solver.ik(
+                target_pose,
+                seed_joints=self.last_q,
+                max_restarts=int(self.args.tracik_max_restarts),
+                strict_seed=False,
+                rng=self.rng,
+            )
+        elapsed_ms = (time.perf_counter_ns() - start_ns) * 1.0e-6
+        self.solve_ms.append(elapsed_ms)
+        if elapsed_ms > self.command_dt * 1000.0:
+            self.deadline_misses += 1
+        if solution is None:
+            raise RuntimeError("TRAC-IK failed to solve a replay action target")
+        solution = np.clip(
+            np.asarray(solution, dtype=np.float64).reshape(6),
+            self.lower[self.arm_indices],
+            self.upper[self.arm_indices],
+        )
+        target_world_pose = np.concatenate(
+            [np.asarray(target_pos, dtype=np.float64), np.asarray(target_quat, dtype=np.float64)]
+        )
+        solution_world_pose = self._solver_pose_to_world(
+            self.solver.fk(solution),
+            base_xy,
+            yaw,
+            base_pitch,
+        )
+        self._append_visual_pose("target", target_world_pose)
+        self._append_visual_pose("solution", solution_world_pose)
+        return solution
+
+    def _coefficients(self, start, goal):
+        if self.args.trajectory_interpolation == "linear":
+            return None
+        zeros = np.zeros_like(np.asarray(start, dtype=np.float64))
+        method = "quintic_hermite" if self.args.trajectory_interpolation == "quintic" else "septic"
+        return self.polynomial_coefficients(
+            np.asarray(start, dtype=np.float64),
+            np.asarray(goal, dtype=np.float64),
+            zeros,
+            zeros,
+            zeros,
+            zeros,
+            zeros,
+            zeros,
+            self.command_dt,
+            method,
+        )
+
+    def samples(self, q_goal, gripper_goal):
+        q_start = self.last_q.copy()
+        gripper_start = float(self.last_gripper)
+        q_coefficients = self._coefficients(q_start, q_goal)
+        gripper_coefficients = self._coefficients(
+            np.asarray([gripper_start]),
+            np.asarray([gripper_goal]),
+        )
+        for substep in range(self.substeps):
+            tau = min((substep + 1) * self.sim_dt, self.command_dt)
+            alpha = min(1.0, tau / self.command_dt)
+            if q_coefficients is None:
+                q = q_start + alpha * (q_goal - q_start)
+                gripper = gripper_start + alpha * (gripper_goal - gripper_start)
+            else:
+                q = self.evaluate_polynomial(q_coefficients, np.asarray([tau]))[0][0]
+                gripper = float(
+                    self.evaluate_polynomial(gripper_coefficients, np.asarray([tau]))[0][0, 0]
+                )
+            yield substep, np.asarray(q, dtype=np.float64), float(gripper)
+        self.last_q = np.asarray(q_goal, dtype=np.float64).copy()
+        self.last_gripper = float(gripper_goal)
+
+    def print_summary(self):
+        if not self.solve_ms:
+            return
+        values = np.asarray(self.solve_ms, dtype=np.float64)
+        print(
+            "TRAC-IK replay summary: "
+            f"solves={len(values)} retries={self.retry_count} "
+            f"deadline={self.command_dt * 1000.0:.3f}ms misses={self.deadline_misses} "
+            f"mean={np.mean(values):.3f}ms p95={np.percentile(values, 95):.3f}ms "
+            f"max={np.max(values):.3f}ms",
+            flush=True,
+        )
+
+
+def _draw_trajectory_polyline(gym, viewer, env, points, color):
+    if len(points) < 2:
+        return
+    points = np.asarray(points, dtype=np.float32).reshape(-1, 3)
+    vertices = np.stack((points[:-1], points[1:]), axis=1)
+    colors = np.repeat(np.asarray(color, dtype=np.float32)[None, :], len(vertices), axis=0)
+    gym.add_lines(viewer, env, len(vertices), vertices, colors)
+
+
+def _draw_trajectory_points(gym, viewer, env, points, color, radius=0.008):
+    if not points:
+        return
+    points = np.asarray(points, dtype=np.float32).reshape(-1, 3)
+    offsets = np.eye(3, dtype=np.float32) * float(radius)
+    vertices = np.stack(
+        [np.stack((points - offset, points + offset), axis=1) for offset in offsets],
+        axis=1,
+    ).reshape(-1, 2, 3)
+    colors = np.repeat(np.asarray(color, dtype=np.float32)[None, :], len(vertices), axis=0)
+    gym.add_lines(viewer, env, len(vertices), vertices, colors)
+
+
+def draw_tracik_replay_trajectories(float_mod, gym, viewer, env, controller):
+    if viewer is None or not controller.args.draw_ik_trajectory:
+        return
+    colors = {
+        "target": (1.0, 0.78, 0.05),
+        "solution": (0.15, 1.0, 0.25),
+        "command": (0.05, 0.85, 1.0),
+        "actual": (1.0, 0.15, 0.12),
+    }
+    for key in ("target", "solution", "command", "actual"):
+        _draw_trajectory_polyline(
+            gym,
+            viewer,
+            env,
+            controller.visual_history[key],
+            colors[key],
+        )
+    _draw_trajectory_points(
+        gym,
+        viewer,
+        env,
+        controller.visual_history["solution"],
+        colors["solution"],
+    )
+
+    marker_specs = {
+        "target": (0.035, 10, colors["target"]),
+        "solution": (0.029, 9, colors["solution"]),
+        "command": (0.023, 8, colors["command"]),
+        "actual": (0.019, 8, colors["actual"]),
+    }
+    for key, pose in controller.current_visual_poses.items():
+        radius, resolution, color = marker_specs[key]
+        transform = float_mod.gymapi.Transform(
+            float_mod.gymapi.Vec3(*[float(value) for value in pose[:3]]),
+            float_mod.gymapi.Quat(*[float(value) for value in pose[3:7]]),
+        )
+        geometry = float_mod.gymutil.WireframeSphereGeometry(
+            radius,
+            resolution,
+            resolution,
+            color=color,
+            color2=color,
+        )
+        float_mod.gymutil.draw_lines(geometry, gym, viewer, env, transform)
+        if key in ("target", "solution"):
+            float_mod.gymutil.draw_lines(
+                float_mod.ThickAxesGeometry(scale=0.10, thickness=0.003),
+                gym,
+                viewer,
+                env,
+                transform,
+            )
+
+    target_pose = controller.current_visual_poses.get("target")
+    solution_pose = controller.current_visual_poses.get("solution")
+    actual_pose = controller.current_visual_poses.get("actual")
+    if target_pose is not None and solution_pose is not None:
+        float_mod.gymutil.draw_line(
+            float_mod.gymapi.Vec3(*[float(value) for value in solution_pose[:3]]),
+            float_mod.gymapi.Vec3(*[float(value) for value in target_pose[:3]]),
+            float_mod.gymapi.Vec3(0.15, 1.0, 0.25),
+            gym,
+            viewer,
+            env,
+        )
+    if target_pose is not None and actual_pose is not None:
+        float_mod.gymutil.draw_line(
+            float_mod.gymapi.Vec3(*[float(value) for value in actual_pose[:3]]),
+            float_mod.gymapi.Vec3(*[float(value) for value in target_pose[:3]]),
+            float_mod.gymapi.Vec3(1.0, 0.15, 0.12),
+            gym,
+            viewer,
+            env,
+        )
+
+
 def step_float_ik_action_replay(
     float_mod,
     gym,
@@ -1473,7 +1949,139 @@ def step_float_ik_action_replay(
     return base_xy, float(yaw), door_pos
 
 
-def print_float_ik_replay_log(data, frame_idx, replay_step, mode, action=None, sim_door_pos=None):
+def step_float_ik_tracik_action_replay(
+    float_mod,
+    gym,
+    sim,
+    env,
+    arm_actor,
+    actor_handles,
+    door,
+    door_actor,
+    dof_names,
+    dof_positions,
+    ik_state,
+    args,
+    action,
+    base_xy,
+    yaw,
+    command_dt,
+    action_frame,
+    controller,
+    data,
+    frame_idx,
+    viewer=None,
+):
+    base_start = np.asarray(base_xy, dtype=np.float32).copy()
+    yaw_start = float(yaw)
+    base_next, yaw_next, target_pos, target_quat, gripper_goal = apply_float_ik_recorded_action(
+        float_mod,
+        action,
+        base_start,
+        args.robot_z,
+        yaw_start,
+        command_dt,
+        action_frame=action_frame,
+        base_pitch=float(getattr(args, "robot_pitch", 0.0)),
+    )
+    if args.tracik_target_source == "replay_ee":
+        target_pos, target_quat = float_ik_replay_ee_target_world(
+            float_mod,
+            data,
+            frame_idx,
+            base_next,
+            args.robot_z,
+            yaw_next,
+            current_pitch=float(getattr(args, "robot_pitch", 0.0)),
+        )
+        if "replay_dof_pos" in data.files:
+            recorded_dof = np.asarray(data["replay_dof_pos"][frame_idx], dtype=np.float32).reshape(-1)
+            if recorded_dof.size >= 1:
+                gripper_goal = float(recorded_dof[-1])
+    q_goal = controller.solve(
+        target_pos,
+        target_quat,
+        base_next,
+        yaw_next,
+        float(getattr(args, "robot_pitch", 0.0)),
+    )
+    float_mod.set_ik_target(ik_state, target_pos, target_quat)
+
+    if controller.gripper_index is not None:
+        gripper_goal = float(
+            np.clip(
+                gripper_goal,
+                controller.lower[controller.gripper_index],
+                controller.upper[controller.gripper_index],
+            )
+        )
+
+    door_pos = None
+    for substep, q_command, gripper_command in controller.samples(q_goal, gripper_goal):
+        fraction = float(substep + 1) / float(controller.substeps)
+        substep_base_xy = base_start + fraction * (base_next - base_start)
+        substep_yaw = yaw_start + fraction * (yaw_next - yaw_start)
+        float_mod.set_robot_base_pose(
+            gym,
+            env,
+            actor_handles,
+            substep_base_xy,
+            args.robot_z,
+            substep_yaw,
+            pitch=float(getattr(args, "robot_pitch", 0.0)),
+        )
+
+        dof_positions[controller.arm_indices] = np.asarray(q_command, dtype=np.float32)
+        if controller.gripper_index is not None:
+            dof_positions[controller.gripper_index] = float(gripper_command)
+        gym.set_actor_dof_position_targets(env, arm_actor, dof_positions)
+
+        enforce_float_ik_locked_hinge(float_mod, gym, env, door_actor, door, args)
+        door_pos, door_vel = float_mod.get_actor_dof_state(gym, env, door_actor)
+        door_efforts = compute_float_ik_door_efforts(float_mod, door, door_pos, door_vel, args)
+        if len(door_efforts) > 0:
+            gym.apply_actor_dof_efforts(env, door_actor, door_efforts)
+
+        gym.simulate(sim)
+        gym.fetch_results(sim, True)
+
+        actual_pos, actual_quat = float_mod.current_ee_pose(gym, sim, ik_state)
+        controller.record_command_and_actual(
+            q_command,
+            substep_base_xy,
+            substep_yaw,
+            float(getattr(args, "robot_pitch", 0.0)),
+            actual_pos,
+            actual_quat,
+        )
+        if viewer is not None:
+            if gym.query_viewer_has_closed(viewer):
+                return np.asarray(base_next, dtype=np.float32), float(yaw_next), door_pos, False
+            gym.clear_lines(viewer)
+            if args.draw_camera_axes:
+                float_mod.draw_low_level_camera_axes(gym, viewer, env, arm_actor, actor_handles, args)
+            if args.draw_ik_trajectory:
+                draw_tracik_replay_trajectories(float_mod, gym, viewer, env, controller)
+            elif args.draw_ik_target:
+                float_mod.base_ik.draw_ik_target(gym, viewer, env, ik_state)
+            gym.step_graphics(sim)
+            gym.draw_viewer(viewer, sim, True)
+            gym.sync_frame_time(sim)
+
+    door_pos, _door_vel = float_mod.get_actor_dof_state(gym, env, door_actor)
+    return np.asarray(base_next, dtype=np.float32), float(yaw_next), door_pos, True
+
+
+def print_float_ik_replay_log(
+    data,
+    frame_idx,
+    replay_step,
+    mode,
+    action=None,
+    sim_door_pos=None,
+    base_xy=None,
+    yaw=None,
+):
     pieces = [f"[DoorDPReplay] mode={mode}", f"step={replay_step}", f"frame={frame_idx}"]
     if "subtask_index" in data.files:
         pieces.append(f"subtask={int(np.asarray(data['subtask_index'][frame_idx]).reshape(-1)[0])}")
@@ -1489,10 +2097,13 @@ def print_float_ik_replay_log(data, frame_idx, replay_step, mode, action=None, s
             f"ee:[{float(action[2]):.3f},{float(action[3]):.3f},{float(action[4]):.3f}] "
             f"grip:{float(action[9]):.3f}"
         )
+    if base_xy is not None and yaw is not None:
+        base_xy = np.asarray(base_xy, dtype=np.float32).reshape(2)
+        pieces.append(f"base:[{float(base_xy[0]):.3f},{float(base_xy[1]):.3f},{float(yaw):.3f}]")
     print(" ".join(pieces), flush=True)
 
 
-def replay_float_ik_episode(args, episode_path, data, vision_mode, mode):
+def replay_float_ik_episode(args, episode_path, data, vision_mode, mode, tracik_solver=None):
     float_mod = load_float_ik_module(mode, data)
     door_asset_selection = prepare_float_ik_replay_args(float_mod, args, data, mode)
     preload_keys = ["action"]
@@ -1500,6 +2111,8 @@ def replay_float_ik_episode(args, episode_path, data, vision_mode, mode):
         preload_keys.extend(REPLAY_STATE_KEYS)
     elif args.replay_mode == "action":
         preload_keys.extend(("replay_root_state", "replay_dof_pos", "replay_dof_vel", "replay_door_dof_pos", "replay_door_dof_vel"))
+        if args.ik_solver == "tracik" and args.tracik_target_source == "replay_ee":
+            preload_keys.extend(("replay_ee_pos", "replay_ee_quat"))
     if args.replay_mode == "state" and args.show_seg and float_mod.cv2 is not None:
         preload_keys.extend(image_keys_for_vision_mode(vision_mode))
     preload_episode_fields(data, preload_keys, f"{mode} replay")
@@ -1517,6 +2130,19 @@ def replay_float_ik_episode(args, episode_path, data, vision_mode, mode):
     indices = frame_indices(args, total_frames)
     if not indices:
         raise ValueError("no frames selected for replay")
+    replay_fps = float(
+        args.replay_fps
+        or (np.asarray(data["fps"]).item() if "fps" in data.files else 50.0)
+    )
+    command_dt = 1.0 / max(1.0e-6, replay_fps)
+    if args.ik_solver == "tracik":
+        if args.replay_mode != "action":
+            raise ValueError("--ik_solver tracik is only used with --replay_mode action")
+        if tracik_solver is None:
+            raise RuntimeError("TRAC-IK solver was not initialized before Isaac Gym")
+        if float(args.trajectory_control_hz) <= 0.0:
+            raise ValueError("--trajectory_control_hz must be positive")
+        args.sim_dt = 1.0 / float(args.trajectory_control_hz)
     print(
         "Replay raw Door DP episode:",
         {
@@ -1528,7 +2154,11 @@ def replay_float_ik_episode(args, episode_path, data, vision_mode, mode):
             "action_frame": action_frame,
             "frames": total_frames,
             "selected_frames": len(indices),
-            "fps": float(args.replay_fps or (np.asarray(data["fps"]).item() if "fps" in data.files else 0.0)) or None,
+            "fps": replay_fps,
+            "ik_solver": args.ik_solver,
+            "trajectory_interpolation": args.trajectory_interpolation if args.ik_solver == "tracik" else None,
+            "trajectory_control_hz": float(args.trajectory_control_hz) if args.ik_solver == "tracik" else None,
+            "tracik_target_source": args.tracik_target_source if args.ik_solver == "tracik" else None,
             "door_cfg": str(_resolve_existing_path(args.door_cfg)),
             "door_asset_selection": door_asset_selection,
             "source_script": source_script_from_episode(data),
@@ -1568,6 +2198,7 @@ def replay_float_ik_episode(args, episode_path, data, vision_mode, mode):
             viewer = float_mod.setup_viewer(gym, sim, args)
             camera_handles = {}
             ik_state = None
+            tracik_controller = None
             base_xy = None
             yaw = None
             if args.replay_mode == "action":
@@ -1606,15 +2237,52 @@ def replay_float_ik_episode(args, episode_path, data, vision_mode, mode):
                     data,
                     indices[0],
                 )
+                if args.ik_solver == "tracik":
+                    if args.tracik_mount_correction is not None:
+                        mount_correction = np.asarray(args.tracik_mount_correction, dtype=np.float64)
+                    elif is_a2w_float_ik_episode(data):
+                        mount_correction = np.asarray([0.026, 0.0, -0.042], dtype=np.float64)
+                    else:
+                        mount_correction = np.zeros(3, dtype=np.float64)
+                    tracik_controller = FloatReplayTracIKController(
+                        tracik_solver,
+                        args,
+                        float_mod,
+                        dof_names,
+                        dof_props["lower"],
+                        dof_props["upper"],
+                        dof_positions,
+                        sim_dt,
+                        command_dt,
+                        mount_correction,
+                    )
+                    print(
+                        "TRAC-IK replay control:",
+                        {
+                            "command_hz": replay_fps,
+                            "command_dt": command_dt,
+                            "control_hz": 1.0 / float(sim_dt),
+                            "sim_dt": float(sim_dt),
+                            "substeps_per_command": tracik_controller.substeps,
+                            "interpolation": args.trajectory_interpolation,
+                            "mount_correction": mount_correction.tolist(),
+                            "base_motion": "integrated from action vx/vyaw over command_dt",
+                        },
+                        flush=True,
+                    )
+                    if viewer is not None and args.draw_ik_trajectory:
+                        print(
+                            "IK visualization: yellow=EE target, green=TRAC-IK FK points, "
+                            "cyan=50 Hz smoothed-command FK, red=actual Gym EE.",
+                            flush=True,
+                        )
             manual_frame_period = None
             if args.real_time:
-                replay_fps = float(
-                    args.replay_fps
-                    or (np.asarray(data["fps"]).item() if "fps" in data.files else (1.0 / max(1.0e-6, float(sim_dt))))
-                )
                 manual_frame_period = 1.0 / max(1.0e-6, replay_fps)
             replay_step = 0
             while True:
+                if tracik_controller is not None:
+                    tracik_controller.clear_visualization()
                 for frame_idx in indices:
                     loop_start = time.time()
                     action = actions[frame_idx, :10] if actions is not None else None
@@ -1647,37 +2315,75 @@ def replay_float_ik_episode(args, episode_path, data, vision_mode, mode):
                             vision_mode,
                         )
                     else:
-                        base_xy, yaw, sim_door_pos = step_float_ik_action_replay(
-                            float_mod,
-                            gym,
-                            sim,
-                            env,
-                            arm_actor,
-                            actor_handles,
-                            door,
-                            door_actor,
-                            dof_names,
-                            dof_positions,
-                            ik_state,
-                            args,
-                            action,
-                            base_xy,
-                            yaw,
-                            sim_dt,
-                            action_frame,
-                        )
-                        keep_running = render_float_ik_action_frame(
-                            float_mod,
-                            gym,
-                            sim,
-                            env,
-                            arm_actor,
-                            actor_handles,
-                            viewer,
-                            camera_handles,
-                            args,
-                            ik_state,
-                        )
+                        if args.ik_solver == "tracik":
+                            base_xy, yaw, sim_door_pos, keep_running = step_float_ik_tracik_action_replay(
+                                float_mod,
+                                gym,
+                                sim,
+                                env,
+                                arm_actor,
+                                actor_handles,
+                                door,
+                                door_actor,
+                                dof_names,
+                                dof_positions,
+                                ik_state,
+                                args,
+                                action,
+                                base_xy,
+                                yaw,
+                                command_dt,
+                                action_frame,
+                                tracik_controller,
+                                data,
+                                frame_idx,
+                                viewer=viewer,
+                            )
+                        else:
+                            base_xy, yaw, sim_door_pos = step_float_ik_action_replay(
+                                float_mod,
+                                gym,
+                                sim,
+                                env,
+                                arm_actor,
+                                actor_handles,
+                                door,
+                                door_actor,
+                                dof_names,
+                                dof_positions,
+                                ik_state,
+                                args,
+                                action,
+                                base_xy,
+                                yaw,
+                                sim_dt,
+                                action_frame,
+                            )
+                            keep_running = render_float_ik_action_frame(
+                                float_mod,
+                                gym,
+                                sim,
+                                env,
+                                arm_actor,
+                                actor_handles,
+                                viewer,
+                                camera_handles,
+                                args,
+                                ik_state,
+                            )
+                        if args.ik_solver == "tracik" and camera_handles and args.show_seg:
+                            render_float_ik_action_frame(
+                                float_mod,
+                                gym,
+                                sim,
+                                env,
+                                arm_actor,
+                                actor_handles,
+                                None,
+                                camera_handles,
+                                args,
+                                ik_state,
+                            )
                     if not keep_running:
                         return
                     if args.print_logs and replay_step % max(1, args.log_interval) == 0:
@@ -1688,6 +2394,8 @@ def replay_float_ik_episode(args, episode_path, data, vision_mode, mode):
                             mode,
                             action=action,
                             sim_door_pos=sim_door_pos,
+                            base_xy=base_xy,
+                            yaw=yaw,
                         )
                     replay_step += 1
                     if manual_frame_period is not None:
@@ -1695,6 +2403,8 @@ def replay_float_ik_episode(args, episode_path, data, vision_mode, mode):
                         time.sleep(max(0.0, manual_frame_period - elapsed))
                 if not args.loop:
                     break
+            if tracik_controller is not None:
+                tracik_controller.print_summary()
     finally:
         if float_mod.cv2 is not None:
             float_mod.cv2.destroyAllWindows()
@@ -1724,7 +2434,15 @@ def main():
             f"Raw episode door_dp_mode={raw_controller_mode!r}, but replay was run with --mode {mode!r}."
         )
     if mode in ("ikpush", "ikpull"):
-        replay_float_ik_episode(args, episode_path, data, requested_vision_mode, mode)
+        tracik_solver = create_tracik_solver(args) if args.ik_solver == "tracik" else None
+        replay_float_ik_episode(
+            args,
+            episode_path,
+            data,
+            requested_vision_mode,
+            mode,
+            tracik_solver=tracik_solver,
+        )
         return
 
     base = load_play_module(mode)

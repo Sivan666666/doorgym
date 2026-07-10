@@ -32,7 +32,7 @@ from z1_pinocchio_ik import (
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-HIGH_LEVEL_ROOT = SCRIPT_DIR.parents[0]
+HIGH_LEVEL_ROOT = SCRIPT_DIR.parents[1]
 DEFAULT_ASSET_ROOT = HIGH_LEVEL_ROOT / "data" / "asset" / "z1"
 DEFAULT_ASSET_FILE = "urdf/z1_arm.urdf"
 DEFAULT_EPISODE = (
@@ -108,11 +108,11 @@ def parse_args():
     parser.add_argument("--ik_pos_gain", type=float, default=1.0)
     parser.add_argument("--ik_rot_gain", type=float, default=1.0)
     parser.add_argument("--rot_weight", type=float, default=0.5)
-    parser.add_argument("--pin_max_iter", type=int, default=120)
-    parser.add_argument("--pin_restarts", type=int, default=16)
-    parser.add_argument("--pin_dt", type=float, default=0.4)
-    parser.add_argument("--pin_damping", type=float, default=1.0e-4)
-    parser.add_argument("--pin_threshold", type=float, default=1.0e-5)
+    parser.add_argument("--pin_max_iter", type=int, default=1000)
+    parser.add_argument("--pin_restarts", type=int, default=30)
+    parser.add_argument("--pin_dt", type=float, default=0.05)
+    parser.add_argument("--pin_damping", type=float, default=1.0e-6)
+    parser.add_argument("--pin_threshold", type=float, default=1.0e-4)
     parser.add_argument("--pos_tol", type=float, default=0.012)
     parser.add_argument("--rot_tol", type=float, default=0.055)
     parser.add_argument("--print_interval", type=int, default=60)

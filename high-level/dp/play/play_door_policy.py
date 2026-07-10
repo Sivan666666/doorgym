@@ -73,10 +73,10 @@ def auto_wrap_official_lerobot_checkpoint(checkpoint_path, args):
 
     policy_config = load_json(policy_dir / "config.json")
     policy_type = str(policy_config.get("type", ""))
-    if policy_type not in ("act", "diffusion"):
+    if policy_type not in ("act", "diffusion", "pi05", "pi05_evo"):
         raise ValueError(
             f"Direct play of official LeRobot policy type={policy_type!r} is not wired yet. "
-            "Currently auto-wrapping supports official ACT and Diffusion checkpoints."
+            "Currently auto-wrapping supports official ACT, Diffusion, and pi0.5 checkpoints."
         )
 
     train_config = load_json(policy_dir / "train_config.json")
@@ -105,8 +105,10 @@ def auto_wrap_official_lerobot_checkpoint(checkpoint_path, args):
 
     if policy_type == "act":
         export_script = DP_ROOT / "export_official_lerobot_act_to_door_checkpoint.py"
-    else:
+    elif policy_type == "diffusion":
         export_script = DP_ROOT / "export_official_lerobot_diffusion_to_door_checkpoint.py"
+    else:
+        export_script = DP_ROOT / "export_official_lerobot_pi05_to_door_checkpoint.py"
     cmd = lerobot_python_command() + [
         str(export_script),
         "--official_checkpoint",
@@ -129,6 +131,13 @@ def auto_wrap_official_lerobot_checkpoint(checkpoint_path, args):
             "--noise_scheduler_type",
             args.dp_noise_scheduler_type,
         ]
+    elif policy_type in ("pi05", "pi05_evo"):
+        cmd += [
+            "--num_inference_steps",
+            str(args.dp_inference_steps),
+        ]
+        if args.dp_action_horizon is not None:
+            cmd += ["--action_horizon", str(args.dp_action_horizon)]
     if args.rgb:
         cmd.append("--rgb")
     elif getattr(args, "depth_only", False):
