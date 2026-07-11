@@ -29,7 +29,7 @@ from tqdm import tqdm
 from lerobot.configs import parser
 from lerobot.configs.train import TrainPipelineConfig
 from lerobot.datasets.factory import make_dataset
-from lerobot.datasets.sampler import EpisodeAwareSampler, make_keyframe_window_sampler
+from lerobot.datasets.sampler import EpisodeAwareSampler, make_keyframe_window_sampler, make_recovery_sampler
 from lerobot.datasets.utils import cycle
 from lerobot.envs.factory import make_env, make_env_pre_post_processors
 from lerobot.envs.utils import close_envs
@@ -343,7 +343,25 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
     shuffle = True
     drop_n_first_frames = 0
     drop_n_last_frames = int(getattr(cfg.policy, "drop_n_last_frames", 0))
-    if getattr(cfg, "keyframe_sampling_ratio", 0.0) > 0.0:
+    if getattr(cfg, "recovery_sampling_ratio", 0.0) > 0.0:
+        if cfg.dataset.streaming:
+            logging.warning("Recovery sampling is disabled for streaming datasets.")
+        else:
+            sampler, recovery_sampler_stats = make_recovery_sampler(
+                dataset,
+                recovery_sampling_ratio=cfg.recovery_sampling_ratio,
+                recovery_feature=cfg.recovery_sampling_feature,
+                recovery_threshold=cfg.recovery_sampling_threshold,
+                drop_n_first_frames=drop_n_first_frames,
+                drop_n_last_frames=drop_n_last_frames,
+                seed=cfg.seed,
+            )
+            if sampler is None:
+                logging.warning("Recovery sampler disabled: %s", recovery_sampler_stats)
+            else:
+                shuffle = False
+                logging.info("Using recovery sampler: %s", recovery_sampler_stats)
+    elif getattr(cfg, "keyframe_sampling_ratio", 0.0) > 0.0:
         if cfg.dataset.streaming:
             logging.warning("Keyframe-window sampling is disabled for streaming datasets.")
         else:

@@ -1,0 +1,153 @@
+{
+  "count": 6,
+  "results": [
+    {
+      "diagnosis": {
+        "candidate_recovery_family": "retreat_realign_reapproach",
+        "evidence": [
+          "max_door_open_deg=1.70",
+          "max_handle_or_secondary_dof_deg=13.40",
+          "max_ee_position_error_m=0.434",
+          "gripper_close_like_action_first_step=446",
+          "large EE tracking/target error while door progress stayed low"
+        ],
+        "failure_type": "geometric_misalignment",
+        "metrics": {
+          "max_door_open_deg": 1.7039763927459717,
+          "max_ee_position_error_m": 0.43386110663414,
+          "max_handle_or_secondary_dof_deg": 13.399189949035645,
+          "success_threshold_deg": 80.0
+        },
+        "recoverability": "preventive_recoverable",
+        "t_dev": 646,
+        "t_fail": 671
+      },
+      "diagnosis_path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_failure_rollouts/wc4_baseline_rerun_v2_seed615455575/failure_trial_000019_batch0001_env03/diagnosis.json",
+      "npz_path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_failure_rollouts/wc4_baseline_rerun_v2_seed615455575/failure_trial_000019_batch0001_env03/failure_rollout.npz"
+    },
+    {
+      "diagnosis": {
+        "candidate_recovery_family": "maintain_grasp_then_push",
+        "evidence": [
+          "max_door_open_deg=1.87",
+          "max_handle_or_secondary_dof_deg=34.30",
+          "max_ee_position_error_m=0.427",
+          "gripper_close_like_action_first_step=374",
+          "handle/secondary DOF moved but hinge did not open enough"
+        ],
+        "failure_type": "insufficient_interaction",
+        "metrics": {
+          "max_door_open_deg": 1.8655505180358887,
+          "max_ee_position_error_m": 0.427174836397171,
+          "max_handle_or_secondary_dof_deg": 34.298973083496094,
+          "success_threshold_deg": 80.0
+        },
+        "recoverability": "reactive_recoverable",
+        "t_dev": 455,
+        "t_fail": 480
+      },
+      "diagnosis_path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_failure_rollouts/wc4_baseline_rerun_v2_seed615455575/failure_trial_000021_batch0001_env05/diagnosis.json",
+      "npz_path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_failure_rollouts/wc4_baseline_rerun_v2_seed615455575/failure_trial_000021_batch0001_env05/failure_rollout.npz"
+    },
+    {
+      "diagnosis": {
+        "candidate_recovery_family": "maintain_grasp_then_push",
+        "evidence": [
+          "max_door_open_deg=1.87",
+          "max_handle_or_secondary_dof_deg=36.79",
+          "max_ee_position_error_m=0.407",
+          "gripper_close_like_action_first_step=372",
+          "handle/secondary DOF moved but hinge did not open enough"
+        ],
+        "failure_type": "insufficient_interaction",
+        "metrics": {
+          "max_door_open_deg": 1.8741449117660522,
+          "max_ee_position_error_m": 0.40675678849220276,
+          "max_handle_or_secondary_dof_deg": 36.79305648803711,
+          "success_threshold_deg": 80.0
+        },
+        "recoverability": "reactive_recoverable",
+        "t_dev": 392,
+        "t_fail": 417
+      },
+      "diagnosis_path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_failure_rollouts/wc4_baseline_rerun_v2_seed615455575/failure_trial_000024_batch0001_env08/diagnosis.json",
+      "npz_path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_failure_rollouts/wc4_baseline_rerun_v2_seed615455575/failure_trial_000024_batch0001_env08/failure_rollout.npz"
+    },
+    {
+      "diagnosis": {
+        "candidate_recovery_family": "maintain_grasp_then_push",
+        "evidence": [
+          "max_door_open_deg=1.93",
+          "max_handle_or_secondary_dof_deg=37.89",
+          "max_ee_position_error_m=0.566",
+          "gripper_close_like_action_first_step=380",
+          "handle/secondary DOF moved but hinge did not open enough",
+          "EE error is extremely large; likely unsafe or infeasible without reset"
+        ],
+        "failure_type": "insufficient_interaction",
+        "metrics": {
+          "max_door_open_deg": 1.9274300336837769,
+          "max_ee_position_error_m": 0.5659795999526978,
+          "max_handle_or_secondary_dof_deg": 37.889122009277344,
+          "success_threshold_deg": 80.0
+        },
+        "recoverability": "unrecoverable",
+        "t_dev": 480,
+        "t_fail": 505
+      },
+      "diagnosis_path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_failure_rollouts/wc4_baseline_rerun_v2_seed615455575/failure_trial_000030_batch0001_env14/diagnosis.json",
+      "npz_path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_failure_rollouts/wc4_baseline_rerun_v2_seed615455575/failure_trial_000030_batch0001_env14/failure_rollout.npz"
+    },
+    {
+      "diagnosis": {
+        "candidate_recovery_family": "maintain_grasp_then_push",
+        "evidence": [
+          "max_door_open_deg=1.75",
+          "max_handle_or_secondary_dof_deg=39.79",
+          "max_ee_position_error_m=0.537",
+          "gripper_close_like_action_first_step=378",
+          "handle/secondary DOF moved but hinge did not open enough",
+          "EE error is extremely large; likely unsafe or infeasible without reset"
+        ],
+        "failure_type": "insufficient_interaction",
+        "metrics": {
+          "max_door_open_deg": 1.7521047592163086,
+          "max_ee_position_error_m": 0.5369464755058289,
+          "max_handle_or_secondary_dof_deg": 39.791343688964844,
+          "success_threshold_deg": 80.0
+        },
+        "recoverability": "unrecoverable",
+        "t_dev": 462,
+        "t_fail": 487
+      },
+      "diagnosis_path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_failure_rollouts/wc4_baseline_rerun_v2_seed615455575/failure_trial_000041_batch0002_env09/diagnosis.json",
+      "npz_path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_failure_rollouts/wc4_baseline_rerun_v2_seed615455575/failure_trial_000041_batch0002_env09/failure_rollout.npz"
+    },
+    {
+      "diagnosis": {
+        "candidate_recovery_family": "maintain_grasp_then_push",
+        "evidence": [
+          "max_door_open_deg=1.89",
+          "max_handle_or_secondary_dof_deg=34.26",
+          "max_ee_position_error_m=0.633",
+          "gripper_close_like_action_first_step=328",
+          "handle/secondary DOF moved but hinge did not open enough",
+          "EE error is extremely large; likely unsafe or infeasible without reset"
+        ],
+        "failure_type": "insufficient_interaction",
+        "metrics": {
+          "max_door_open_deg": 1.8878958225250244,
+          "max_ee_position_error_m": 0.6330460906028748,
+          "max_handle_or_secondary_dof_deg": 34.262874603271484,
+          "success_threshold_deg": 80.0
+        },
+        "recoverability": "unrecoverable",
+        "t_dev": 427,
+        "t_fail": 452
+      },
+      "diagnosis_path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_failure_rollouts/wc4_baseline_rerun_v2_seed615455575/failure_trial_000047_batch0002_env15/diagnosis.json",
+      "npz_path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_failure_rollouts/wc4_baseline_rerun_v2_seed615455575/failure_trial_000047_batch0002_env15/failure_rollout.npz"
+    }
+  ],
+  "schema_version": 1
+}

@@ -1,6 +1,7 @@
 import argparse
 import json
 import shutil
+import sys
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -22,6 +23,7 @@ try:
         RAW_WRIST_CAMERA_POSE_KEY,
         RAW_WRIST_HANDLE_BBOX_KEY,
         RAW_WRIST_HANDLE_BBOX_VALID_KEY,
+        RECOVERY_INDICATOR_FEATURE,
         DATASET_METADATA_KEYS,
         DEFAULT_KEYFRAME_LOSS_RADIUS,
         DEFAULT_KEYFRAME_LOSS_WEIGHT,
@@ -58,6 +60,7 @@ except ImportError:
         RAW_WRIST_CAMERA_POSE_KEY,
         RAW_WRIST_HANDLE_BBOX_KEY,
         RAW_WRIST_HANDLE_BBOX_VALID_KEY,
+        RECOVERY_INDICATOR_FEATURE,
         DATASET_METADATA_KEYS,
         DEFAULT_KEYFRAME_LOSS_RADIUS,
         DEFAULT_KEYFRAME_LOSS_WEIGHT,
@@ -90,12 +93,33 @@ HIGH_LEVEL_ROOT = DP_ROOT.parent
 def parse_args():
     parser = argparse.ArgumentParser(description="Convert raw Door DP .npz episodes into a local LeRobotDataset.")
     parser.add_argument("--raw_root", type=str, default=str(HIGH_LEVEL_ROOT / "data" / "door_dp_raw" / "local_door_dp"))
+    parser.add_argument(
+        "--additional_raw_root",
+        action="append",
+        default=[],
+        help=(
+            "Additional compatible raw episode root to append to --raw_root. Repeat this option to mix "
+            "multiple roots without copying depth data. Episodes are written in root order."
+        ),
+    )
     parser.add_argument("--root", type=str, default=str(HIGH_LEVEL_ROOT / "data" / "lerobot"))
     parser.add_argument("--repo_id", type=str, default="local/door_dp")
     parser.add_argument("--fps", type=int, default=None)
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--rgb", action="store_true", help="Convert raw RGB+mask Door DP data. Required for RGB raw data.")
-    parser.add_argument("--depth_only", action="store_true", help="Convert raw depth-only Door DP data with no mask image fields.")
+    parser.add_argument(
+        "--depth_only",
+        dest="depth_only",
+        action="store_true",
+        default=True,
+        help="Convert raw depth-only Door DP data with no mask image fields (default).",
+    )
+    parser.add_argument(
+        "--no_depth_only",
+        dest="depth_only",
+        action="store_false",
+        help="Convert legacy depth+mask Door DP data.",
+    )
     parser.add_argument(
         "--image_storage",
         choices=["video", "image"],
@@ -104,12 +128,20 @@ def parse_args():
     )
     parser.add_argument("--video_codec", type=str, default="h264", help="Video codec used when --image_storage video.")
     parser.add_argument(
+        "--include_recovery_indicator",
+        action="store_true",
+        help=(
+            "Write per-frame aux.is_recovery. Raw episodes with scalar/sequence aux.is_recovery use that "
+            "value; episodes without it default to 0. Required for --recovery_sampling_ratio training."
+        ),
+    )
+    parser.add_argument(
         "--num_workers",
         type=int,
-        default=1,
+        default=4,
         help=(
             "Number of worker threads used to preload/validate raw npz episodes. "
-            "LeRobot writing stays ordered in the main process. Default 1 preserves the old serial path."
+            "LeRobot writing stays ordered in the main process. Defaults to 4."
         ),
     )
     parser.add_argument(
@@ -544,6 +576,7 @@ def load_episode_payload(
     initial_task,
     keyframe_loss_weight_override=None,
     keyframe_loss_radius_override=None,
+    load_handle_bbox=False,
 ):
     with np.load(path, allow_pickle=True) as data:
         validate_episode_metadata(path, data, sidecar, action_frame, ikpush_state_version, controller_mode)
@@ -553,6 +586,18 @@ def load_episode_payload(
             raise ValueError(f"Episode {path} has state_dim={states.shape[-1]}, cannot apply selected state columns.")
         states = states[:, keep_state_indices]
         actions = data["action"].astype(np.float32)
+        if RECOVERY_INDICATOR_FEATURE in data.files:
+            raw_is_recovery = np.asarray(data[RECOVERY_INDICATOR_FEATURE], dtype=np.float32)
+            if raw_is_recovery.size == 1:
+                is_recovery = np.full((states.shape[0], 1), float(raw_is_recovery.reshape(-1)[0]), dtype=np.float32)
+            else:
+                is_recovery = raw_is_recovery.reshape(-1, 1)
+        else:
+            is_recovery = np.zeros((states.shape[0], 1), dtype=np.float32)
+        if not np.all(np.isfinite(is_recovery)) or np.any(is_recovery < 0.0) or np.any(is_recovery > 1.0):
+            raise ValueError(
+                f"Episode {path} has invalid {RECOVERY_INDICATOR_FEATURE}; expected finite values in [0, 1]."
+            )
         if vision_mode == "depth_only":
             require_fields(data, image_keys, path)
             wrist_second = data[image_keys[0]].astype(np.uint8)
@@ -584,7 +629,9 @@ def load_episode_payload(
         else:
             front_camera_pose_base = None
             wrist_camera_pose_base = None
-        has_handle_bbox = RAW_FRONT_HANDLE_BBOX_KEY in data.files or RAW_WRIST_HANDLE_BBOX_KEY in data.files
+        has_handle_bbox = bool(load_handle_bbox) and (
+            RAW_FRONT_HANDLE_BBOX_KEY in data.files or RAW_WRIST_HANDLE_BBOX_KEY in data.files
+        )
         if has_handle_bbox:
             required_bbox = [
                 RAW_FRONT_HANDLE_BBOX_KEY,
@@ -673,6 +720,7 @@ def load_episode_payload(
         == front_second.shape[0]
         == subtasks.shape[0]
         == action_loss_weight.shape[0]
+        == is_recovery.shape[0]
         == n
     ):
         raise ValueError(f"Episode {path} has inconsistent lengths.")
@@ -698,6 +746,7 @@ def load_episode_payload(
         "front_second": front_second,
         "subtasks": subtasks,
         "action_loss_weight": action_loss_weight,
+        "is_recovery": is_recovery,
         "front_camera_pose_base": front_camera_pose_base,
         "wrist_camera_pose_base": wrist_camera_pose_base,
         "has_camera_pose": front_camera_pose_base is not None,
@@ -746,8 +795,9 @@ def main():
         raise ValueError("--keyframe_loss_weight must be > 0")
     if args.keyframe_loss_radius is not None and args.keyframe_loss_radius < 0:
         raise ValueError("--keyframe_loss_radius must be >= 0")
-    raw_root = Path(args.raw_root)
-    files = episode_files(raw_root)
+    raw_roots = [Path(args.raw_root), *(Path(value) for value in args.additional_raw_root)]
+    files = [path for root in raw_roots for path in episode_files(root)]
+    raw_root = raw_roots[0]
     sidecar = load_sidecar(raw_root)
     first = np.load(files[0], allow_pickle=True)
     if sidecar and "state" in sidecar:
@@ -766,7 +816,9 @@ def main():
             f"{RAW_FRONT_CAMERA_POSE_KEY}={RAW_FRONT_CAMERA_POSE_KEY in first.files}, "
             f"{RAW_WRIST_CAMERA_POSE_KEY}={RAW_WRIST_CAMERA_POSE_KEY in first.files}."
         )
-    has_handle_bbox = RAW_FRONT_HANDLE_BBOX_KEY in first.files or RAW_WRIST_HANDLE_BBOX_KEY in first.files
+    has_handle_bbox = bool(args.add_handle_latent) and (
+        RAW_FRONT_HANDLE_BBOX_KEY in first.files or RAW_WRIST_HANDLE_BBOX_KEY in first.files
+    )
     if args.add_handle_latent:
         required_bbox = [
             RAW_FRONT_HANDLE_BBOX_KEY,
@@ -806,8 +858,11 @@ def main():
             )
     raw_fps = int(first["fps"]) if "fps" in first else 50
     fps = int(args.fps or (sidecar.get("fps") if sidecar else raw_fps))
-    if args.rgb and args.depth_only:
+    depth_only_explicit = "--depth_only" in sys.argv[1:]
+    if args.rgb and depth_only_explicit:
         raise ValueError("--rgb and --depth_only are mutually exclusive.")
+    if args.rgb:
+        args.depth_only = False
     vision_mode = "rgb" if args.rgb else ("depth_only" if args.depth_only else "depth")
     raw_vision_mode = detect_raw_vision_mode(first, sidecar)
     action_frame = detect_action_frame(first, sidecar)
@@ -988,6 +1043,7 @@ def main():
         image_storage=args.image_storage,
         video_codec=args.video_codec,
         include_action_loss_weight=True,
+        include_recovery_indicator=bool(args.include_recovery_indicator),
         include_camera_pose=has_camera_pose,
         include_handle_latent=bool(args.add_handle_latent),
         metadata={
@@ -1040,6 +1096,7 @@ def main():
         initial_task=initial_task,
         keyframe_loss_weight_override=args.keyframe_loss_weight,
         keyframe_loss_radius_override=args.keyframe_loss_radius,
+        load_handle_bbox=bool(args.add_handle_latent),
     )
     for ep_idx, payload in payloads:
         task = payload["task"]
@@ -1056,12 +1113,13 @@ def main():
         front_second = payload["front_second"]
         subtasks = payload["subtasks"]
         action_loss_weight = payload["action_loss_weight"]
+        is_recovery = payload["is_recovery"]
         if bool(payload.get("has_camera_pose", False)) != bool(has_camera_pose):
             raise ValueError(
                 f"Episode {payload['path_name']} camera-pose presence does not match the first episode. "
                 "Do not mix Plücker-ready and legacy raw episodes in one conversion."
             )
-        if bool(payload.get("has_handle_bbox", False)) != bool(has_handle_bbox):
+        if args.add_handle_latent and bool(payload.get("has_handle_bbox", False)) != bool(has_handle_bbox):
             raise ValueError(
                 f"Episode {payload['path_name']} handle-bbox presence does not match the first episode. "
                 "Do not mix handle-latent-ready and legacy raw episodes in one conversion."
@@ -1090,6 +1148,7 @@ def main():
                 front_mask_rgb=image_to_three_channel_uint8(front_first[i]),
                 front_second_rgb=image_to_three_channel_uint8(front_second[i]),
                 action_loss_weight=action_loss_weight[i],
+                is_recovery=is_recovery[i] if args.include_recovery_indicator else None,
                 front_camera_pose_base=None if front_camera_pose_base is None else front_camera_pose_base[i],
                 wrist_camera_pose_base=None if wrist_camera_pose_base is None else wrist_camera_pose_base[i],
                 front_handle_latent=None if handle_latents is None else handle_latents["front_handle_latent"][i],
@@ -1108,6 +1167,7 @@ def main():
         "action": action_names,
         "image_features": lerobot_image_keys_for_vision_mode(vision_mode),
         "source_raw_root": str(raw_root),
+        "source_raw_roots": [str(root) for root in raw_roots],
         "action_frame": action_frame,
         "action_pose_frame": action_frame,
         "target_pose_frame": action_frame,
@@ -1122,6 +1182,11 @@ def main():
         "action_preprocess": action_preprocess_config,
         "state_normalized": converted_state_normalized,
         "action_loss_weight_feature": ACTION_LOSS_WEIGHT_FEATURE,
+        **(
+            {"recovery_indicator_feature": RECOVERY_INDICATOR_FEATURE}
+            if args.include_recovery_indicator
+            else {}
+        ),
         "keyframe_loss_weight": converted_keyframe_loss_weight,
         "keyframe_loss_radius": converted_keyframe_loss_radius,
     }

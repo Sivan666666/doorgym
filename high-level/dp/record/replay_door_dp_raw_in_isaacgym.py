@@ -337,6 +337,8 @@ def action_frame_from_data(data):
             value = scalar_to_str(data[key]).lower()
             if value:
                 return value
+    if is_a2w_failure_rollout(data):
+        return "robot_base_full"
     return "world"
 
 
@@ -366,7 +368,17 @@ def is_float_ik_episode(data):
 
 
 def is_a2w_float_ik_episode(data):
-    return source_script_from_episode(data).endswith("isaacgym_float_ik_a2w_basearn_push_door_parallel.py")
+    return source_script_from_episode(data).endswith(
+        "isaacgym_float_ik_a2w_basearn_push_door_parallel.py"
+    ) or is_a2w_failure_rollout(data)
+
+
+def is_a2w_failure_rollout(data):
+    """Recognize evaluator-exported A2W failure bundles without raw metadata."""
+    if "success_metrics_success" not in data.files or "replay_dof_pos" not in data.files:
+        return False
+    dof_pos = np.asarray(data["replay_dof_pos"])
+    return dof_pos.ndim == 2 and dof_pos.shape[1] == 19
 
 
 def door_asset_selection_from_episode(data, args):
@@ -2372,6 +2384,8 @@ def replay_float_ik_episode(args, episode_path, data, vision_mode, mode, tracik_
                                 ik_state,
                             )
                         if args.ik_solver == "tracik" and camera_handles and args.show_seg:
+                            if viewer is not None:
+                                gym.clear_lines(viewer)
                             render_float_ik_action_frame(
                                 float_mod,
                                 gym,

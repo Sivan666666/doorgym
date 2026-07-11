@@ -1,0 +1,2500 @@
+{
+  "bundles": [
+    {
+      "branches": [
+        {
+          "branch_step": 441,
+          "candidates": [
+            {
+              "branch_step": 441,
+              "candidate_id": 0,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "on_contact",
+                "controller": "reopen_retreat_reapproach",
+                "handle_regrasp_x_offset_m": -0.02,
+                "open_gripper_first": true,
+                "push_steps": 220,
+                "reapproach_z_offset_m": -0.02,
+                "retreat_distance_m": 0.03,
+                "rotate_steps": 100
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 441,
+              "candidate_id": 1,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "after_5_stable_contact_frames",
+                "controller": "reopen_retreat_reapproach",
+                "handle_regrasp_x_offset_m": -0.02,
+                "open_gripper_first": true,
+                "push_steps": 220,
+                "reapproach_z_offset_m": -0.02,
+                "retreat_distance_m": 0.03,
+                "rotate_steps": 100
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 441,
+              "candidate_id": 2,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "on_contact",
+                "controller": "reopen_retreat_reapproach",
+                "handle_regrasp_x_offset_m": -0.01,
+                "open_gripper_first": true,
+                "push_steps": 220,
+                "reapproach_z_offset_m": -0.02,
+                "retreat_distance_m": 0.03,
+                "rotate_steps": 100
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 441,
+              "candidate_id": 3,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "after_5_stable_contact_frames",
+                "controller": "reopen_retreat_reapproach",
+                "handle_regrasp_x_offset_m": -0.01,
+                "open_gripper_first": true,
+                "push_steps": 220,
+                "reapproach_z_offset_m": -0.02,
+                "retreat_distance_m": 0.03,
+                "rotate_steps": 100
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 441,
+              "candidate_id": 4,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "on_contact",
+                "controller": "reopen_retreat_reapproach",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": true,
+                "push_steps": 220,
+                "reapproach_z_offset_m": -0.02,
+                "retreat_distance_m": 0.03,
+                "rotate_steps": 100
+              },
+              "status": "proposed_unverified"
+            }
+          ]
+        },
+        {
+          "branch_step": 446,
+          "candidates": [
+            {
+              "branch_step": 446,
+              "candidate_id": 5,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "on_contact",
+                "controller": "reopen_retreat_reapproach",
+                "handle_regrasp_x_offset_m": -0.02,
+                "open_gripper_first": true,
+                "push_steps": 220,
+                "reapproach_z_offset_m": -0.02,
+                "retreat_distance_m": 0.03,
+                "rotate_steps": 100
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 446,
+              "candidate_id": 6,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "after_5_stable_contact_frames",
+                "controller": "reopen_retreat_reapproach",
+                "handle_regrasp_x_offset_m": -0.02,
+                "open_gripper_first": true,
+                "push_steps": 220,
+                "reapproach_z_offset_m": -0.02,
+                "retreat_distance_m": 0.03,
+                "rotate_steps": 100
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 446,
+              "candidate_id": 7,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "on_contact",
+                "controller": "reopen_retreat_reapproach",
+                "handle_regrasp_x_offset_m": -0.01,
+                "open_gripper_first": true,
+                "push_steps": 220,
+                "reapproach_z_offset_m": -0.02,
+                "retreat_distance_m": 0.03,
+                "rotate_steps": 100
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 446,
+              "candidate_id": 8,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "after_5_stable_contact_frames",
+                "controller": "reopen_retreat_reapproach",
+                "handle_regrasp_x_offset_m": -0.01,
+                "open_gripper_first": true,
+                "push_steps": 220,
+                "reapproach_z_offset_m": -0.02,
+                "retreat_distance_m": 0.03,
+                "rotate_steps": 100
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 446,
+              "candidate_id": 9,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "on_contact",
+                "controller": "reopen_retreat_reapproach",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": true,
+                "push_steps": 220,
+                "reapproach_z_offset_m": -0.02,
+                "retreat_distance_m": 0.03,
+                "rotate_steps": 100
+              },
+              "status": "proposed_unverified"
+            }
+          ]
+        },
+        {
+          "branch_step": 451,
+          "candidates": [
+            {
+              "branch_step": 451,
+              "candidate_id": 10,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "on_contact",
+                "controller": "reopen_retreat_reapproach",
+                "handle_regrasp_x_offset_m": -0.02,
+                "open_gripper_first": true,
+                "push_steps": 220,
+                "reapproach_z_offset_m": -0.02,
+                "retreat_distance_m": 0.03,
+                "rotate_steps": 100
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 451,
+              "candidate_id": 11,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "after_5_stable_contact_frames",
+                "controller": "reopen_retreat_reapproach",
+                "handle_regrasp_x_offset_m": -0.02,
+                "open_gripper_first": true,
+                "push_steps": 220,
+                "reapproach_z_offset_m": -0.02,
+                "retreat_distance_m": 0.03,
+                "rotate_steps": 100
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 451,
+              "candidate_id": 12,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "on_contact",
+                "controller": "reopen_retreat_reapproach",
+                "handle_regrasp_x_offset_m": -0.01,
+                "open_gripper_first": true,
+                "push_steps": 220,
+                "reapproach_z_offset_m": -0.02,
+                "retreat_distance_m": 0.03,
+                "rotate_steps": 100
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 451,
+              "candidate_id": 13,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "after_5_stable_contact_frames",
+                "controller": "reopen_retreat_reapproach",
+                "handle_regrasp_x_offset_m": -0.01,
+                "open_gripper_first": true,
+                "push_steps": 220,
+                "reapproach_z_offset_m": -0.02,
+                "retreat_distance_m": 0.03,
+                "rotate_steps": 100
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 451,
+              "candidate_id": 14,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "on_contact",
+                "controller": "reopen_retreat_reapproach",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": true,
+                "push_steps": 220,
+                "reapproach_z_offset_m": -0.02,
+                "retreat_distance_m": 0.03,
+                "rotate_steps": 100
+              },
+              "status": "proposed_unverified"
+            }
+          ]
+        }
+      ],
+      "diagnosis": {
+        "candidate_recovery_family": "reopen_retreat_reapproach",
+        "evidence": [
+          "max_door_open_deg=1.70",
+          "max_handle_or_secondary_dof_deg=13.40",
+          "max_ee_position_error_m=0.000",
+          "gripper_close_like_action_first_step=446",
+          "door hinge stayed near zero after gripper close"
+        ],
+        "failure_type": "contact_establishment_failure",
+        "metrics": {
+          "max_door_open_deg": 1.7039763927459717,
+          "max_ee_position_error_m": 0.0,
+          "max_handle_or_secondary_dof_deg": 13.399189949035645,
+          "success_threshold_deg": 80.0
+        },
+        "recoverability": "reactive_recoverable",
+        "t_dev": 446,
+        "t_fail": 446
+      },
+      "failure_rollout_npz": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_failure_rollouts/wc4_5door_baseline_act_50k_seed615455575/failure_trial_000019_batch0001_env03/failure_rollout.npz",
+      "metadata": {
+        "eval": {
+          "base_seed": 615455575,
+          "checkpoint": "/home/sivan/whole_body/visual_whole_body/high-level/dp/logs/lerobot-train/leroact_a2w_5door_baseline_act_50k_chunk100_exec50_bs16_0709_0206/checkpoints/050000",
+          "door_cfg": "/home/sivan/whole_body/visual_whole_body/high-level/data/cfg/b1z1_opendoor.yaml",
+          "dp_action_horizon": 25,
+          "dp_fps": 25,
+          "mode": "ikpush",
+          "pass_open_angle_deg": 80.0,
+          "robot_body": "a2wz1",
+          "steps": 1000,
+          "success_metric": "abs"
+        },
+        "failure_export": {
+          "camera_obs_available": false,
+          "diagnosis_path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_failure_rollouts/wc4_5door_baseline_act_50k_seed615455575/failure_trial_000019_batch0001_env03/diagnosis.json",
+          "note": "This bundle is exported from policy JSONL logs. It contains dense actions, privileged/event signals, and replay-style sim_snapshot fields when the play loop was run with --dp_log_replay_snapshot.",
+          "npz_path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_failure_rollouts/wc4_5door_baseline_act_50k_seed615455575/failure_trial_000019_batch0001_env03/failure_rollout.npz",
+          "records": 1000,
+          "save_camera_obs_requested": false,
+          "save_events": true,
+          "save_privileged_state": true,
+          "sim_snapshot_available": false,
+          "snapshot_interval": 1
+        },
+        "play_command": [
+          "/home/sivan/miniconda3/envs/b1z1/bin/python",
+          "/home/sivan/whole_body/visual_whole_body/high-level/dp/play/play_door_policy.py",
+          "--mode",
+          "ikpush",
+          "--robot_body",
+          "a2wz1",
+          "--checkpoint",
+          "/home/sivan/whole_body/visual_whole_body/high-level/dp/logs/lerobot-train/leroact_a2w_5door_baseline_act_50k_chunk100_exec50_bs16_0709_0206/checkpoints/050000",
+          "--num_envs",
+          "16",
+          "--steps",
+          "1000",
+          "--rl_device",
+          "cuda:0",
+          "--sim_device",
+          "cuda:0",
+          "--dp_control_all_envs",
+          "--dp_inference_steps",
+          "10",
+          "--dp_noise_scheduler_type",
+          "DDIM",
+          "--dp_log_path",
+          "/home/sivan/whole_body/visual_whole_body/high-level/logs/door-policy-success/wc4_5door_baseline_act_50k_seed615455575/batch_0001.jsonl",
+          "--no_show_seg",
+          "--dp_action_horizon",
+          "25",
+          "--depth_only",
+          "--headless",
+          "--graphics_device_id",
+          "0",
+          "--no_dp_print",
+          "--camera_display_scale",
+          "1",
+          "--no_enable_depth_noise",
+          "--depth_aug_config",
+          "/home/sivan/whole_body/visual_whole_body/high-level/dp/config/depth_camera_aug_default.yaml",
+          "--depth_noise_prob",
+          "0.5",
+          "--depth_gaussian_std_m",
+          "0.005",
+          "--depth_gaussian_distance_factor",
+          "0.05",
+          "--depth_edge_noise_prob",
+          "0.1",
+          "--depth_edge_gradient_threshold_m",
+          "0.05",
+          "--depth_edge_dilation_kernel_size",
+          "3",
+          "--depth_hole_noise_prob",
+          "0.005",
+          "--depth_hole_block_size_min",
+          "3",
+          "--depth_hole_block_size",
+          "15",
+          "--depth_hole_white_prob",
+          "0.5",
+          "--depth_dropout_prob",
+          "0.002",
+          "--depth_salt_pepper_prob",
+          "0.002",
+          "--no_enable_depth_gaussian_blur",
+          "--depth_gaussian_blur_ksize",
+          "5",
+          "--depth_gaussian_blur_sigma",
+          "1.0",
+          "--enable_depth_camera_randomization",
+          "--depth_camera_pos_rand_m",
+          "0.02",
+          "--depth_camera_rot_rand_deg",
+          "5.0",
+          "--",
+          "--door_cfg",
+          "/home/sivan/whole_body/visual_whole_body/high-level/data/cfg/b1z1_opendoor.yaml",
+          "--pass_open_angle_deg",
+          "80.0",
+          "--dp_fps",
+          "25",
+          "--seed",
+          "615455576",
+          "--door_name",
+          "wc4",
+          "--camera_depth_clip_lower",
+          "0.2",
+          "--camera_depth_clip_far",
+          "1.5",
+          "--robot_pitch",
+          "0.0",
+          "--ikpush_robot_pitch_rand_min",
+          "0.0",
+          "--ikpush_robot_pitch_rand_max",
+          "0.0",
+          "--ee_pose_frame",
+          "robot_base_full"
+        ],
+        "schema_version": 1,
+        "source": {
+          "batch": 1,
+          "env_id": 3,
+          "global_trial": 19,
+          "log_path": "/home/sivan/whole_body/visual_whole_body/high-level/logs/door-policy-success/wc4_5door_baseline_act_50k_seed615455575/batch_0001.jsonl",
+          "stdout_path": "/home/sivan/whole_body/visual_whole_body/high-level/logs/door-policy-success/wc4_5door_baseline_act_50k_seed615455575/batch_0001.out"
+        },
+        "success_metrics": {
+          "first_success_step": null,
+          "max_open_deg": 1.7039764827190682,
+          "success": false
+        }
+      }
+    },
+    {
+      "branches": [
+        {
+          "branch_step": 450,
+          "candidates": [
+            {
+              "branch_step": 450,
+              "candidate_id": 0,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 450,
+              "candidate_id": 1,
+              "parameters": {
+                "base_lateral_adjust_m": 0.0,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 450,
+              "candidate_id": 2,
+              "parameters": {
+                "base_lateral_adjust_m": 0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 450,
+              "candidate_id": 3,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 220,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 450,
+              "candidate_id": 4,
+              "parameters": {
+                "base_lateral_adjust_m": 0.0,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 220,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            }
+          ]
+        },
+        {
+          "branch_step": 455,
+          "candidates": [
+            {
+              "branch_step": 455,
+              "candidate_id": 5,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 455,
+              "candidate_id": 6,
+              "parameters": {
+                "base_lateral_adjust_m": 0.0,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 455,
+              "candidate_id": 7,
+              "parameters": {
+                "base_lateral_adjust_m": 0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 455,
+              "candidate_id": 8,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 220,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 455,
+              "candidate_id": 9,
+              "parameters": {
+                "base_lateral_adjust_m": 0.0,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 220,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            }
+          ]
+        },
+        {
+          "branch_step": 460,
+          "candidates": [
+            {
+              "branch_step": 460,
+              "candidate_id": 10,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 460,
+              "candidate_id": 11,
+              "parameters": {
+                "base_lateral_adjust_m": 0.0,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 460,
+              "candidate_id": 12,
+              "parameters": {
+                "base_lateral_adjust_m": 0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 460,
+              "candidate_id": 13,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 220,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 460,
+              "candidate_id": 14,
+              "parameters": {
+                "base_lateral_adjust_m": 0.0,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 220,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            }
+          ]
+        }
+      ],
+      "diagnosis": {
+        "candidate_recovery_family": "maintain_grasp_then_push",
+        "evidence": [
+          "max_door_open_deg=1.87",
+          "max_handle_or_secondary_dof_deg=34.30",
+          "max_ee_position_error_m=0.000",
+          "gripper_close_like_action_first_step=374",
+          "handle/secondary DOF moved but hinge did not open enough"
+        ],
+        "failure_type": "insufficient_interaction",
+        "metrics": {
+          "max_door_open_deg": 1.8655505180358887,
+          "max_ee_position_error_m": 0.0,
+          "max_handle_or_secondary_dof_deg": 34.298973083496094,
+          "success_threshold_deg": 80.0
+        },
+        "recoverability": "reactive_recoverable",
+        "t_dev": 455,
+        "t_fail": 455
+      },
+      "failure_rollout_npz": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_failure_rollouts/wc4_5door_baseline_act_50k_seed615455575/failure_trial_000021_batch0001_env05/failure_rollout.npz",
+      "metadata": {
+        "eval": {
+          "base_seed": 615455575,
+          "checkpoint": "/home/sivan/whole_body/visual_whole_body/high-level/dp/logs/lerobot-train/leroact_a2w_5door_baseline_act_50k_chunk100_exec50_bs16_0709_0206/checkpoints/050000",
+          "door_cfg": "/home/sivan/whole_body/visual_whole_body/high-level/data/cfg/b1z1_opendoor.yaml",
+          "dp_action_horizon": 25,
+          "dp_fps": 25,
+          "mode": "ikpush",
+          "pass_open_angle_deg": 80.0,
+          "robot_body": "a2wz1",
+          "steps": 1000,
+          "success_metric": "abs"
+        },
+        "failure_export": {
+          "camera_obs_available": false,
+          "diagnosis_path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_failure_rollouts/wc4_5door_baseline_act_50k_seed615455575/failure_trial_000021_batch0001_env05/diagnosis.json",
+          "note": "This bundle is exported from policy JSONL logs. It contains dense actions, privileged/event signals, and replay-style sim_snapshot fields when the play loop was run with --dp_log_replay_snapshot.",
+          "npz_path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_failure_rollouts/wc4_5door_baseline_act_50k_seed615455575/failure_trial_000021_batch0001_env05/failure_rollout.npz",
+          "records": 1000,
+          "save_camera_obs_requested": false,
+          "save_events": true,
+          "save_privileged_state": true,
+          "sim_snapshot_available": false,
+          "snapshot_interval": 1
+        },
+        "play_command": [
+          "/home/sivan/miniconda3/envs/b1z1/bin/python",
+          "/home/sivan/whole_body/visual_whole_body/high-level/dp/play/play_door_policy.py",
+          "--mode",
+          "ikpush",
+          "--robot_body",
+          "a2wz1",
+          "--checkpoint",
+          "/home/sivan/whole_body/visual_whole_body/high-level/dp/logs/lerobot-train/leroact_a2w_5door_baseline_act_50k_chunk100_exec50_bs16_0709_0206/checkpoints/050000",
+          "--num_envs",
+          "16",
+          "--steps",
+          "1000",
+          "--rl_device",
+          "cuda:0",
+          "--sim_device",
+          "cuda:0",
+          "--dp_control_all_envs",
+          "--dp_inference_steps",
+          "10",
+          "--dp_noise_scheduler_type",
+          "DDIM",
+          "--dp_log_path",
+          "/home/sivan/whole_body/visual_whole_body/high-level/logs/door-policy-success/wc4_5door_baseline_act_50k_seed615455575/batch_0001.jsonl",
+          "--no_show_seg",
+          "--dp_action_horizon",
+          "25",
+          "--depth_only",
+          "--headless",
+          "--graphics_device_id",
+          "0",
+          "--no_dp_print",
+          "--camera_display_scale",
+          "1",
+          "--no_enable_depth_noise",
+          "--depth_aug_config",
+          "/home/sivan/whole_body/visual_whole_body/high-level/dp/config/depth_camera_aug_default.yaml",
+          "--depth_noise_prob",
+          "0.5",
+          "--depth_gaussian_std_m",
+          "0.005",
+          "--depth_gaussian_distance_factor",
+          "0.05",
+          "--depth_edge_noise_prob",
+          "0.1",
+          "--depth_edge_gradient_threshold_m",
+          "0.05",
+          "--depth_edge_dilation_kernel_size",
+          "3",
+          "--depth_hole_noise_prob",
+          "0.005",
+          "--depth_hole_block_size_min",
+          "3",
+          "--depth_hole_block_size",
+          "15",
+          "--depth_hole_white_prob",
+          "0.5",
+          "--depth_dropout_prob",
+          "0.002",
+          "--depth_salt_pepper_prob",
+          "0.002",
+          "--no_enable_depth_gaussian_blur",
+          "--depth_gaussian_blur_ksize",
+          "5",
+          "--depth_gaussian_blur_sigma",
+          "1.0",
+          "--enable_depth_camera_randomization",
+          "--depth_camera_pos_rand_m",
+          "0.02",
+          "--depth_camera_rot_rand_deg",
+          "5.0",
+          "--",
+          "--door_cfg",
+          "/home/sivan/whole_body/visual_whole_body/high-level/data/cfg/b1z1_opendoor.yaml",
+          "--pass_open_angle_deg",
+          "80.0",
+          "--dp_fps",
+          "25",
+          "--seed",
+          "615455576",
+          "--door_name",
+          "wc4",
+          "--camera_depth_clip_lower",
+          "0.2",
+          "--camera_depth_clip_far",
+          "1.5",
+          "--robot_pitch",
+          "0.0",
+          "--ikpush_robot_pitch_rand_min",
+          "0.0",
+          "--ikpush_robot_pitch_rand_max",
+          "0.0",
+          "--ee_pose_frame",
+          "robot_base_full"
+        ],
+        "schema_version": 1,
+        "source": {
+          "batch": 1,
+          "env_id": 5,
+          "global_trial": 21,
+          "log_path": "/home/sivan/whole_body/visual_whole_body/high-level/logs/door-policy-success/wc4_5door_baseline_act_50k_seed615455575/batch_0001.jsonl",
+          "stdout_path": "/home/sivan/whole_body/visual_whole_body/high-level/logs/door-policy-success/wc4_5door_baseline_act_50k_seed615455575/batch_0001.out"
+        },
+        "success_metrics": {
+          "first_success_step": null,
+          "max_open_deg": 1.8655505809459603,
+          "success": false
+        }
+      }
+    },
+    {
+      "branches": [
+        {
+          "branch_step": 387,
+          "candidates": [
+            {
+              "branch_step": 387,
+              "candidate_id": 0,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 387,
+              "candidate_id": 1,
+              "parameters": {
+                "base_lateral_adjust_m": 0.0,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 387,
+              "candidate_id": 2,
+              "parameters": {
+                "base_lateral_adjust_m": 0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 387,
+              "candidate_id": 3,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 220,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 387,
+              "candidate_id": 4,
+              "parameters": {
+                "base_lateral_adjust_m": 0.0,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 220,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            }
+          ]
+        },
+        {
+          "branch_step": 392,
+          "candidates": [
+            {
+              "branch_step": 392,
+              "candidate_id": 5,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 392,
+              "candidate_id": 6,
+              "parameters": {
+                "base_lateral_adjust_m": 0.0,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 392,
+              "candidate_id": 7,
+              "parameters": {
+                "base_lateral_adjust_m": 0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 392,
+              "candidate_id": 8,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 220,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 392,
+              "candidate_id": 9,
+              "parameters": {
+                "base_lateral_adjust_m": 0.0,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 220,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            }
+          ]
+        },
+        {
+          "branch_step": 397,
+          "candidates": [
+            {
+              "branch_step": 397,
+              "candidate_id": 10,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 397,
+              "candidate_id": 11,
+              "parameters": {
+                "base_lateral_adjust_m": 0.0,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 397,
+              "candidate_id": 12,
+              "parameters": {
+                "base_lateral_adjust_m": 0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 397,
+              "candidate_id": 13,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 220,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 397,
+              "candidate_id": 14,
+              "parameters": {
+                "base_lateral_adjust_m": 0.0,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 220,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            }
+          ]
+        }
+      ],
+      "diagnosis": {
+        "candidate_recovery_family": "maintain_grasp_then_push",
+        "evidence": [
+          "max_door_open_deg=1.87",
+          "max_handle_or_secondary_dof_deg=36.79",
+          "max_ee_position_error_m=0.000",
+          "gripper_close_like_action_first_step=372",
+          "handle/secondary DOF moved but hinge did not open enough"
+        ],
+        "failure_type": "insufficient_interaction",
+        "metrics": {
+          "max_door_open_deg": 1.8741449117660522,
+          "max_ee_position_error_m": 0.0,
+          "max_handle_or_secondary_dof_deg": 36.79305648803711,
+          "success_threshold_deg": 80.0
+        },
+        "recoverability": "reactive_recoverable",
+        "t_dev": 392,
+        "t_fail": 392
+      },
+      "failure_rollout_npz": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_failure_rollouts/wc4_5door_baseline_act_50k_seed615455575/failure_trial_000024_batch0001_env08/failure_rollout.npz",
+      "metadata": {
+        "eval": {
+          "base_seed": 615455575,
+          "checkpoint": "/home/sivan/whole_body/visual_whole_body/high-level/dp/logs/lerobot-train/leroact_a2w_5door_baseline_act_50k_chunk100_exec50_bs16_0709_0206/checkpoints/050000",
+          "door_cfg": "/home/sivan/whole_body/visual_whole_body/high-level/data/cfg/b1z1_opendoor.yaml",
+          "dp_action_horizon": 25,
+          "dp_fps": 25,
+          "mode": "ikpush",
+          "pass_open_angle_deg": 80.0,
+          "robot_body": "a2wz1",
+          "steps": 1000,
+          "success_metric": "abs"
+        },
+        "failure_export": {
+          "camera_obs_available": false,
+          "diagnosis_path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_failure_rollouts/wc4_5door_baseline_act_50k_seed615455575/failure_trial_000024_batch0001_env08/diagnosis.json",
+          "note": "This bundle is exported from policy JSONL logs. It contains dense actions, privileged/event signals, and replay-style sim_snapshot fields when the play loop was run with --dp_log_replay_snapshot.",
+          "npz_path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_failure_rollouts/wc4_5door_baseline_act_50k_seed615455575/failure_trial_000024_batch0001_env08/failure_rollout.npz",
+          "records": 1000,
+          "save_camera_obs_requested": false,
+          "save_events": true,
+          "save_privileged_state": true,
+          "sim_snapshot_available": false,
+          "snapshot_interval": 1
+        },
+        "play_command": [
+          "/home/sivan/miniconda3/envs/b1z1/bin/python",
+          "/home/sivan/whole_body/visual_whole_body/high-level/dp/play/play_door_policy.py",
+          "--mode",
+          "ikpush",
+          "--robot_body",
+          "a2wz1",
+          "--checkpoint",
+          "/home/sivan/whole_body/visual_whole_body/high-level/dp/logs/lerobot-train/leroact_a2w_5door_baseline_act_50k_chunk100_exec50_bs16_0709_0206/checkpoints/050000",
+          "--num_envs",
+          "16",
+          "--steps",
+          "1000",
+          "--rl_device",
+          "cuda:0",
+          "--sim_device",
+          "cuda:0",
+          "--dp_control_all_envs",
+          "--dp_inference_steps",
+          "10",
+          "--dp_noise_scheduler_type",
+          "DDIM",
+          "--dp_log_path",
+          "/home/sivan/whole_body/visual_whole_body/high-level/logs/door-policy-success/wc4_5door_baseline_act_50k_seed615455575/batch_0001.jsonl",
+          "--no_show_seg",
+          "--dp_action_horizon",
+          "25",
+          "--depth_only",
+          "--headless",
+          "--graphics_device_id",
+          "0",
+          "--no_dp_print",
+          "--camera_display_scale",
+          "1",
+          "--no_enable_depth_noise",
+          "--depth_aug_config",
+          "/home/sivan/whole_body/visual_whole_body/high-level/dp/config/depth_camera_aug_default.yaml",
+          "--depth_noise_prob",
+          "0.5",
+          "--depth_gaussian_std_m",
+          "0.005",
+          "--depth_gaussian_distance_factor",
+          "0.05",
+          "--depth_edge_noise_prob",
+          "0.1",
+          "--depth_edge_gradient_threshold_m",
+          "0.05",
+          "--depth_edge_dilation_kernel_size",
+          "3",
+          "--depth_hole_noise_prob",
+          "0.005",
+          "--depth_hole_block_size_min",
+          "3",
+          "--depth_hole_block_size",
+          "15",
+          "--depth_hole_white_prob",
+          "0.5",
+          "--depth_dropout_prob",
+          "0.002",
+          "--depth_salt_pepper_prob",
+          "0.002",
+          "--no_enable_depth_gaussian_blur",
+          "--depth_gaussian_blur_ksize",
+          "5",
+          "--depth_gaussian_blur_sigma",
+          "1.0",
+          "--enable_depth_camera_randomization",
+          "--depth_camera_pos_rand_m",
+          "0.02",
+          "--depth_camera_rot_rand_deg",
+          "5.0",
+          "--",
+          "--door_cfg",
+          "/home/sivan/whole_body/visual_whole_body/high-level/data/cfg/b1z1_opendoor.yaml",
+          "--pass_open_angle_deg",
+          "80.0",
+          "--dp_fps",
+          "25",
+          "--seed",
+          "615455576",
+          "--door_name",
+          "wc4",
+          "--camera_depth_clip_lower",
+          "0.2",
+          "--camera_depth_clip_far",
+          "1.5",
+          "--robot_pitch",
+          "0.0",
+          "--ikpush_robot_pitch_rand_min",
+          "0.0",
+          "--ikpush_robot_pitch_rand_max",
+          "0.0",
+          "--ee_pose_frame",
+          "robot_base_full"
+        ],
+        "schema_version": 1,
+        "source": {
+          "batch": 1,
+          "env_id": 8,
+          "global_trial": 24,
+          "log_path": "/home/sivan/whole_body/visual_whole_body/high-level/logs/door-policy-success/wc4_5door_baseline_act_50k_seed615455575/batch_0001.jsonl",
+          "stdout_path": "/home/sivan/whole_body/visual_whole_body/high-level/logs/door-policy-success/wc4_5door_baseline_act_50k_seed615455575/batch_0001.out"
+        },
+        "success_metrics": {
+          "first_success_step": null,
+          "max_open_deg": 1.8741449478729229,
+          "success": false
+        }
+      }
+    },
+    {
+      "branches": [
+        {
+          "branch_step": 475,
+          "candidates": [
+            {
+              "branch_step": 475,
+              "candidate_id": 0,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 475,
+              "candidate_id": 1,
+              "parameters": {
+                "base_lateral_adjust_m": 0.0,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 475,
+              "candidate_id": 2,
+              "parameters": {
+                "base_lateral_adjust_m": 0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 475,
+              "candidate_id": 3,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 220,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 475,
+              "candidate_id": 4,
+              "parameters": {
+                "base_lateral_adjust_m": 0.0,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 220,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            }
+          ]
+        },
+        {
+          "branch_step": 480,
+          "candidates": [
+            {
+              "branch_step": 480,
+              "candidate_id": 5,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 480,
+              "candidate_id": 6,
+              "parameters": {
+                "base_lateral_adjust_m": 0.0,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 480,
+              "candidate_id": 7,
+              "parameters": {
+                "base_lateral_adjust_m": 0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 480,
+              "candidate_id": 8,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 220,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 480,
+              "candidate_id": 9,
+              "parameters": {
+                "base_lateral_adjust_m": 0.0,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 220,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            }
+          ]
+        },
+        {
+          "branch_step": 485,
+          "candidates": [
+            {
+              "branch_step": 485,
+              "candidate_id": 10,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 485,
+              "candidate_id": 11,
+              "parameters": {
+                "base_lateral_adjust_m": 0.0,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 485,
+              "candidate_id": 12,
+              "parameters": {
+                "base_lateral_adjust_m": 0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 485,
+              "candidate_id": 13,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 220,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 485,
+              "candidate_id": 14,
+              "parameters": {
+                "base_lateral_adjust_m": 0.0,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 220,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            }
+          ]
+        }
+      ],
+      "diagnosis": {
+        "candidate_recovery_family": "maintain_grasp_then_push",
+        "evidence": [
+          "max_door_open_deg=1.93",
+          "max_handle_or_secondary_dof_deg=37.89",
+          "max_ee_position_error_m=0.000",
+          "gripper_close_like_action_first_step=380",
+          "handle/secondary DOF moved but hinge did not open enough"
+        ],
+        "failure_type": "insufficient_interaction",
+        "metrics": {
+          "max_door_open_deg": 1.9274300336837769,
+          "max_ee_position_error_m": 0.0,
+          "max_handle_or_secondary_dof_deg": 37.889122009277344,
+          "success_threshold_deg": 80.0
+        },
+        "recoverability": "reactive_recoverable",
+        "t_dev": 480,
+        "t_fail": 480
+      },
+      "failure_rollout_npz": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_failure_rollouts/wc4_5door_baseline_act_50k_seed615455575/failure_trial_000030_batch0001_env14/failure_rollout.npz",
+      "metadata": {
+        "eval": {
+          "base_seed": 615455575,
+          "checkpoint": "/home/sivan/whole_body/visual_whole_body/high-level/dp/logs/lerobot-train/leroact_a2w_5door_baseline_act_50k_chunk100_exec50_bs16_0709_0206/checkpoints/050000",
+          "door_cfg": "/home/sivan/whole_body/visual_whole_body/high-level/data/cfg/b1z1_opendoor.yaml",
+          "dp_action_horizon": 25,
+          "dp_fps": 25,
+          "mode": "ikpush",
+          "pass_open_angle_deg": 80.0,
+          "robot_body": "a2wz1",
+          "steps": 1000,
+          "success_metric": "abs"
+        },
+        "failure_export": {
+          "camera_obs_available": false,
+          "diagnosis_path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_failure_rollouts/wc4_5door_baseline_act_50k_seed615455575/failure_trial_000030_batch0001_env14/diagnosis.json",
+          "note": "This bundle is exported from policy JSONL logs. It contains dense actions, privileged/event signals, and replay-style sim_snapshot fields when the play loop was run with --dp_log_replay_snapshot.",
+          "npz_path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_failure_rollouts/wc4_5door_baseline_act_50k_seed615455575/failure_trial_000030_batch0001_env14/failure_rollout.npz",
+          "records": 1000,
+          "save_camera_obs_requested": false,
+          "save_events": true,
+          "save_privileged_state": true,
+          "sim_snapshot_available": false,
+          "snapshot_interval": 1
+        },
+        "play_command": [
+          "/home/sivan/miniconda3/envs/b1z1/bin/python",
+          "/home/sivan/whole_body/visual_whole_body/high-level/dp/play/play_door_policy.py",
+          "--mode",
+          "ikpush",
+          "--robot_body",
+          "a2wz1",
+          "--checkpoint",
+          "/home/sivan/whole_body/visual_whole_body/high-level/dp/logs/lerobot-train/leroact_a2w_5door_baseline_act_50k_chunk100_exec50_bs16_0709_0206/checkpoints/050000",
+          "--num_envs",
+          "16",
+          "--steps",
+          "1000",
+          "--rl_device",
+          "cuda:0",
+          "--sim_device",
+          "cuda:0",
+          "--dp_control_all_envs",
+          "--dp_inference_steps",
+          "10",
+          "--dp_noise_scheduler_type",
+          "DDIM",
+          "--dp_log_path",
+          "/home/sivan/whole_body/visual_whole_body/high-level/logs/door-policy-success/wc4_5door_baseline_act_50k_seed615455575/batch_0001.jsonl",
+          "--no_show_seg",
+          "--dp_action_horizon",
+          "25",
+          "--depth_only",
+          "--headless",
+          "--graphics_device_id",
+          "0",
+          "--no_dp_print",
+          "--camera_display_scale",
+          "1",
+          "--no_enable_depth_noise",
+          "--depth_aug_config",
+          "/home/sivan/whole_body/visual_whole_body/high-level/dp/config/depth_camera_aug_default.yaml",
+          "--depth_noise_prob",
+          "0.5",
+          "--depth_gaussian_std_m",
+          "0.005",
+          "--depth_gaussian_distance_factor",
+          "0.05",
+          "--depth_edge_noise_prob",
+          "0.1",
+          "--depth_edge_gradient_threshold_m",
+          "0.05",
+          "--depth_edge_dilation_kernel_size",
+          "3",
+          "--depth_hole_noise_prob",
+          "0.005",
+          "--depth_hole_block_size_min",
+          "3",
+          "--depth_hole_block_size",
+          "15",
+          "--depth_hole_white_prob",
+          "0.5",
+          "--depth_dropout_prob",
+          "0.002",
+          "--depth_salt_pepper_prob",
+          "0.002",
+          "--no_enable_depth_gaussian_blur",
+          "--depth_gaussian_blur_ksize",
+          "5",
+          "--depth_gaussian_blur_sigma",
+          "1.0",
+          "--enable_depth_camera_randomization",
+          "--depth_camera_pos_rand_m",
+          "0.02",
+          "--depth_camera_rot_rand_deg",
+          "5.0",
+          "--",
+          "--door_cfg",
+          "/home/sivan/whole_body/visual_whole_body/high-level/data/cfg/b1z1_opendoor.yaml",
+          "--pass_open_angle_deg",
+          "80.0",
+          "--dp_fps",
+          "25",
+          "--seed",
+          "615455576",
+          "--door_name",
+          "wc4",
+          "--camera_depth_clip_lower",
+          "0.2",
+          "--camera_depth_clip_far",
+          "1.5",
+          "--robot_pitch",
+          "0.0",
+          "--ikpush_robot_pitch_rand_min",
+          "0.0",
+          "--ikpush_robot_pitch_rand_max",
+          "0.0",
+          "--ee_pose_frame",
+          "robot_base_full"
+        ],
+        "schema_version": 1,
+        "source": {
+          "batch": 1,
+          "env_id": 14,
+          "global_trial": 30,
+          "log_path": "/home/sivan/whole_body/visual_whole_body/high-level/logs/door-policy-success/wc4_5door_baseline_act_50k_seed615455575/batch_0001.jsonl",
+          "stdout_path": "/home/sivan/whole_body/visual_whole_body/high-level/logs/door-policy-success/wc4_5door_baseline_act_50k_seed615455575/batch_0001.out"
+        },
+        "success_metrics": {
+          "first_success_step": null,
+          "max_open_deg": 1.9274300228200896,
+          "success": false
+        }
+      }
+    },
+    {
+      "branches": [
+        {
+          "branch_step": 457,
+          "candidates": [
+            {
+              "branch_step": 457,
+              "candidate_id": 0,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 457,
+              "candidate_id": 1,
+              "parameters": {
+                "base_lateral_adjust_m": 0.0,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 457,
+              "candidate_id": 2,
+              "parameters": {
+                "base_lateral_adjust_m": 0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 457,
+              "candidate_id": 3,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 220,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 457,
+              "candidate_id": 4,
+              "parameters": {
+                "base_lateral_adjust_m": 0.0,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 220,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            }
+          ]
+        },
+        {
+          "branch_step": 462,
+          "candidates": [
+            {
+              "branch_step": 462,
+              "candidate_id": 5,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 462,
+              "candidate_id": 6,
+              "parameters": {
+                "base_lateral_adjust_m": 0.0,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 462,
+              "candidate_id": 7,
+              "parameters": {
+                "base_lateral_adjust_m": 0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 462,
+              "candidate_id": 8,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 220,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 462,
+              "candidate_id": 9,
+              "parameters": {
+                "base_lateral_adjust_m": 0.0,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 220,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            }
+          ]
+        },
+        {
+          "branch_step": 467,
+          "candidates": [
+            {
+              "branch_step": 467,
+              "candidate_id": 10,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 467,
+              "candidate_id": 11,
+              "parameters": {
+                "base_lateral_adjust_m": 0.0,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 467,
+              "candidate_id": 12,
+              "parameters": {
+                "base_lateral_adjust_m": 0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 467,
+              "candidate_id": 13,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 220,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 467,
+              "candidate_id": 14,
+              "parameters": {
+                "base_lateral_adjust_m": 0.0,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 220,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            }
+          ]
+        }
+      ],
+      "diagnosis": {
+        "candidate_recovery_family": "maintain_grasp_then_push",
+        "evidence": [
+          "max_door_open_deg=1.75",
+          "max_handle_or_secondary_dof_deg=39.79",
+          "max_ee_position_error_m=0.000",
+          "gripper_close_like_action_first_step=378",
+          "handle/secondary DOF moved but hinge did not open enough"
+        ],
+        "failure_type": "insufficient_interaction",
+        "metrics": {
+          "max_door_open_deg": 1.7521047592163086,
+          "max_ee_position_error_m": 0.0,
+          "max_handle_or_secondary_dof_deg": 39.791343688964844,
+          "success_threshold_deg": 80.0
+        },
+        "recoverability": "reactive_recoverable",
+        "t_dev": 462,
+        "t_fail": 462
+      },
+      "failure_rollout_npz": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_failure_rollouts/wc4_5door_baseline_act_50k_seed615455575/failure_trial_000041_batch0002_env09/failure_rollout.npz",
+      "metadata": {
+        "eval": {
+          "base_seed": 615455575,
+          "checkpoint": "/home/sivan/whole_body/visual_whole_body/high-level/dp/logs/lerobot-train/leroact_a2w_5door_baseline_act_50k_chunk100_exec50_bs16_0709_0206/checkpoints/050000",
+          "door_cfg": "/home/sivan/whole_body/visual_whole_body/high-level/data/cfg/b1z1_opendoor.yaml",
+          "dp_action_horizon": 25,
+          "dp_fps": 25,
+          "mode": "ikpush",
+          "pass_open_angle_deg": 80.0,
+          "robot_body": "a2wz1",
+          "steps": 1000,
+          "success_metric": "abs"
+        },
+        "failure_export": {
+          "camera_obs_available": false,
+          "diagnosis_path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_failure_rollouts/wc4_5door_baseline_act_50k_seed615455575/failure_trial_000041_batch0002_env09/diagnosis.json",
+          "note": "This bundle is exported from policy JSONL logs. It contains dense actions, privileged/event signals, and replay-style sim_snapshot fields when the play loop was run with --dp_log_replay_snapshot.",
+          "npz_path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_failure_rollouts/wc4_5door_baseline_act_50k_seed615455575/failure_trial_000041_batch0002_env09/failure_rollout.npz",
+          "records": 1000,
+          "save_camera_obs_requested": false,
+          "save_events": true,
+          "save_privileged_state": true,
+          "sim_snapshot_available": false,
+          "snapshot_interval": 1
+        },
+        "play_command": [
+          "/home/sivan/miniconda3/envs/b1z1/bin/python",
+          "/home/sivan/whole_body/visual_whole_body/high-level/dp/play/play_door_policy.py",
+          "--mode",
+          "ikpush",
+          "--robot_body",
+          "a2wz1",
+          "--checkpoint",
+          "/home/sivan/whole_body/visual_whole_body/high-level/dp/logs/lerobot-train/leroact_a2w_5door_baseline_act_50k_chunk100_exec50_bs16_0709_0206/checkpoints/050000",
+          "--num_envs",
+          "16",
+          "--steps",
+          "1000",
+          "--rl_device",
+          "cuda:0",
+          "--sim_device",
+          "cuda:0",
+          "--dp_control_all_envs",
+          "--dp_inference_steps",
+          "10",
+          "--dp_noise_scheduler_type",
+          "DDIM",
+          "--dp_log_path",
+          "/home/sivan/whole_body/visual_whole_body/high-level/logs/door-policy-success/wc4_5door_baseline_act_50k_seed615455575/batch_0002.jsonl",
+          "--no_show_seg",
+          "--dp_action_horizon",
+          "25",
+          "--depth_only",
+          "--headless",
+          "--graphics_device_id",
+          "0",
+          "--no_dp_print",
+          "--camera_display_scale",
+          "1",
+          "--no_enable_depth_noise",
+          "--depth_aug_config",
+          "/home/sivan/whole_body/visual_whole_body/high-level/dp/config/depth_camera_aug_default.yaml",
+          "--depth_noise_prob",
+          "0.5",
+          "--depth_gaussian_std_m",
+          "0.005",
+          "--depth_gaussian_distance_factor",
+          "0.05",
+          "--depth_edge_noise_prob",
+          "0.1",
+          "--depth_edge_gradient_threshold_m",
+          "0.05",
+          "--depth_edge_dilation_kernel_size",
+          "3",
+          "--depth_hole_noise_prob",
+          "0.005",
+          "--depth_hole_block_size_min",
+          "3",
+          "--depth_hole_block_size",
+          "15",
+          "--depth_hole_white_prob",
+          "0.5",
+          "--depth_dropout_prob",
+          "0.002",
+          "--depth_salt_pepper_prob",
+          "0.002",
+          "--no_enable_depth_gaussian_blur",
+          "--depth_gaussian_blur_ksize",
+          "5",
+          "--depth_gaussian_blur_sigma",
+          "1.0",
+          "--enable_depth_camera_randomization",
+          "--depth_camera_pos_rand_m",
+          "0.02",
+          "--depth_camera_rot_rand_deg",
+          "5.0",
+          "--",
+          "--door_cfg",
+          "/home/sivan/whole_body/visual_whole_body/high-level/data/cfg/b1z1_opendoor.yaml",
+          "--pass_open_angle_deg",
+          "80.0",
+          "--dp_fps",
+          "25",
+          "--seed",
+          "615455577",
+          "--door_name",
+          "wc4",
+          "--camera_depth_clip_lower",
+          "0.2",
+          "--camera_depth_clip_far",
+          "1.5",
+          "--robot_pitch",
+          "0.0",
+          "--ikpush_robot_pitch_rand_min",
+          "0.0",
+          "--ikpush_robot_pitch_rand_max",
+          "0.0",
+          "--ee_pose_frame",
+          "robot_base_full"
+        ],
+        "schema_version": 1,
+        "source": {
+          "batch": 2,
+          "env_id": 9,
+          "global_trial": 41,
+          "log_path": "/home/sivan/whole_body/visual_whole_body/high-level/logs/door-policy-success/wc4_5door_baseline_act_50k_seed615455575/batch_0002.jsonl",
+          "stdout_path": "/home/sivan/whole_body/visual_whole_body/high-level/logs/door-policy-success/wc4_5door_baseline_act_50k_seed615455575/batch_0002.out"
+        },
+        "success_metrics": {
+          "first_success_step": null,
+          "max_open_deg": 1.7521049375100575,
+          "success": false
+        }
+      }
+    },
+    {
+      "branches": [
+        {
+          "branch_step": 422,
+          "candidates": [
+            {
+              "branch_step": 422,
+              "candidate_id": 0,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 422,
+              "candidate_id": 1,
+              "parameters": {
+                "base_lateral_adjust_m": 0.0,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 422,
+              "candidate_id": 2,
+              "parameters": {
+                "base_lateral_adjust_m": 0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 422,
+              "candidate_id": 3,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 220,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 422,
+              "candidate_id": 4,
+              "parameters": {
+                "base_lateral_adjust_m": 0.0,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 220,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            }
+          ]
+        },
+        {
+          "branch_step": 427,
+          "candidates": [
+            {
+              "branch_step": 427,
+              "candidate_id": 5,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 427,
+              "candidate_id": 6,
+              "parameters": {
+                "base_lateral_adjust_m": 0.0,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 427,
+              "candidate_id": 7,
+              "parameters": {
+                "base_lateral_adjust_m": 0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 427,
+              "candidate_id": 8,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 220,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 427,
+              "candidate_id": 9,
+              "parameters": {
+                "base_lateral_adjust_m": 0.0,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 220,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            }
+          ]
+        },
+        {
+          "branch_step": 432,
+          "candidates": [
+            {
+              "branch_step": 432,
+              "candidate_id": 10,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 432,
+              "candidate_id": 11,
+              "parameters": {
+                "base_lateral_adjust_m": 0.0,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 432,
+              "candidate_id": 12,
+              "parameters": {
+                "base_lateral_adjust_m": 0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 160,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 432,
+              "candidate_id": 13,
+              "parameters": {
+                "base_lateral_adjust_m": -0.04,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 220,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            },
+            {
+              "branch_step": 432,
+              "candidate_id": 14,
+              "parameters": {
+                "base_lateral_adjust_m": 0.0,
+                "close_timing": "keep_closed",
+                "controller": "maintain_grasp_then_push",
+                "handle_regrasp_x_offset_m": 0.0,
+                "open_gripper_first": false,
+                "push_steps": 220,
+                "reapproach_z_offset_m": 0.0,
+                "retreat_distance_m": 0.0,
+                "rotate_steps": 80
+              },
+              "status": "proposed_unverified"
+            }
+          ]
+        }
+      ],
+      "diagnosis": {
+        "candidate_recovery_family": "maintain_grasp_then_push",
+        "evidence": [
+          "max_door_open_deg=1.89",
+          "max_handle_or_secondary_dof_deg=34.26",
+          "max_ee_position_error_m=0.000",
+          "gripper_close_like_action_first_step=328",
+          "handle/secondary DOF moved but hinge did not open enough"
+        ],
+        "failure_type": "insufficient_interaction",
+        "metrics": {
+          "max_door_open_deg": 1.8878958225250244,
+          "max_ee_position_error_m": 0.0,
+          "max_handle_or_secondary_dof_deg": 34.262874603271484,
+          "success_threshold_deg": 80.0
+        },
+        "recoverability": "reactive_recoverable",
+        "t_dev": 427,
+        "t_fail": 427
+      },
+      "failure_rollout_npz": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_failure_rollouts/wc4_5door_baseline_act_50k_seed615455575/failure_trial_000047_batch0002_env15/failure_rollout.npz",
+      "metadata": {
+        "eval": {
+          "base_seed": 615455575,
+          "checkpoint": "/home/sivan/whole_body/visual_whole_body/high-level/dp/logs/lerobot-train/leroact_a2w_5door_baseline_act_50k_chunk100_exec50_bs16_0709_0206/checkpoints/050000",
+          "door_cfg": "/home/sivan/whole_body/visual_whole_body/high-level/data/cfg/b1z1_opendoor.yaml",
+          "dp_action_horizon": 25,
+          "dp_fps": 25,
+          "mode": "ikpush",
+          "pass_open_angle_deg": 80.0,
+          "robot_body": "a2wz1",
+          "steps": 1000,
+          "success_metric": "abs"
+        },
+        "failure_export": {
+          "camera_obs_available": false,
+          "diagnosis_path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_failure_rollouts/wc4_5door_baseline_act_50k_seed615455575/failure_trial_000047_batch0002_env15/diagnosis.json",
+          "note": "This bundle is exported from policy JSONL logs. It contains dense actions, privileged/event signals, and replay-style sim_snapshot fields when the play loop was run with --dp_log_replay_snapshot.",
+          "npz_path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_failure_rollouts/wc4_5door_baseline_act_50k_seed615455575/failure_trial_000047_batch0002_env15/failure_rollout.npz",
+          "records": 1000,
+          "save_camera_obs_requested": false,
+          "save_events": true,
+          "save_privileged_state": true,
+          "sim_snapshot_available": false,
+          "snapshot_interval": 1
+        },
+        "play_command": [
+          "/home/sivan/miniconda3/envs/b1z1/bin/python",
+          "/home/sivan/whole_body/visual_whole_body/high-level/dp/play/play_door_policy.py",
+          "--mode",
+          "ikpush",
+          "--robot_body",
+          "a2wz1",
+          "--checkpoint",
+          "/home/sivan/whole_body/visual_whole_body/high-level/dp/logs/lerobot-train/leroact_a2w_5door_baseline_act_50k_chunk100_exec50_bs16_0709_0206/checkpoints/050000",
+          "--num_envs",
+          "16",
+          "--steps",
+          "1000",
+          "--rl_device",
+          "cuda:0",
+          "--sim_device",
+          "cuda:0",
+          "--dp_control_all_envs",
+          "--dp_inference_steps",
+          "10",
+          "--dp_noise_scheduler_type",
+          "DDIM",
+          "--dp_log_path",
+          "/home/sivan/whole_body/visual_whole_body/high-level/logs/door-policy-success/wc4_5door_baseline_act_50k_seed615455575/batch_0002.jsonl",
+          "--no_show_seg",
+          "--dp_action_horizon",
+          "25",
+          "--depth_only",
+          "--headless",
+          "--graphics_device_id",
+          "0",
+          "--no_dp_print",
+          "--camera_display_scale",
+          "1",
+          "--no_enable_depth_noise",
+          "--depth_aug_config",
+          "/home/sivan/whole_body/visual_whole_body/high-level/dp/config/depth_camera_aug_default.yaml",
+          "--depth_noise_prob",
+          "0.5",
+          "--depth_gaussian_std_m",
+          "0.005",
+          "--depth_gaussian_distance_factor",
+          "0.05",
+          "--depth_edge_noise_prob",
+          "0.1",
+          "--depth_edge_gradient_threshold_m",
+          "0.05",
+          "--depth_edge_dilation_kernel_size",
+          "3",
+          "--depth_hole_noise_prob",
+          "0.005",
+          "--depth_hole_block_size_min",
+          "3",
+          "--depth_hole_block_size",
+          "15",
+          "--depth_hole_white_prob",
+          "0.5",
+          "--depth_dropout_prob",
+          "0.002",
+          "--depth_salt_pepper_prob",
+          "0.002",
+          "--no_enable_depth_gaussian_blur",
+          "--depth_gaussian_blur_ksize",
+          "5",
+          "--depth_gaussian_blur_sigma",
+          "1.0",
+          "--enable_depth_camera_randomization",
+          "--depth_camera_pos_rand_m",
+          "0.02",
+          "--depth_camera_rot_rand_deg",
+          "5.0",
+          "--",
+          "--door_cfg",
+          "/home/sivan/whole_body/visual_whole_body/high-level/data/cfg/b1z1_opendoor.yaml",
+          "--pass_open_angle_deg",
+          "80.0",
+          "--dp_fps",
+          "25",
+          "--seed",
+          "615455577",
+          "--door_name",
+          "wc4",
+          "--camera_depth_clip_lower",
+          "0.2",
+          "--camera_depth_clip_far",
+          "1.5",
+          "--robot_pitch",
+          "0.0",
+          "--ikpush_robot_pitch_rand_min",
+          "0.0",
+          "--ikpush_robot_pitch_rand_max",
+          "0.0",
+          "--ee_pose_frame",
+          "robot_base_full"
+        ],
+        "schema_version": 1,
+        "source": {
+          "batch": 2,
+          "env_id": 15,
+          "global_trial": 47,
+          "log_path": "/home/sivan/whole_body/visual_whole_body/high-level/logs/door-policy-success/wc4_5door_baseline_act_50k_seed615455575/batch_0002.jsonl",
+          "stdout_path": "/home/sivan/whole_body/visual_whole_body/high-level/logs/door-policy-success/wc4_5door_baseline_act_50k_seed615455575/batch_0002.out"
+        },
+        "success_metrics": {
+          "first_success_step": null,
+          "max_open_deg": 1.8878959349560624,
+          "success": false
+        }
+      }
+    }
+  ],
+  "description": "Recovery candidates proposed for simulator verification; not training ground truth.",
+  "schema_version": 1,
+  "verification_rule": {
+    "final_task_success": {
+      "door_open_angle_deg": 80.0
+    },
+    "keep_branch_if": "local_recovery_success AND final_task_success",
+    "local_recovery_success": {
+      "contact_min_frames": 5,
+      "requires_progress_restart": true
+    }
+  }
+}

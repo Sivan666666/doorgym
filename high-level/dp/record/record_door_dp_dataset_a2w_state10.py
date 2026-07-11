@@ -114,7 +114,7 @@ def parse_args():
         "--steps",
         type=int,
         default=None,
-        help="Simulator steps. Defaults to 1000 for A2W dataset recording.",
+        help="Simulator steps. Defaults to 960 for TRAC-IK and 1000 otherwise.",
     )
     parser.add_argument(
         "--seed",
@@ -240,11 +240,11 @@ def assert_raw_root_schema_compatible(raw_root, schema):
         )
 
 
-def default_float_ik_scripted_args(mode):
+def default_float_ik_scripted_args(mode, arm_ik_solver="gym_jacobian"):
     if mode == "ikpush":
         return [
             "--initial_hold_steps",
-            "150",
+            "100" if str(arm_ik_solver) == "tracik" else "150",
             "--initial_hold_move_steps",
             "100",
             "--grasp_steps",
@@ -279,6 +279,11 @@ def find_forwarded_arg(extra_args, name):
         if value.startswith(prefix):
             return value[len(prefix):]
     return None
+
+
+def forwarded_arm_ik_solver(args):
+    solver = find_forwarded_arg(forwarded_play_args(args), "--arm_ik_solver")
+    return str(solver or "gym_jacobian").strip().lower()
 
 
 def resolve_cli_path(value):
@@ -554,7 +559,7 @@ def run_one(mode, rollout_idx, args):
             cmd.append("--no_dp_record_all_envs")
         if args.seed >= 0:
             cmd += ["--seed", str(int(args.seed) + int(rollout_idx))]
-        cmd += default_float_ik_scripted_args(mode)
+        cmd += default_float_ik_scripted_args(mode, forwarded_arm_ik_solver(args))
         add_depth_aug_command_args(cmd, args)
         cmd += extra
         print(
@@ -664,7 +669,7 @@ def main():
         raise ValueError("--max_quota_rollouts must be positive")
     modes = [args.mode]
     if args.steps is None:
-        args.steps = 1000
+        args.steps = 960 if forwarded_arm_ik_solver(args) == "tracik" else 1000
     if args.rgb:
         args.depth_only = False
     assert_raw_root_schema_compatible(args.raw_root, args.state_action_mode)

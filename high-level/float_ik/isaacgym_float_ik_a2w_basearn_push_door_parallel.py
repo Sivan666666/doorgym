@@ -221,6 +221,10 @@ class TracIKTrajectoryController:
         self.command_stride = max(1, int(round(1.0 / (requested_hz * self.sim_dt))))
         self.command_period = self.command_stride * self.sim_dt
         self.max_restarts = max(1, int(args.tracik_max_restarts))
+        self.initial_segment_duration = float(args.tracik_initial_segment_duration)
+        self.projection_iterations = max(0, int(args.tracik_projection_iterations))
+        self.projection_min_alpha = float(args.tracik_projection_min_alpha)
+        self.project_unreachable = not bool(args.no_tracik_unreachable_projection)
         self.max_waypoint_step = float(args.tracik_max_waypoint_step)
         self.velocity_alpha = float(args.tracik_waypoint_velocity_alpha)
         self.rng = np.random.default_rng(int(seed))
@@ -232,6 +236,7 @@ class TracIKTrajectoryController:
             args.tracik_max_segment_duration,
         )
         self.last_solution = initial_q.copy()
+        self.last_reachable_pose = np.asarray(self.solver.fk(initial_q), dtype=np.float64).reshape(7)
         self.last_waypoint_velocity = np.zeros(6, dtype=np.float64)
         self.last_solve_step = None
         self.solve_count = 0
@@ -242,6 +247,13 @@ class TracIKTrajectoryController:
         self.last_target_pose = None
         self.last_candidate = None
         self.last_waypoint_step = 0.0
+        self.projection_count = 0
+        self.projection_failure_count = 0
+        self.nearest_position_count = 0
+        self.last_projection_alpha = 1.0
+        self.last_projection_ms = 0.0
+        self.last_projection_target_pose = None
+        self.initial_plan_active = False
 
     def reset(self, q, sim_time):
         q = np.clip(np.asarray(q, dtype=np.float64).reshape(6), self.lower, self.upper)
@@ -253,26 +265,164 @@ class TracIKTrajectoryController:
         )
         self.trajectory.start_time = float(sim_time)
         self.last_solution = q.copy()
+        self.last_reachable_pose = np.asarray(self.solver.fk(q), dtype=np.float64).reshape(7)
         self.last_waypoint_velocity[:] = 0.0
         self.last_solve_step = None
         self.last_error = ""
+        self.initial_plan_active = False
 
-    def update(self, step, target_pose, position_only=False):
-        step = int(step)
-        now = step * self.sim_dt
-        solve_due = self.last_solve_step is None or step - self.last_solve_step >= self.command_stride
-        if solve_due:
-            first_solve_after_reset = self.last_solve_step is None
-            self.last_target_pose = np.asarray(target_pose, dtype=np.float64).copy()
-            start_ns = time.perf_counter_ns()
-            solution = self.solver.ik(
+    @staticmethod
+    def _interpolate_target(start_pose, target_pose, alpha, position_only):
+        alpha = float(np.clip(alpha, 0.0, 1.0))
+        position = (1.0 - alpha) * start_pose[:3] + alpha * target_pose[:3]
+        if position_only:
+            return position
+        start_quat = np.asarray(start_pose[3:7], dtype=np.float64)
+        target_quat = np.asarray(target_pose[3:7], dtype=np.float64)
+        if float(np.dot(start_quat, target_quat)) < 0.0:
+            target_quat = -target_quat
+        quat = (1.0 - alpha) * start_quat + alpha * target_quat
+        quat_norm = float(np.linalg.norm(quat))
+        if quat_norm < 1.0e-12:
+            quat = start_quat.copy()
+        else:
+            quat /= quat_norm
+        return np.concatenate([position, quat])
+
+    def _project_to_reachable_target(self, target_pose, position_only):
+        if not self.project_unreachable or self.projection_iterations <= 0:
+            return None, 0.0, None
+        target_pose = np.asarray(target_pose, dtype=np.float64).reshape(-1)
+        start_pose = self.last_reachable_pose.copy()
+        low = 0.0
+        high = 1.0
+        best_solution = self.last_solution.copy()
+        best_target = start_pose[:3].copy() if position_only else start_pose.copy()
+        for _ in range(self.projection_iterations):
+            alpha = 0.5 * (low + high)
+            candidate_target = self._interpolate_target(
+                start_pose,
                 target_pose,
+                alpha,
+                bool(position_only),
+            )
+            candidate_solution = self.solver.ik(
+                candidate_target,
                 seed_joints=self.last_solution,
                 position_only=bool(position_only),
                 max_restarts=1,
                 strict_seed=True,
             )
-            if solution is None and self.max_restarts > 1:
+            if candidate_solution is not None:
+                candidate_solution = np.clip(
+                    np.asarray(candidate_solution, dtype=np.float64).reshape(6),
+                    self.lower,
+                    self.upper,
+                )
+                waypoint_step = float(np.max(np.abs(candidate_solution - self.last_solution)))
+                if self.max_waypoint_step > 0.0 and waypoint_step > self.max_waypoint_step:
+                    candidate_solution = None
+            if candidate_solution is None:
+                high = alpha
+            else:
+                low = alpha
+                best_solution = candidate_solution.copy()
+                best_target = np.asarray(candidate_target, dtype=np.float64).copy()
+        if low < self.projection_min_alpha:
+            return None, low, best_target
+        return best_solution, low, best_target
+
+    def update(
+        self,
+        step,
+        target_pose,
+        position_only=False,
+        nearest_position_solution=None,
+        nearest_position_solve_ms=0.0,
+        initial_move=False,
+    ):
+        step = int(step)
+        now = step * self.sim_dt
+        leaving_initial_move = self.initial_plan_active and not bool(initial_move)
+        if leaving_initial_move:
+            self.initial_plan_active = False
+        solve_due = (
+            leaving_initial_move
+            or self.last_solve_step is None
+            or step - self.last_solve_step >= self.command_stride
+        )
+        if bool(initial_move) and self.initial_plan_active:
+            solve_due = False
+        if solve_due:
+            first_solve_after_reset = self.last_solve_step is None
+            self.last_target_pose = np.asarray(target_pose, dtype=np.float64).copy()
+            self.last_projection_alpha = 1.0
+            self.last_projection_ms = 0.0
+            self.last_projection_target_pose = None
+            used_projection = False
+            used_nearest_position = False
+            projection_attempted = False
+            start_ns = time.perf_counter_ns()
+            if bool(position_only) and nearest_position_solution is not None:
+                solution = np.clip(
+                    np.asarray(nearest_position_solution, dtype=np.float64).reshape(6),
+                    self.lower,
+                    self.upper,
+                )
+                if self.max_waypoint_step > 0.0:
+                    solution = np.clip(
+                        solution,
+                        self.last_solution - self.max_waypoint_step,
+                        self.last_solution + self.max_waypoint_step,
+                    )
+                strict_solution = solution
+                needs_projection = False
+                used_nearest_position = True
+                self.nearest_position_count += 1
+            else:
+                solution = self.solver.ik(
+                    target_pose,
+                    seed_joints=self.last_solution,
+                    position_only=bool(position_only),
+                    max_restarts=1,
+                    strict_seed=True,
+                )
+                strict_solution = solution
+                strict_waypoint_jump = 0.0
+                if strict_solution is not None:
+                    strict_solution = np.clip(
+                        np.asarray(strict_solution, dtype=np.float64).reshape(6),
+                        self.lower,
+                        self.upper,
+                    )
+                    strict_waypoint_jump = float(
+                        np.max(np.abs(strict_solution - self.last_solution))
+                    )
+                needs_projection = (
+                    strict_solution is None
+                    or (
+                        self.max_waypoint_step > 0.0
+                        and strict_waypoint_jump > self.max_waypoint_step
+                    )
+                )
+            if needs_projection and not first_solve_after_reset:
+                projection_attempted = self.project_unreachable and self.projection_iterations > 0
+                projection_start_ns = time.perf_counter_ns()
+                projected_solution, projection_alpha, projection_target = self._project_to_reachable_target(
+                    target_pose,
+                    bool(position_only),
+                )
+                self.last_projection_ms = (time.perf_counter_ns() - projection_start_ns) * 1.0e-6
+                self.last_projection_alpha = float(projection_alpha)
+                self.last_projection_target_pose = projection_target
+                if projected_solution is not None:
+                    solution = projected_solution
+                    used_projection = True
+                    self.projection_count += 1
+                elif self.project_unreachable:
+                    solution = strict_solution
+                    self.projection_failure_count += 1
+            if solution is None and self.max_restarts > 1 and not projection_attempted:
                 solution = self.solver.ik(
                     target_pose,
                     seed_joints=self.last_solution,
@@ -281,7 +431,10 @@ class TracIKTrajectoryController:
                     strict_seed=False,
                     rng=self.rng,
                 )
-            self.last_solve_ms = (time.perf_counter_ns() - start_ns) * 1.0e-6
+            self.last_solve_ms = (
+                (time.perf_counter_ns() - start_ns) * 1.0e-6
+                + float(nearest_position_solve_ms)
+            )
             self.solve_count += 1
             self.last_solve_step = step
             if solution is None:
@@ -303,25 +456,41 @@ class TracIKTrajectoryController:
                         f"{self.max_waypoint_step:.4f}"
                     )
                 else:
-                    raw_velocity = (solution - self.last_solution) / self.command_period
-                    raw_velocity = np.clip(
-                        raw_velocity,
-                        -self.trajectory.max_speed,
-                        self.trajectory.max_speed,
-                    )
-                    waypoint_velocity = (
-                        self.velocity_alpha * raw_velocity
-                        + (1.0 - self.velocity_alpha) * self.last_waypoint_velocity
-                    )
+                    if bool(initial_move):
+                        waypoint_velocity = np.zeros(6, dtype=np.float64)
+                        nominal_duration = self.initial_segment_duration
+                    else:
+                        raw_velocity = (solution - self.last_solution) / self.command_period
+                        raw_velocity = np.clip(
+                            raw_velocity,
+                            -self.trajectory.max_speed,
+                            self.trajectory.max_speed,
+                        )
+                        waypoint_velocity = (
+                            self.velocity_alpha * raw_velocity
+                            + (1.0 - self.velocity_alpha) * self.last_waypoint_velocity
+                        )
+                        nominal_duration = self.command_period
                     self.last_segment_duration = self.trajectory.retarget(
                         solution,
                         now,
-                        self.command_period,
+                        nominal_duration,
                         goal_velocity=waypoint_velocity,
                     )
                     self.last_solution = solution.copy()
+                    self.last_reachable_pose = np.asarray(
+                        self.solver.fk(solution),
+                        dtype=np.float64,
+                    ).reshape(7)
                     self.last_waypoint_velocity = waypoint_velocity.copy()
-                    self.last_error = ""
+                    if used_nearest_position:
+                        self.last_error = "nearest_position_target"
+                    elif used_projection:
+                        self.last_error = "projected_target"
+                    else:
+                        self.last_error = ""
+                    if bool(initial_move):
+                        self.initial_plan_active = True
         q_command, qd_command, qdd_command, _ = self.trajectory.sample(now + self.sim_dt)
         return q_command, qd_command, qdd_command
 
@@ -758,6 +927,10 @@ def parse_args():
             {"name": "--tracik_epsilon", "type": float, "default": 3.0e-3},
             {"name": "--tracik_solver_type", "type": str, "default": "Speed"},
             {"name": "--tracik_max_restarts", "type": int, "default": 30},
+            {"name": "--tracik_initial_segment_duration", "type": float, "default": 2.0},
+            {"name": "--tracik_projection_iterations", "type": int, "default": 6},
+            {"name": "--tracik_projection_min_alpha", "type": float, "default": 1.0e-3},
+            {"name": "--no_tracik_unreachable_projection", "action": "store_true"},
             {"name": "--tracik_command_hz", "type": float, "default": 25.0},
             {"name": "--tracik_max_joint_speed", "type": float, "default": 3.0},
             {"name": "--tracik_max_joint_acceleration", "type": float, "default": 80.0},
@@ -941,6 +1114,11 @@ def parse_args():
             {"name": "--dp_temporal_new_weight", "type": float, "default": 0.7},
             {"name": "--dp_log_path", "type": str, "default": ""},
             {"name": "--dp_log_interval", "type": int, "default": 25},
+            {
+                "name": "--dp_log_replay_snapshot",
+                "action": "store_true",
+                "help": "Include replay-style root/DOF/door snapshot fields in each DP policy JSONL log record.",
+            },
             {"name": "--no_dp_print", "dest": "dp_print", "action": "store_false", "default": True},
             {
                 "name": "--dp_gripper_latch",
@@ -957,6 +1135,15 @@ def parse_args():
             {"name": "--dp_warmstart_step", "type": int, "default": -1},
             {"name": "--dp_warmstart_expert_obs", "dest": "dp_warmstart_expert_obs", "action": "store_true", "default": True},
             {"name": "--no_dp_warmstart_expert_obs", "dest": "dp_warmstart_expert_obs", "action": "store_false"},
+            {
+                "name": "--recovery_batch_manifest",
+                "type": str,
+                "default": "",
+                "help": "Run a simulator-verification batch produced by dp/recovery/verify_recovery_candidates.py.",
+            },
+            {"name": "--recovery_result_json", "type": str, "default": ""},
+            {"name": "--recovery_raw_root", "type": str, "default": ""},
+            {"name": "--recovery_contact_min_frames", "type": int, "default": 5},
             {"name": "--pass_open_angle_deg", "type": float, "default": 80.0},
             {"name": "--no_preview_trajectory_at_spawn", "action": "store_true"},
             {
@@ -1069,6 +1256,10 @@ def parse_args():
     args.arm_ik_solver = str(args.arm_ik_solver).strip().lower()
     if args.arm_ik_solver not in ("gym_jacobian", "tracik"):
         raise ValueError("--arm_ik_solver must be gym_jacobian or tracik.")
+    if args.arm_ik_solver == "tracik" and not cli_attr_was_set(argv_list, "steps"):
+        args.steps = 960
+    if args.arm_ik_solver == "tracik" and not cli_attr_was_set(argv_list, "initial_hold_steps"):
+        args.initial_hold_steps = 100
     if str(args.tracik_solver_type) not in ("Speed", "Distance", "Manip1", "Manip2"):
         raise ValueError("--tracik_solver_type must be Speed, Distance, Manip1, or Manip2.")
     if float(args.tracik_command_hz) <= 0.0:
@@ -1077,6 +1268,12 @@ def parse_args():
         raise ValueError("--tracik_waypoint_velocity_alpha must be in [0, 1].")
     if int(args.tracik_max_restarts) <= 0:
         raise ValueError("--tracik_max_restarts must be positive.")
+    if float(args.tracik_initial_segment_duration) <= 0.0:
+        raise ValueError("--tracik_initial_segment_duration must be positive.")
+    if int(args.tracik_projection_iterations) < 0:
+        raise ValueError("--tracik_projection_iterations must be non-negative.")
+    if not 0.0 <= float(args.tracik_projection_min_alpha) <= 1.0:
+        raise ValueError("--tracik_projection_min_alpha must be in [0, 1].")
     if args.arm_ik_solver == "tracik" and str(args.ik_ee_link) != str(args.tracik_ee_link):
         raise ValueError("--ik_ee_link and --tracik_ee_link must match in TRAC-IK mode.")
     if args.num_envs <= 0:
@@ -1153,7 +1350,10 @@ def create_tracik_solver_if_requested(args):
         f"command_hz={float(args.tracik_command_hz):.1f} "
         f"max_speed={float(args.tracik_max_joint_speed):.2f}rad/s "
         f"max_acceleration={float(args.tracik_max_joint_acceleration):.2f}rad/s^2 "
+        f"initial_segment={float(args.tracik_initial_segment_duration):.2f}s "
         f"waypoint_velocity_alpha={float(args.tracik_waypoint_velocity_alpha):.2f} "
+        f"unreachable_projection={not bool(args.no_tracik_unreachable_projection)} "
+        f"projection_iterations={int(args.tracik_projection_iterations)} "
         f"mount_correction={np.asarray(args.tracik_mount_correction, dtype=np.float64).tolist()}",
         flush=True,
     )
@@ -1864,15 +2064,66 @@ def reset_tracik_controller_to_targets(st, step, dt):
     )
 
 
+def gym_position_dls_candidate_for_tracik(gym, st):
+    ik_state = st.ik_state
+    torch = ik_state.torch
+    eef_state = ik_state.rb_states[ik_state.eef_body_sim_index]
+    pos_err = ik_state.target_pos - eef_state[:3]
+    jacobian_env_idx = (
+        int(st.index)
+        if ik_state.jacobian.ndim >= 4 and ik_state.jacobian.shape[0] > int(st.index)
+        else 0
+    )
+    j_eef = ik_state.jacobian[jacobian_env_idx, ik_state.eef_jacobian_index, :, :]
+    task_j = j_eef[:3, ik_state.control_indices]
+    j_t = torch.transpose(task_j, 0, 1)
+    damping = max(1.0e-6, float(st.args.ik_damping))
+    lhs = task_j @ j_t + torch.eye(
+        3,
+        dtype=torch.float32,
+        device=task_j.device,
+    ) * (damping * damping)
+    delta = j_t @ torch.linalg.solve(
+        lhs,
+        (float(st.args.ik_pos_gain) * pos_err).unsqueeze(-1),
+    ).squeeze(-1)
+    max_step = float(st.args.ik_max_step) * float(st.tracik_controller.command_stride)
+    delta = torch.clamp(delta, -max_step, max_step)
+
+    actor_states = gym.get_actor_dof_states(st.env, st.arm_actor, gymapi.STATE_ALL)
+    current_q = torch.as_tensor(
+        actor_states["pos"][st.tracik_joint_indices],
+        dtype=torch.float32,
+        device=task_j.device,
+    )
+    lower = ik_state.lower[ik_state.control_indices]
+    upper = ik_state.upper[ik_state.control_indices]
+    candidate = torch.max(torch.min(current_q + delta, upper), lower)
+    return candidate.detach().cpu().numpy().astype(np.float64)
+
+
 def update_tracik_arm_targets_for_env(gym, st, step, dt):
     controller = st.tracik_controller
     if controller is None:
         raise RuntimeError("TRAC-IK controller was not initialized for this environment.")
     target_pose, position_only = tracik_target_pose_in_standalone_base(gym, st)
+    nearest_position_solution = None
+    nearest_position_solve_ms = 0.0
+    solve_due = (
+        controller.last_solve_step is None
+        or int(step) - int(controller.last_solve_step) >= controller.command_stride
+    )
+    if position_only and solve_due:
+        nearest_start_ns = time.perf_counter_ns()
+        nearest_position_solution = gym_position_dls_candidate_for_tracik(gym, st)
+        nearest_position_solve_ms = (time.perf_counter_ns() - nearest_start_ns) * 1.0e-6
     q_command, _qd_command, _qdd_command = controller.update(
         step,
         target_pose,
         position_only=position_only,
+        nearest_position_solution=nearest_position_solution,
+        nearest_position_solve_ms=nearest_position_solve_ms,
+        initial_move=st.last_phase == "initial_hold",
     )
     st.dof_positions[st.tracik_joint_indices] = np.asarray(q_command, dtype=np.float32)
 
@@ -2146,7 +2397,10 @@ def create_low_level_cameras(gym, env, arm_actor, actor_handles, door, args):
         else set()
     )
     regular_camera_use = bool(
-        args.show_camera_images or args.record_dp_dataset or args.dp_policy_checkpoint
+        args.show_camera_images
+        or args.record_dp_dataset
+        or args.dp_policy_checkpoint
+        or str(getattr(args, "recovery_batch_manifest", "") or "").strip()
     )
     if args.enable_wrist_camera and (regular_camera_use or "wrist" in door_twin_views):
         wrist_rot = dc.wrist_camera_rotation_radians_from_args(args)
@@ -2327,6 +2581,15 @@ def yaw_from_quat_xyzw(quat):
     return math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
 
 
+def pitch_from_quat_xyzw(quat):
+    q = np.asarray(quat, dtype=np.float32).reshape(-1)
+    if q.size < 4:
+        return 0.0
+    x, y, z, w = [float(v) for v in q[:4]]
+    value = 2.0 * (w * y - z * x)
+    return math.asin(float(np.clip(value, -1.0, 1.0)))
+
+
 def set_actor_root_from_state(gym, env, actor, root_state):
     state = np.asarray(root_state, dtype=np.float32).reshape(-1)
     if state.shape[0] < 7:
@@ -2447,10 +2710,23 @@ def apply_warmstart_state(gym, sim, st, data, step, dof_names):
     door_states["pos"][:n] = door_pos[:n]
     door_states["vel"][:n] = door_vel[:n]
     gym.set_actor_dof_states(st.env, st.door_actor, door_states, gymapi.STATE_ALL)
-    if n >= 1 and abs(float(door_pos[0]) - float(st.door.dof_upper[0])) > 1.0e-4:
-        st.door.open_stage = True
-    if n >= 2 and float(door_pos[1] - st.door.dof_lower[1]) >= float(st.door.handle_unlock_threshold):
-        st.door.open_stage = True
+    if "replay_door_open_stage" in data.files:
+        saved_open_stage = np.asarray(data["replay_door_open_stage"][int(step)], dtype=np.float32).reshape(-1)
+        st.door.open_stage = bool(saved_open_stage.size and saved_open_stage[0] > 0.5)
+    else:
+        # Legacy snapshots did not store the internal latch state. Infer it
+        # conservatively: tiny PhysX hinge drift must not unlock the door.
+        closed_angle = dc.closed_hinge_angle(st.door, st.args)
+        hinge_departure = abs(float(door_pos[0]) - float(closed_angle)) if n >= 1 else 0.0
+        handle_from_lower = float(door_pos[1] - st.door.dof_lower[1]) if n >= 2 else 0.0
+        st.door.open_stage = bool(
+            hinge_departure >= math.radians(2.0)
+            or handle_from_lower >= float(st.door.handle_unlock_threshold)
+        )
+    if not st.door.open_stage:
+        # Remove the small numerical hinge displacement stored in a locked
+        # failure snapshot before the recovery branch starts.
+        dc.enforce_locked_door_hinge(gym, st.env, st.door_actor, st.door, st.args)
 
     yaw = yaw_from_quat_xyzw(root_state[3:7])
     st.traj["base_xy"] = np.asarray(root_state[:2], dtype=np.float32).copy()
@@ -3439,6 +3715,7 @@ def create_parallel_env_states(
             env_args.show_camera_images
             or env_args.record_dp_dataset
             or env_args.dp_policy_checkpoint
+            or str(getattr(env_args, "recovery_batch_manifest", "") or "").strip()
             or env_args.dump_keyframe_images
         ) and (
             env_args.enable_wrist_camera
@@ -3499,6 +3776,467 @@ def create_parallel_env_states(
         flush=True,
     )
     return env_states, vision_mode
+
+
+def load_recovery_batch_manifest(path):
+    manifest_path = Path(path).expanduser().resolve()
+    with manifest_path.open("r", encoding="utf-8") as f:
+        manifest = json.load(f)
+    entries = list(manifest.get("entries", []))
+    if not entries:
+        raise ValueError(f"Recovery batch manifest has no entries: {manifest_path}")
+    return manifest_path, manifest, entries
+
+
+def recovery_source_frame_index(data, branch_step):
+    if "step" not in data.files:
+        return int(branch_step)
+    steps = np.asarray(data["step"], dtype=np.int64).reshape(-1)
+    exact = np.flatnonzero(steps == int(branch_step))
+    if exact.size:
+        return int(exact[0])
+    return int(np.argmin(np.abs(steps - int(branch_step))))
+
+
+def apply_recovery_randomization(gym, st, metadata):
+    sampled = dict(metadata.get("ikpush_randomization") or {})
+    for name in (
+        "door_x",
+        "door_y",
+        "door_wall_x_offset",
+        "robot_x",
+        "robot_y",
+        "robot_yaw",
+        "robot_z",
+        "robot_pitch",
+        "pregrasp_offset",
+        "grasp_x_offset",
+        "grasp_z_offset",
+        "handle_rotate_angle",
+        "door_push_distance",
+        "door_joint_friction",
+        "door_joint_damping",
+        "door_open_resistance",
+        "handle_joint_friction",
+        "handle_joint_damping",
+        "handle_spring_stiffness",
+        "handle_spring_damping",
+    ):
+        value = sampled.get(name)
+        if value is not None and not isinstance(value, (list, dict)):
+            setattr(st.args, name, float(value))
+    dc.configure_door_actor_dofs(gym, st.env, st.door_actor, st.door, st.args)
+
+
+def initialize_recovery_candidate(gym, sim, st, entry, dof_names, raw_root, dt):
+    failure_npz = Path(entry["failure_rollout_npz"]).expanduser().resolve()
+    metadata_path = Path(entry["metadata_path"]).expanduser().resolve()
+    data = np.load(failure_npz, allow_pickle=True)
+    with metadata_path.open("r", encoding="utf-8") as f:
+        metadata = json.load(f)
+    params = dict(entry["parameters"])
+    diagnosis = dict(entry.get("diagnosis") or {})
+    branch_step = int(entry["branch_step"])
+    frame_idx = recovery_source_frame_index(data, branch_step)
+
+    apply_recovery_randomization(gym, st, metadata)
+    apply_warmstart_state(gym, sim, st, data, frame_idx, dof_names)
+    current_ee_pose(gym, sim, st.ik_state)
+    root_state = np.asarray(data["replay_root_state"][frame_idx], dtype=np.float32)
+    st.args.robot_z = float(root_state[2])
+    st.args.robot_pitch = float(pitch_from_quat_xyzw(root_state[3:7]))
+    base_xy = root_state[:2].astype(np.float32).copy()
+    yaw = yaw_from_quat_xyzw(root_state[3:7])
+
+    handle_pos, handle_quat = get_body_pose(gym, st.env, st.door_actor, st.door.handle_body_index)
+    handle_goal = quat_apply(handle_quat, st.door.handle_goal_offset) + handle_pos
+    approach = np.asarray([base_xy[0], base_xy[1], st.args.robot_z], dtype=np.float32) - handle_goal
+    approach[2] = 0.0
+    approach = normalize(approach)
+    if float(np.linalg.norm(approach)) < 1.0e-5:
+        approach = np.asarray([math.cos(yaw), math.sin(yaw), 0.0], dtype=np.float32)
+    lateral = np.asarray([-approach[1], approach[0]], dtype=np.float32)
+
+    source_grasp_x = float(getattr(st.args, "grasp_x_offset", 0.0))
+    source_grasp_z = float(getattr(st.args, "grasp_z_offset", 0.0))
+    source_pregrasp_offset = float(getattr(st.args, "pregrasp_offset", 0.15))
+    source_handle_rotate_steps = int(getattr(st.args, "handle_rotate_steps", 100))
+    source_door_push_steps = int(getattr(st.args, "door_push_steps", 300))
+    open_first = bool(params.get("open_gripper_first", True))
+    if open_first:
+        st.args.walk_steps = 30
+        st.args.initial_hold_steps = 30
+        st.args.initial_hold_move_steps = 30
+        st.args.grasp_steps = 50
+        st.args.grasp_hold_steps = 5 if params.get("close_timing") == "after_5_stable_contact_frames" else 0
+        st.args.gripper_close_steps = 50
+        st.args.pregrasp_offset = source_pregrasp_offset + float(params.get("retreat_distance_m", 0.05))
+    else:
+        st.args.walk_steps = 0
+        st.args.initial_hold_steps = 0
+        st.args.initial_hold_move_steps = 0
+        st.args.grasp_steps = 0
+        st.args.grasp_hold_steps = 0
+        st.args.gripper_close_steps = 0
+    # Preserve the base-motion cadence used by the original scripted expert.
+    # Recovery candidates may alter arm/gripper re-acquisition, but they must
+    # not change the base push duration or introduce lateral base jumps.
+    st.args.handle_rotate_steps = max(1, source_handle_rotate_steps)
+    st.args.door_push_steps = max(1, source_door_push_steps)
+    st.args.return_home_steps = 0
+    st.args.traverse_steps = 0
+    st.args.grasp_x_offset = source_grasp_x + float(params.get("handle_regrasp_x_offset_m", 0.0))
+    st.args.grasp_z_offset = source_grasp_z + float(params.get("reapproach_z_offset_m", 0.0))
+
+    adjusted_base = base_xy.copy()
+    heading = np.asarray([math.cos(yaw), math.sin(yaw)], dtype=np.float32)
+    st.base_start = base_xy.copy()
+    st.base_stop = adjusted_base.astype(np.float32)
+    st.base_push, st.base_traverse = compute_base_push_and_traverse_targets(st.args, st.base_stop, heading)
+    st.yaw_start = float(yaw)
+    st.yaw_push = float(yaw) + float(getattr(st.args, "push_base_yaw_delta", 0.0))
+    st.yaw_traverse = st.yaw_push + float(getattr(st.args, "traverse_yaw_delta", 0.0))
+    st.traj = {"base_xy": base_xy.copy(), "yaw": float(yaw)}
+    st.last_target_pos = st.ik_state.current_pos_np.copy()
+    st.last_target_quat = (
+        None if st.ik_state.current_quat_np is None else st.ik_state.current_quat_np.copy()
+    )
+    st.last_gripper = float(
+        np.asarray(data["replay_dof_pos"][frame_idx], dtype=np.float32).reshape(-1)[-1]
+    )
+    st.last_dp_action = np.asarray(
+        data["action"][frame_idx] if "action" in data.files else np.zeros(10), dtype=np.float32
+    ).copy()
+    st.recovery_entry = entry
+    st.recovery_applied_parameters = {
+        **params,
+        "base_lateral_adjust_m": 0.0,
+        "rotate_steps": int(st.args.handle_rotate_steps),
+        "push_steps": int(st.args.door_push_steps),
+        "preserve_scripted_base_motion": True,
+    }
+    st.recovery_source_frame_idx = frame_idx
+    st.recovery_failure_type = str(diagnosis.get("failure_type", "progress_stagnation"))
+    st.recovery_initial_door = np.asarray(data["replay_door_dof_pos"][frame_idx], dtype=np.float32).copy()
+    st.recovery_contact_streak = 0
+    st.recovery_max_contact_streak = 0
+    st.recovery_progress_restart = False
+    st.recovery_local_success = False
+    st.recovery_final_success = False
+    st.recovery_first_local_step = -1
+    st.recovery_first_final_step = -1
+    st.recovery_max_door_deg = 0.0
+    st.recovery_initial_open_stage = bool(st.door.open_stage)
+    st.recovery_first_contact_any_step = -1
+    st.recovery_first_contact_both_step = -1
+    st.recovery_first_unlock_step = -1
+    st.recovery_unlock_phase = ""
+    st.recovery_handle_deg_at_unlock = 0.0
+    st.recovery_max_locked_hinge_drift_deg = 0.0
+    st.recovery_premature_unlock = False
+    st.recovery_done = False
+    st.base_door_collision_detected = False
+    st.dp_record_warned_no_camera = False
+    st.dp_record_sim_steps = 0
+    st.dp_record_prev_base_xy = None
+    st.dp_record_prev_yaw = None
+
+    st.args.dp_raw_root = str(raw_root)
+    st.args.record_camera_pose = True
+    st.args.record_gripper_handle_contact = True
+    st.args.filter_gripper_handle_contact = False
+    st.args.dp_record_state_mode = "pi05_last_command_state10"
+    st.dp_recorder = dc.make_float_dp_recorder(
+        st.args,
+        st.door,
+        st.index,
+        dc.float_dp_vision_mode(st.args, normalize_vision_mode),
+        DP_PHASE_NAMES,
+        "ikpush",
+        IKPUSH_STATE_VERSION,
+        RawDoorDPRecorder,
+        make_state_feature_names,
+        randomization_metadata_key="ikpush_randomization",
+        extra_metadata={
+            "aux.is_recovery": 1,
+            "recovery_source_failure_rollout": str(failure_npz),
+            "recovery_failure_type": st.recovery_failure_type,
+            "recovery_t_dev": int(diagnosis.get("t_dev", branch_step)),
+            "recovery_t_fail": int(diagnosis.get("t_fail", branch_step)),
+            "recovery_t_branch": branch_step,
+            "recovery_candidate_id": int(entry["candidate_id"]),
+            "recovery_parameters_json": json.dumps(st.recovery_applied_parameters, sort_keys=True),
+        },
+    )
+    st.recovery_total_steps = (
+        int(st.args.walk_steps)
+        + int(st.args.initial_hold_steps)
+        + int(st.args.grasp_steps)
+        + int(st.args.grasp_hold_steps)
+        + int(st.args.gripper_close_steps)
+        + int(st.args.handle_rotate_steps)
+        + int(st.args.door_push_steps)
+    )
+    return data
+
+
+def recovery_local_success(st, contact_both, door_pos, ee_pos, handle_goal, step):
+    if bool(contact_both):
+        st.recovery_contact_streak += 1
+    else:
+        st.recovery_contact_streak = 0
+    st.recovery_max_contact_streak = max(st.recovery_max_contact_streak, st.recovery_contact_streak)
+    initial = np.asarray(st.recovery_initial_door, dtype=np.float32).reshape(-1)
+    current = np.asarray(door_pos, dtype=np.float32).reshape(-1)
+    door_delta = abs(float(current[0] - initial[0])) if current.size and initial.size else 0.0
+    handle_delta = abs(float(current[1] - initial[1])) if current.size > 1 and initial.size > 1 else 0.0
+    if door_delta >= math.radians(2.0) or handle_delta >= math.radians(5.0):
+        st.recovery_progress_restart = True
+
+    failure_type = st.recovery_failure_type
+    contact_ok = st.recovery_max_contact_streak >= int(st.args.recovery_contact_min_frames)
+    if failure_type in {"contact_establishment_failure", "contact_maintenance_failure"}:
+        local = contact_ok
+    elif failure_type in {"insufficient_interaction", "progress_stagnation"}:
+        local = bool(st.recovery_progress_restart)
+    elif failure_type == "geometric_misalignment":
+        local = contact_ok or float(np.linalg.norm(np.asarray(ee_pos) - np.asarray(handle_goal))) <= 0.06
+    elif failure_type == "kinematic_infeasibility":
+        local = float(getattr(st.ik_state, "last_pos_error", 1.0)) <= 0.05
+    elif failure_type == "collision_or_clearance_failure":
+        local = not bool(st.base_door_collision_detected)
+    else:
+        local = contact_ok or bool(st.recovery_progress_restart)
+    if local and not st.recovery_local_success:
+        st.recovery_local_success = True
+        st.recovery_first_local_step = int(step)
+    return bool(st.recovery_local_success)
+
+
+def run_parallel_recovery_batch(gym, sim, env_states, viewer, args, dt, dof_names, manifest, entries):
+    if len(env_states) != len(entries):
+        raise ValueError(f"Recovery env count {len(env_states)} != candidate count {len(entries)}")
+    raw_root = Path(args.recovery_raw_root).expanduser().resolve()
+    raw_root.mkdir(parents=True, exist_ok=True)
+    result_path = Path(args.recovery_result_json).expanduser().resolve()
+    result_path.parent.mkdir(parents=True, exist_ok=True)
+    gripper_idx = {name: i for i, name in enumerate(dof_names)}.get("jointGripper")
+    num_arm_dofs = len(env_states[0].dof_positions)
+    for st, entry in zip(env_states, entries):
+        initialize_recovery_candidate(gym, sim, st, entry, dof_names, raw_root, dt)
+
+    max_steps = max(int(st.recovery_total_steps) for st in env_states)
+    print(f"Recovery verification batch: candidates={len(env_states)} steps={max_steps}", flush=True)
+    for step in range(max_steps):
+        gym.refresh_rigid_body_state_tensor(sim)
+        gym.refresh_dof_state_tensor(sim)
+        gym.refresh_jacobian_tensors(sim)
+        for st in env_states:
+            if step >= int(st.recovery_total_steps):
+                st.recovery_done = True
+                continue
+            current_ee_pose_from_refreshed_tensors(st.ik_state)
+            local_step = step
+            phase, base_xy, yaw, target_pos, target_quat, gripper, handle_goal = trajectory_targets(
+                local_step,
+                st.args,
+                st.door,
+                gym,
+                st.env,
+                st.door_actor,
+                st.ik_state,
+                st.base_start,
+                st.base_stop,
+                st.base_push,
+                st.base_traverse,
+                st.yaw_start,
+                st.yaw_push,
+                st.yaw_traverse,
+                st.traj,
+            )
+            st.last_phase = phase
+            st.traj["base_xy"] = np.asarray(base_xy, dtype=np.float32).copy()
+            st.traj["yaw"] = float(yaw)
+            st.last_handle_goal = np.asarray(handle_goal, dtype=np.float32).copy()
+            st.last_target_pos = np.asarray(target_pos, dtype=np.float32).copy()
+            st.last_target_quat = None if target_quat is None else np.asarray(target_quat, dtype=np.float32).copy()
+            st.last_gripper = float(gripper)
+            set_robot_base_pose(
+                gym,
+                st.env,
+                st.actor_handles,
+                base_xy,
+                st.args.robot_z,
+                yaw,
+                getattr(st.args, "robot_pitch", 0.0),
+            )
+            set_ik_target(st.ik_state, target_pos, target_quat)
+
+        gym.refresh_rigid_body_state_tensor(sim)
+        gym.refresh_dof_state_tensor(sim)
+        gym.refresh_jacobian_tensors(sim)
+        for st in env_states:
+            if bool(st.recovery_done):
+                continue
+            update_arm_ik_targets_for_env(
+                gym,
+                st.env,
+                st.arm_actor,
+                st.index,
+                st.dof_positions,
+                st.ik_state,
+                st.args,
+                num_arm_dofs,
+            )
+            if gripper_idx is not None:
+                st.dof_positions[gripper_idx] = np.clip(
+                    st.last_gripper,
+                    st.ik_state.lower[gripper_idx].item(),
+                    st.ik_state.upper[gripper_idx].item(),
+                )
+            gym.set_actor_dof_position_targets(st.env, st.arm_actor, st.dof_positions)
+            dc.enforce_locked_door_hinge(gym, st.env, st.door_actor, st.door, st.args)
+            door_pos, door_vel = get_actor_dof_state(gym, st.env, st.door_actor)
+            efforts = compute_door_efforts(st.door, door_pos, door_vel, st.args)
+            if len(efforts):
+                gym.apply_actor_dof_efforts(st.env, st.door_actor, efforts)
+
+        gym.simulate(sim)
+        gym.fetch_results(sim, True)
+        gym.step_graphics(sim)
+        gym.render_all_camera_sensors(sim)
+        gym.refresh_rigid_body_state_tensor(sim)
+        gym.refresh_dof_state_tensor(sim)
+        gym.refresh_jacobian_tensors(sim)
+
+        for st in env_states:
+            if bool(st.recovery_done):
+                continue
+            door_pos, door_vel = get_actor_dof_state(gym, st.env, st.door_actor)
+            st.last_door_pos = door_pos
+            dc.monitor_base_door_collision(gym, step, st)
+            contact = dc.gripper_handle_contact_snapshot(gym, st)
+            contact_any = bool(np.asarray(contact["gripper_handle_contact_any"]).reshape(-1)[0] > 0.5)
+            contact_both = bool(np.asarray(contact["gripper_handle_contact_both"]).reshape(-1)[0] > 0.5)
+            if contact_any and st.recovery_first_contact_any_step < 0:
+                st.recovery_first_contact_any_step = int(step)
+            if contact_both and st.recovery_first_contact_both_step < 0:
+                st.recovery_first_contact_both_step = int(step)
+            closed_angle = dc.closed_hinge_angle(st.door, st.args)
+            locked_hinge_drift_deg = (
+                abs(math.degrees(float(door_pos[0]) - float(closed_angle))) if len(door_pos) else 0.0
+            )
+            if not st.door.open_stage:
+                st.recovery_max_locked_hinge_drift_deg = max(
+                    float(st.recovery_max_locked_hinge_drift_deg),
+                    float(locked_hinge_drift_deg),
+                )
+            if st.door.open_stage and not st.recovery_initial_open_stage and st.recovery_first_unlock_step < 0:
+                st.recovery_first_unlock_step = int(step)
+                st.recovery_unlock_phase = str(st.last_phase)
+                st.recovery_handle_deg_at_unlock = (
+                    abs(math.degrees(float(door_pos[1] - st.door.dof_lower[1]))) if len(door_pos) > 1 else 0.0
+                )
+                if (
+                    st.recovery_first_contact_any_step < 0
+                    or st.recovery_unlock_phase not in {"rotate_handle", "push_door"}
+                    or st.recovery_max_locked_hinge_drift_deg > 0.5
+                ):
+                    st.recovery_premature_unlock = True
+            ee_pos, _ee_quat = current_ee_pose_from_refreshed_tensors(st.ik_state)
+            recovery_local_success(st, contact_both, door_pos, ee_pos, st.last_handle_goal, step)
+            door_deg = abs(math.degrees(float(door_pos[0]))) if len(door_pos) else 0.0
+            st.recovery_max_door_deg = max(float(st.recovery_max_door_deg), float(door_deg))
+            if (
+                door_deg >= float(args.pass_open_angle_deg)
+                and not bool(st.base_door_collision_detected)
+                and not bool(st.recovery_premature_unlock)
+                and st.recovery_local_success
+            ):
+                if not st.recovery_final_success:
+                    st.recovery_first_final_step = int(step)
+                st.recovery_final_success = True
+            dc.record_float_dp_frame(
+                gym,
+                sim,
+                st,
+                dof_names,
+                gripper_idx,
+                dt,
+                DP_PHASE_ID.get(st.last_phase, 0),
+                door_pos,
+                door_vel,
+            )
+            st.prev_base_xy = np.asarray(st.traj.get("base_xy", st.base_start), dtype=np.float32).copy()
+            st.prev_yaw = float(st.traj.get("yaw", st.yaw_start))
+
+        if step % 50 == 0 or step + 1 == max_steps:
+            local_count = sum(bool(st.recovery_local_success) for st in env_states)
+            final_count = sum(bool(st.recovery_final_success) for st in env_states)
+            print(f"[recovery {step:04d}] local={local_count}/{len(env_states)} final={final_count}/{len(env_states)}", flush=True)
+
+    results = []
+    for st in env_states:
+        st.dp_record_success = bool(
+            st.recovery_local_success
+            and st.recovery_final_success
+            and not bool(st.base_door_collision_detected)
+            and not bool(st.recovery_premature_unlock)
+        )
+        raw_path = None
+        if st.dp_record_success and st.dp_recorder.frame_count > 0:
+            st.dp_recorder.metadata["recovery_local_success"] = True
+            st.dp_recorder.metadata["recovery_final_success"] = True
+            st.dp_recorder.metadata["recovery_first_local_step"] = int(st.recovery_first_local_step)
+            st.dp_recorder.metadata["recovery_first_final_step"] = int(st.recovery_first_final_step)
+            raw_path = st.dp_recorder._next_episode_path()
+            st.dp_recorder.save_episode()
+        st.dp_recorder.finalize()
+        door_pos = np.asarray(st.last_door_pos, dtype=np.float32).reshape(-1)
+        result = {
+            "candidate_id": int(st.recovery_entry["candidate_id"]),
+            "branch_step": int(st.recovery_entry["branch_step"]),
+            "failure_rollout_npz": str(st.recovery_entry["failure_rollout_npz"]),
+            "parameters": st.recovery_entry["parameters"],
+            "applied_parameters": st.recovery_applied_parameters,
+            "failure_type": st.recovery_failure_type,
+            "local_recovery_success": bool(st.recovery_local_success),
+            "final_task_success": bool(st.recovery_final_success),
+            "recovery_success": bool(st.dp_record_success),
+            "max_contact_streak": int(st.recovery_max_contact_streak),
+            "progress_restart": bool(st.recovery_progress_restart),
+            "first_local_step": int(st.recovery_first_local_step),
+            "first_final_step": int(st.recovery_first_final_step),
+            "initial_open_stage": bool(st.recovery_initial_open_stage),
+            "first_contact_any_step": int(st.recovery_first_contact_any_step),
+            "first_contact_both_step": int(st.recovery_first_contact_both_step),
+            "first_unlock_step": int(st.recovery_first_unlock_step),
+            "unlock_phase": str(st.recovery_unlock_phase),
+            "handle_deg_at_unlock": float(st.recovery_handle_deg_at_unlock),
+            "max_locked_hinge_drift_deg": float(st.recovery_max_locked_hinge_drift_deg),
+            "premature_unlock": bool(st.recovery_premature_unlock),
+            "max_door_deg": float(st.recovery_max_door_deg),
+            "final_door_deg": abs(math.degrees(float(door_pos[0]))) if door_pos.size else 0.0,
+            "unsafe_or_collision": bool(st.base_door_collision_detected),
+            "raw_episode": None if raw_path is None else str(raw_path),
+        }
+        results.append(result)
+    payload = {
+        "schema_version": 1,
+        "verification_rule": (
+            "local_recovery_success AND final_task_success AND "
+            "NOT unsafe_or_collision AND NOT premature_unlock"
+        ),
+        "source_batch_manifest": str(args.recovery_batch_manifest),
+        "results": results,
+    }
+    with result_path.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, sort_keys=True)
+    print(
+        f"Recovery verification result: {sum(r['recovery_success'] for r in results)}/{len(results)} "
+        f"verified -> {result_path}",
+        flush=True,
+    )
 
 
 def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
@@ -3661,7 +4399,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                     )
                 st.traj["base_xy"] = np.asarray(base_xy, dtype=np.float32).copy()
                 st.traj["yaw"] = float(yaw)
-                door_pos_for_log, _door_vel_for_log = get_actor_dof_state(gym, st.env, st.door_actor)
+                door_pos_for_log, door_vel_for_log = get_actor_dof_state(gym, st.env, st.door_actor)
             else:
                 phase, base_xy, yaw, target_pos, target_quat, gripper, handle_goal = trajectory_targets(
                     step,
@@ -3695,6 +4433,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                 ee_pos = None
                 ee_quat = None
                 door_pos_for_log = None
+                door_vel_for_log = None
             if dp_action is not None:
                 gripper = apply_dp_gripper_latch(st, gripper, door_pos_for_log)
                 if bool(dp_policy_uses_joint_action) and gripper_idx is not None:
@@ -3718,9 +4457,12 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                     ee_pos,
                     ee_quat,
                     door_pos_for_log,
+                    door_vel_for_log,
                     phase,
                     action_names=dp_policy_action_names or ACTION_NAMES,
                     camera_gates=camera_gates,
+                    gym=gym,
+                    dof_names=dof_names,
                 )
                 if dp_logger is not None:
                     dp_logger.write(dp_record)
@@ -3894,6 +4636,11 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                 tracik_note = (
                     f" tracik_solve={controller.last_solve_ms:.3f}ms"
                     f" failures={controller.failure_count}"
+                    f" projections={controller.projection_count}"
+                    f" nearest_position={controller.nearest_position_count}"
+                    f" projection_alpha={controller.last_projection_alpha:.3f}"
+                    f" projection_ms={controller.last_projection_ms:.3f}"
+                    f" initial_plan={controller.initial_plan_active}"
                     f" segment={controller.last_segment_duration * 1000.0:.1f}ms"
                     f" ik_pos_err={first.ik_state.last_pos_error:.4f}"
                     f" tracik_error={controller.last_error or 'none'}"
@@ -3949,6 +4696,25 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
 
 def main():
     args = parse_args()
+    recovery_manifest = None
+    recovery_entries = None
+    if str(getattr(args, "recovery_batch_manifest", "") or "").strip():
+        if not str(getattr(args, "recovery_result_json", "") or "").strip():
+            raise ValueError("--recovery_result_json is required with --recovery_batch_manifest.")
+        if not str(getattr(args, "recovery_raw_root", "") or "").strip():
+            raise ValueError("--recovery_raw_root is required with --recovery_batch_manifest.")
+        _manifest_path, recovery_manifest, recovery_entries = load_recovery_batch_manifest(
+            args.recovery_batch_manifest
+        )
+        args.num_envs = len(recovery_entries)
+        args.record_dp_dataset = False
+        args.dp_policy_checkpoint = ""
+        args.show_camera_images = False
+        print(
+            f"Recovery verification mode: manifest={args.recovery_batch_manifest} "
+            f"candidates={args.num_envs}",
+            flush=True,
+        )
     create_tracik_solver_if_requested(args)
     seed = resolve_seed(args)
     print(f"ikpush seed={seed}", flush=True)
@@ -3991,7 +4757,20 @@ def main():
         viewer = setup_viewer(gym, sim, args)
         setup_viewer_pause_shortcut(gym, viewer)
         try:
-            run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names)
+            if recovery_entries is not None:
+                run_parallel_recovery_batch(
+                    gym,
+                    sim,
+                    env_states,
+                    viewer,
+                    args,
+                    dt,
+                    dof_names,
+                    recovery_manifest,
+                    recovery_entries,
+                )
+            else:
+                run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names)
         finally:
             if args.show_camera_images and cv2 is not None:
                 cv2.destroyAllWindows()

@@ -102,6 +102,7 @@ DATASET_METADATA_KEYS = (
     "keyframe_extraction_rules",
 )
 ACTION_LOSS_WEIGHT_FEATURE = "loss.action_weight"
+RECOVERY_INDICATOR_FEATURE = "aux.is_recovery"
 RAW_ACTION_LOSS_WEIGHT_KEY = "action_loss_weight"
 DEFAULT_KEYFRAME_LOSS_WEIGHT = 8.0
 DEFAULT_KEYFRAME_LOSS_RADIUS = 3
@@ -1267,6 +1268,7 @@ class DoorDPLeRobotRecorder:
         video_codec="h264",
         action_feature_names=None,
         include_action_loss_weight=False,
+        include_recovery_indicator=False,
         include_camera_pose=False,
         include_handle_latent=False,
     ):
@@ -1284,6 +1286,7 @@ class DoorDPLeRobotRecorder:
         self.state_feature_names = list(state_feature_names)
         self.action_names = list(action_feature_names or ACTION_NAMES)
         self.include_action_loss_weight = bool(include_action_loss_weight)
+        self.include_recovery_indicator = bool(include_recovery_indicator)
         self.include_camera_pose = bool(include_camera_pose)
         self.include_handle_latent = bool(include_handle_latent)
         self.metadata = dict(metadata or {})
@@ -1307,6 +1310,12 @@ class DoorDPLeRobotRecorder:
                 "dtype": "float32",
                 "shape": (1,),
                 "names": ["action_loss_weight"],
+            }
+        if self.include_recovery_indicator:
+            features[RECOVERY_INDICATOR_FEATURE] = {
+                "dtype": "float32",
+                "shape": (1,),
+                "names": ["is_recovery"],
             }
         if self.include_camera_pose:
             for key in CAMERA_POSE_FEATURES:
@@ -1375,6 +1384,8 @@ class DoorDPLeRobotRecorder:
         }
         if self.include_action_loss_weight:
             sidecar["action_loss_weight_feature"] = ACTION_LOSS_WEIGHT_FEATURE
+        if self.include_recovery_indicator:
+            sidecar["recovery_indicator_feature"] = RECOVERY_INDICATOR_FEATURE
         if self.include_camera_pose:
             sidecar["camera_pose_features"] = CAMERA_POSE_FEATURES
             sidecar.setdefault("camera_pose_frame", "robot_base")
@@ -1401,6 +1412,7 @@ class DoorDPLeRobotRecorder:
         front_mask_rgb=None,
         front_second_rgb=None,
         action_loss_weight=None,
+        is_recovery=None,
         front_camera_pose_base=None,
         wrist_camera_pose_base=None,
         front_handle_latent=None,
@@ -1425,6 +1437,9 @@ class DoorDPLeRobotRecorder:
         if self.include_action_loss_weight:
             weight = 1.0 if action_loss_weight is None else float(np.asarray(action_loss_weight).reshape(-1)[0])
             frame[ACTION_LOSS_WEIGHT_FEATURE] = np.asarray([weight], dtype=np.float32)
+        if self.include_recovery_indicator:
+            value = 0.0 if is_recovery is None else float(np.asarray(is_recovery).reshape(-1)[0])
+            frame[RECOVERY_INDICATOR_FEATURE] = np.asarray([value], dtype=np.float32)
         if self.include_camera_pose:
             if front_camera_pose_base is None or wrist_camera_pose_base is None:
                 raise ValueError("LeRobot camera-pose dataset frames require both front and wrist camera poses.")

@@ -202,6 +202,11 @@ def parse_args():
     parser.add_argument("--no_dp_control_all_envs", dest="dp_control_all_envs", action="store_false")
     parser.add_argument("--dp_log_path", type=str, default=None)
     parser.add_argument("--dp_log_interval", type=int, default=25)
+    parser.add_argument(
+        "--dp_log_replay_snapshot",
+        action="store_true",
+        help="Include replay-style simulator snapshot fields in each policy JSONL record.",
+    )
     parser.add_argument("--no_dp_print", dest="dp_print", action="store_false", default=True)
     parser.add_argument("--dp_warmstart", action="store_true", help="Initialize ikpush policy play from a raw expert frame.")
     parser.add_argument("--dp_warmstart_raw_episode", type=str, default=None)
@@ -310,6 +315,8 @@ def main():
         str(args.dp_log_interval),
         "--no_preview_trajectory_at_spawn",
     ]
+    if args.dp_log_replay_snapshot:
+        cmd.append("--dp_log_replay_snapshot")
     if args.mode in ("ikpush", "ikpull"):
         cmd.append("--enable_front_camera")
         if not args.debug_visuals:

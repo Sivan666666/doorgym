@@ -1,0 +1,295 @@
+{
+  "raw_root": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_raw/a2w_recovery_verified_wc4_baseline_locked_v3_seed615455575",
+  "selected": [
+    {
+      "candidate_id": 0,
+      "episode": "episode_000000.npz",
+      "failure_source": "failure_trial_000019_batch0001_env03",
+      "failure_type": "geometric_misalignment",
+      "frames": 253,
+      "parameters": {
+        "base_lateral_adjust_m": -0.04,
+        "close_timing": "on_contact",
+        "controller": "retreat_realign_reapproach",
+        "handle_regrasp_x_offset_m": -0.01,
+        "open_gripper_first": true,
+        "push_steps": 220,
+        "reapproach_z_offset_m": -0.02,
+        "retreat_distance_m": 0.03,
+        "rotate_steps": 100
+      },
+      "path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_raw/a2w_recovery_verified_wc4_baseline_locked_v3_seed615455575/episode_000000.npz",
+      "stage_indices": {
+        "final": 252,
+        "grasp": 30,
+        "push": 130,
+        "rotate": 80,
+        "start": 0
+      },
+      "t_branch": 641,
+      "t_dev": 646,
+      "t_fail": 671
+    },
+    {
+      "candidate_id": 4,
+      "episode": "episode_000004.npz",
+      "failure_source": "failure_trial_000019_batch0001_env03",
+      "failure_type": "geometric_misalignment",
+      "frames": 253,
+      "parameters": {
+        "base_lateral_adjust_m": 0.04,
+        "close_timing": "after_5_stable_contact_frames",
+        "controller": "retreat_realign_reapproach",
+        "handle_regrasp_x_offset_m": -0.01,
+        "open_gripper_first": true,
+        "push_steps": 220,
+        "reapproach_z_offset_m": 0.02,
+        "retreat_distance_m": 0.08,
+        "rotate_steps": 100
+      },
+      "path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_raw/a2w_recovery_verified_wc4_baseline_locked_v3_seed615455575/episode_000004.npz",
+      "stage_indices": {
+        "final": 252,
+        "grasp": 30,
+        "push": 133,
+        "rotate": 83,
+        "start": 0
+      },
+      "t_branch": 641,
+      "t_dev": 646,
+      "t_fail": 671
+    },
+    {
+      "candidate_id": 5,
+      "episode": "episode_000005.npz",
+      "failure_source": "failure_trial_000019_batch0001_env03",
+      "failure_type": "geometric_misalignment",
+      "frames": 253,
+      "parameters": {
+        "base_lateral_adjust_m": -0.04,
+        "close_timing": "on_contact",
+        "controller": "retreat_realign_reapproach",
+        "handle_regrasp_x_offset_m": -0.01,
+        "open_gripper_first": true,
+        "push_steps": 220,
+        "reapproach_z_offset_m": -0.02,
+        "retreat_distance_m": 0.03,
+        "rotate_steps": 100
+      },
+      "path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_raw/a2w_recovery_verified_wc4_baseline_locked_v3_seed615455575/episode_000005.npz",
+      "stage_indices": {
+        "final": 252,
+        "grasp": 30,
+        "push": 130,
+        "rotate": 80,
+        "start": 0
+      },
+      "t_branch": 646,
+      "t_dev": 646,
+      "t_fail": 671
+    },
+    {
+      "candidate_id": 10,
+      "episode": "episode_000010.npz",
+      "failure_source": "failure_trial_000019_batch0001_env03",
+      "failure_type": "geometric_misalignment",
+      "frames": 253,
+      "parameters": {
+        "base_lateral_adjust_m": -0.04,
+        "close_timing": "on_contact",
+        "controller": "retreat_realign_reapproach",
+        "handle_regrasp_x_offset_m": -0.01,
+        "open_gripper_first": true,
+        "push_steps": 220,
+        "reapproach_z_offset_m": -0.02,
+        "retreat_distance_m": 0.03,
+        "rotate_steps": 100
+      },
+      "path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_raw/a2w_recovery_verified_wc4_baseline_locked_v3_seed615455575/episode_000010.npz",
+      "stage_indices": {
+        "final": 252,
+        "grasp": 30,
+        "push": 130,
+        "rotate": 80,
+        "start": 0
+      },
+      "t_branch": 651,
+      "t_dev": 646,
+      "t_fail": 671
+    },
+    {
+      "candidate_id": 15,
+      "episode": "episode_000015.npz",
+      "failure_source": "failure_trial_000019_batch0001_env03",
+      "failure_type": "geometric_misalignment",
+      "frames": 253,
+      "parameters": {
+        "base_lateral_adjust_m": -0.04,
+        "close_timing": "on_contact",
+        "controller": "retreat_realign_reapproach",
+        "handle_regrasp_x_offset_m": -0.01,
+        "open_gripper_first": true,
+        "push_steps": 220,
+        "reapproach_z_offset_m": -0.02,
+        "retreat_distance_m": 0.03,
+        "rotate_steps": 100
+      },
+      "path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_raw/a2w_recovery_verified_wc4_baseline_locked_v3_seed615455575/episode_000015.npz",
+      "stage_indices": {
+        "final": 252,
+        "grasp": 30,
+        "push": 130,
+        "rotate": 80,
+        "start": 0
+      },
+      "t_branch": 671,
+      "t_dev": 646,
+      "t_fail": 671
+    },
+    {
+      "candidate_id": 24,
+      "episode": "episode_000024.npz",
+      "failure_source": "failure_trial_000021_batch0001_env05",
+      "failure_type": "insufficient_interaction",
+      "frames": 253,
+      "parameters": {
+        "base_lateral_adjust_m": 0.04,
+        "close_timing": "keep_closed",
+        "controller": "maintain_grasp_then_push",
+        "handle_regrasp_x_offset_m": 0.0,
+        "open_gripper_first": false,
+        "push_steps": 280,
+        "reapproach_z_offset_m": 0.0,
+        "retreat_distance_m": 0.0,
+        "rotate_steps": 120
+      },
+      "path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_raw/a2w_recovery_verified_wc4_baseline_locked_v3_seed615455575/episode_000024.npz",
+      "stage_indices": {
+        "final": 252,
+        "grasp": 63,
+        "push": 60,
+        "rotate": 0,
+        "start": 0
+      },
+      "t_branch": 450,
+      "t_dev": 455,
+      "t_fail": 480
+    },
+    {
+      "candidate_id": 44,
+      "episode": "episode_000036.npz",
+      "failure_source": "failure_trial_000024_batch0001_env08",
+      "failure_type": "insufficient_interaction",
+      "frames": 210,
+      "parameters": {
+        "base_lateral_adjust_m": 0.04,
+        "close_timing": "keep_closed",
+        "controller": "maintain_grasp_then_push",
+        "handle_regrasp_x_offset_m": 0.0,
+        "open_gripper_first": false,
+        "push_steps": 280,
+        "reapproach_z_offset_m": 0.0,
+        "retreat_distance_m": 0.0,
+        "rotate_steps": 120
+      },
+      "path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_raw/a2w_recovery_verified_wc4_baseline_locked_v3_seed615455575/episode_000036.npz",
+      "stage_indices": {
+        "final": 209,
+        "grasp": 52,
+        "push": 60,
+        "rotate": 0,
+        "start": 0
+      },
+      "t_branch": 387,
+      "t_dev": 392,
+      "t_fail": 417
+    },
+    {
+      "candidate_id": 64,
+      "episode": "episode_000048.npz",
+      "failure_source": "failure_trial_000030_batch0001_env14",
+      "failure_type": "insufficient_interaction",
+      "frames": 210,
+      "parameters": {
+        "base_lateral_adjust_m": 0.04,
+        "close_timing": "keep_closed",
+        "controller": "maintain_grasp_then_push",
+        "handle_regrasp_x_offset_m": 0.0,
+        "open_gripper_first": false,
+        "push_steps": 280,
+        "reapproach_z_offset_m": 0.0,
+        "retreat_distance_m": 0.0,
+        "rotate_steps": 120
+      },
+      "path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_raw/a2w_recovery_verified_wc4_baseline_locked_v3_seed615455575/episode_000048.npz",
+      "stage_indices": {
+        "final": 209,
+        "grasp": 52,
+        "push": 60,
+        "rotate": 0,
+        "start": 0
+      },
+      "t_branch": 475,
+      "t_dev": 480,
+      "t_fail": 505
+    },
+    {
+      "candidate_id": 84,
+      "episode": "episode_000061.npz",
+      "failure_source": "failure_trial_000041_batch0002_env09",
+      "failure_type": "insufficient_interaction",
+      "frames": 210,
+      "parameters": {
+        "base_lateral_adjust_m": 0.04,
+        "close_timing": "keep_closed",
+        "controller": "maintain_grasp_then_push",
+        "handle_regrasp_x_offset_m": 0.0,
+        "open_gripper_first": false,
+        "push_steps": 280,
+        "reapproach_z_offset_m": 0.0,
+        "retreat_distance_m": 0.0,
+        "rotate_steps": 120
+      },
+      "path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_raw/a2w_recovery_verified_wc4_baseline_locked_v3_seed615455575/episode_000061.npz",
+      "stage_indices": {
+        "final": 209,
+        "grasp": 52,
+        "push": 60,
+        "rotate": 0,
+        "start": 0
+      },
+      "t_branch": 457,
+      "t_dev": 462,
+      "t_fail": 487
+    },
+    {
+      "candidate_id": 104,
+      "episode": "episode_000072.npz",
+      "failure_source": "failure_trial_000047_batch0002_env15",
+      "failure_type": "insufficient_interaction",
+      "frames": 210,
+      "parameters": {
+        "base_lateral_adjust_m": 0.04,
+        "close_timing": "keep_closed",
+        "controller": "maintain_grasp_then_push",
+        "handle_regrasp_x_offset_m": 0.0,
+        "open_gripper_first": false,
+        "push_steps": 280,
+        "reapproach_z_offset_m": 0.0,
+        "retreat_distance_m": 0.0,
+        "rotate_steps": 120
+      },
+      "path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_raw/a2w_recovery_verified_wc4_baseline_locked_v3_seed615455575/episode_000072.npz",
+      "stage_indices": {
+        "final": 209,
+        "grasp": 52,
+        "push": 60,
+        "rotate": 0,
+        "start": 0
+      },
+      "t_branch": 422,
+      "t_dev": 427,
+      "t_fail": 452
+    }
+  ]
+}

@@ -3549,9 +3549,12 @@ def make_float_dp_policy_log_record(
     ee_pos,
     ee_quat,
     door_pos,
+    door_vel,
     phase,
     action_names=None,
     camera_gates=None,
+    gym=None,
+    dof_names=None,
 ):
     action_frame = str(getattr(st, "dp_action_frame", "base"))
     action_names = list(action_names or [])
@@ -3595,6 +3598,55 @@ def make_float_dp_policy_log_record(
         "gripper": {"target": float(st.last_gripper)},
         "door": {"dof": _round_list(door_pos) if door_pos is not None else []},
     }
+    if ee_record["target_pos_world"] and ee_record["actual_pos_world"]:
+        record["ee"]["pos_error"] = _round_list(
+            np.asarray(ee_record["target_pos_world"], dtype=np.float32)
+            - np.asarray(ee_record["actual_pos_world"], dtype=np.float32)
+        )
+    randomization_json = str(getattr(st.args, "ikpush_randomization_json", "") or "").strip()
+    if randomization_json:
+        try:
+            record["ikpush_randomization"] = json.loads(randomization_json)
+        except Exception:
+            record["ikpush_randomization_json"] = randomization_json
+    if bool(getattr(st.args, "dp_log_replay_snapshot", False)):
+        dof_pos = np.asarray(getattr(st, "dof_positions", []), dtype=np.float32).reshape(-1)
+        dof_vel = np.zeros_like(dof_pos, dtype=np.float32)
+        if gym is not None:
+            actual_dof_state = gym.get_actor_dof_states(st.env, st.arm_actor, gymapi.STATE_ALL)
+            dof_pos = np.asarray(actual_dof_state["pos"], dtype=np.float32).copy()
+            dof_vel = np.asarray(actual_dof_state["vel"], dtype=np.float32).copy()
+        door_pos_arr = np.asarray([] if door_pos is None else door_pos, dtype=np.float32).reshape(-1)
+        door_vel_arr = np.zeros_like(door_pos_arr, dtype=np.float32)
+        if door_vel is not None:
+            door_vel_arr = np.asarray(door_vel, dtype=np.float32).reshape(-1)
+        base_xy = np.asarray(st.traj.get("base_xy", st.base_start), dtype=np.float32)
+        yaw = float(st.traj.get("yaw", st.yaw_start))
+        snapshot = make_float_replay_snapshot(
+            st.args,
+            st.door,
+            list(dof_names or []),
+            dof_pos,
+            dof_vel,
+            door_pos_arr,
+            door_vel_arr,
+            ee_pos,
+            ee_quat,
+            base_xy,
+            yaw,
+            float(dp_action[0]) if len(dp_action) > 0 else 0.0,
+            float(dp_action[1]) if len(dp_action) > 1 else 0.0,
+        )
+        record["sim_snapshot"] = {key: _round_list(value) for key, value in snapshot.items()}
+        if gym is not None:
+            if getattr(st, "camera_handles", None):
+                front_pose_base, wrist_pose_base = float_camera_pose_base(gym, st)
+                record["sim_snapshot"]["front_camera_pose_base"] = _round_list(front_pose_base)
+                record["sim_snapshot"]["wrist_camera_pose_base"] = _round_list(wrist_pose_base)
+            record["extra"] = {
+                key: _round_list(value)
+                for key, value in gripper_handle_contact_snapshot(gym, st).items()
+            }
     if camera_gates is not None:
         gates = np.asarray(camera_gates, dtype=np.float32).reshape(-1)
         if gates.size >= 2:
@@ -3667,6 +3719,7 @@ def make_float_replay_snapshot(args, door, dof_names, dof_pos, dof_vel, door_pos
         "replay_door_root_state": door_root_state,
         "replay_door_dof_pos": np.asarray(door_pos, dtype=np.float32).copy(),
         "replay_door_dof_vel": np.asarray(door_vel, dtype=np.float32).copy(),
+        "replay_door_open_stage": np.asarray([float(bool(door.open_stage))], dtype=np.float32),
     }
 
 

@@ -1,0 +1,20 @@
+{
+  "candidate_recovery_family": "reopen_retreat_reapproach",
+  "evidence": [
+    "max_door_open_deg=1.70",
+    "max_handle_or_secondary_dof_deg=13.40",
+    "max_ee_position_error_m=0.000",
+    "gripper_close_like_action_first_step=446",
+    "door hinge stayed near zero after gripper close"
+  ],
+  "failure_type": "contact_establishment_failure",
+  "metrics": {
+    "max_door_open_deg": 1.7039763927459717,
+    "max_ee_position_error_m": 0.0,
+    "max_handle_or_secondary_dof_deg": 13.399189949035645,
+    "success_threshold_deg": 80.0
+  },
+  "recoverability": "reactive_recoverable",
+  "t_dev": 446,
+  "t_fail": 446
+}

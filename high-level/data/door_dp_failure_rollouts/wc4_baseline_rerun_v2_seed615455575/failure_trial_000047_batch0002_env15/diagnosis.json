@@ -1,0 +1,21 @@
+{
+  "candidate_recovery_family": "maintain_grasp_then_push",
+  "evidence": [
+    "max_door_open_deg=1.89",
+    "max_handle_or_secondary_dof_deg=34.26",
+    "max_ee_position_error_m=0.633",
+    "gripper_close_like_action_first_step=328",
+    "handle/secondary DOF moved but hinge did not open enough",
+    "EE error is extremely large; likely unsafe or infeasible without reset"
+  ],
+  "failure_type": "insufficient_interaction",
+  "metrics": {
+    "max_door_open_deg": 1.8878958225250244,
+    "max_ee_position_error_m": 0.6330460906028748,
+    "max_handle_or_secondary_dof_deg": 34.262874603271484,
+    "success_threshold_deg": 80.0
+  },
+  "recoverability": "unrecoverable",
+  "t_dev": 427,
+  "t_fail": 452
+}

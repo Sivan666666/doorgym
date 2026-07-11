@@ -81,6 +81,13 @@ class TrainPipelineConfig(HubMixin):
     keyframe_sampling_weight_feature: str = "loss.action_weight"
     keyframe_sampling_threshold: float = 1.0
 
+    # Verified failure-recovery data mixing. A ratio of 0.8 assigns 80% of
+    # sampled chunk anchors to frames with aux.is_recovery > 0.5 and 20% to
+    # original expert frames. This changes sampling only, not action loss.
+    recovery_sampling_ratio: float = 0.0
+    recovery_sampling_feature: str = "aux.is_recovery"
+    recovery_sampling_threshold: float = 0.5
+
     # Rename map for the observation to override the image and state keys
     rename_map: dict[str, str] = field(default_factory=dict)
     checkpoint_path: Path | None = field(init=False, default=None)
@@ -158,6 +165,15 @@ class TrainPipelineConfig(HubMixin):
         if not 0.0 <= self.keyframe_sampling_ratio <= 1.0:
             raise ValueError(
                 f"keyframe_sampling_ratio must be in [0, 1], got {self.keyframe_sampling_ratio}."
+            )
+        if not 0.0 <= self.recovery_sampling_ratio <= 1.0:
+            raise ValueError(
+                f"recovery_sampling_ratio must be in [0, 1], got {self.recovery_sampling_ratio}."
+            )
+        if self.keyframe_sampling_ratio > 0.0 and self.recovery_sampling_ratio > 0.0:
+            raise ValueError(
+                "keyframe_sampling_ratio and recovery_sampling_ratio cannot both be enabled. "
+                "Use one sampler at a time so their probability masses are unambiguous."
             )
 
     @classmethod

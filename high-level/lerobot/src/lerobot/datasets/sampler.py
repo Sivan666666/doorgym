@@ -218,3 +218,41 @@ def make_keyframe_window_sampler(
         "drop_n_last_frames": int(drop_n_last_frames),
     }
     return sampler, stats
+
+
+def make_recovery_sampler(
+    dataset,
+    *,
+    recovery_sampling_ratio: float,
+    recovery_feature: str = "aux.is_recovery",
+    recovery_threshold: float = 0.5,
+    drop_n_first_frames: int = 0,
+    drop_n_last_frames: int = 0,
+    seed: int | None = None,
+) -> tuple[WeightedRandomSampler | None, dict]:
+    """Draw fixed probability mass from verified recovery versus expert frames.
+
+    ``recovery_sampling_ratio=0.8`` assigns 80% total sampling probability to
+    rows where ``recovery_feature > recovery_threshold`` and 20% to all other
+    eligible rows. This is frame/chunk-anchor sampling with replacement; it
+    does not duplicate videos or alter the behavior-cloning loss.
+    """
+    sampler, stats = make_keyframe_window_sampler(
+        dataset,
+        keyframe_sampling_ratio=recovery_sampling_ratio,
+        weight_feature=recovery_feature,
+        keyframe_threshold=recovery_threshold,
+        drop_n_first_frames=drop_n_first_frames,
+        drop_n_last_frames=drop_n_last_frames,
+        seed=seed,
+    )
+    stats = dict(stats)
+    stats["sampler_type"] = "recovery"
+    if stats.get("enabled"):
+        stats["recovery_ratio"] = stats.pop("keyframe_ratio")
+        stats["expert_ratio"] = stats.pop("ordinary_ratio")
+        stats["recovery_frames"] = stats.pop("keyframe_window_frames")
+        stats["expert_frames"] = stats.pop("ordinary_frames")
+        stats["recovery_feature"] = stats.pop("weight_feature")
+        stats["recovery_threshold"] = stats.pop("keyframe_threshold")
+    return sampler, stats

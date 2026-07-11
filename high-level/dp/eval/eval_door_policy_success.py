@@ -22,6 +22,8 @@ from pathlib import Path
 from threading import Lock, Thread
 from typing import Any
 
+import numpy as np
+
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DP_ROOT = SCRIPT_DIR.parent
@@ -166,6 +168,64 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--progress_interval", type=float, default=5.0, help="Seconds between per-batch progress updates.")
     parser.add_argument("--no_progress", action="store_true", help="Disable per-batch progress updates.")
     parser.add_argument("--print_policy_steps", action="store_true", help="Do not pass --no_dp_print to play.")
+    parser.add_argument(
+        "--dp_log_interval",
+        type=int,
+        default=25,
+        help=(
+            "Forwarded to play_door_policy.py. Use 1 for dense per-step logs. "
+            "When --save_failure_rollouts is set, this is automatically clamped to <= --failure_snapshot_interval."
+        ),
+    )
+    parser.add_argument(
+        "--save_failure_rollouts",
+        action="store_true",
+        help=(
+            "After evaluation, export failed env trajectories from the per-step JSONL logs into "
+            "failure rollout .npz + metadata/diagnosis JSON files."
+        ),
+    )
+    parser.add_argument(
+        "--failure_rollout_root",
+        type=str,
+        default=None,
+        help="Directory for exported failed rollout bundles. Defaults to <run_root>/failure_rollouts.",
+    )
+    parser.add_argument(
+        "--failure_snapshot_interval",
+        type=int,
+        default=1,
+        help="Keep every Nth logged frame when exporting failure rollouts.",
+    )
+    parser.add_argument(
+        "--failure_save_camera_obs",
+        action="store_true",
+        help="Reserve camera observation fields in exported metadata when available in logs.",
+    )
+    parser.add_argument(
+        "--failure_save_privileged_state",
+        action="store_true",
+        default=True,
+        help="Export privileged state derived from policy JSONL logs.",
+    )
+    parser.add_argument(
+        "--no_failure_save_privileged_state",
+        dest="failure_save_privileged_state",
+        action="store_false",
+        help="Do not export privileged state fields.",
+    )
+    parser.add_argument(
+        "--failure_save_events",
+        action="store_true",
+        default=True,
+        help="Export event/contact/progress fields when present in policy JSONL logs.",
+    )
+    parser.add_argument(
+        "--no_failure_save_events",
+        dest="failure_save_events",
+        action="store_false",
+        help="Do not export event fields.",
+    )
     parser.add_argument(
         "play_args",
         nargs=argparse.REMAINDER,
@@ -382,6 +442,8 @@ def build_play_command(args: argparse.Namespace, batch_envs: int, batch_idx: int
         args.dp_noise_scheduler_type,
         "--dp_log_path",
         str(log_path),
+        "--dp_log_interval",
+        str(args.dp_log_interval),
         "--no_show_seg",
     ]
     if args.dp_action_horizon is not None:
@@ -391,6 +453,8 @@ def build_play_command(args: argparse.Namespace, batch_envs: int, batch_idx: int
         cmd += ["--dp_temporal_prefetch_actions", str(args.dp_temporal_prefetch_actions)]
         cmd += ["--dp_temporal_old_weight", str(args.dp_temporal_old_weight)]
         cmd += ["--dp_temporal_new_weight", str(args.dp_temporal_new_weight)]
+    if args.save_failure_rollouts:
+        cmd.append("--dp_log_replay_snapshot")
     if args.rgb:
         cmd.append("--rgb")
     elif args.depth_only:
@@ -417,6 +481,398 @@ def build_play_command(args: argparse.Namespace, batch_envs: int, batch_idx: int
     extra = args.play_args[1:] if args.play_args[:1] == ["--"] else args.play_args
     cmd += extra
     return cmd
+
+
+def _as_float_list(value: Any, length: int | None = None) -> list[float]:
+    if value is None:
+        out: list[float] = []
+    elif isinstance(value, (list, tuple)):
+        out = [float(x) for x in value]
+    else:
+        out = [float(value)]
+    if length is not None:
+        if len(out) < length:
+            out.extend([float("nan")] * (length - len(out)))
+        elif len(out) > length:
+            out = out[:length]
+    return out
+
+
+def _records_for_env(log_path: Path, env_id: int, stride: int) -> list[dict[str, Any]]:
+    stride = max(1, int(stride))
+    records = [record for record in read_jsonl(log_path) if int(record.get("controlled_env_id", -1)) == int(env_id)]
+    if stride <= 1:
+        return records
+    return [record for idx, record in enumerate(records) if idx % stride == 0]
+
+
+def _collect_failure_npz_arrays(records: list[dict[str, Any]], *, save_privileged: bool, save_events: bool) -> dict[str, Any]:
+    arrays: dict[str, Any] = {}
+    if not records:
+        return arrays
+
+    arrays["step"] = np.asarray([int(r.get("step", -1)) for r in records], dtype=np.int32)
+    arrays["controlled_env_id"] = np.asarray([int(r.get("controlled_env_id", -1)) for r in records], dtype=np.int32)
+    arrays["state"] = np.asarray([_as_float_list(r.get("state"), 10) for r in records], dtype=np.float32)
+    arrays["action"] = np.asarray([_as_float_list(r.get("dp_action_raw"), 10) for r in records], dtype=np.float32)
+    arrays["applied_action"] = np.asarray([_as_float_list(r.get("applied_action"), 10) for r in records], dtype=np.float32)
+    arrays["phase_name"] = np.asarray([str(r.get("phase_name") or "") for r in records])
+
+    snapshot_keys = (
+        "replay_root_state",
+        "replay_dof_pos",
+        "replay_dof_vel",
+        "replay_ee_pos",
+        "replay_ee_quat",
+        "replay_door_root_state",
+        "replay_box_root_state",
+        "replay_door_dof_pos",
+        "replay_door_dof_vel",
+        "replay_door_open_stage",
+        "front_camera_pose_base",
+        "wrist_camera_pose_base",
+    )
+    for key in snapshot_keys:
+        values = []
+        found = False
+        max_len = 0
+        for record in records:
+            snapshot = record.get("sim_snapshot") or {}
+            value = snapshot.get(key)
+            if value is not None:
+                found = True
+            value_list = _as_float_list(value, None)
+            values.append(value_list)
+            max_len = max(max_len, len(value_list))
+        if found:
+            value = np.asarray(
+                [v + [float("nan")] * (max_len - len(v)) for v in values],
+                dtype=np.float32,
+            )
+            arrays[f"sim_snapshot_{key}"] = value
+            arrays[key] = value
+
+    if save_privileged:
+        arrays["privileged_base_xy"] = np.asarray(
+            [_as_float_list((r.get("base") or {}).get("xy"), 2) for r in records],
+            dtype=np.float32,
+        )
+        arrays["privileged_base_height"] = np.asarray(
+            [float((r.get("base") or {}).get("height", float("nan"))) for r in records],
+            dtype=np.float32,
+        )
+        arrays["privileged_base_lin_vel"] = np.asarray(
+            [_as_float_list((r.get("base") or {}).get("lin_vel"), 3) for r in records],
+            dtype=np.float32,
+        )
+        arrays["privileged_base_ang_vel"] = np.asarray(
+            [_as_float_list((r.get("base") or {}).get("ang_vel"), 3) for r in records],
+            dtype=np.float32,
+        )
+        arrays["privileged_ee_target_pos_world"] = np.asarray(
+            [_as_float_list((r.get("ee") or {}).get("target_pos_world"), 3) for r in records],
+            dtype=np.float32,
+        )
+        arrays["privileged_ee_actual_pos_world"] = np.asarray(
+            [_as_float_list((r.get("ee") or {}).get("actual_pos_world"), 3) for r in records],
+            dtype=np.float32,
+        )
+        arrays["privileged_ee_pos_error"] = np.asarray(
+            [_as_float_list((r.get("ee") or {}).get("pos_error"), 3) for r in records],
+            dtype=np.float32,
+        )
+        arrays["privileged_gripper_target"] = np.asarray(
+            [_as_float_list((r.get("gripper") or {}).get("target"), None) for r in records],
+            dtype=np.float32,
+        )
+        arrays["privileged_gripper_actual_pos"] = np.asarray(
+            [_as_float_list((r.get("gripper") or {}).get("actual_pos"), None) for r in records],
+            dtype=np.float32,
+        )
+        arrays["privileged_door_dof"] = np.asarray(
+            [_as_float_list((r.get("door") or {}).get("dof"), 2) for r in records],
+            dtype=np.float32,
+        )
+
+    if save_events:
+        door_dof = arrays.get("privileged_door_dof")
+        if door_dof is None:
+            door_dof = np.asarray([_as_float_list((r.get("door") or {}).get("dof"), 2) for r in records], dtype=np.float32)
+        door_abs = np.abs(np.nan_to_num(door_dof[:, 0], nan=0.0))
+        handle_abs = np.abs(np.nan_to_num(door_dof[:, 1], nan=0.0))
+        arrays["events_door_progress"] = door_abs.astype(np.float32)
+        arrays["events_handle_progress"] = handle_abs.astype(np.float32)
+        arrays["events_door_progress_delta"] = np.diff(door_abs, prepend=door_abs[:1]).astype(np.float32)
+        arrays["events_handle_progress_delta"] = np.diff(handle_abs, prepend=handle_abs[:1]).astype(np.float32)
+
+        extra_keys = (
+            "gripper_handle_contact_score",
+            "gripper_handle_contact_count",
+            "gripper_handle_contact_any",
+            "gripper_handle_contact_both",
+        )
+        for key in extra_keys:
+            values = []
+            found = False
+            for record in records:
+                extra = record.get("extra") or {}
+                value = extra.get(key, record.get(key))
+                if value is not None:
+                    found = True
+                values.append(_as_float_list(value, None))
+            if found:
+                max_len = max(1, max(len(v) for v in values))
+                arrays[f"events_{key}"] = np.asarray(
+                    [v + [float("nan")] * (max_len - len(v)) for v in values],
+                    dtype=np.float32,
+                )
+    return arrays
+
+
+def diagnose_failure_arrays(arrays: dict[str, Any], threshold_deg: float) -> dict[str, Any]:
+    step = np.asarray(arrays.get("step", []), dtype=np.int32)
+    door_dof = np.asarray(arrays.get("privileged_door_dof", np.zeros((len(step), 2), dtype=np.float32)), dtype=np.float32)
+    ee_err = np.asarray(arrays.get("privileged_ee_pos_error", np.zeros((len(step), 3), dtype=np.float32)), dtype=np.float32)
+    action = np.asarray(arrays.get("action", np.zeros((len(step), 10), dtype=np.float32)), dtype=np.float32)
+    if len(step) == 0:
+        return {
+            "failure_type": "progress_stagnation",
+            "t_dev": 0,
+            "t_fail": 0,
+            "recoverability": "unrecoverable",
+            "candidate_recovery_family": "none",
+            "evidence": ["empty failure rollout"],
+        }
+
+    door_abs_deg = np.abs(np.nan_to_num(door_dof[:, 0], nan=0.0)) * 180.0 / math.pi
+    handle_abs_deg = np.abs(np.nan_to_num(door_dof[:, 1], nan=0.0)) * 180.0 / math.pi
+    ee_err_norm = np.linalg.norm(np.nan_to_num(ee_err, nan=0.0), axis=1) if ee_err.ndim == 2 else np.zeros(len(step))
+    gripper = action[:, 9] if action.ndim == 2 and action.shape[1] >= 10 else np.zeros(len(step))
+
+    max_door = float(np.nanmax(door_abs_deg)) if len(door_abs_deg) else 0.0
+    max_handle = float(np.nanmax(handle_abs_deg)) if len(handle_abs_deg) else 0.0
+    max_ee_err = float(np.nanmax(ee_err_norm)) if len(ee_err_norm) else 0.0
+    close_candidates = np.flatnonzero(gripper > -0.8)
+    first_close_idx = int(close_candidates[0]) if len(close_candidates) else max(0, len(step) // 2)
+    progress_candidates = np.flatnonzero(door_abs_deg > max(2.0, 0.05 * float(threshold_deg)))
+    handle_candidates = np.flatnonzero(handle_abs_deg > 10.0)
+
+    evidence: list[str] = [
+        f"max_door_open_deg={max_door:.2f}",
+        f"max_handle_or_secondary_dof_deg={max_handle:.2f}",
+        f"max_ee_position_error_m={max_ee_err:.3f}",
+    ]
+    if len(close_candidates):
+        evidence.append(f"gripper_close_like_action_first_step={int(step[first_close_idx])}")
+    else:
+        evidence.append("no_clear_gripper_close_action_detected")
+
+    if max_door < max(5.0, 0.15 * float(threshold_deg)):
+        if max_handle >= 20.0:
+            failure_type = "insufficient_interaction"
+            candidate_family = "maintain_grasp_then_push"
+            evidence.append("handle/secondary DOF moved but hinge did not open enough")
+            t_dev_idx = int(handle_candidates[0]) if len(handle_candidates) else first_close_idx
+        elif max_ee_err > 0.08:
+            failure_type = "geometric_misalignment"
+            candidate_family = "retreat_realign_reapproach"
+            evidence.append("large EE tracking/target error while door progress stayed low")
+            err_candidates = np.flatnonzero(ee_err_norm > 0.08)
+            t_dev_idx = int(err_candidates[0]) if len(err_candidates) else first_close_idx
+        else:
+            failure_type = "contact_establishment_failure"
+            candidate_family = "reopen_retreat_reapproach"
+            evidence.append("door hinge stayed near zero after gripper close")
+            t_dev_idx = first_close_idx
+    elif max_door < float(threshold_deg):
+        failure_type = "progress_stagnation"
+        candidate_family = "continue_push_with_reposition"
+        evidence.append("door moved partially but did not reach success threshold")
+        t_dev_idx = int(progress_candidates[0]) if len(progress_candidates) else first_close_idx
+    else:
+        failure_type = "temporal_coordination_failure"
+        candidate_family = "phase_timing_adjustment"
+        evidence.append("rollout marked failed despite reaching threshold; check metric/sign/timeout")
+        t_dev_idx = first_close_idx
+
+    stagnation_window = 25
+    t_fail_idx = len(step) - 1
+    if len(door_abs_deg) > stagnation_window:
+        # Failure confirmation must follow the earliest deviation by a full
+        # observation window. Otherwise a quiet window immediately before
+        # t_dev incorrectly collapses t_fail onto t_dev.
+        first_confirm_idx = max(t_dev_idx + stagnation_window, stagnation_window)
+        for idx in range(first_confirm_idx, len(door_abs_deg)):
+            recent = door_abs_deg[max(0, idx - stagnation_window) : idx + 1]
+            if float(np.max(recent) - np.min(recent)) < 1.0 and float(np.max(recent)) < float(threshold_deg):
+                t_fail_idx = idx
+                break
+
+    recoverability = "reactive_recoverable"
+    if max_ee_err > 0.5:
+        recoverability = "unrecoverable"
+        evidence.append("EE error is extremely large; likely unsafe or infeasible without reset")
+    elif int(step[t_dev_idx]) < int(step[t_fail_idx]):
+        recoverability = "preventive_recoverable" if failure_type in {"geometric_misalignment", "progress_stagnation"} else "reactive_recoverable"
+
+    return {
+        "failure_type": failure_type,
+        "t_dev": int(step[t_dev_idx]),
+        "t_fail": int(step[t_fail_idx]),
+        "recoverability": recoverability,
+        "candidate_recovery_family": candidate_family,
+        "evidence": evidence,
+        "metrics": {
+            "max_door_open_deg": max_door,
+            "max_handle_or_secondary_dof_deg": max_handle,
+            "max_ee_position_error_m": max_ee_err,
+            "success_threshold_deg": float(threshold_deg),
+        },
+    }
+
+
+def export_failure_rollout_bundle(
+    *,
+    records: list[dict[str, Any]],
+    out_dir: Path,
+    trial: dict[str, Any],
+    args: argparse.Namespace,
+    metric: str,
+    cmd: list[str] | None,
+) -> dict[str, Any] | None:
+    if not records:
+        return None
+    out_dir.mkdir(parents=True, exist_ok=True)
+    arrays = _collect_failure_npz_arrays(
+        records,
+        save_privileged=bool(args.failure_save_privileged_state),
+        save_events=bool(args.failure_save_events),
+    )
+    arrays["success_metrics_success"] = np.asarray([0], dtype=np.int8)
+    arrays["success_metrics_max_open_deg"] = np.asarray([float(trial.get("max_open_deg") or 0.0)], dtype=np.float32)
+    arrays["success_metrics_first_success_step"] = np.asarray([-1], dtype=np.int32)
+
+    npz_path = out_dir / "failure_rollout.npz"
+    np.savez_compressed(npz_path, **arrays)
+    diagnosis = diagnose_failure_arrays(arrays, float(args.pass_open_angle_deg))
+    diagnosis_path = out_dir / "diagnosis.json"
+    with diagnosis_path.open("w", encoding="utf-8") as f:
+        json.dump(diagnosis, f, indent=2, sort_keys=True)
+
+    metadata = {
+        "schema_version": 1,
+        "source": {
+            "log_path": str(trial.get("log_path", "")),
+            "stdout_path": str(trial.get("stdout_path", "")),
+            "batch": int(trial.get("batch", -1)),
+            "env_id": int(trial.get("env_id", -1)),
+            "global_trial": int(trial.get("global_trial", -1)),
+        },
+        "eval": {
+            "checkpoint": str(resolve_path(args.checkpoint)),
+            "door_cfg": str(resolve_path(args.door_cfg)),
+            "mode": args.mode,
+            "robot_body": args.robot_body,
+            "base_seed": args.base_seed,
+            "success_metric": metric,
+            "pass_open_angle_deg": float(args.pass_open_angle_deg),
+            "dp_action_horizon": args.dp_action_horizon,
+            "dp_fps": int(args.dp_fps),
+            "steps": int(args.steps),
+        },
+        "failure_export": {
+            "snapshot_interval": int(args.failure_snapshot_interval),
+            "save_camera_obs_requested": bool(args.failure_save_camera_obs),
+            "camera_obs_available": False,
+            "save_privileged_state": bool(args.failure_save_privileged_state),
+            "save_events": bool(args.failure_save_events),
+            "records": int(len(records)),
+            "sim_snapshot_available": "sim_snapshot_replay_root_state" in arrays,
+            "npz_path": str(npz_path),
+            "diagnosis_path": str(diagnosis_path),
+            "note": (
+                "This bundle is exported from policy JSONL logs. It contains dense actions, "
+                "privileged/event signals, and replay-style sim_snapshot fields when the play loop "
+                "was run with --dp_log_replay_snapshot."
+            ),
+        },
+        "play_command": cmd or [],
+        "success_metrics": {
+            "success": False,
+            "max_open_deg": None if trial.get("max_open_deg") is None else float(trial.get("max_open_deg")),
+            "first_success_step": trial.get("first_success_step"),
+        },
+    }
+    randomization = next(
+        (record.get("ikpush_randomization") for record in records if record.get("ikpush_randomization")),
+        None,
+    )
+    if randomization is not None:
+        metadata["ikpush_randomization"] = randomization
+    metadata_path = out_dir / "metadata.json"
+    with metadata_path.open("w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=2, sort_keys=True)
+    return {
+        "global_trial": int(trial.get("global_trial", -1)),
+        "batch": int(trial.get("batch", -1)),
+        "env_id": int(trial.get("env_id", -1)),
+        "dir": str(out_dir),
+        "npz_path": str(npz_path),
+        "metadata_path": str(metadata_path),
+        "diagnosis_path": str(diagnosis_path),
+        "diagnosis": diagnosis,
+    }
+
+
+def export_failed_rollouts(
+    *,
+    args: argparse.Namespace,
+    run_root: Path,
+    all_trials: list[dict[str, Any]],
+    batch_logs: dict[int, dict[str, Any]],
+    metric: str,
+) -> list[dict[str, Any]]:
+    if not bool(args.save_failure_rollouts):
+        return []
+    failure_root = Path(args.failure_rollout_root).expanduser() if args.failure_rollout_root else run_root / "failure_rollouts"
+    if not failure_root.is_absolute():
+        failure_root = (Path.cwd() / failure_root).resolve()
+    failure_root.mkdir(parents=True, exist_ok=True)
+    exported: list[dict[str, Any]] = []
+    for trial in all_trials:
+        if bool(trial.get("success")):
+            continue
+        log_path = Path(str(trial.get("log_path", ""))).expanduser()
+        if not log_path.is_file():
+            continue
+        env_id = int(trial.get("env_id", -1))
+        records = _records_for_env(log_path, env_id, int(args.failure_snapshot_interval))
+        out_dir = failure_root / f"failure_trial_{int(trial.get('global_trial', -1)):06d}_batch{int(trial.get('batch', -1)):04d}_env{env_id:02d}"
+        batch_info = batch_logs.get(int(trial.get("batch", -1)), {})
+        item = export_failure_rollout_bundle(
+            records=records,
+            out_dir=out_dir,
+            trial=trial,
+            args=args,
+            metric=metric,
+            cmd=batch_info.get("command"),
+        )
+        if item is not None:
+            exported.append(item)
+    manifest_path = failure_root / "manifest.json"
+    with manifest_path.open("w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "schema_version": 1,
+                "failure_rollout_count": len(exported),
+                "failure_rollouts": exported,
+            },
+            f,
+            indent=2,
+            sort_keys=True,
+        )
+    safe_print(f"Failure rollouts exported: {len(exported)} -> {manifest_path}")
+    return exported
 
 
 def pump_subprocess_output(proc: subprocess.Popen, stdout_path: Path, stream_output: bool, batch_idx: int) -> None:
@@ -495,6 +951,12 @@ def main() -> None:
         raise ValueError("--parallel_batches must be positive.")
     if args.progress_interval <= 0:
         raise ValueError("--progress_interval must be positive.")
+    if args.dp_log_interval <= 0:
+        raise ValueError("--dp_log_interval must be positive.")
+    if args.failure_snapshot_interval <= 0:
+        raise ValueError("--failure_snapshot_interval must be positive.")
+    if args.save_failure_rollouts:
+        args.dp_log_interval = min(int(args.dp_log_interval), int(args.failure_snapshot_interval))
     if args.rgb:
         args.depth_only = False
     if args.dp_fps <= 0:
@@ -532,7 +994,7 @@ def main() -> None:
         f"steps={args.steps} threshold={args.pass_open_angle_deg}deg metric={metric} "
         f"vision_mode={'rgb' if args.rgb else ('depth_only' if args.depth_only else 'depth')} "
         f"dp_action_horizon={args.dp_action_horizon} dp_temporal_ensemble={args.dp_temporal_ensemble} "
-        f"dp_fps={args.dp_fps:g} "
+        f"dp_fps={args.dp_fps:g} dp_log_interval={args.dp_log_interval} "
         f"parallel_batches={args.parallel_batches} headless={args.headless} run_root={run_root}"
     )
     if args.parallel_batches > 1:
@@ -614,6 +1076,13 @@ def main() -> None:
     total_successes = sum(1 for item in all_trials if item["success"])
     total = len(all_trials)
     success_rate = total_successes / max(1, total)
+    failure_rollouts = export_failed_rollouts(
+        args=args,
+        run_root=run_root,
+        all_trials=all_trials,
+        batch_logs=batch_logs,
+        metric=metric,
+    )
     summary = {
         "checkpoint": str(resolve_path(args.checkpoint)),
         "door_cfg": str(resolve_path(args.door_cfg)),
@@ -630,6 +1099,7 @@ def main() -> None:
         "headless": bool(args.headless),
         "graphics_device_id": args.graphics_device_id,
         "dp_inference_steps": int(args.dp_inference_steps),
+        "dp_log_interval": int(args.dp_log_interval),
         "dp_noise_scheduler_type": args.dp_noise_scheduler_type,
         "dp_action_horizon": None if args.dp_action_horizon is None else int(args.dp_action_horizon),
         "dp_temporal_ensemble": bool(args.dp_temporal_ensemble),
@@ -651,6 +1121,12 @@ def main() -> None:
         "successes": total_successes,
         "trials": total,
         "success_rate": success_rate,
+        "failure_rollout_root": (
+            str(Path(args.failure_rollout_root).expanduser())
+            if args.failure_rollout_root
+            else (str(run_root / "failure_rollouts") if args.save_failure_rollouts else None)
+        ),
+        "failure_rollouts": failure_rollouts,
         "batch_logs": [batch_logs[idx] for idx in sorted(batch_logs)],
         "trials_detail": all_trials,
     }

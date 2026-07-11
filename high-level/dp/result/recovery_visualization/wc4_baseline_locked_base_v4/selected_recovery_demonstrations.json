@@ -1,0 +1,305 @@
+{
+  "raw_root": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_raw/a2w_recovery_verified_wc4_baseline_locked_base_v4_seed615455575",
+  "selected": [
+    {
+      "candidate_id": 0,
+      "episode": "episode_000000.npz",
+      "failure_source": "failure_trial_000019_batch0001_env03",
+      "failure_type": "geometric_misalignment",
+      "frames": 283,
+      "parameters": {
+        "base_lateral_adjust_m": 0.0,
+        "close_timing": "on_contact",
+        "controller": "retreat_realign_reapproach",
+        "handle_regrasp_x_offset_m": -0.01,
+        "open_gripper_first": true,
+        "preserve_scripted_base_motion": true,
+        "push_steps": 300,
+        "reapproach_z_offset_m": -0.02,
+        "retreat_distance_m": 0.03,
+        "rotate_steps": 100
+      },
+      "path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_raw/a2w_recovery_verified_wc4_baseline_locked_base_v4_seed615455575/episode_000000.npz",
+      "stage_indices": {
+        "final": 282,
+        "grasp": 30,
+        "push": 130,
+        "rotate": 80,
+        "start": 0
+      },
+      "t_branch": 641,
+      "t_dev": 646,
+      "t_fail": 671
+    },
+    {
+      "candidate_id": 10,
+      "episode": "episode_000008.npz",
+      "failure_source": "failure_trial_000019_batch0001_env03",
+      "failure_type": "geometric_misalignment",
+      "frames": 283,
+      "parameters": {
+        "base_lateral_adjust_m": 0.0,
+        "close_timing": "on_contact",
+        "controller": "retreat_realign_reapproach",
+        "handle_regrasp_x_offset_m": -0.01,
+        "open_gripper_first": true,
+        "preserve_scripted_base_motion": true,
+        "push_steps": 300,
+        "reapproach_z_offset_m": -0.02,
+        "retreat_distance_m": 0.03,
+        "rotate_steps": 100
+      },
+      "path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_raw/a2w_recovery_verified_wc4_baseline_locked_base_v4_seed615455575/episode_000008.npz",
+      "stage_indices": {
+        "final": 282,
+        "grasp": 30,
+        "push": 130,
+        "rotate": 80,
+        "start": 0
+      },
+      "t_branch": 651,
+      "t_dev": 646,
+      "t_fail": 671
+    },
+    {
+      "candidate_id": 20,
+      "episode": "episode_000018.npz",
+      "failure_source": "failure_trial_000021_batch0001_env05",
+      "failure_type": "insufficient_interaction",
+      "frames": 283,
+      "parameters": {
+        "base_lateral_adjust_m": 0.0,
+        "close_timing": "keep_closed",
+        "controller": "maintain_grasp_then_push",
+        "handle_regrasp_x_offset_m": 0.0,
+        "open_gripper_first": false,
+        "preserve_scripted_base_motion": true,
+        "push_steps": 300,
+        "reapproach_z_offset_m": 0.0,
+        "retreat_distance_m": 0.0,
+        "rotate_steps": 100
+      },
+      "path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_raw/a2w_recovery_verified_wc4_baseline_locked_base_v4_seed615455575/episode_000018.npz",
+      "stage_indices": {
+        "final": 282,
+        "grasp": 70,
+        "push": 50,
+        "rotate": 0,
+        "start": 0
+      },
+      "t_branch": 450,
+      "t_dev": 455,
+      "t_fail": 480
+    },
+    {
+      "candidate_id": 30,
+      "episode": "episode_000026.npz",
+      "failure_source": "failure_trial_000021_batch0001_env05",
+      "failure_type": "insufficient_interaction",
+      "frames": 283,
+      "parameters": {
+        "base_lateral_adjust_m": 0.0,
+        "close_timing": "keep_closed",
+        "controller": "maintain_grasp_then_push",
+        "handle_regrasp_x_offset_m": 0.0,
+        "open_gripper_first": false,
+        "preserve_scripted_base_motion": true,
+        "push_steps": 300,
+        "reapproach_z_offset_m": 0.0,
+        "retreat_distance_m": 0.0,
+        "rotate_steps": 100
+      },
+      "path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_raw/a2w_recovery_verified_wc4_baseline_locked_base_v4_seed615455575/episode_000026.npz",
+      "stage_indices": {
+        "final": 282,
+        "grasp": 70,
+        "push": 50,
+        "rotate": 0,
+        "start": 0
+      },
+      "t_branch": 460,
+      "t_dev": 455,
+      "t_fail": 480
+    },
+    {
+      "candidate_id": 40,
+      "episode": "episode_000034.npz",
+      "failure_source": "failure_trial_000024_batch0001_env08",
+      "failure_type": "insufficient_interaction",
+      "frames": 283,
+      "parameters": {
+        "base_lateral_adjust_m": 0.0,
+        "close_timing": "keep_closed",
+        "controller": "maintain_grasp_then_push",
+        "handle_regrasp_x_offset_m": 0.0,
+        "open_gripper_first": false,
+        "preserve_scripted_base_motion": true,
+        "push_steps": 300,
+        "reapproach_z_offset_m": 0.0,
+        "retreat_distance_m": 0.0,
+        "rotate_steps": 100
+      },
+      "path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_raw/a2w_recovery_verified_wc4_baseline_locked_base_v4_seed615455575/episode_000034.npz",
+      "stage_indices": {
+        "final": 282,
+        "grasp": 70,
+        "push": 50,
+        "rotate": 0,
+        "start": 0
+      },
+      "t_branch": 387,
+      "t_dev": 392,
+      "t_fail": 417
+    },
+    {
+      "candidate_id": 50,
+      "episode": "episode_000042.npz",
+      "failure_source": "failure_trial_000024_batch0001_env08",
+      "failure_type": "insufficient_interaction",
+      "frames": 283,
+      "parameters": {
+        "base_lateral_adjust_m": 0.0,
+        "close_timing": "keep_closed",
+        "controller": "maintain_grasp_then_push",
+        "handle_regrasp_x_offset_m": 0.0,
+        "open_gripper_first": false,
+        "preserve_scripted_base_motion": true,
+        "push_steps": 300,
+        "reapproach_z_offset_m": 0.0,
+        "retreat_distance_m": 0.0,
+        "rotate_steps": 100
+      },
+      "path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_raw/a2w_recovery_verified_wc4_baseline_locked_base_v4_seed615455575/episode_000042.npz",
+      "stage_indices": {
+        "final": 282,
+        "grasp": 70,
+        "push": 50,
+        "rotate": 0,
+        "start": 0
+      },
+      "t_branch": 397,
+      "t_dev": 392,
+      "t_fail": 417
+    },
+    {
+      "candidate_id": 60,
+      "episode": "episode_000050.npz",
+      "failure_source": "failure_trial_000030_batch0001_env14",
+      "failure_type": "insufficient_interaction",
+      "frames": 283,
+      "parameters": {
+        "base_lateral_adjust_m": 0.0,
+        "close_timing": "keep_closed",
+        "controller": "maintain_grasp_then_push",
+        "handle_regrasp_x_offset_m": 0.0,
+        "open_gripper_first": false,
+        "preserve_scripted_base_motion": true,
+        "push_steps": 300,
+        "reapproach_z_offset_m": 0.0,
+        "retreat_distance_m": 0.0,
+        "rotate_steps": 100
+      },
+      "path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_raw/a2w_recovery_verified_wc4_baseline_locked_base_v4_seed615455575/episode_000050.npz",
+      "stage_indices": {
+        "final": 282,
+        "grasp": 70,
+        "push": 50,
+        "rotate": 0,
+        "start": 0
+      },
+      "t_branch": 475,
+      "t_dev": 480,
+      "t_fail": 505
+    },
+    {
+      "candidate_id": 80,
+      "episode": "episode_000066.npz",
+      "failure_source": "failure_trial_000041_batch0002_env09",
+      "failure_type": "insufficient_interaction",
+      "frames": 283,
+      "parameters": {
+        "base_lateral_adjust_m": 0.0,
+        "close_timing": "keep_closed",
+        "controller": "maintain_grasp_then_push",
+        "handle_regrasp_x_offset_m": 0.0,
+        "open_gripper_first": false,
+        "preserve_scripted_base_motion": true,
+        "push_steps": 300,
+        "reapproach_z_offset_m": 0.0,
+        "retreat_distance_m": 0.0,
+        "rotate_steps": 100
+      },
+      "path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_raw/a2w_recovery_verified_wc4_baseline_locked_base_v4_seed615455575/episode_000066.npz",
+      "stage_indices": {
+        "final": 282,
+        "grasp": 70,
+        "push": 50,
+        "rotate": 0,
+        "start": 0
+      },
+      "t_branch": 457,
+      "t_dev": 462,
+      "t_fail": 487
+    },
+    {
+      "candidate_id": 90,
+      "episode": "episode_000074.npz",
+      "failure_source": "failure_trial_000041_batch0002_env09",
+      "failure_type": "insufficient_interaction",
+      "frames": 283,
+      "parameters": {
+        "base_lateral_adjust_m": 0.0,
+        "close_timing": "keep_closed",
+        "controller": "maintain_grasp_then_push",
+        "handle_regrasp_x_offset_m": 0.0,
+        "open_gripper_first": false,
+        "preserve_scripted_base_motion": true,
+        "push_steps": 300,
+        "reapproach_z_offset_m": 0.0,
+        "retreat_distance_m": 0.0,
+        "rotate_steps": 100
+      },
+      "path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_raw/a2w_recovery_verified_wc4_baseline_locked_base_v4_seed615455575/episode_000074.npz",
+      "stage_indices": {
+        "final": 282,
+        "grasp": 70,
+        "push": 50,
+        "rotate": 0,
+        "start": 0
+      },
+      "t_branch": 467,
+      "t_dev": 462,
+      "t_fail": 487
+    },
+    {
+      "candidate_id": 102,
+      "episode": "episode_000082.npz",
+      "failure_source": "failure_trial_000047_batch0002_env15",
+      "failure_type": "insufficient_interaction",
+      "frames": 283,
+      "parameters": {
+        "base_lateral_adjust_m": 0.0,
+        "close_timing": "on_contact",
+        "controller": "reopen_retreat_reapproach",
+        "handle_regrasp_x_offset_m": -0.01,
+        "open_gripper_first": true,
+        "preserve_scripted_base_motion": true,
+        "push_steps": 300,
+        "reapproach_z_offset_m": 0.0,
+        "retreat_distance_m": 0.05,
+        "rotate_steps": 100
+      },
+      "path": "/home/sivan/whole_body/visual_whole_body/high-level/data/door_dp_raw/a2w_recovery_verified_wc4_baseline_locked_base_v4_seed615455575/episode_000082.npz",
+      "stage_indices": {
+        "final": 282,
+        "grasp": 30,
+        "push": 130,
+        "rotate": 80,
+        "start": 0
+      },
+      "t_branch": 422,
+      "t_dev": 427,
+      "t_fail": 452
+    }
+  ]
+}
