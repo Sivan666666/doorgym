@@ -167,6 +167,23 @@ def main():
             "handle_latent_wrist_valid_key",
             "aux.wrist_handle_latent_valid",
         ),
+        end_signal_prediction=bool(policy_config.get("end_signal_prediction", False)),
+        end_signal_target_key=policy_config.get("end_signal_target_key", "aux.end_signal"),
+        end_signal_loss_weight=float(policy_config.get("end_signal_loss_weight", 1.0)),
+        end_signal_init_probability=float(policy_config.get("end_signal_init_probability", 0.01)),
+        interaction_state_conditioning=bool(policy_config.get("interaction_state_conditioning", False)),
+        interaction_contact_target_key=policy_config.get(
+            "interaction_contact_target_key", "aux.interaction_contact"
+        ),
+        interaction_handle_target_key=policy_config.get(
+            "interaction_handle_target_key", "aux.interaction_handle_progress"
+        ),
+        interaction_door_target_key=policy_config.get(
+            "interaction_door_target_key", "aux.interaction_door_progress"
+        ),
+        interaction_contact_loss_weight=float(policy_config.get("interaction_contact_loss_weight", 0.1)),
+        interaction_handle_loss_weight=float(policy_config.get("interaction_handle_loss_weight", 0.1)),
+        interaction_door_loss_weight=float(policy_config.get("interaction_door_loss_weight", 0.1)),
         pre_norm=bool(policy_config.get("pre_norm", False)),
         dim_model=int(policy_config.get("dim_model", 512)),
         n_heads=int(policy_config.get("n_heads", 8)),
@@ -192,6 +209,11 @@ def main():
         "repo_id": args.repo_id,
         "state_dim": state_dim,
         "action_dim": action_dim,
+        "motion_action_dim": action_dim,
+        "policy_output_dim": action_dim + int(bool(policy_config.get("end_signal_prediction", False))),
+        "end_signal_prediction": bool(policy_config.get("end_signal_prediction", False)),
+        "end_signal_index": action_dim if bool(policy_config.get("end_signal_prediction", False)) else None,
+        "interaction_state_conditioning": bool(policy_config.get("interaction_state_conditioning", False)),
         "action_names": action_names,
         "vision_mode": vision_mode,
         "action_frame": action_frame,

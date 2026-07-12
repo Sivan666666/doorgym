@@ -158,6 +158,20 @@ class ACTConfig(PreTrainedConfig):
     handle_latent_front_valid_key: str = "aux.front_handle_latent_valid"
     handle_latent_wrist_key: str = "aux.wrist_handle_latent"
     handle_latent_wrist_valid_key: str = "aux.wrist_handle_latent_valid"
+    # Optional dense autonomous-termination auxiliary target. Motion actions remain
+    # unchanged; a separate sigmoid head predicts this future-aligned scalar.
+    end_signal_prediction: bool = False
+    end_signal_target_key: str = "aux.end_signal"
+    end_signal_loss_weight: float = 1.0
+    end_signal_init_probability: float = 0.01
+    # Optional current-frame privileged interaction supervision and decoder conditioning.
+    interaction_state_conditioning: bool = False
+    interaction_contact_target_key: str = "aux.interaction_contact"
+    interaction_handle_target_key: str = "aux.interaction_handle_progress"
+    interaction_door_target_key: str = "aux.interaction_door_progress"
+    interaction_contact_loss_weight: float = 0.1
+    interaction_handle_loss_weight: float = 0.1
+    interaction_door_loss_weight: float = 0.1
     # Transformer layers.
     pre_norm: bool = False
     dim_model: int = 512
@@ -303,6 +317,28 @@ class ACTConfig(PreTrainedConfig):
             ):
                 if not str(getattr(self, key_name, "")):
                     raise ValueError(f"`{key_name}` must be non-empty when handle_latent_aux is enabled.")
+        if self.end_signal_prediction:
+            if not str(self.end_signal_target_key):
+                raise ValueError("`end_signal_target_key` must be non-empty when end prediction is enabled.")
+            if self.end_signal_loss_weight < 0.0:
+                raise ValueError("`end_signal_loss_weight` must be non-negative.")
+            if not 0.0 < self.end_signal_init_probability < 1.0:
+                raise ValueError("`end_signal_init_probability` must be in (0, 1).")
+        if self.interaction_state_conditioning:
+            for key_name in (
+                "interaction_contact_target_key",
+                "interaction_handle_target_key",
+                "interaction_door_target_key",
+            ):
+                if not str(getattr(self, key_name, "")):
+                    raise ValueError(f"`{key_name}` must be non-empty when interaction conditioning is enabled.")
+            for weight_name in (
+                "interaction_contact_loss_weight",
+                "interaction_handle_loss_weight",
+                "interaction_door_loss_weight",
+            ):
+                if float(getattr(self, weight_name)) < 0.0:
+                    raise ValueError(f"`{weight_name}` must be non-negative.")
         if self.temporal_ensemble_coeff is not None and self.n_action_steps > 1:
             raise NotImplementedError(
                 "`n_action_steps` must be 1 when using temporal ensembling. This is "
@@ -366,6 +402,9 @@ class ACTConfig(PreTrainedConfig):
                     "ACT handle-latent auxiliary loss needs one front image key and one wrist image key. "
                     f"Got {image_keys}."
                 )
+        # Auxiliary targets such as ``aux.end_signal`` are intentionally not
+        # policy inputs. They remain in the training batch and are validated
+        # in ACTPolicy.forward(), while inference needs observations only.
 
     @property
     def observation_delta_indices(self) -> None:

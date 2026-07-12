@@ -29,6 +29,7 @@ from door_dp_common import (  # noqa: E402
     RAW_FRONT_CAMERA_POSE_KEY,
     RAW_WRIST_CAMERA_POSE_KEY,
     image_to_three_channel_uint8,
+    make_interaction_state_targets,
     normalize_vision_mode,
     raw_image_keys_for_vision_mode,
 )
@@ -99,6 +100,38 @@ class Metrics:
             f"pos_l2={self.pos_l2 / self.rows:.4f} "
             f"quat_deg={self.quat_deg / self.rows:.2f} "
             f"grip_mae={self.gripper_abs / self.rows:.4f}"
+        )
+
+
+@dataclass
+class InteractionMetrics:
+    rows: int = 0
+    contact_tp: int = 0
+    contact_fp: int = 0
+    contact_fn: int = 0
+    handle_abs: float = 0.0
+    door_abs: float = 0.0
+
+    def update(self, target: np.ndarray, pred: np.ndarray) -> None:
+        target = np.asarray(target, dtype=np.float32).reshape(3)
+        pred = np.asarray(pred, dtype=np.float32).reshape(3)
+        gt_contact = bool(target[0] >= 0.5)
+        pred_contact = bool(pred[0] >= 0.5)
+        self.contact_tp += int(gt_contact and pred_contact)
+        self.contact_fp += int(not gt_contact and pred_contact)
+        self.contact_fn += int(gt_contact and not pred_contact)
+        self.handle_abs += abs(float(pred[1] - target[1]))
+        self.door_abs += abs(float(pred[2] - target[2]))
+        self.rows += 1
+
+    def summary(self) -> str:
+        precision = self.contact_tp / max(1, self.contact_tp + self.contact_fp)
+        recall = self.contact_tp / max(1, self.contact_tp + self.contact_fn)
+        f1 = 2.0 * precision * recall / max(1.0e-12, precision + recall)
+        return (
+            f"n={self.rows} contact_precision={precision:.4f} contact_recall={recall:.4f} "
+            f"contact_f1={f1:.4f} handle_mae={self.handle_abs/max(1,self.rows):.4f} "
+            f"door_mae={self.door_abs/max(1,self.rows):.4f}"
         )
 
 
@@ -245,6 +278,9 @@ def preload_episode_arrays(data, image_keys: list[str]) -> dict[str, np.ndarray]
     keys = ["state", "action"] + list(image_keys)
     if RAW_FRONT_CAMERA_POSE_KEY in data.files and RAW_WRIST_CAMERA_POSE_KEY in data.files:
         keys += [RAW_FRONT_CAMERA_POSE_KEY, RAW_WRIST_CAMERA_POSE_KEY]
+    for key in ("gripper_handle_contact_both", "replay_door_dof_pos"):
+        if key in data.files:
+            keys.append(key)
     return {key: np.asarray(data[key]) for key in keys}
 
 
@@ -326,12 +362,14 @@ def predict_action_chunks_batched(
     steps: list[int],
     seed: int,
     compare_horizon: int,
-) -> np.ndarray:
+) -> tuple[np.ndarray, np.ndarray | None]:
     windows = [obs_window_from_cache(obs_cache, step, controller.obs_horizon) for step in steps]
     noise = initial_noise_for_steps(controller, steps, seed)
     action = controller.predict_action_chunks_from_windows(windows, noise=noise)
     action = action.detach().cpu().numpy().astype(np.float32)
-    return action[:, :compare_horizon]
+    interaction = getattr(controller.backend, "last_interaction_state", None)
+    interaction = None if interaction is None else np.asarray(interaction, dtype=np.float32).copy()
+    return action[:, :compare_horizon], interaction
 
 
 def reset_controller_on_expert_window(controller: DoorDPPolicyController, data, image_keys: list[str], step: int) -> None:
@@ -444,6 +482,24 @@ def main() -> None:
     )
 
     total = Metrics()
+    interaction_total = InteractionMetrics()
+    interaction_targets = None
+    if bool(getattr(controller.backend.config, "interaction_state_conditioning", False)):
+        missing = [
+            key
+            for key in ("gripper_handle_contact_both", "replay_door_dof_pos")
+            if key not in episode
+        ]
+        if missing:
+            raise ValueError(f"Interaction-state offline metrics require raw fields {missing}.")
+        interaction_targets_dict = make_interaction_state_targets(
+            episode["gripper_handle_contact_both"],
+            episode["replay_door_dof_pos"],
+            contact_min_consecutive_frames=3,
+            handle_unlock_delta_rad=np.deg2rad(40.0),
+            door_goal_delta_rad=np.deg2rad(90.0),
+        )
+        interaction_targets = np.concatenate(list(interaction_targets_dict.values()), axis=1)
     segment = Metrics()
     segment_start = steps[0]
     next_report = segment_start + max(1, int(args.report_every))
@@ -452,9 +508,11 @@ def main() -> None:
 
     for batch_start in range(0, len(steps), batch_size):
         batch_steps = steps[batch_start : batch_start + batch_size]
-        batch_pred = predict_action_chunks_batched(controller, obs_cache, batch_steps, args.seed, compare_horizon)
+        batch_pred, batch_interaction = predict_action_chunks_batched(
+            controller, obs_cache, batch_steps, args.seed, compare_horizon
+        )
         for local_idx, step in enumerate(batch_steps):
-            pred = batch_pred[local_idx]
+            pred = batch_pred[local_idx, :, : actions.shape[1]]
             expert = actions[step : step + compare_horizon]
             current = Metrics()
             current.update(expert, pred, args)
@@ -462,6 +520,10 @@ def main() -> None:
             segment.merge(current)
             if args.print_each or args.steps:
                 print_step_detail(step, expert, pred)
+            if interaction_targets is not None:
+                if batch_interaction is None:
+                    raise RuntimeError("Interaction-enabled checkpoint did not expose interaction predictions.")
+                interaction_total.update(interaction_targets[step], batch_interaction[local_idx])
             if step >= next_report:
                 print(f"[{segment_start:05d}-{step:05d}] {segment.summary()}", flush=True)
                 segment = Metrics()
@@ -472,6 +534,8 @@ def main() -> None:
     if segment.rows > 0:
         print(f"[{segment_start:05d}-{steps[-1]:05d}] {segment.summary()}", flush=True)
     print(f"TOTAL {total.summary()} elapsed={time.perf_counter() - eval_t0:.2f}s", flush=True)
+    if interaction_targets is not None:
+        print(f"INTERACTION {interaction_total.summary()}", flush=True)
 
 
 if __name__ == "__main__":

@@ -3553,6 +3553,7 @@ def make_float_dp_policy_log_record(
     phase,
     action_names=None,
     camera_gates=None,
+    interaction_state=None,
     gym=None,
     dof_names=None,
 ):
@@ -3655,10 +3656,71 @@ def make_float_dp_policy_log_record(
                 "wrist": float(gates[1]),
                 "sum": float(gates[0] + gates[1]),
             }
+    if interaction_state is not None:
+        values = np.asarray(interaction_state, dtype=np.float32).reshape(-1)
+        if values.size >= 3:
+            record["interaction_contact_probability"] = float(values[0])
+            record["interaction_handle_progress"] = float(values[1])
+            record["interaction_door_progress"] = float(values[2])
+            record["interaction_state"] = {
+                "contact_probability": float(values[0]),
+                "handle_progress": float(values[1]),
+                "door_progress": float(values[2]),
+            }
+    if bool(getattr(st.args, "dp_end_signal_monitor", False)):
+        end_probability = float(getattr(st, "dp_end_probability", 0.0))
+        end_consecutive_count = int(getattr(st, "dp_end_consecutive_count", 0))
+        end_triggered = bool(getattr(st, "dp_end_triggered", False))
+        first_end_trigger_step = getattr(st, "dp_first_end_trigger_step", None)
+        door_angle_at_end_trigger = getattr(st, "dp_door_angle_at_end_trigger", None)
+        phase_at_end_trigger = getattr(st, "dp_phase_at_end_trigger", None)
+        record.update(
+            {
+                "end_probability": end_probability,
+                "end_consecutive_count": end_consecutive_count,
+                "end_triggered": end_triggered,
+                "first_end_trigger_step": first_end_trigger_step,
+                "door_angle_at_end_trigger": door_angle_at_end_trigger,
+                "phase_at_end_trigger": phase_at_end_trigger,
+            }
+        )
+        record["end_signal"] = {
+            "probability": end_probability,
+            "consecutive_count": end_consecutive_count,
+            "triggered": end_triggered,
+            "first_trigger_step": first_end_trigger_step,
+            "door_angle_deg_at_trigger": door_angle_at_end_trigger,
+            "phase_at_trigger": phase_at_end_trigger,
+        }
     temporal_meta = getattr(st, "dp_temporal_last_action_meta", None)
     if temporal_meta is not None:
         record["temporal_ensemble"] = temporal_meta
     return record
+
+
+def update_float_dp_end_signal_monitor(st, policy_output, step, door_pos, phase):
+    """Advance one env's sticky end detector for one actually executed policy step."""
+    if not bool(getattr(st.args, "dp_end_signal_monitor", False)):
+        return
+    output = np.asarray(policy_output, dtype=np.float32).reshape(-1)
+    if output.size <= 10:
+        raise ValueError("--dp_end_signal_monitor requires a policy output with end probability at index 10.")
+    probability = float(np.clip(output[10], 0.0, 1.0))
+    threshold = float(getattr(st.args, "dp_end_signal_threshold", 0.8))
+    required = max(1, int(getattr(st.args, "dp_end_signal_consecutive_steps", 10)))
+    count = int(getattr(st, "dp_end_consecutive_count", 0))
+    count = count + 1 if probability > threshold else 0
+    st.dp_end_probability = probability
+    st.dp_end_consecutive_count = count
+    if bool(getattr(st, "dp_end_triggered", False)) or count < required:
+        return
+    st.dp_end_triggered = True
+    st.dp_first_end_trigger_step = int(step)
+    door_values = np.asarray([] if door_pos is None else door_pos, dtype=np.float32).reshape(-1)
+    st.dp_door_angle_at_end_trigger = (
+        None if door_values.size == 0 else float(np.degrees(float(door_values[0])))
+    )
+    st.dp_phase_at_end_trigger = str(phase)
 
 
 def print_float_dp_policy_log_record(record):
@@ -3868,6 +3930,10 @@ def make_float_dp_recorder(
     state_mode = normalize_float_dp_state_mode(getattr(args, "dp_record_state_mode", FLOAT_DP_STATE_MODE_FULL))
     action_names = float_dp_action_feature_names(state_mode=state_mode)
     pose_frame = normalize_float_dp_pose_frame(getattr(args, "ee_pose_frame", "base"))
+    records_tracik_command_fk = (
+        str(getattr(args, "arm_ik_solver", "gym_jacobian")) == "tracik"
+        and not float_dp_action_is_a2w_joint9(action_names)
+    )
     if state_mode == FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10:
         state_source = "current_vx_yaw_rate_ee_base_gripper"
     elif state_mode == FLOAT_DP_STATE_MODE_PI05_LAST_COMMAND_STATE10:
@@ -3904,8 +3970,13 @@ def make_float_dp_recorder(
         "action_source": (
             "base_command_plus_a2w_z1_joint_targets"
             if float_dp_action_is_a2w_joint9(action_names)
-            else "base_command_plus_ee_target_pose"
+            else (
+                "base_command_plus_tracik_smoothed_command_fk"
+                if records_tracik_command_fk
+                else "base_command_plus_ee_target_pose"
+            )
         ),
+        "tracik_smoothed_action_recording": records_tracik_command_fk,
         "state_normalized": False,
         "pi05_state_action_aligned": state_mode == FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10,
         "camera_fps": float_dp_camera_effective_fps(args),
@@ -3925,7 +3996,27 @@ def make_float_dp_recorder(
             "grasp": "first grasp_hold/close_gripper frame",
             "rotate": "first push_door frame, i.e. after rotate_handle completes",
         },
+        "handle_closed_angle": float(door.dof_lower[1]) if len(door.dof_lower) > 1 else 0.0,
+        "door_closed_angle": (
+            float(door.dof_upper[0])
+            if len(door.dof_upper) > 0 and float(args.door_motion_sign) < 0.0
+            else (float(door.dof_lower[0]) if len(door.dof_lower) > 0 else 0.0)
+        ),
+        "handle_unlock_threshold": float(getattr(door, "handle_unlock_threshold", math.radians(40.0))),
+        "door_progress_goal_angle": math.radians(90.0),
     }
+    if bool(getattr(args, "record_end_signal", False)):
+        metadata.update(
+            {
+                "end_signal_enabled": True,
+                "end_signal_feature": "aux.end_signal",
+                "end_signal_positive_phases": parse_csv_names(
+                    getattr(args, "end_signal_positive_phases", "return_home,hold_home"),
+                    ["return_home", "hold_home"],
+                ),
+                "end_signal_version": "phase_dense_v1",
+            }
+        )
     if bool(getattr(args, "record_camera_pose", False)):
         metadata.update(
             {
@@ -4097,7 +4188,7 @@ def shortest_path_slerp_xyzw(old_quat_xyzw, new_quat_xyzw, new_weight):
 
 
 def blend_float_dp_ee_actions(old_action, new_action, old_weight=0.3, new_weight=0.7):
-    """Blend overlapping 10D EE actions like the real NX deployment path."""
+    """Blend overlapping EE actions and preserve optional auxiliary outputs."""
     old = np.asarray(old_action, dtype=np.float32).reshape(-1)
     new = np.asarray(new_action, dtype=np.float32).reshape(-1)
     if old.shape[0] < 10 or new.shape[0] < 10:
@@ -4107,11 +4198,17 @@ def blend_float_dp_ee_actions(old_action, new_action, old_weight=0.3, new_weight
         raise ValueError("EE action blend weights must have a positive sum.")
     old_alpha = float(old_weight) / total
     new_alpha = float(new_weight) / total
-    blended = new[:10].copy()
+    if old.shape[0] != new.shape[0]:
+        raise ValueError(f"Overlapping policy outputs must have equal dimensions, got {old.shape} and {new.shape}.")
+    blended = new.copy()
     blended[0:5] = old_alpha * old[0:5] + new_alpha * new[0:5]
     blended[5:9] = shortest_path_slerp_xyzw(old[5:9], new[5:9], new_alpha)
     # Gripper follows the newest chunk directly; blending delays grasp/release.
     blended[9] = new[9]
+    # Auxiliary outputs (currently end probability) use the same temporal
+    # weighting as continuous motion values.
+    if blended.shape[0] > 10:
+        blended[10:] = old_alpha * old[10:] + new_alpha * new[10:]
     return blended
 
 
@@ -4178,7 +4275,7 @@ class FloatDPActionOverlapBuffer:
             else:
                 future[timestep] = FloatDPTimedAction(
                     timestep=timestep,
-                    action=np.asarray(row[:10], dtype=np.float32).copy(),
+                    action=np.asarray(row, dtype=np.float32).copy(),
                     source="new_chunk",
                     blend_count=1,
                 )
@@ -4230,6 +4327,12 @@ def setup_float_dp_policy_controller(
         action_horizon=args.dp_action_horizon,
         noise_scheduler_type=args.dp_noise_scheduler_type,
     )
+    if bool(getattr(args, "dp_end_signal_monitor", False)) and not bool(
+        getattr(dp_controller, "end_signal_prediction", False)
+    ):
+        raise ValueError(
+            "--dp_end_signal_monitor was enabled, but the loaded checkpoint has no autonomous end-signal head."
+        )
     expected_vision_mode = "rgb" if args.rgb else "depth"
     if bool(getattr(args, "depth_only", False)) and not args.rgb:
         expected_vision_mode = "depth_only"
@@ -4381,6 +4484,10 @@ def _collect_float_dp_policy_actions_temporal(
         dp_policy_inputs_by_env[env_id]["temporal_ensemble"] = dict(st.dp_temporal_last_action_meta)
         if hasattr(dp_controller, "get_last_camera_gates_for_env"):
             dp_policy_inputs_by_env[env_id]["camera_gates"] = dp_controller.get_last_camera_gates_for_env(env_id)
+        if hasattr(dp_controller, "get_last_interaction_state_for_env"):
+            dp_policy_inputs_by_env[env_id]["interaction_state"] = (
+                dp_controller.get_last_interaction_state_for_env(env_id)
+            )
     return dp_actions_by_env
 
 
@@ -4528,6 +4635,10 @@ def collect_float_dp_policy_actions(gym, sim, env_states, dof_names, gripper_idx
                     dp_policy_inputs_by_env[int(env_id)]["camera_gates"] = dp_controller.get_last_camera_gates_for_env(
                         int(env_id)
                     )
+                if hasattr(dp_controller, "get_last_interaction_state_for_env"):
+                    dp_policy_inputs_by_env[int(env_id)]["interaction_state"] = (
+                        dp_controller.get_last_interaction_state_for_env(int(env_id))
+                    )
     return dp_policy_inputs_by_env, dp_actions_by_env
 
 
@@ -4557,7 +4668,20 @@ def record_float_dp_frame(gym, sim, st, dof_names, gripper_idx, dt, phase_id, do
         getattr(st, "dp_record_prev_yaw", None),
         record_dt,
     )
-    target_quat = target_quat_for_dp(st.last_target_quat, st.ik_state, ee_quat)
+    scripted_target_pos = np.asarray(st.last_target_pos, dtype=np.float32).copy()
+    scripted_target_quat = target_quat_for_dp(st.last_target_quat, st.ik_state, ee_quat)
+    action_target_pos = scripted_target_pos
+    action_target_quat = scripted_target_quat
+    use_tracik_command_fk = (
+        str(getattr(st.args, "arm_ik_solver", "gym_jacobian")) == "tracik"
+        and getattr(st, "tracik_command_pos_world", None) is not None
+        and getattr(st, "tracik_command_quat_world", None) is not None
+    )
+    if use_tracik_command_fk:
+        action_target_pos = np.asarray(st.tracik_command_pos_world, dtype=np.float32).copy()
+        action_target_quat = base_ik.normalize_quat(
+            np.asarray(st.tracik_command_quat_world, dtype=np.float32)
+        )
     wrist_mask_rgb, wrist_second_rgb, front_mask_rgb, front_second_rgb = float_dp_camera_images_for_record_frame(
         gym, sim, st
     )
@@ -4605,8 +4729,8 @@ def record_float_dp_frame(gym, sim, st, dof_names, gripper_idx, dt, phase_id, do
     dp_action = make_float_dp_action(
         vx_cmd,
         yaw_rate_cmd,
-        st.last_target_pos,
-        target_quat,
+        action_target_pos,
+        action_target_quat,
         st.last_gripper,
         base_xy,
         st.args.robot_z,
@@ -4632,6 +4756,12 @@ def record_float_dp_frame(gym, sim, st, dof_names, gripper_idx, dt, phase_id, do
         vx_cmd,
         yaw_rate_cmd,
     )
+    replay_snapshot["scripted_target_ee_pos_world"] = scripted_target_pos
+    replay_snapshot["scripted_target_ee_quat_world"] = scripted_target_quat
+    if use_tracik_command_fk:
+        replay_snapshot["tracik_command_q"] = np.asarray(st.tracik_command_q, dtype=np.float32).copy()
+        replay_snapshot["tracik_command_ee_pos_world"] = action_target_pos
+        replay_snapshot["tracik_command_ee_quat_world"] = action_target_quat
     if bool(getattr(st.args, "record_camera_pose", False)):
         front_pose_base, wrist_pose_base = float_camera_pose_base(gym, st)
         replay_snapshot["front_camera_pose_base"] = front_pose_base
@@ -4655,6 +4785,9 @@ def record_float_dp_frame(gym, sim, st, dof_names, gripper_idx, dt, phase_id, do
         ).reshape(1)
     if bool(getattr(st.args, "record_gripper_handle_contact", False)):
         replay_snapshot.update(gripper_handle_contact_snapshot(gym, st))
+    phase_names = list(st.dp_recorder.metadata.get("phase_names", []))
+    phase_name = phase_names[int(phase_id)] if 0 <= int(phase_id) < len(phase_names) else ""
+    positive_end_phases = set(st.dp_recorder.metadata.get("end_signal_positive_phases", []))
     st.dp_recorder.add_frame(
         dp_state,
         wrist_mask_rgb,
@@ -4664,6 +4797,12 @@ def record_float_dp_frame(gym, sim, st, dof_names, gripper_idx, dt, phase_id, do
         front_mask_rgb=front_mask_rgb,
         front_second_rgb=front_second_rgb,
         replay_snapshot=replay_snapshot,
+        end_signal=(
+            1.0
+            if bool(getattr(st.args, "record_end_signal", False))
+            and str(phase_name) in positive_end_phases
+            else 0.0
+        ),
     )
     st.last_dp_action = dp_action.copy()
     st.dp_record_prev_base_xy = np.asarray(base_xy, dtype=np.float32).copy()

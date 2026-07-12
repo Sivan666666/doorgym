@@ -1,4 +1,5 @@
 import json
+import math
 import os
 from pathlib import Path
 from collections import deque
@@ -67,6 +68,7 @@ DATASET_METADATA_KEYS = (
     "state_source",
     "action_format",
     "action_source",
+    "state_action_mode",
     "state_normalized",
     "pi05_state_action_aligned",
     "state_preprocess",
@@ -100,10 +102,34 @@ DATASET_METADATA_KEYS = (
     "keyframe_loss_feature",
     "action_loss_weight_feature",
     "keyframe_extraction_rules",
+    "end_signal_enabled",
+    "end_signal_feature",
+    "end_signal_positive_phases",
+    "end_signal_version",
+    "interaction_state_features",
+    "interaction_state_version",
+    "interaction_contact_min_consecutive_frames",
+    "interaction_handle_unlock_angle_deg",
+    "interaction_door_goal_angle_deg",
+    "handle_closed_angle",
+    "door_closed_angle",
+    "handle_unlock_threshold",
+    "door_progress_goal_angle",
 )
 ACTION_LOSS_WEIGHT_FEATURE = "loss.action_weight"
 RECOVERY_INDICATOR_FEATURE = "aux.is_recovery"
 RAW_ACTION_LOSS_WEIGHT_KEY = "action_loss_weight"
+END_SIGNAL_FEATURE = "aux.end_signal"
+RAW_END_SIGNAL_KEY = "end_signal"
+DEFAULT_END_SIGNAL_POSITIVE_PHASES = ("return_home", "hold_home")
+INTERACTION_CONTACT_FEATURE = "aux.interaction_contact"
+INTERACTION_HANDLE_PROGRESS_FEATURE = "aux.interaction_handle_progress"
+INTERACTION_DOOR_PROGRESS_FEATURE = "aux.interaction_door_progress"
+INTERACTION_STATE_FEATURES = (
+    INTERACTION_CONTACT_FEATURE,
+    INTERACTION_HANDLE_PROGRESS_FEATURE,
+    INTERACTION_DOOR_PROGRESS_FEATURE,
+)
 DEFAULT_KEYFRAME_LOSS_WEIGHT = 8.0
 DEFAULT_KEYFRAME_LOSS_RADIUS = 3
 DEFAULT_KEYFRAME_NAMES = (
@@ -882,6 +908,80 @@ def _to_str_list(value):
     return [str(value)]
 
 
+def make_end_signal_from_phase_ids(
+    phase_ids,
+    phase_names,
+    positive_phases=DEFAULT_END_SIGNAL_POSITIVE_PHASES,
+):
+    """Build a dense binary end target aligned one-to-one with recorded frames."""
+    phase_ids = np.asarray(phase_ids, dtype=np.int64).reshape(-1)
+    names = _to_str_list(phase_names)
+    wanted = {str(name).strip() for name in positive_phases if str(name).strip()}
+    positive_ids = {idx for idx, name in enumerate(names) if name in wanted}
+    values = np.isin(phase_ids, list(positive_ids)).astype(np.float32)
+    return values.reshape(-1, 1)
+
+
+def make_interaction_state_targets(
+    contact_both,
+    door_dof_pos,
+    *,
+    contact_min_consecutive_frames=3,
+    handle_closed_angle=None,
+    door_closed_angle=None,
+    handle_unlock_delta_rad=math.radians(40.0),
+    door_goal_delta_rad=math.radians(90.0),
+):
+    """Create causal contact and cumulative articulation progress targets."""
+    contact_both = np.asarray(contact_both, dtype=np.float32).reshape(-1)
+    door_dof_pos = np.asarray(door_dof_pos, dtype=np.float32)
+    if door_dof_pos.ndim != 2 or door_dof_pos.shape[1] < 2:
+        raise ValueError(f"door_dof_pos must have shape (T, >=2), got {door_dof_pos.shape}.")
+    if contact_both.shape[0] != door_dof_pos.shape[0]:
+        raise ValueError(
+            f"contact/door frame count mismatch: {contact_both.shape[0]} vs {door_dof_pos.shape[0]}."
+        )
+    if not np.all(np.isfinite(contact_both)) or not np.all(np.isfinite(door_dof_pos[:, :2])):
+        raise ValueError("Interaction-state source arrays must contain only finite values.")
+    min_frames = int(contact_min_consecutive_frames)
+    if min_frames <= 0:
+        raise ValueError("contact_min_consecutive_frames must be positive.")
+    handle_unlock_delta_rad = float(handle_unlock_delta_rad)
+    door_goal_delta_rad = float(door_goal_delta_rad)
+    if handle_unlock_delta_rad <= 0.0 or door_goal_delta_rad <= 0.0:
+        raise ValueError("Interaction progress denominators must be positive.")
+
+    contact = np.zeros(contact_both.shape[0], dtype=np.float32)
+    run_length = 0
+    for idx, active in enumerate(contact_both > 0.5):
+        run_length = run_length + 1 if bool(active) else 0
+        contact[idx] = float(run_length >= min_frames)
+
+    handle_closed = float(door_dof_pos[0, 1] if handle_closed_angle is None else handle_closed_angle)
+    door_closed = float(door_dof_pos[0, 0] if door_closed_angle is None else door_closed_angle)
+    raw_handle = np.clip(
+        np.abs(door_dof_pos[:, 1] - handle_closed) / handle_unlock_delta_rad,
+        0.0,
+        1.0,
+    )
+    raw_door = np.clip(
+        np.abs(door_dof_pos[:, 0] - door_closed) / door_goal_delta_rad,
+        0.0,
+        1.0,
+    )
+    # Physics limits commonly stop a few microradians short of the nominal
+    # target; snap numerically equivalent completion values to exactly one.
+    raw_handle[raw_handle >= 1.0 - 1.0e-4] = 1.0
+    raw_door[raw_door >= 1.0 - 1.0e-4] = 1.0
+    handle_progress = np.maximum.accumulate(raw_handle).astype(np.float32, copy=False)
+    door_progress = np.maximum.accumulate(raw_door).astype(np.float32, copy=False)
+    return {
+        INTERACTION_CONTACT_FEATURE: contact.reshape(-1, 1),
+        INTERACTION_HANDLE_PROGRESS_FEATURE: handle_progress.reshape(-1, 1),
+        INTERACTION_DOOR_PROGRESS_FEATURE: door_progress.reshape(-1, 1),
+    }
+
+
 def first_phase_index(phase_ids, phase_names, target_phase_names):
     phase_names = _to_str_list(phase_names)
     if not phase_names:
@@ -1271,6 +1371,8 @@ class DoorDPLeRobotRecorder:
         include_recovery_indicator=False,
         include_camera_pose=False,
         include_handle_latent=False,
+        include_end_signal=False,
+        include_interaction_state=False,
     ):
         from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
@@ -1289,6 +1391,8 @@ class DoorDPLeRobotRecorder:
         self.include_recovery_indicator = bool(include_recovery_indicator)
         self.include_camera_pose = bool(include_camera_pose)
         self.include_handle_latent = bool(include_handle_latent)
+        self.include_end_signal = bool(include_end_signal)
+        self.include_interaction_state = bool(include_interaction_state)
         self.metadata = dict(metadata or {})
         self.root.mkdir(parents=True, exist_ok=True)
         self.dataset_root = self.root / repo_id
@@ -1317,6 +1421,19 @@ class DoorDPLeRobotRecorder:
                 "shape": (1,),
                 "names": ["is_recovery"],
             }
+        if self.include_end_signal:
+            features[END_SIGNAL_FEATURE] = {
+                "dtype": "float32",
+                "shape": (1,),
+                "names": ["end_signal"],
+            }
+        if self.include_interaction_state:
+            for key, name in (
+                (INTERACTION_CONTACT_FEATURE, "contact"),
+                (INTERACTION_HANDLE_PROGRESS_FEATURE, "handle_progress"),
+                (INTERACTION_DOOR_PROGRESS_FEATURE, "door_progress"),
+            ):
+                features[key] = {"dtype": "float32", "shape": (1,), "names": [name]}
         if self.include_camera_pose:
             for key in CAMERA_POSE_FEATURES:
                 features[key] = {
@@ -1386,6 +1503,10 @@ class DoorDPLeRobotRecorder:
             sidecar["action_loss_weight_feature"] = ACTION_LOSS_WEIGHT_FEATURE
         if self.include_recovery_indicator:
             sidecar["recovery_indicator_feature"] = RECOVERY_INDICATOR_FEATURE
+        if self.include_end_signal:
+            sidecar["end_signal_feature"] = END_SIGNAL_FEATURE
+        if self.include_interaction_state:
+            sidecar["interaction_state_features"] = list(INTERACTION_STATE_FEATURES)
         if self.include_camera_pose:
             sidecar["camera_pose_features"] = CAMERA_POSE_FEATURES
             sidecar.setdefault("camera_pose_frame", "robot_base")
@@ -1419,6 +1540,10 @@ class DoorDPLeRobotRecorder:
         front_handle_latent_valid=None,
         wrist_handle_latent=None,
         wrist_handle_latent_valid=None,
+        end_signal=None,
+        interaction_contact=None,
+        interaction_handle_progress=None,
+        interaction_door_progress=None,
     ):
         if self.vision_mode == "depth":
             front_mask_rgb = _zero_image_like(wrist_mask_rgb) if front_mask_rgb is None else front_mask_rgb
@@ -1440,6 +1565,22 @@ class DoorDPLeRobotRecorder:
         if self.include_recovery_indicator:
             value = 0.0 if is_recovery is None else float(np.asarray(is_recovery).reshape(-1)[0])
             frame[RECOVERY_INDICATOR_FEATURE] = np.asarray([value], dtype=np.float32)
+        if self.include_end_signal:
+            value = 0.0 if end_signal is None else float(np.asarray(end_signal).reshape(-1)[0])
+            frame[END_SIGNAL_FEATURE] = np.asarray([value], dtype=np.float32)
+        if self.include_interaction_state:
+            values = {
+                INTERACTION_CONTACT_FEATURE: interaction_contact,
+                INTERACTION_HANDLE_PROGRESS_FEATURE: interaction_handle_progress,
+                INTERACTION_DOOR_PROGRESS_FEATURE: interaction_door_progress,
+            }
+            for key, value in values.items():
+                if value is None:
+                    raise ValueError(f"LeRobot interaction-state frame requires {key!r}.")
+                scalar = float(np.asarray(value, dtype=np.float32).reshape(-1)[0])
+                if not np.isfinite(scalar) or scalar < 0.0 or scalar > 1.0:
+                    raise ValueError(f"Invalid {key}={scalar}; expected a finite value in [0, 1].")
+                frame[key] = np.asarray([scalar], dtype=np.float32)
         if self.include_camera_pose:
             if front_camera_pose_base is None or wrist_camera_pose_base is None:
                 raise ValueError("LeRobot camera-pose dataset frames require both front and wrist camera poses.")
@@ -1511,6 +1652,9 @@ class RawDoorDPRecorder:
             "action": [],
             "subtask_index": [],
         }
+        self.include_end_signal = bool(self.metadata.get("end_signal_enabled", False))
+        if self.include_end_signal:
+            self.frames[RAW_END_SIGNAL_KEY] = []
         for key in self.image_keys:
             self.frames[key] = []
         self.frame_count = 0
@@ -1548,6 +1692,7 @@ class RawDoorDPRecorder:
         front_mask_rgb=None,
         front_second_rgb=None,
         replay_snapshot=None,
+        end_signal=None,
     ):
         if self.vision_mode == "depth":
             front_mask_rgb = _zero_image_like(wrist_mask_rgb) if front_mask_rgb is None else front_mask_rgb
@@ -1567,6 +1712,9 @@ class RawDoorDPRecorder:
             self.frames[self.image_keys[2]].append(np.asarray(front_mask_rgb, dtype=np.uint8).copy())
             self.frames[self.image_keys[3]].append(np.asarray(front_second_rgb, dtype=np.uint8).copy())
         self.frames["subtask_index"].append(np.asarray([subtask_index], dtype=np.int64).copy())
+        if self.include_end_signal:
+            value = 0.0 if end_signal is None else float(np.asarray(end_signal).reshape(-1)[0])
+            self.frames[RAW_END_SIGNAL_KEY].append(np.asarray([value], dtype=np.float32))
         if replay_snapshot:
             for key, value in replay_snapshot.items():
                 self.frames.setdefault(key, []).append(np.asarray(value, dtype=np.float32).copy())
@@ -1649,6 +1797,10 @@ class RawDoorDPRecorder:
             "keyframe_loss_radius": np.asarray(keyframe_loss_radius, dtype=np.int64),
             "keyframe_loss_feature": np.asarray(ACTION_LOSS_WEIGHT_FEATURE),
         }
+        if self.include_end_signal:
+            payload[RAW_END_SIGNAL_KEY] = np.stack(
+                self.frames[RAW_END_SIGNAL_KEY], axis=0
+            ).astype(np.float32, copy=False)
         if self.vision_mode != "depth":
             payload["vision_mode"] = np.asarray(self.vision_mode)
         if self.vision_mode == "depth_only":

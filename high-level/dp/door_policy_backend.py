@@ -32,6 +32,8 @@ from torch.utils.data import Dataset
 try:
     from .door_dp_common import (
         ACTION_NAMES,
+        END_SIGNAL_FEATURE,
+        INTERACTION_STATE_FEATURES,
         FRONT_CAMERA_POSE_FEATURE,
         IMAGE_HEIGHT,
         IMAGE_WIDTH,
@@ -46,6 +48,8 @@ try:
 except ImportError:
     from door_dp_common import (
         ACTION_NAMES,
+        END_SIGNAL_FEATURE,
+        INTERACTION_STATE_FEATURES,
         FRONT_CAMERA_POSE_FEATURE,
         IMAGE_HEIGHT,
         IMAGE_WIDTH,
@@ -745,6 +749,10 @@ class DoorPolicyChunkDataset(Dataset):
         self.indices = self._build_indices()
         meta = getattr(self.dataset, "meta", None)
         self.stats = getattr(meta, "stats", None)
+        self.has_end_signal = bool(meta is not None and END_SIGNAL_FEATURE in getattr(meta, "features", {}))
+        self.interaction_state_features = [
+            key for key in INTERACTION_STATE_FEATURES if meta is not None and key in getattr(meta, "features", {})
+        ]
         if self.stats is None:
             raise ValueError("LeRobotDataset has no meta.stats; run conversion/stat generation before training.")
 
@@ -781,13 +789,22 @@ class DoorPolicyChunkDataset(Dataset):
             OBS_STATE: torch.as_tensor(_as_numpy(_field(frame, OBS_STATE)), dtype=torch.float32),
             ACTION_IS_PAD: torch.zeros(self.chunk_size, dtype=torch.bool),
         }
+        for key in self.interaction_state_features:
+            sample[key] = torch.as_tensor(_as_numpy(_field(frame, key)), dtype=torch.float32)
         for key in self.image_keys:
             sample[key] = _image_from_frame(frame, key, required=image_required)
         actions: List[torch.Tensor] = []
+        end_signals: List[torch.Tensor] = []
         for idx in range(center, center + self.chunk_size):
             action_frame = self._tabular_frame(idx)
             actions.append(torch.as_tensor(_as_numpy(_field(action_frame, ACTION)), dtype=torch.float32))
+            if self.has_end_signal:
+                end_signals.append(
+                    torch.as_tensor(_as_numpy(_field(action_frame, END_SIGNAL_FEATURE)), dtype=torch.float32)
+                )
         sample[ACTION] = torch.stack(actions, dim=0)
+        if self.has_end_signal:
+            sample[END_SIGNAL_FEATURE] = torch.stack(end_signals, dim=0)
         return sample
 
 
@@ -1056,6 +1073,17 @@ def make_lerobot_act_config(
     handle_latent_front_valid_key: str = "aux.front_handle_latent_valid",
     handle_latent_wrist_key: str = "aux.wrist_handle_latent",
     handle_latent_wrist_valid_key: str = "aux.wrist_handle_latent_valid",
+    end_signal_prediction: bool = False,
+    end_signal_target_key: str = "aux.end_signal",
+    end_signal_loss_weight: float = 1.0,
+    end_signal_init_probability: float = 0.01,
+    interaction_state_conditioning: bool = False,
+    interaction_contact_target_key: str = "aux.interaction_contact",
+    interaction_handle_target_key: str = "aux.interaction_handle_progress",
+    interaction_door_target_key: str = "aux.interaction_door_progress",
+    interaction_contact_loss_weight: float = 0.1,
+    interaction_handle_loss_weight: float = 0.1,
+    interaction_door_loss_weight: float = 0.1,
     pre_norm: bool = False,
     dim_model: int = 512,
     n_heads: int = 8,
@@ -1151,6 +1179,17 @@ def make_lerobot_act_config(
         handle_latent_front_valid_key=str(handle_latent_front_valid_key),
         handle_latent_wrist_key=str(handle_latent_wrist_key),
         handle_latent_wrist_valid_key=str(handle_latent_wrist_valid_key),
+        end_signal_prediction=bool(end_signal_prediction),
+        end_signal_target_key=str(end_signal_target_key),
+        end_signal_loss_weight=float(end_signal_loss_weight),
+        end_signal_init_probability=float(end_signal_init_probability),
+        interaction_state_conditioning=bool(interaction_state_conditioning),
+        interaction_contact_target_key=str(interaction_contact_target_key),
+        interaction_handle_target_key=str(interaction_handle_target_key),
+        interaction_door_target_key=str(interaction_door_target_key),
+        interaction_contact_loss_weight=float(interaction_contact_loss_weight),
+        interaction_handle_loss_weight=float(interaction_handle_loss_weight),
+        interaction_door_loss_weight=float(interaction_door_loss_weight),
         pre_norm=bool(pre_norm),
         dim_model=int(dim_model),
         n_heads=int(n_heads),
@@ -1615,6 +1654,7 @@ class LeRobotActDoorPolicyBackend:
             self.device,
         )
         self.last_camera_gates: Optional[np.ndarray] = None
+        self.last_interaction_state: Optional[np.ndarray] = None
 
     @property
     def obs_horizon(self) -> int:
@@ -1630,6 +1670,10 @@ class LeRobotActDoorPolicyBackend:
 
     @property
     def action_dim(self) -> int:
+        return self.motion_action_dim + int(bool(getattr(self.config, "end_signal_prediction", False)))
+
+    @property
+    def motion_action_dim(self) -> int:
         return int(self.config.action_feature.shape[0])
 
     @classmethod
@@ -1746,6 +1790,23 @@ class LeRobotActDoorPolicyBackend:
                 "handle_latent_wrist_valid_key",
                 "aux.wrist_handle_latent_valid",
             ),
+            end_signal_prediction=bool(cfg.get("end_signal_prediction", False)),
+            end_signal_target_key=cfg.get("end_signal_target_key", "aux.end_signal"),
+            end_signal_loss_weight=float(cfg.get("end_signal_loss_weight", 1.0)),
+            end_signal_init_probability=float(cfg.get("end_signal_init_probability", 0.01)),
+            interaction_state_conditioning=bool(cfg.get("interaction_state_conditioning", False)),
+            interaction_contact_target_key=cfg.get(
+                "interaction_contact_target_key", "aux.interaction_contact"
+            ),
+            interaction_handle_target_key=cfg.get(
+                "interaction_handle_target_key", "aux.interaction_handle_progress"
+            ),
+            interaction_door_target_key=cfg.get(
+                "interaction_door_target_key", "aux.interaction_door_progress"
+            ),
+            interaction_contact_loss_weight=float(cfg.get("interaction_contact_loss_weight", 0.1)),
+            interaction_handle_loss_weight=float(cfg.get("interaction_handle_loss_weight", 0.1)),
+            interaction_door_loss_weight=float(cfg.get("interaction_door_loss_weight", 0.1)),
             pre_norm=bool(cfg.get("pre_norm", False)),
             dim_model=int(cfg.get("dim_model", 512)),
             n_heads=int(cfg.get("n_heads", 8)),
@@ -1799,15 +1860,60 @@ class LeRobotActDoorPolicyBackend:
     def predict_action_chunks_from_batch(self, batch: Mapping[str, Any], noise: Optional[torch.Tensor] = None) -> torch.Tensor:
         batch_norm = self.normalizer.normalize_batch(batch, include_action=False)
         self.policy.eval()
-        actions = self.policy.predict_action_chunk(batch_norm)
+        if bool(getattr(self.config, "end_signal_prediction", False)):
+            actions, end_probability = self.policy.predict_action_chunk_with_end_signal(batch_norm)
+        else:
+            actions = self.policy.predict_action_chunk(batch_norm)
+            end_probability = None
         gates = getattr(getattr(self.policy, "model", None), "_last_camera_gates", None)
         self.last_camera_gates = None if gates is None else gates.detach().cpu().float().numpy()
-        return self.normalizer.denormalize_action(actions)
+        interaction = getattr(
+            getattr(self.policy, "model", None), "_last_interaction_state_probabilities", None
+        )
+        self.last_interaction_state = (
+            None if interaction is None else interaction.detach().cpu().float().numpy()
+        )
+        actions = self.normalizer.denormalize_action(actions)
+        if end_probability is not None:
+            actions = torch.cat([actions, end_probability.to(device=actions.device, dtype=actions.dtype)], dim=-1)
+        return actions
 
     def metadata(self, extra_config: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
         policy_config = {
             "state_dim": int(self.config.robot_state_feature.shape[0]),
             "action_dim": int(self.config.action_feature.shape[0]),
+            "motion_action_dim": int(self.config.action_feature.shape[0]),
+            "policy_output_dim": self.action_dim,
+            "end_signal_prediction": bool(getattr(self.config, "end_signal_prediction", False)),
+            "end_signal_index": (
+                int(self.config.action_feature.shape[0])
+                if bool(getattr(self.config, "end_signal_prediction", False))
+                else None
+            ),
+            "end_signal_target_key": str(getattr(self.config, "end_signal_target_key", "aux.end_signal")),
+            "end_signal_loss_weight": float(getattr(self.config, "end_signal_loss_weight", 1.0)),
+            "end_signal_init_probability": float(getattr(self.config, "end_signal_init_probability", 0.01)),
+            "interaction_state_conditioning": bool(
+                getattr(self.config, "interaction_state_conditioning", False)
+            ),
+            "interaction_contact_target_key": str(
+                getattr(self.config, "interaction_contact_target_key", "aux.interaction_contact")
+            ),
+            "interaction_handle_target_key": str(
+                getattr(self.config, "interaction_handle_target_key", "aux.interaction_handle_progress")
+            ),
+            "interaction_door_target_key": str(
+                getattr(self.config, "interaction_door_target_key", "aux.interaction_door_progress")
+            ),
+            "interaction_contact_loss_weight": float(
+                getattr(self.config, "interaction_contact_loss_weight", 0.1)
+            ),
+            "interaction_handle_loss_weight": float(
+                getattr(self.config, "interaction_handle_loss_weight", 0.1)
+            ),
+            "interaction_door_loss_weight": float(
+                getattr(self.config, "interaction_door_loss_weight", 0.1)
+            ),
             "obs_horizon": 1,
             "chunk_size": int(self.config.chunk_size),
             "horizon": int(self.config.chunk_size),
@@ -2354,12 +2460,17 @@ class DoorPolicyController:
         self.pred_horizon = self.backend.horizon
         self.action_horizon = self.backend.action_horizon
         self.action_dim = self.backend.action_dim
+        self.motion_action_dim = int(getattr(self.backend, "motion_action_dim", self.backend.action_dim))
+        self.end_signal_prediction = bool(self.config.get("end_signal_prediction", False))
+        self.end_signal_index = self.config.get("end_signal_index")
         self.obs_buffer: deque = deque(maxlen=self.obs_horizon)
         self.action_queue: deque = deque()
         self.multi_obs_buffers: Dict[int, deque] = {}
         self.multi_action_queues: Dict[int, deque] = {}
         self.multi_camera_gates: Dict[int, np.ndarray] = {}
+        self.multi_interaction_states: Dict[int, np.ndarray] = {}
         self.last_camera_gates: Optional[np.ndarray] = None
+        self.last_interaction_state: Optional[np.ndarray] = None
         self.sidecar_config = dict(getattr(self.backend, "sidecar_config", {}) or {})
         self.state_feature_names = list(self.sidecar_config.get("state") or self.config.get("state_feature_names", []))
         self.state_sanitize = self.sidecar_config.get("state_sanitize") or self.config.get("state_sanitize")
@@ -2380,20 +2491,25 @@ class DoorPolicyController:
         self.multi_obs_buffers.clear()
         self.multi_action_queues.clear()
         self.multi_camera_gates.clear()
+        self.multi_interaction_states.clear()
         self.last_camera_gates = None
+        self.last_interaction_state = None
 
     def reset_envs(self, env_ids: Optional[Sequence[int]] = None) -> None:
         if env_ids is None:
             self.multi_obs_buffers.clear()
             self.multi_action_queues.clear()
             self.multi_camera_gates.clear()
+            self.multi_interaction_states.clear()
             self.last_camera_gates = None
+            self.last_interaction_state = None
             return
         for env_id in env_ids:
             env_id = int(env_id)
             self.multi_obs_buffers.pop(env_id, None)
             self.multi_action_queues.pop(env_id, None)
             self.multi_camera_gates.pop(env_id, None)
+            self.multi_interaction_states.pop(env_id, None)
 
     def _ensure_env_buffers(self, env_id: int) -> Tuple[deque, deque]:
         env_id = int(env_id)
@@ -2429,10 +2545,15 @@ class DoorPolicyController:
     def _postprocess_action_for_control(self, actions: torch.Tensor) -> torch.Tensor:
         output_device = actions.device
         output_dtype = actions.dtype
+        motion_dim = int(self.motion_action_dim)
+        if actions.shape[-1] < motion_dim:
+            raise ValueError(f"Policy output has {actions.shape[-1]} values, expected at least {motion_dim} motion values.")
+        motion_actions = actions[..., :motion_dim]
+        auxiliary = actions[..., motion_dim:]
         if not self.action_preprocess or not bool(self.action_preprocess.get("applied", False)):
-            physical = actions.detach().cpu().numpy().astype(np.float32)
+            physical = motion_actions.detach().cpu().numpy().astype(np.float32)
         else:
-            actions_np = actions.detach().cpu().numpy().astype(np.float32)
+            actions_np = motion_actions.detach().cpu().numpy().astype(np.float32)
             physical = invert_door_dp_action_preprocess(
                 actions_np,
                 action_names=self.action_names or ACTION_NAMES,
@@ -2443,7 +2564,10 @@ class DoorPolicyController:
             action_names=self.action_names or ACTION_NAMES,
             eps=float((self.action_sanitize or {}).get("eps", 1.0e-6)),
         )
-        return torch.as_tensor(physical, device=output_device, dtype=output_dtype)
+        physical_tensor = torch.as_tensor(physical, device=output_device, dtype=output_dtype)
+        if auxiliary.shape[-1] > 0:
+            physical_tensor = torch.cat([physical_tensor, auxiliary.to(output_device, output_dtype)], dim=-1)
+        return physical_tensor
 
     def _make_item(
         self,
@@ -2596,7 +2720,11 @@ class DoorPolicyController:
             windows.append(list(obs_buffer))
         actions = self.predict_action_chunks_from_windows(windows, noise=noise)
         gates = getattr(self.backend, "last_camera_gates", None)
+        interaction = getattr(self.backend, "last_interaction_state", None)
         self.last_camera_gates = None if gates is None else np.asarray(gates, dtype=np.float32).copy()
+        self.last_interaction_state = (
+            None if interaction is None else np.asarray(interaction, dtype=np.float32).copy()
+        )
         actions_np = actions.detach().cpu().numpy().astype(np.float32)
         for row_idx, env_id in enumerate(env_ids):
             _, action_queue = self._ensure_env_buffers(env_id)
@@ -2607,6 +2735,12 @@ class DoorPolicyController:
                 self.multi_camera_gates.pop(int(env_id), None)
             else:
                 self.multi_camera_gates[int(env_id)] = np.asarray(gates[row_idx], dtype=np.float32).copy()
+            if interaction is None:
+                self.multi_interaction_states.pop(int(env_id), None)
+            else:
+                self.multi_interaction_states[int(env_id)] = np.asarray(
+                    interaction[row_idx], dtype=np.float32
+                ).copy()
 
     @torch.no_grad()
     def predict_action_chunks_for_envs(
@@ -2631,20 +2765,36 @@ class DoorPolicyController:
             windows.append(list(obs_buffer))
         actions = self.predict_action_chunks_from_windows(windows, noise=noise)
         gates = getattr(self.backend, "last_camera_gates", None)
+        interaction = getattr(self.backend, "last_interaction_state", None)
         self.last_camera_gates = None if gates is None else np.asarray(gates, dtype=np.float32).copy()
+        self.last_interaction_state = (
+            None if interaction is None else np.asarray(interaction, dtype=np.float32).copy()
+        )
         if gates is None:
             for env_id in env_ids:
                 self.multi_camera_gates.pop(int(env_id), None)
         else:
             for row_idx, env_id in enumerate(env_ids):
                 self.multi_camera_gates[int(env_id)] = np.asarray(gates[row_idx], dtype=np.float32).copy()
+        if interaction is None:
+            for env_id in env_ids:
+                self.multi_interaction_states.pop(int(env_id), None)
+        else:
+            for row_idx, env_id in enumerate(env_ids):
+                self.multi_interaction_states[int(env_id)] = np.asarray(
+                    interaction[row_idx], dtype=np.float32
+                ).copy()
         return actions.detach().cpu().numpy().astype(np.float32)
 
     @torch.no_grad()
     def sample_action_chunk(self, noise: Optional[torch.Tensor] = None) -> None:
         actions = self.predict_action_chunks_from_batch(self._current_batch(), noise=noise)
         gates = getattr(self.backend, "last_camera_gates", None)
+        interaction = getattr(self.backend, "last_interaction_state", None)
         self.last_camera_gates = None if gates is None else np.asarray(gates, dtype=np.float32).copy()
+        self.last_interaction_state = (
+            None if interaction is None else np.asarray(interaction, dtype=np.float32).copy()
+        )
         actions_np = actions[0].detach().cpu().numpy().astype(np.float32)
         self.action_queue.clear()
         for row in actions_np[: self.action_horizon]:
@@ -2661,6 +2811,15 @@ class DoorPolicyController:
                 return None
             return np.asarray(self.last_camera_gates[0], dtype=np.float32).copy()
         value = self.multi_camera_gates.get(int(env_id))
+        return None if value is None else np.asarray(value, dtype=np.float32).copy()
+
+    def get_last_interaction_state_for_env(self, env_id: Optional[int] = None) -> Optional[np.ndarray]:
+        """Return latest [contact, handle_progress, door_progress] predictions."""
+        if env_id is None:
+            if self.last_interaction_state is None or len(self.last_interaction_state) == 0:
+                return None
+            return np.asarray(self.last_interaction_state[0], dtype=np.float32).copy()
+        value = self.multi_interaction_states.get(int(env_id))
         return None if value is None else np.asarray(value, dtype=np.float32).copy()
 
     def act(

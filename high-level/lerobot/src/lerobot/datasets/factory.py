@@ -31,6 +31,12 @@ from lerobot.utils.constants import ACTION, OBS_PREFIX, REWARD
 
 
 ACTION_LOSS_WEIGHT_FEATURE = "loss.action_weight"
+END_SIGNAL_FEATURE = "aux.end_signal"
+INTERACTION_STATE_FEATURES = (
+    "aux.interaction_contact",
+    "aux.interaction_handle_progress",
+    "aux.interaction_door_progress",
+)
 
 IMAGENET_STATS = {
     "mean": [[[0.485]], [[0.456]], [[0.406]]],  # (c,1,1)
@@ -70,6 +76,12 @@ def resolve_delta_timestamps(
             # Older scalar-weight behavior is still handled inside ACT.forward when a dataset does
             # not provide this feature or is loaded without delta timestamps.
             delta_timestamps[key] = [i / ds_meta.fps for i in cfg.action_delta_indices]
+        if (
+            key == getattr(cfg, "end_signal_target_key", END_SIGNAL_FEATURE)
+            and bool(getattr(cfg, "end_signal_prediction", False))
+            and cfg.action_delta_indices is not None
+        ):
+            delta_timestamps[key] = [i / ds_meta.fps for i in cfg.action_delta_indices]
         if key.startswith(OBS_PREFIX) and cfg.observation_delta_indices is not None:
             delta_timestamps[key] = [i / ds_meta.fps for i in cfg.observation_delta_indices]
 
@@ -99,6 +111,25 @@ def make_dataset(cfg: TrainPipelineConfig) -> LeRobotDataset | MultiLeRobotDatas
         ds_meta = LeRobotDatasetMetadata(
             cfg.dataset.repo_id, root=cfg.dataset.root, revision=cfg.dataset.revision
         )
+        if bool(getattr(cfg.policy, "end_signal_prediction", False)):
+            target_key = str(getattr(cfg.policy, "end_signal_target_key", END_SIGNAL_FEATURE))
+            if target_key not in ds_meta.features:
+                raise ValueError(
+                    "ACT end-signal prediction is enabled, but the dataset does not contain "
+                    f"{target_key!r}. Re-convert it with --add_end_signal."
+                )
+        if bool(getattr(cfg.policy, "interaction_state_conditioning", False)):
+            target_keys = (
+                str(getattr(cfg.policy, "interaction_contact_target_key", INTERACTION_STATE_FEATURES[0])),
+                str(getattr(cfg.policy, "interaction_handle_target_key", INTERACTION_STATE_FEATURES[1])),
+                str(getattr(cfg.policy, "interaction_door_target_key", INTERACTION_STATE_FEATURES[2])),
+            )
+            missing = [key for key in target_keys if key not in ds_meta.features]
+            if missing:
+                raise ValueError(
+                    "ACT interaction-state conditioning is enabled, but the dataset is missing "
+                    f"{missing}. Re-convert it with --add_interaction_state."
+                )
         delta_timestamps = resolve_delta_timestamps(cfg.policy, ds_meta)
         if not cfg.dataset.streaming:
             dataset = LeRobotDataset(

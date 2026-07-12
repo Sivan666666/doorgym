@@ -1034,6 +1034,16 @@ def parse_args():
             },
             {"name": "--record_dp_dataset", "action": "store_true"},
             {
+                "name": "--record_end_signal",
+                "action": "store_true",
+                "help": "Save a per-frame end signal that is 1 in return_home/hold_home and 0 otherwise.",
+            },
+            {
+                "name": "--end_signal_positive_phases",
+                "type": str,
+                "default": "return_home,hold_home",
+            },
+            {
                 "name": "--record_camera_pose",
                 "action": "store_true",
                 "help": "When recording raw DP data, save front/wrist camera optical-frame poses in robot base frame.",
@@ -1112,6 +1122,9 @@ def parse_args():
             {"name": "--dp_temporal_prefetch_actions", "type": int, "default": 3},
             {"name": "--dp_temporal_old_weight", "type": float, "default": 0.3},
             {"name": "--dp_temporal_new_weight", "type": float, "default": 0.7},
+            {"name": "--dp_end_signal_monitor", "action": "store_true"},
+            {"name": "--dp_end_signal_threshold", "type": float, "default": 0.8},
+            {"name": "--dp_end_signal_consecutive_steps", "type": int, "default": 10},
             {"name": "--dp_log_path", "type": str, "default": ""},
             {"name": "--dp_log_interval", "type": int, "default": 25},
             {
@@ -1478,6 +1491,7 @@ class ParallelEnvState:
     prev_base_xy: object = None
     prev_yaw: object = None
     last_dp_action: object = None
+    last_dp_policy_output: object = None
     last_phase: str = "init"
     last_handle_goal: object = None
     last_door_pos: object = None
@@ -1491,6 +1505,16 @@ class ParallelEnvState:
     door_twin_tracker: object = None
     tracik_controller: object = None
     tracik_joint_indices: object = None
+    tracik_command_q: object = None
+    tracik_command_pos_world: object = None
+    tracik_command_quat_world: object = None
+    dp_end_probability: float = 0.0
+    dp_end_consecutive_count: int = 0
+    dp_end_triggered: bool = False
+    dp_first_end_trigger_step: object = None
+    dp_door_angle_at_end_trigger: object = None
+    dp_phase_at_end_trigger: object = None
+    last_dp_interaction_state: object = None
 
 
 def door_twin_profile_for_args(args):
@@ -2054,13 +2078,44 @@ def tracik_target_pose_in_standalone_base(gym, st):
     return np.concatenate([target_pos_local, target_quat_local]).astype(np.float64), False
 
 
-def reset_tracik_controller_to_targets(st, step, dt):
+def store_tracik_command_pose_world(gym, st, q_command):
+    """Cache the smoothed TRAC-IK joint command and its EE FK in world coordinates."""
+    controller = getattr(st, "tracik_controller", None)
+    if controller is None:
+        return
+    q_command = np.asarray(q_command, dtype=np.float64).reshape(6)
+    solver_pose = np.asarray(controller.solver.fk(q_command), dtype=np.float64).reshape(7)
+    root_pos, root_quat = get_body_pose(gym, st.env, st.arm_actor, 0)
+    # tracik_target_pose_in_standalone_base() adds this correction before IK;
+    # invert it here so the FK pose is expressed in the simulated arm-root frame.
+    local_pos = solver_pose[:3].astype(np.float32) - np.asarray(
+        st.args.tracik_mount_correction,
+        dtype=np.float32,
+    )
+    world_pos = quat_apply(root_quat, local_pos) + np.asarray(root_pos, dtype=np.float32)
+    world_quat = base_ik.normalize_quat(
+        base_ik.quat_multiply(
+            np.asarray(root_quat, dtype=np.float32),
+            np.asarray(solver_pose[3:7], dtype=np.float32),
+        )
+    )
+    st.tracik_command_q = q_command.astype(np.float32)
+    st.tracik_command_pos_world = np.asarray(world_pos, dtype=np.float32).copy()
+    st.tracik_command_quat_world = np.asarray(world_quat, dtype=np.float32).copy()
+
+
+def reset_tracik_controller_to_targets(gym, st, step, dt):
     controller = getattr(st, "tracik_controller", None)
     if controller is None:
         return
     controller.reset(
         np.asarray(st.dof_positions, dtype=np.float64)[st.tracik_joint_indices],
         float(step) * float(dt),
+    )
+    store_tracik_command_pose_world(
+        gym,
+        st,
+        np.asarray(st.dof_positions, dtype=np.float64)[st.tracik_joint_indices],
     )
 
 
@@ -2126,6 +2181,7 @@ def update_tracik_arm_targets_for_env(gym, st, step, dt):
         initial_move=st.last_phase == "initial_hold",
     )
     st.dof_positions[st.tracik_joint_indices] = np.asarray(q_command, dtype=np.float32)
+    store_tracik_command_pose_world(gym, st, q_command)
 
     eef_state = st.ik_state.rb_states[st.ik_state.eef_body_sim_index]
     current_pos = eef_state[:3].detach().cpu().numpy().astype(np.float32)
@@ -4352,14 +4408,21 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                     ee_quat = dp_policy_input["ee_quat"]
                     dp_state = dp_policy_input["dp_state"]
                     dp_action = dp_actions_by_env[st.index]
-                    st.last_dp_action = np.asarray(dp_action, dtype=np.float32).copy()
+                    st.last_dp_policy_output = np.asarray(dp_action, dtype=np.float32).copy()
+                    st.last_dp_action = np.asarray(dp_action[:10], dtype=np.float32).copy()
                     st.last_dp_state = None if dp_state is None else np.asarray(dp_state, dtype=np.float32).copy()
                     st.last_dp_ee_pos = None if ee_pos is None else np.asarray(ee_pos, dtype=np.float32).copy()
                     st.last_dp_ee_quat = None if ee_quat is None else np.asarray(ee_quat, dtype=np.float32).copy()
                     st.last_dp_handle_goal = None if handle_goal is None else np.asarray(handle_goal, dtype=np.float32).copy()
                     camera_gates = dp_policy_input.get("camera_gates")
+                    interaction_state = dp_policy_input.get("interaction_state")
                     st.last_dp_camera_gates = (
                         None if camera_gates is None else np.asarray(camera_gates, dtype=np.float32).copy()
+                    )
+                    st.last_dp_interaction_state = (
+                        None
+                        if interaction_state is None
+                        else np.asarray(interaction_state, dtype=np.float32).copy()
                     )
                 else:
                     base_xy_current = np.asarray(st.traj.get("base_xy", st.base_start), dtype=np.float32)
@@ -4368,8 +4431,14 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                     ee_pos = getattr(st, "last_dp_ee_pos", None)
                     ee_quat = getattr(st, "last_dp_ee_quat", None)
                     dp_state = getattr(st, "last_dp_state", None)
-                    dp_action = np.asarray(st.last_dp_action, dtype=np.float32).copy()
+                    dp_action = np.asarray(
+                        st.last_dp_policy_output
+                        if st.last_dp_policy_output is not None
+                        else st.last_dp_action,
+                        dtype=np.float32,
+                    ).copy()
                     camera_gates = getattr(st, "last_dp_camera_gates", None)
+                    interaction_state = getattr(st, "last_dp_interaction_state", None)
                 if dp_policy_uses_joint_action:
                     base_xy, yaw, joint_targets = apply_float_dp_joint_action9(
                         dp_action,
@@ -4400,6 +4469,14 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                 st.traj["base_xy"] = np.asarray(base_xy, dtype=np.float32).copy()
                 st.traj["yaw"] = float(yaw)
                 door_pos_for_log, door_vel_for_log = get_actor_dof_state(gym, st.env, st.door_actor)
+                if st.index in dp_actions_by_env:
+                    dc.update_float_dp_end_signal_monitor(
+                        st,
+                        dp_action,
+                        step,
+                        door_pos_for_log,
+                        phase,
+                    )
             else:
                 phase, base_xy, yaw, target_pos, target_quat, gripper, handle_goal = trajectory_targets(
                     step,
@@ -4461,6 +4538,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                     phase,
                     action_names=dp_policy_action_names or ACTION_NAMES,
                     camera_gates=camera_gates,
+                    interaction_state=interaction_state,
                     gym=gym,
                     dof_names=dof_names,
                 )
@@ -4483,14 +4561,14 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                 alpha = float(st.traj.get("return_home_alpha", 0.0))
                 st.dof_positions[:] = lerp(st.traj["return_home_start_dofs"], st.home_positions, alpha)
                 st.ik_state.last_pos_error = 0.0
-                reset_tracik_controller_to_targets(st, step, dt)
+                reset_tracik_controller_to_targets(gym, st, step, dt)
             elif phase in ("walk", "hold_home"):
                 st.dof_positions[:] = st.home_positions
                 st.ik_state.last_pos_error = 0.0
-                reset_tracik_controller_to_targets(st, step, dt)
+                reset_tracik_controller_to_targets(gym, st, step, dt)
             elif getattr(st, "dp_joint_action_active", False):
                 st.ik_state.last_pos_error = 0.0
-                reset_tracik_controller_to_targets(st, step, dt)
+                reset_tracik_controller_to_targets(gym, st, step, dt)
             else:
                 set_ik_target(st.ik_state, target_pos, target_quat)
 

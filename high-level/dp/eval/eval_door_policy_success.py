@@ -152,6 +152,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dp_temporal_prefetch_actions", type=int, default=3)
     parser.add_argument("--dp_temporal_old_weight", type=float, default=0.3)
     parser.add_argument("--dp_temporal_new_weight", type=float, default=0.7)
+    parser.add_argument("--dp_end_signal_monitor", action="store_true")
+    parser.add_argument("--dp_end_signal_threshold", type=float, default=0.8)
+    parser.add_argument("--dp_end_signal_consecutive_steps", type=int, default=10)
     parser.add_argument(
         "--dp_fps",
         type=int,
@@ -390,6 +393,17 @@ def summarize_log(
             "max_open_deg": float("-inf"),
             "first_success_step": None,
             "success": False,
+            "end_triggered": False,
+            "first_end_trigger_step": None,
+            "open_deg_at_end_trigger": None,
+            "phase_at_end_trigger": None,
+            "interaction_records": 0,
+            "interaction_contact_sum": 0.0,
+            "interaction_handle_sum": 0.0,
+            "interaction_door_sum": 0.0,
+            "interaction_contact_max": None,
+            "interaction_handle_max": None,
+            "interaction_door_max": None,
         }
         for env_id in range(int(num_envs))
     }
@@ -400,6 +414,34 @@ def summarize_log(
         item = stats[env_id]
         item["records"] += 1
         open_deg = door_open_deg(record, metric=metric, door_motion_sign=door_motion_sign)
+        end_record = record.get("end_signal") or {}
+        interaction = record.get("interaction_state") or {}
+        if interaction:
+            contact = float(interaction.get("contact_probability", 0.0))
+            handle = float(interaction.get("handle_progress", 0.0))
+            door_progress = float(interaction.get("door_progress", 0.0))
+            item["interaction_records"] += 1
+            item["interaction_contact_sum"] += contact
+            item["interaction_handle_sum"] += handle
+            item["interaction_door_sum"] += door_progress
+            item["interaction_contact_max"] = max(
+                contact,
+                contact if item["interaction_contact_max"] is None else float(item["interaction_contact_max"]),
+            )
+            item["interaction_handle_max"] = max(
+                handle,
+                handle if item["interaction_handle_max"] is None else float(item["interaction_handle_max"]),
+            )
+            item["interaction_door_max"] = max(
+                door_progress,
+                door_progress if item["interaction_door_max"] is None else float(item["interaction_door_max"]),
+            )
+        if bool(end_record.get("triggered", False)) and item["first_end_trigger_step"] is None:
+            raw_trigger_step = end_record.get("first_trigger_step", record.get("step", -1))
+            item["end_triggered"] = True
+            item["first_end_trigger_step"] = int(raw_trigger_step)
+            item["open_deg_at_end_trigger"] = None if open_deg is None else float(open_deg)
+            item["phase_at_end_trigger"] = end_record.get("phase_at_trigger")
         if open_deg is None:
             continue
         item["max_open_deg"] = max(float(item["max_open_deg"]), float(open_deg))
@@ -411,6 +453,18 @@ def summarize_log(
         item = dict(stats[env_id])
         if item["max_open_deg"] == float("-inf"):
             item["max_open_deg"] = None
+        success_step = item.get("first_success_step")
+        trigger_step = item.get("first_end_trigger_step")
+        item["end_trigger_delay_after_first_task_success"] = (
+            None if success_step is None or trigger_step is None else int(trigger_step) - int(success_step)
+        )
+        interaction_count = int(item.pop("interaction_records"))
+        for name in ("contact", "handle", "door"):
+            total_value = float(item.pop(f"interaction_{name}_sum"))
+            item[f"interaction_{name}_mean"] = (
+                None if interaction_count == 0 else total_value / interaction_count
+            )
+        item["interaction_records"] = interaction_count
         out.append(item)
     return out
 
@@ -453,6 +507,10 @@ def build_play_command(args: argparse.Namespace, batch_envs: int, batch_idx: int
         cmd += ["--dp_temporal_prefetch_actions", str(args.dp_temporal_prefetch_actions)]
         cmd += ["--dp_temporal_old_weight", str(args.dp_temporal_old_weight)]
         cmd += ["--dp_temporal_new_weight", str(args.dp_temporal_new_weight)]
+    if args.dp_end_signal_monitor:
+        cmd.append("--dp_end_signal_monitor")
+        cmd += ["--dp_end_signal_threshold", str(args.dp_end_signal_threshold)]
+        cmd += ["--dp_end_signal_consecutive_steps", str(args.dp_end_signal_consecutive_steps)]
     if args.save_failure_rollouts:
         cmd.append("--dp_log_replay_snapshot")
     if args.rgb:
@@ -1076,6 +1134,23 @@ def main() -> None:
     total_successes = sum(1 for item in all_trials if item["success"])
     total = len(all_trials)
     success_rate = total_successes / max(1, total)
+    end_triggered_trials = [item for item in all_trials if item.get("end_triggered")]
+    end_false_trigger_count = sum(
+        1
+        for item in end_triggered_trials
+        if item.get("first_success_step") is None
+        or int(item["first_end_trigger_step"]) < int(item["first_success_step"])
+    )
+    end_missing_trigger_count = sum(
+        1 for item in all_trials if item.get("success") and not item.get("end_triggered")
+    )
+    end_trigger_steps = [int(item["first_end_trigger_step"]) for item in end_triggered_trials]
+    end_trigger_delays = [
+        int(item["end_trigger_delay_after_first_task_success"])
+        for item in end_triggered_trials
+        if item.get("end_trigger_delay_after_first_task_success") is not None
+    ]
+    interaction_trials = [item for item in all_trials if int(item.get("interaction_records", 0)) > 0]
     failure_rollouts = export_failed_rollouts(
         args=args,
         run_root=run_root,
@@ -1106,6 +1181,9 @@ def main() -> None:
         "dp_temporal_prefetch_actions": int(args.dp_temporal_prefetch_actions),
         "dp_temporal_old_weight": float(args.dp_temporal_old_weight),
         "dp_temporal_new_weight": float(args.dp_temporal_new_weight),
+        "dp_end_signal_monitor": bool(args.dp_end_signal_monitor),
+        "dp_end_signal_threshold": float(args.dp_end_signal_threshold),
+        "dp_end_signal_consecutive_steps": int(args.dp_end_signal_consecutive_steps),
         "dp_fps": int(args.dp_fps),
         "rgb": bool(args.rgb),
         "depth_only": bool(args.depth_only),
@@ -1121,6 +1199,29 @@ def main() -> None:
         "successes": total_successes,
         "trials": total,
         "success_rate": success_rate,
+        "end_trigger_rate": len(end_triggered_trials) / max(1, total),
+        "end_false_trigger_count": int(end_false_trigger_count),
+        "end_missing_trigger_count": int(end_missing_trigger_count),
+        "end_trigger_steps": end_trigger_steps,
+        "end_trigger_delay_after_first_task_success": end_trigger_delays,
+        "interaction_state_summary": {
+            "trials_with_predictions": len(interaction_trials),
+            "contact_mean": (
+                None
+                if not interaction_trials
+                else float(np.mean([item["interaction_contact_mean"] for item in interaction_trials]))
+            ),
+            "handle_progress_mean": (
+                None
+                if not interaction_trials
+                else float(np.mean([item["interaction_handle_mean"] for item in interaction_trials]))
+            ),
+            "door_progress_mean": (
+                None
+                if not interaction_trials
+                else float(np.mean([item["interaction_door_mean"] for item in interaction_trials]))
+            ),
+        },
         "failure_rollout_root": (
             str(Path(args.failure_rollout_root).expanduser())
             if args.failure_rollout_root

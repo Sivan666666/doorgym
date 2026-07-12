@@ -1,6 +1,6 @@
 # A2W 5-door ACT 策略在 WC4 / Button Door / Fire Door 上的评测汇总
 
-日期：2026-07-09，更新：2026-07-11  
+日期：2026-07-09，更新：2026-07-12  
 任务：比较 4 种 50K ACT checkpoint 在训练门 `wc4`、unseen door `button_door`、unseen `fire_door` 上的成功率，并记录 `fire_door` 50 条数据 finetune 后的变化；另补充 π0.5 在同一评测设置下的结果。  
 
 ## 1. 对比的 4 种策略
@@ -289,4 +289,114 @@ ps1 三个模型：
 /home/ps/workspace/txc/doorgym/high-level/logs/door-policy-success/wc4_eval_pi05_5door_025000_seed615455575
 /home/ps/workspace/txc/doorgym/high-level/logs/door-policy-success/firedoor_eval_pi05_5door_025000_seed615455575
 /home/ps/workspace/txc/doorgym/high-level/logs/door-policy-success/buttondoor_eval_pi05_5door_025000_seed615455575
+```
+
+## 7. Recovery 数据微调实验
+
+### 7.1 实验目的与设置
+
+本实验从同一个 `Plücker ACT FOV55` 50K checkpoint 出发，对比两种 optimizer-reset finetune 设置：
+
+1. **仅原始数据**：继续使用 250 条 5-door 专家轨迹，不加入 recovery 数据。
+2. **Recovery 20%**：训练时 80% 从原始专家帧采样，20% 从经过仿真验证的 WC4 recovery 帧采样。
+
+初始 checkpoint：
+
+```text
+/home/ps/workspace/txc/doorgym/high-level/dp/logs/lerobot-train/leroact_a2w_5door_plucker_fov55_50k_chunk100_exec50_bs16_0709_0209/checkpoints/050000
+```
+
+合并数据集包含：
+
+| 数据来源 | Episodes | Frames | 合并数据中的自然帧比例 |
+|---|---:|---:|---:|
+| 原始 5-door 专家数据 | 250 | 125,000 | 82.74% |
+| WC4 verified recovery | 98 | 26,080 | 17.26% |
+| 合计 | 348 | 151,080 | 100% |
+
+Recovery 20%实验使用显式采样器，将训练采样比例固定为 `expert=80%`、`recovery=20%`。两个微调实验都加载相同的模型权重，但重新初始化 AdamW optimizer；因此这里比较的是 finetune，而不是恢复原训练器 optimizer 状态后的无缝 resume。
+
+WC4评测参数与本文第2节一致，关键设置如下：
+
+```text
+base_seed=615455575
+实际 batch seed=615455575, 615455576, 615455577, 615455578
+num_envs=16
+total_trials=64
+steps=1000
+dp_action_horizon=25
+dp_fps=25
+success_metric=abs
+pass_open_angle_deg=80
+depth_only
+depth_noise=off
+gaussian_blur=off
+camera_randomization=on, pos=0.02m, rot=5deg
+robot_pitch=0.0
+robot_pitch_randomization=[0.0, 0.0]
+```
+
+### 7.2 不同微调步数的 WC4 成功率
+
+| 微调步数 | 仅原始数据 | Recovery 20% |
+|---:|---:|---:|
+| 0K | 59/64 = 92.19% | 59/64 = 92.19% |
+| 5K | 58/64 = 90.62% | 53/64 = 82.81% |
+| 20K | 57/64 = 89.06% | 49/64 = 76.56% |
+| 50K | 55/64 = 85.94% | **60/64 = 93.75%** |
+
+50K checkpoint 的分 batch 结果：
+
+| 设置 | Batch 0 | Batch 1 | Batch 2 | Batch 3 | Total |
+|---|---:|---:|---:|---:|---:|
+| 仅原始数据微调 50K | 15/16 | 12/16 | 13/16 | 15/16 | 55/64 |
+| Recovery 20% 微调 50K | 16/16 | 14/16 | 15/16 | 15/16 | 60/64 |
+
+### 7.3 结果分析
+
+#### 7.3.1 Recovery 20% 存在明显的先下降、后适应过程
+
+Recovery 20%模型在5K和20K阶段分别下降到 `82.81%` 和 `76.56%`，但在50K时回升到 `93.75%`。这说明加入 recovery 后，模型需要较长时间适应新的状态—动作分布；只评测5K或20K会得到“recovery有害”的过早结论。
+
+早期下降可能来自多个因素共同作用：
+
+1. 原始轨迹中的“继续闭合、转把手、推门”和 recovery 轨迹中的“张开、后退、重新对齐、重新抓取”在相似观测附近形成动作多模态。
+2. 当前策略没有显式输入接触状态、恢复模式或任务阶段，需要仅凭双深度和 state10 自行区分正常主线与恢复状态。
+3. finetune 使用合并数据集的新 normalization stats，旧模型在训练初期需要重新适应输入和动作归一化的变化。
+4. Recovery episode 主要覆盖抓取、转把手和推门附近的状态，其阶段分布与完整专家轨迹不同。
+
+训练到50K后，模型逐渐吸收 recovery行为，同时恢复了正常开门主线的稳定性。
+
+#### 7.3.2 单纯继续训练原始数据会缓慢退化
+
+仅原始数据的对照组从 `59/64` 依次下降到 `58/64`、`57/64`、`55/64`。这说明继续在相同250条轨迹上训练并不会自然提升 closed-loop 成功率，反而可能产生轻微过拟合或策略漂移。Open-loop训练loss继续下降，不代表closed-loop开门性能一定提升。
+
+#### 7.3.3 Recovery 20% 在相同训练预算下取得正收益
+
+50K时的公平对照为：
+
+```text
+仅原始数据：55/64 = 85.94%
+Recovery 20%：60/64 = 93.75%
+```
+
+Recovery 20%比相同初始化、相同finetune步数的原始数据对照多成功5次，提高 `7.81` 个百分点；同时比微调前的Plücker 50K checkpoint多成功1次，提高 `1.56` 个百分点。
+
+相对原始checkpoint的 `60/64 vs 59/64` 差异只有1次成功，暂时不能声称统计显著提升；但相对同训练步数对照的 `60/64 vs 55/64` 更能说明 recovery replay 抵消了持续训练造成的退化。后续仍应增加多组独立seed，并加入强制EE偏移、抓空和接触丢失等 recovery-specific 评测，确认提升是否来自真正的恢复能力。
+
+### 7.4 Recovery 实验日志
+
+```text
+# 原始 Plücker 50K，作为 0K 对照
+/home/ps/workspace/txc/doorgym/high-level/logs/door-policy-success/wc4_plucker_recovery_step00000_rerun_seed615455575
+
+# 仅原始数据继续微调
+/home/ps/workspace/txc/doorgym/high-level/logs/door-policy-success/wc4_plucker_original250_continue_step05000_seed615455575
+/home/ps/workspace/txc/doorgym/high-level/logs/door-policy-success/wc4_plucker_original250_continue_step20000_seed615455575
+/home/ps/workspace/txc/doorgym/high-level/logs/door-policy-success/wc4_plucker_original250_continue_step50000_seed615455575
+
+# 原始 80% + Recovery 20%
+/home/ps/workspace/txc/doorgym/high-level/logs/door-policy-success/wc4_plucker_recovery20_step05000_seed615455575
+/home/ps/workspace/txc/doorgym/high-level/logs/door-policy-success/wc4_plucker_recovery20_step20000_seed615455575
+/home/ps/workspace/txc/doorgym/high-level/logs/door-policy-success/wc4_plucker_recovery20_step50000_seed615455575
 ```

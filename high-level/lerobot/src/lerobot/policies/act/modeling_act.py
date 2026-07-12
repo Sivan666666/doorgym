@@ -23,6 +23,7 @@ import math
 from collections import deque
 from collections.abc import Callable
 from itertools import chain
+from pathlib import Path
 from typing import Any
 
 import einops
@@ -30,6 +31,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F  # noqa: N812
 import torchvision
+from safetensors import safe_open
 from torch import Tensor, nn
 from torchvision.models._utils import IntermediateLayerGetter
 from torchvision.ops.misc import FrozenBatchNorm2d
@@ -278,6 +280,46 @@ class ACTPolicy(PreTrainedPolicy):
     config_class = ACTConfig
     name = "act"
 
+    @classmethod
+    def from_pretrained(cls, pretrained_name_or_path, *, config=None, strict=False, **kwargs):
+        """Allow old ACT weights to initialize only explicitly enabled new heads."""
+        policy = super().from_pretrained(
+            pretrained_name_or_path,
+            config=config,
+            strict=strict,
+            **kwargs,
+        )
+        optional_warmstart = bool(getattr(policy.config, "end_signal_prediction", False)) or bool(
+            getattr(policy.config, "interaction_state_conditioning", False)
+        )
+        if strict or not optional_warmstart:
+            return policy
+        path = Path(pretrained_name_or_path).expanduser()
+        model_file = path / "model.safetensors" if path.is_dir() else path
+        if not model_file.is_file():
+            return policy
+        with safe_open(str(model_file), framework="pt", device="cpu") as handle:
+            saved_keys = set(handle.keys())
+        expected_keys = set(policy.state_dict().keys())
+        missing = expected_keys - saved_keys
+        unexpected = saved_keys - expected_keys
+        allowed_missing = set()
+        if bool(getattr(policy.config, "end_signal_prediction", False)):
+            allowed_missing.update({"model.end_signal_head.weight", "model.end_signal_head.bias"})
+        if bool(getattr(policy.config, "interaction_state_conditioning", False)):
+            allowed_missing.update(
+                key
+                for key in expected_keys
+                if key.startswith("model.interaction_state_head.")
+                or key.startswith("model.interaction_conditioner.")
+            )
+        if missing - allowed_missing or unexpected:
+            raise RuntimeError(
+                "Old-checkpoint warm start only permits parameters from explicitly enabled new ACT heads "
+                f"parameters to be missing. missing={sorted(missing)} unexpected={sorted(unexpected)}"
+            )
+        return policy
+
     def __init__(
         self,
         config: ACTConfig,
@@ -364,6 +406,18 @@ class ACTPolicy(PreTrainedPolicy):
         actions = self.model(batch)[0]
         return actions
 
+    @torch.no_grad()
+    def predict_action_chunk_with_end_signal(self, batch: dict[str, Tensor]) -> tuple[Tensor, Tensor | None]:
+        """Predict motion actions and an optional future-aligned end probability chunk."""
+        self.eval()
+        if self.config.image_features:
+            batch = dict(batch)
+            batch[OBS_IMAGES] = [batch[key] for key in self.config.image_features]
+        actions = self.model(batch)[0]
+        logits = self.model._last_end_signal_logits
+        probabilities = None if logits is None else torch.sigmoid(logits)
+        return actions, probabilities
+
     def forward(self, batch: dict[str, Tensor], reduction: str = "mean") -> tuple[Tensor, dict]:
         """Run the batch through the model and compute the loss for training or validation."""
         if self.config.image_features:
@@ -446,6 +500,83 @@ class ACTPolicy(PreTrainedPolicy):
                 loss_dict["handle_latent_valid_count"] = float(
                     self.model._last_handle_latent_valid_count.detach().cpu()
                 )
+
+        if self.config.interaction_state_conditioning:
+            logits = self.model._last_interaction_state_logits
+            probabilities = self.model._last_interaction_state_probabilities
+            if logits is None or probabilities is None or logits.shape[-1] != 3:
+                raise RuntimeError("ACT interaction-state conditioning did not produce Bx3 predictions.")
+            target_keys = (
+                str(self.config.interaction_contact_target_key),
+                str(self.config.interaction_handle_target_key),
+                str(self.config.interaction_door_target_key),
+            )
+            missing = [key for key in target_keys if key not in batch]
+            if missing:
+                raise KeyError(
+                    f"ACT interaction-state conditioning requires {missing}. "
+                    "Re-convert the dataset with --add_interaction_state."
+                )
+            targets = []
+            for key in target_keys:
+                target = batch[key].to(device=logits.device, dtype=logits.dtype).reshape(logits.shape[0], -1)[:, 0]
+                if not torch.all(torch.isfinite(target)) or torch.any(target < 0.0) or torch.any(target > 1.0):
+                    raise ValueError(f"Interaction target {key!r} must contain finite values in [0, 1].")
+                targets.append(target)
+            contact_per_sample = F.binary_cross_entropy_with_logits(logits[:, 0], targets[0], reduction="none")
+            handle_per_sample = F.smooth_l1_loss(probabilities[:, 1], targets[1], reduction="none")
+            door_per_sample = F.smooth_l1_loss(probabilities[:, 2], targets[2], reduction="none")
+            contact_weight = float(self.config.interaction_contact_loss_weight)
+            handle_weight = float(self.config.interaction_handle_loss_weight)
+            door_weight = float(self.config.interaction_door_loss_weight)
+            interaction_per_sample = (
+                contact_weight * contact_per_sample
+                + handle_weight * handle_per_sample
+                + door_weight * door_per_sample
+            )
+            per_sample_loss = per_sample_loss + interaction_per_sample
+            loss = loss + interaction_per_sample.mean()
+            loss_dict.update(
+                {
+                    "interaction_contact_loss": float(contact_per_sample.mean().detach().cpu()),
+                    "interaction_handle_loss": float(handle_per_sample.mean().detach().cpu()),
+                    "interaction_door_loss": float(door_per_sample.mean().detach().cpu()),
+                    "interaction_contact_probability": float(probabilities[:, 0].mean().detach().cpu()),
+                    "interaction_handle_progress": float(probabilities[:, 1].mean().detach().cpu()),
+                    "interaction_door_progress": float(probabilities[:, 2].mean().detach().cpu()),
+                }
+            )
+
+        if self.config.end_signal_prediction:
+            target_key = str(self.config.end_signal_target_key)
+            if target_key not in batch:
+                raise KeyError(
+                    f"ACT end-signal prediction requires future-aligned target {target_key!r} in the batch."
+                )
+            logits = self.model._last_end_signal_logits
+            if logits is None:
+                raise RuntimeError("ACT end-signal head is enabled but did not produce logits.")
+            targets = batch[target_key].to(device=logits.device, dtype=logits.dtype)
+            if targets.ndim == 2:
+                targets = targets.unsqueeze(-1)
+            if targets.shape != logits.shape:
+                raise ValueError(
+                    f"End-signal target/logit shape mismatch: target={tuple(targets.shape)} "
+                    f"logits={tuple(logits.shape)}."
+                )
+            end_per_elem = F.binary_cross_entropy_with_logits(logits, targets, reduction="none")
+            end_valid = valid_f.to(dtype=end_per_elem.dtype)
+            end_count_per_sample = end_valid.sum(dim=(1, 2))
+            end_per_sample = (end_per_elem * end_valid).sum(dim=(1, 2)) / torch.clamp(
+                end_count_per_sample, min=1.0
+            )
+            end_loss = (end_per_elem * end_valid).sum() / torch.clamp(end_valid.sum(), min=1.0)
+            end_weight = float(self.config.end_signal_loss_weight)
+            loss = loss + end_weight * end_loss
+            per_sample_loss = per_sample_loss + end_weight * end_per_sample
+            loss_dict["end_signal_loss"] = float(end_loss.detach().cpu())
+            loss_dict["end_signal_loss_weight"] = end_weight
+            loss_dict["end_signal_probability_mean"] = float(torch.sigmoid(logits).mean().detach().cpu())
 
         if reduction == "none":
             return per_sample_loss, loss_dict
@@ -778,6 +909,31 @@ class ACTHandleLatentHead(nn.Module):
         return self.head(handle_token)
 
 
+class ACTInteractionStateHead(nn.Module):
+    """Pool non-VAE encoder tokens and predict contact/handle/door logits."""
+
+    def __init__(self, dim_model: int, n_heads: int, dropout: float) -> None:
+        super().__init__()
+        self.query = nn.Embedding(1, int(dim_model))
+        self.cross_attn = nn.MultiheadAttention(int(dim_model), int(n_heads), dropout=float(dropout))
+        self.head = nn.Sequential(nn.LayerNorm(int(dim_model)), nn.Linear(int(dim_model), 3))
+
+    def forward(self, encoder_tokens_without_vae: Tensor) -> Tensor:
+        if encoder_tokens_without_vae.ndim != 3 or encoder_tokens_without_vae.shape[0] <= 0:
+            raise ValueError(
+                "ACTInteractionStateHead expects non-empty tokens shaped (sequence, batch, dim); "
+                f"got {tuple(encoder_tokens_without_vae.shape)}."
+            )
+        batch_size = int(encoder_tokens_without_vae.shape[1])
+        query = self.query.weight.unsqueeze(1).expand(-1, batch_size, -1)
+        pooled = self.cross_attn(
+            query=query,
+            key=encoder_tokens_without_vae,
+            value=encoder_tokens_without_vae,
+        )[0][0]
+        return self.head(pooled)
+
+
 class ACT(nn.Module):
     """Action Chunking Transformer: The underlying neural network for ACTPolicy.
 
@@ -939,6 +1095,18 @@ class ACT(nn.Module):
 
         # Final action regression head on the output of the transformer's decoder.
         self.action_head = nn.Linear(config.dim_model, self.config.action_feature.shape[0])
+        self.end_signal_head = nn.Linear(config.dim_model, 1) if self.config.end_signal_prediction else None
+        if self.config.interaction_state_conditioning:
+            self.interaction_state_head = ACTInteractionStateHead(
+                config.dim_model,
+                config.n_heads,
+                config.dropout,
+            )
+            self.interaction_conditioner = nn.Sequential(
+                nn.Linear(3, config.dim_model),
+                nn.GELU(),
+                nn.Linear(config.dim_model, config.dim_model),
+            )
 
         self._reset_parameters()
         self._last_camera_gates: Tensor | None = None
@@ -946,10 +1114,20 @@ class ACT(nn.Module):
         self._last_handle_latent_front_loss: Tensor | None = None
         self._last_handle_latent_wrist_loss: Tensor | None = None
         self._last_handle_latent_valid_count: Tensor | None = None
+        self._last_end_signal_logits: Tensor | None = None
+        self._last_interaction_state_logits: Tensor | None = None
+        self._last_interaction_state_probabilities: Tensor | None = None
         if self.config.camera_input_gating:
             self._init_camera_input_gating()
         if self.config.handle_latent_aux:
             self._init_handle_latent_aux()
+        if self.end_signal_head is not None:
+            nn.init.zeros_(self.end_signal_head.weight)
+            init_probability = float(self.config.end_signal_init_probability)
+            nn.init.constant_(self.end_signal_head.bias, math.log(init_probability / (1.0 - init_probability)))
+        if self.config.interaction_state_conditioning:
+            nn.init.zeros_(self.interaction_conditioner[-1].weight)
+            nn.init.zeros_(self.interaction_conditioner[-1].bias)
 
     def _plucker_pose_key_for_image_key(self, image_key: str) -> str:
         image_key_lower = str(image_key).lower()
@@ -1045,6 +1223,9 @@ class ACT(nn.Module):
         self._last_handle_latent_front_loss = None
         self._last_handle_latent_wrist_loss = None
         self._last_handle_latent_valid_count = None
+        self._last_interaction_state_logits = None
+        self._last_interaction_state_probabilities = None
+        self._last_end_signal_logits = None
 
         if not self.config.handle_latent_aux or not self.training:
             return
@@ -1323,6 +1504,15 @@ class ACT(nn.Module):
             dtype=encoder_in_pos_embed.dtype,
             device=encoder_in_pos_embed.device,
         )
+        if self.config.interaction_state_conditioning:
+            # Token zero is the ACT VAE latent. Excluding it prevents the
+            # interaction predictor from reading future ground-truth actions in training.
+            interaction_logits = self.interaction_state_head(encoder_out[1:])
+            interaction_probabilities = torch.sigmoid(interaction_logits)
+            self._last_interaction_state_logits = interaction_logits
+            self._last_interaction_state_probabilities = interaction_probabilities
+            interaction_residual = self.interaction_conditioner(interaction_probabilities)
+            decoder_in = decoder_in + interaction_residual.unsqueeze(0)
         decoder_out = self.decoder(
             decoder_in,
             encoder_out,
@@ -1334,6 +1524,8 @@ class ACT(nn.Module):
         decoder_out = decoder_out.transpose(0, 1)
 
         actions = self.action_head(decoder_out)
+        if self.end_signal_head is not None:
+            self._last_end_signal_logits = self.end_signal_head(decoder_out)
 
         return actions, (mu, log_sigma_x2)
 

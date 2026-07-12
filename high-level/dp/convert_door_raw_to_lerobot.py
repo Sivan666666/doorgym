@@ -1,5 +1,6 @@
 import argparse
 import json
+import math
 import shutil
 import sys
 from collections import deque
@@ -28,7 +29,14 @@ try:
         DEFAULT_KEYFRAME_LOSS_RADIUS,
         DEFAULT_KEYFRAME_LOSS_WEIGHT,
         DEFAULT_NEAR_ZERO_RATE_EPS,
+        DEFAULT_END_SIGNAL_POSITIVE_PHASES,
         DoorDPLeRobotRecorder,
+        END_SIGNAL_FEATURE,
+        INTERACTION_CONTACT_FEATURE,
+        INTERACTION_DOOR_PROGRESS_FEATURE,
+        INTERACTION_HANDLE_PROGRESS_FEATURE,
+        INTERACTION_STATE_FEATURES,
+        RAW_END_SIGNAL_KEY,
         RAW_ACTION_LOSS_WEIGHT_KEY,
         WRIST_HANDLE_LATENT_FEATURE,
         WRIST_HANDLE_LATENT_VALID_FEATURE,
@@ -41,6 +49,8 @@ try:
         image_to_three_channel_uint8,
         lerobot_image_keys_for_vision_mode,
         make_keyframe_action_loss_weight,
+        make_end_signal_from_phase_ids,
+        make_interaction_state_targets,
         make_door_dp_sanitize_config,
         normalize_vision_mode,
         raw_image_keys_for_vision_mode,
@@ -65,7 +75,14 @@ except ImportError:
         DEFAULT_KEYFRAME_LOSS_RADIUS,
         DEFAULT_KEYFRAME_LOSS_WEIGHT,
         DEFAULT_NEAR_ZERO_RATE_EPS,
+        DEFAULT_END_SIGNAL_POSITIVE_PHASES,
         DoorDPLeRobotRecorder,
+        END_SIGNAL_FEATURE,
+        INTERACTION_CONTACT_FEATURE,
+        INTERACTION_DOOR_PROGRESS_FEATURE,
+        INTERACTION_HANDLE_PROGRESS_FEATURE,
+        INTERACTION_STATE_FEATURES,
+        RAW_END_SIGNAL_KEY,
         RAW_ACTION_LOSS_WEIGHT_KEY,
         WRIST_HANDLE_LATENT_FEATURE,
         WRIST_HANDLE_LATENT_VALID_FEATURE,
@@ -78,6 +95,8 @@ except ImportError:
         image_to_three_channel_uint8,
         lerobot_image_keys_for_vision_mode,
         make_keyframe_action_loss_weight,
+        make_end_signal_from_phase_ids,
+        make_interaction_state_targets,
         make_door_dp_sanitize_config,
         normalize_vision_mode,
         raw_image_keys_for_vision_mode,
@@ -88,6 +107,31 @@ except ImportError:
 
 DP_ROOT = Path(__file__).resolve().parent
 HIGH_LEVEL_ROOT = DP_ROOT.parent
+
+RAW_STATE_ACTION_MODE = "raw"
+TRACIK_JOINT_STATE9_MODE = "tracik_joint_state9"
+TRACIK_JOINT_STATE9_NAMES = [
+    "last_command_vx",
+    "last_command_vyaw",
+    "joint1",
+    "joint2",
+    "joint3",
+    "joint4",
+    "joint5",
+    "joint6",
+    "jointGripper",
+]
+TRACIK_JOINT_ACTION9_NAMES = [
+    "vx",
+    "yaw",
+    "joint1",
+    "joint2",
+    "joint3",
+    "joint4",
+    "joint5",
+    "joint6",
+    "jointGripper",
+]
 
 
 def parse_args():
@@ -106,6 +150,16 @@ def parse_args():
     parser.add_argument("--repo_id", type=str, default="local/door_dp")
     parser.add_argument("--fps", type=int, default=None)
     parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument(
+        "--state_action_mode",
+        choices=[RAW_STATE_ACTION_MODE, TRACIK_JOINT_STATE9_MODE],
+        default=RAW_STATE_ACTION_MODE,
+        help=(
+            "raw keeps the recorded state/action arrays. tracik_joint_state9 derives "
+            "state=[last base command,current arm q,current gripper] and "
+            "action=[base command,TRAC-IK q_command,gripper command] from an EE-state raw dataset."
+        ),
+    )
     parser.add_argument("--rgb", action="store_true", help="Convert raw RGB+mask Door DP data. Required for RGB raw data.")
     parser.add_argument(
         "--depth_only",
@@ -135,6 +189,28 @@ def parse_args():
             "value; episodes without it default to 0. Required for --recovery_sampling_ratio training."
         ),
     )
+    parser.add_argument(
+        "--add_end_signal",
+        action="store_true",
+        help=(
+            "Write aux.end_signal. Prefer an explicit raw end_signal field; otherwise backfill it "
+            "from subtask_index and phase_names."
+        ),
+    )
+    parser.add_argument(
+        "--end_signal_positive_phases",
+        type=str,
+        default=",".join(DEFAULT_END_SIGNAL_POSITIVE_PHASES),
+        help="Comma-separated phases labeled 1; every other phase is labeled 0.",
+    )
+    parser.add_argument(
+        "--add_interaction_state",
+        action="store_true",
+        help="Derive current-frame contact/handle/door interaction targets from privileged raw arrays.",
+    )
+    parser.add_argument("--interaction_contact_min_consecutive_frames", type=int, default=3)
+    parser.add_argument("--interaction_handle_unlock_angle_deg", type=float, default=40.0)
+    parser.add_argument("--interaction_door_goal_angle_deg", type=float, default=90.0)
     parser.add_argument(
         "--num_workers",
         type=int,
@@ -232,6 +308,10 @@ def scalar_str(value):
     if arr.shape == ():
         return str(arr.item())
     return str(arr.reshape(-1)[0])
+
+
+def parse_csv_names(value):
+    return [item.strip() for item in str(value or "").split(",") if item.strip()]
 
 
 def _normalize_handle_bbox_array(value, frame_count, key, path):
@@ -383,6 +463,51 @@ def array_to_str_list(value):
     return [str(item) for item in np.asarray(value, dtype=object).reshape(-1).tolist()]
 
 
+def state_action_arrays(data, mode, path=None):
+    mode = str(mode or RAW_STATE_ACTION_MODE)
+    if mode == RAW_STATE_ACTION_MODE:
+        return data["state"].astype(np.float32), data["action"].astype(np.float32)
+    if mode != TRACIK_JOINT_STATE9_MODE:
+        raise ValueError(f"Unsupported state_action_mode={mode!r}")
+
+    label = str(path or "raw episode")
+    required = ("state", "action", "replay_dof_pos", "tracik_command_q")
+    missing = [key for key in required if key not in data.files]
+    if missing:
+        raise KeyError(f"{label} cannot derive {mode}; missing fields: {missing}")
+    raw_state = np.asarray(data["state"], dtype=np.float32)
+    raw_action = np.asarray(data["action"], dtype=np.float32)
+    replay_dof_pos = np.asarray(data["replay_dof_pos"], dtype=np.float32)
+    tracik_command_q = np.asarray(data["tracik_command_q"], dtype=np.float32)
+    if raw_state.ndim != 2 or raw_state.shape[1] < 2:
+        raise ValueError(f"{label} has invalid state shape {raw_state.shape}; expected T x >=2")
+    if raw_action.ndim != 2 or raw_action.shape[1] < 10:
+        raise ValueError(f"{label} has invalid action shape {raw_action.shape}; expected T x >=10")
+    if replay_dof_pos.ndim != 2 or replay_dof_pos.shape[1] < 19:
+        raise ValueError(
+            f"{label} has invalid replay_dof_pos shape {replay_dof_pos.shape}; "
+            "expected the mapped A2W arm joints at columns 12:19"
+        )
+    if tracik_command_q.ndim != 2 or tracik_command_q.shape[1] != 6:
+        raise ValueError(f"{label} has invalid tracik_command_q shape {tracik_command_q.shape}; expected T x 6")
+    lengths = {raw_state.shape[0], raw_action.shape[0], replay_dof_pos.shape[0], tracik_command_q.shape[0]}
+    if len(lengths) != 1:
+        raise ValueError(
+            f"{label} has misaligned frame counts: state={raw_state.shape[0]} action={raw_action.shape[0]} "
+            f"replay_dof_pos={replay_dof_pos.shape[0]} tracik_command_q={tracik_command_q.shape[0]}"
+        )
+    states = np.concatenate([raw_state[:, :2], replay_dof_pos[:, 12:19]], axis=1).astype(np.float32)
+    actions = np.concatenate(
+        [raw_action[:, :2], tracik_command_q, raw_action[:, 9:10]],
+        axis=1,
+    ).astype(np.float32)
+    if states.shape[1] != 9 or actions.shape[1] != 9:
+        raise AssertionError(f"Derived joint state/action dimensions are {states.shape}/{actions.shape}, expected T x 9")
+    if not np.all(np.isfinite(states)) or not np.all(np.isfinite(actions)):
+        raise ValueError(f"{label} produced non-finite joint state/action values")
+    return states, actions
+
+
 def detect_action_names(data, sidecar):
     if sidecar and sidecar.get("action") is not None:
         names = [str(item) for item in sidecar.get("action", [])]
@@ -481,6 +606,7 @@ def validate_episode_metadata(path, data, sidecar, action_frame, ikpush_state_ve
 def fit_state_preprocess_from_episodes(
     files,
     sidecar,
+    state_action_mode,
     keep_state_indices,
     state_names,
     action_frame,
@@ -495,7 +621,7 @@ def fit_state_preprocess_from_episodes(
     for path in files:
         with np.load(path, allow_pickle=True) as data:
             validate_episode_metadata(path, data, sidecar, action_frame, ikpush_state_version, controller_mode)
-            states = data["state"].astype(np.float32)
+            states, _ = state_action_arrays(data, state_action_mode, path)
             if keep_state_indices and states.shape[-1] <= max(keep_state_indices):
                 raise ValueError(f"Episode {path} has state_dim={states.shape[-1]}, cannot apply selected state columns.")
             states = states[:, keep_state_indices]
@@ -527,6 +653,7 @@ def fit_state_preprocess_from_episodes(
 def fit_action_preprocess_from_episodes(
     files,
     sidecar,
+    state_action_mode,
     action_names,
     action_frame,
     ikpush_state_version,
@@ -540,7 +667,7 @@ def fit_action_preprocess_from_episodes(
     for path in files:
         with np.load(path, allow_pickle=True) as data:
             validate_episode_metadata(path, data, sidecar, action_frame, ikpush_state_version, controller_mode)
-            actions = data["action"].astype(np.float32)
+            _, actions = state_action_arrays(data, state_action_mode, path)
             chunks.append(actions)
             total_frames += int(actions.shape[0])
     if not chunks:
@@ -568,6 +695,7 @@ def load_episode_payload(
     path,
     sidecar,
     image_keys,
+    state_action_mode,
     keep_state_indices,
     action_frame,
     ikpush_state_version,
@@ -577,15 +705,20 @@ def load_episode_payload(
     keyframe_loss_weight_override=None,
     keyframe_loss_radius_override=None,
     load_handle_bbox=False,
+    add_end_signal=False,
+    end_signal_positive_phases=DEFAULT_END_SIGNAL_POSITIVE_PHASES,
+    add_interaction_state=False,
+    interaction_contact_min_consecutive_frames=3,
+    interaction_handle_unlock_angle_deg=40.0,
+    interaction_door_goal_angle_deg=90.0,
 ):
     with np.load(path, allow_pickle=True) as data:
         validate_episode_metadata(path, data, sidecar, action_frame, ikpush_state_version, controller_mode)
         task = scalar_str(data["task"]) if "task" in data else initial_task
-        states = data["state"].astype(np.float32)
+        states, actions = state_action_arrays(data, state_action_mode, path)
         if keep_state_indices and states.shape[-1] <= max(keep_state_indices):
             raise ValueError(f"Episode {path} has state_dim={states.shape[-1]}, cannot apply selected state columns.")
         states = states[:, keep_state_indices]
-        actions = data["action"].astype(np.float32)
         if RECOVERY_INDICATOR_FEATURE in data.files:
             raw_is_recovery = np.asarray(data[RECOVERY_INDICATOR_FEATURE], dtype=np.float32)
             if raw_is_recovery.size == 1:
@@ -616,6 +749,80 @@ def load_episode_payload(
             front_first = data[image_keys[2]].astype(np.uint8) if image_keys[2] in data else np.zeros_like(wrist_first)
             front_second = data[image_keys[3]].astype(np.uint8) if image_keys[3] in data else np.zeros_like(wrist_second)
         subtasks = data["subtask_index"].astype(np.int64).reshape(-1)
+        end_signal = None
+        if add_end_signal:
+            if RAW_END_SIGNAL_KEY in data.files:
+                end_signal = np.asarray(data[RAW_END_SIGNAL_KEY], dtype=np.float32).reshape(-1, 1)
+            else:
+                raw_phase_names = (
+                    array_to_str_list(data["phase_names"])
+                    if "phase_names" in data.files
+                    else list((sidecar or {}).get("phase_names", []))
+                )
+                end_signal = make_end_signal_from_phase_ids(
+                    subtasks,
+                    raw_phase_names,
+                    positive_phases=end_signal_positive_phases,
+                )
+            if end_signal.shape[0] != states.shape[0]:
+                raise ValueError(
+                    f"Episode {path} has end_signal length {end_signal.shape[0]}, expected {states.shape[0]}."
+                )
+            if not np.all(np.isfinite(end_signal)) or np.any(end_signal < 0.0) or np.any(end_signal > 1.0):
+                raise ValueError(f"Episode {path} has invalid end_signal; expected finite values in [0, 1].")
+        interaction_state = None
+        door_asset_name = scalar_str(data["door_asset_name"]) if "door_asset_name" in data.files else "unknown"
+        if add_interaction_state:
+            required_interaction = ["gripper_handle_contact_both", "replay_door_dof_pos"]
+            missing_interaction = [key for key in required_interaction if key not in data.files]
+            if missing_interaction:
+                raise ValueError(
+                    f"Episode {path} cannot generate interaction-state targets; missing {missing_interaction}. "
+                    "Re-record with gripper-handle contact and replay snapshots enabled."
+                )
+            door_dof_pos = np.asarray(data["replay_door_dof_pos"], dtype=np.float32)
+            if door_dof_pos.ndim != 2 or door_dof_pos.shape[1] < 2:
+                raise ValueError(
+                    f"Episode {path} replay_door_dof_pos must have shape (T, >=2), got {door_dof_pos.shape}."
+                )
+
+            def source_scalar(key, fallback=None):
+                if key in data.files:
+                    return float(np.asarray(data[key]).reshape(-1)[0])
+                if sidecar and key in sidecar:
+                    return float(sidecar[key])
+                return fallback
+
+            handle_closed = source_scalar("handle_closed_angle")
+            door_closed = source_scalar("door_closed_angle")
+            if handle_closed is None or door_closed is None:
+                initial_handle = float(door_dof_pos[0, 1])
+                initial_door = float(door_dof_pos[0, 0])
+                recovery_episode = bool(np.any(is_recovery > 0.5)) or "recovery_source_failure_rollout" in data.files
+                if recovery_episode and max(abs(initial_handle), abs(initial_door)) > math.radians(5.0):
+                    raise ValueError(
+                        f"Recovery episode {path} starts away from the closed state but has no closed-angle metadata. "
+                        "Refusing to use its branch state as the progress origin."
+                    )
+                handle_closed = initial_handle if handle_closed is None else handle_closed
+                door_closed = initial_door if door_closed is None else door_closed
+            handle_unlock_delta = source_scalar(
+                "handle_unlock_threshold",
+                math.radians(float(interaction_handle_unlock_angle_deg)),
+            )
+            door_goal_delta = source_scalar(
+                "door_progress_goal_angle",
+                math.radians(float(interaction_door_goal_angle_deg)),
+            )
+            interaction_state = make_interaction_state_targets(
+                data["gripper_handle_contact_both"],
+                door_dof_pos,
+                contact_min_consecutive_frames=interaction_contact_min_consecutive_frames,
+                handle_closed_angle=handle_closed,
+                door_closed_angle=door_closed,
+                handle_unlock_delta_rad=handle_unlock_delta,
+                door_goal_delta_rad=door_goal_delta,
+            )
         has_front_pose = RAW_FRONT_CAMERA_POSE_KEY in data.files
         has_wrist_pose = RAW_WRIST_CAMERA_POSE_KEY in data.files
         if has_front_pose != has_wrist_pose:
@@ -728,6 +935,10 @@ def load_episode_payload(
         front_camera_pose_base.shape[0] != n or wrist_camera_pose_base.shape[0] != n
     ):
         raise ValueError(f"Episode {path} has camera pose length inconsistent with frame count.")
+    if end_signal is not None and end_signal.shape[0] != n:
+        raise ValueError(f"Episode {path} has end_signal length inconsistent with frame count.")
+    if interaction_state is not None and any(value.shape[0] != n for value in interaction_state.values()):
+        raise ValueError(f"Episode {path} has interaction-state length inconsistent with frame count.")
     if front_handle_bbox_xyxy is not None and (
         front_handle_bbox_xyxy.shape[0] != n
         or front_handle_bbox_valid.shape[0] != n
@@ -747,6 +958,9 @@ def load_episode_payload(
         "subtasks": subtasks,
         "action_loss_weight": action_loss_weight,
         "is_recovery": is_recovery,
+        "end_signal": end_signal,
+        "interaction_state": interaction_state,
+        "door_asset_name": door_asset_name,
         "front_camera_pose_base": front_camera_pose_base,
         "wrist_camera_pose_base": wrist_camera_pose_base,
         "has_camera_pose": front_camera_pose_base is not None,
@@ -800,13 +1014,18 @@ def main():
     raw_root = raw_roots[0]
     sidecar = load_sidecar(raw_root)
     first = np.load(files[0], allow_pickle=True)
-    if sidecar and "state" in sidecar:
-        state_names = list(sidecar["state"])
-    elif "state_feature_names" in first:
-        state_names = [str(x) for x in first["state_feature_names"].tolist()]
+    if args.state_action_mode == TRACIK_JOINT_STATE9_MODE:
+        state_names = list(TRACIK_JOINT_STATE9_NAMES)
+        action_names = list(TRACIK_JOINT_ACTION9_NAMES)
     else:
-        state_names = [f"state_{i}" for i in range(first["state"].shape[-1])]
-    action_names = detect_action_names(first, sidecar)
+        if sidecar and "state" in sidecar:
+            state_names = list(sidecar["state"])
+        elif "state_feature_names" in first:
+            state_names = [str(x) for x in first["state_feature_names"].tolist()]
+        else:
+            state_names = [f"state_{i}" for i in range(first["state"].shape[-1])]
+        action_names = detect_action_names(first, sidecar)
+    first_states, first_actions = state_action_arrays(first, args.state_action_mode, files[0])
     has_camera_pose = RAW_FRONT_CAMERA_POSE_KEY in first.files or RAW_WRIST_CAMERA_POSE_KEY in first.files
     if has_camera_pose and not (
         RAW_FRONT_CAMERA_POSE_KEY in first.files and RAW_WRIST_CAMERA_POSE_KEY in first.files
@@ -840,9 +1059,9 @@ def main():
         raise ValueError("--handle_bbox_min_area and --handle_bbox_min_size must be non-negative")
     if args.handle_latent_batch_size <= 0:
         raise ValueError("--handle_latent_batch_size must be positive")
-    if first["action"].shape[-1] != len(action_names):
+    if first_actions.shape[-1] != len(action_names):
         raise ValueError(
-            f"Raw action_dim={first['action'].shape[-1]} does not match action_names={len(action_names)}: "
+            f"Converted action_dim={first_actions.shape[-1]} does not match action_names={len(action_names)}: "
             f"{action_names}"
         )
     keep_state_indices = list(range(len(state_names)))
@@ -865,12 +1084,18 @@ def main():
         args.depth_only = False
     vision_mode = "rgb" if args.rgb else ("depth_only" if args.depth_only else "depth")
     raw_vision_mode = detect_raw_vision_mode(first, sidecar)
-    action_frame = detect_action_frame(first, sidecar)
-    ikpush_state_version = detect_ikpush_state_version(first, sidecar)
+    raw_action_frame = detect_action_frame(first, sidecar)
+    raw_ikpush_state_version = detect_ikpush_state_version(first, sidecar)
+    action_frame = "joint_command" if args.state_action_mode == TRACIK_JOINT_STATE9_MODE else raw_action_frame
+    ikpush_state_version = (
+        "a2w_last_command_joint_state9"
+        if args.state_action_mode == TRACIK_JOINT_STATE9_MODE
+        else raw_ikpush_state_version
+    )
     controller_mode = detect_controller_mode(first, sidecar)
-    if action_frame not in ("world", "base", "robot_base_full", "base_full", "arm_base", "robot_base", "true_base"):
+    if raw_action_frame not in ("world", "base", "robot_base_full", "base_full", "arm_base", "robot_base", "true_base"):
         raise ValueError(
-            f"Unsupported raw action_frame={action_frame!r}; "
+            f"Unsupported raw action_frame={raw_action_frame!r}; "
             "expected 'world', 'base', or 'robot_base_full'."
         )
     if raw_vision_mode != vision_mode:
@@ -992,10 +1217,11 @@ def main():
             state_preprocess_config = fit_state_preprocess_from_episodes(
                 files,
                 sidecar,
+                args.state_action_mode,
                 keep_state_indices,
                 state_names,
-                action_frame,
-                ikpush_state_version,
+                raw_action_frame,
+                raw_ikpush_state_version,
                 controller_mode,
                 args.state_quantile_low,
                 args.state_quantile_high,
@@ -1008,9 +1234,10 @@ def main():
             action_preprocess_config = fit_action_preprocess_from_episodes(
                 files,
                 sidecar,
+                args.state_action_mode,
                 action_names,
-                action_frame,
-                ikpush_state_version,
+                raw_action_frame,
+                raw_ikpush_state_version,
                 controller_mode,
                 args.action_quantile_low,
                 args.action_quantile_high,
@@ -1046,12 +1273,20 @@ def main():
         include_recovery_indicator=bool(args.include_recovery_indicator),
         include_camera_pose=has_camera_pose,
         include_handle_latent=bool(args.add_handle_latent),
+        include_end_signal=bool(args.add_end_signal),
+        include_interaction_state=bool(args.add_interaction_state),
         metadata={
             **inherited_metadata,
             "action_frame": action_frame,
             "action_pose_frame": action_frame,
             "target_pose_frame": action_frame,
             "ikpush_state_version": ikpush_state_version,
+            "state_action_mode": args.state_action_mode,
+            "action_source": (
+                "base_command_plus_tracik_smoothed_joint_command"
+                if args.state_action_mode == TRACIK_JOINT_STATE9_MODE
+                else inherited_metadata.get("action_source", "raw")
+            ),
             "door_dp_mode": controller_mode,
             "controller_mode": controller_mode,
             "image_storage": args.image_storage,
@@ -1062,6 +1297,29 @@ def main():
             "action_preprocess": action_preprocess_config,
             "state_normalized": converted_state_normalized,
             "action_loss_weight_feature": ACTION_LOSS_WEIGHT_FEATURE,
+            **(
+                {
+                    "end_signal_enabled": True,
+                    "end_signal_feature": END_SIGNAL_FEATURE,
+                    "end_signal_positive_phases": parse_csv_names(args.end_signal_positive_phases),
+                    "end_signal_version": "phase_dense_v1",
+                }
+                if args.add_end_signal
+                else {}
+            ),
+            **(
+                {
+                    "interaction_state_features": list(INTERACTION_STATE_FEATURES),
+                    "interaction_state_version": "causal_cummax_v1",
+                    "interaction_contact_min_consecutive_frames": int(
+                        args.interaction_contact_min_consecutive_frames
+                    ),
+                    "interaction_handle_unlock_angle_deg": float(args.interaction_handle_unlock_angle_deg),
+                    "interaction_door_goal_angle_deg": float(args.interaction_door_goal_angle_deg),
+                }
+                if args.add_interaction_state
+                else {}
+            ),
             "keyframe_loss_weight": converted_keyframe_loss_weight,
             "keyframe_loss_radius": converted_keyframe_loss_radius,
             **(
@@ -1088,16 +1346,27 @@ def main():
         args.num_workers,
         sidecar=sidecar,
         image_keys=image_keys,
+        state_action_mode=args.state_action_mode,
         keep_state_indices=keep_state_indices,
-        action_frame=action_frame,
-        ikpush_state_version=ikpush_state_version,
+        action_frame=raw_action_frame,
+        ikpush_state_version=raw_ikpush_state_version,
         controller_mode=controller_mode,
         vision_mode=vision_mode,
         initial_task=initial_task,
         keyframe_loss_weight_override=args.keyframe_loss_weight,
         keyframe_loss_radius_override=args.keyframe_loss_radius,
         load_handle_bbox=bool(args.add_handle_latent),
+        add_end_signal=bool(args.add_end_signal),
+        end_signal_positive_phases=parse_csv_names(args.end_signal_positive_phases),
+        add_interaction_state=bool(args.add_interaction_state),
+        interaction_contact_min_consecutive_frames=int(args.interaction_contact_min_consecutive_frames),
+        interaction_handle_unlock_angle_deg=float(args.interaction_handle_unlock_angle_deg),
+        interaction_door_goal_angle_deg=float(args.interaction_door_goal_angle_deg),
     )
+    end_positive_frames = 0
+    end_total_frames = 0
+    end_zero_positive_episodes = 0
+    interaction_stats = {}
     for ep_idx, payload in payloads:
         task = payload["task"]
         recorder.task = task
@@ -1114,6 +1383,45 @@ def main():
         subtasks = payload["subtasks"]
         action_loss_weight = payload["action_loss_weight"]
         is_recovery = payload["is_recovery"]
+        end_signal = payload.get("end_signal")
+        interaction_state = payload.get("interaction_state")
+        if end_signal is not None:
+            episode_positive = int(np.count_nonzero(end_signal > 0.5))
+            end_positive_frames += episode_positive
+            end_total_frames += int(end_signal.shape[0])
+            end_zero_positive_episodes += int(episode_positive == 0)
+            print(
+                f"End signal {payload['path_name']}: positive={episode_positive}/{end_signal.shape[0]}",
+                flush=True,
+            )
+        if interaction_state is not None:
+            door_name = str(payload.get("door_asset_name", "unknown"))
+            door_stats = interaction_stats.setdefault(
+                door_name,
+                {
+                    key: {"sum": 0.0, "count": 0, "min": 1.0, "max": 0.0, "first_one": []}
+                    for key in INTERACTION_STATE_FEATURES
+                },
+            )
+            episode_summary = []
+            for key in INTERACTION_STATE_FEATURES:
+                values = np.asarray(interaction_state[key], dtype=np.float32).reshape(-1)
+                stat = door_stats[key]
+                stat["sum"] += float(values.sum())
+                stat["count"] += int(values.size)
+                stat["min"] = min(float(stat["min"]), float(values.min()))
+                stat["max"] = max(float(stat["max"]), float(values.max()))
+                ones = np.flatnonzero(values >= 1.0 - 1.0e-6)
+                first_one = None if ones.size == 0 else int(ones[0])
+                if first_one is not None:
+                    stat["first_one"].append(first_one)
+                episode_summary.append(
+                    f"{key.rsplit('.', 1)[-1]}:mean={float(values.mean()):.3f},first1={first_one}"
+                )
+            print(
+                f"Interaction state {payload['path_name']} door={door_name}: " + " ".join(episode_summary),
+                flush=True,
+            )
         if bool(payload.get("has_camera_pose", False)) != bool(has_camera_pose):
             raise ValueError(
                 f"Episode {payload['path_name']} camera-pose presence does not match the first episode. "
@@ -1155,10 +1463,42 @@ def main():
                 front_handle_latent_valid=None if handle_latents is None else handle_latents["front_handle_latent_valid"][i],
                 wrist_handle_latent=None if handle_latents is None else handle_latents["wrist_handle_latent"][i],
                 wrist_handle_latent_valid=None if handle_latents is None else handle_latents["wrist_handle_latent_valid"][i],
+                end_signal=None if end_signal is None else end_signal[i],
+                interaction_contact=(
+                    None if interaction_state is None else interaction_state[INTERACTION_CONTACT_FEATURE][i]
+                ),
+                interaction_handle_progress=(
+                    None if interaction_state is None else interaction_state[INTERACTION_HANDLE_PROGRESS_FEATURE][i]
+                ),
+                interaction_door_progress=(
+                    None if interaction_state is None else interaction_state[INTERACTION_DOOR_PROGRESS_FEATURE][i]
+                ),
             )
         recorder.save_episode()
         print(f"Converted {payload['path_name']}: {n} frames task={task!r} ({ep_idx + 1}/{len(files)})", flush=True)
     recorder.finalize()
+    if args.add_end_signal:
+        ratio = float(end_positive_frames) / max(1, int(end_total_frames))
+        print(
+            "End signal summary: "
+            f"positive={end_positive_frames} negative={end_total_frames - end_positive_frames} "
+            f"total={end_total_frames} positive_ratio={ratio:.6f} "
+            f"zero_positive_episodes={end_zero_positive_episodes}/{len(files)}",
+            flush=True,
+        )
+    if args.add_interaction_state:
+        print("Interaction state summary by door:", flush=True)
+        for door_name in sorted(interaction_stats):
+            pieces = []
+            for key in INTERACTION_STATE_FEATURES:
+                stat = interaction_stats[door_name][key]
+                first_values = stat["first_one"]
+                first_text = "none" if not first_values else f"{min(first_values)}..{max(first_values)}"
+                pieces.append(
+                    f"{key.rsplit('.', 1)[-1]}(min={stat['min']:.3f},max={stat['max']:.3f},"
+                    f"mean={stat['sum']/max(1, stat['count']):.3f},first1={first_text})"
+                )
+            print(f"  {door_name}: " + " ".join(pieces), flush=True)
     feature_sidecar = Path(args.root) / args.repo_id / "door_dp_feature_names.json"
     feature_sidecar.parent.mkdir(parents=True, exist_ok=True)
     sidecar_payload = {
@@ -1172,6 +1512,12 @@ def main():
         "action_pose_frame": action_frame,
         "target_pose_frame": action_frame,
         "ikpush_state_version": ikpush_state_version,
+        "state_action_mode": args.state_action_mode,
+        "action_source": (
+            "base_command_plus_tracik_smoothed_joint_command"
+            if args.state_action_mode == TRACIK_JOINT_STATE9_MODE
+            else inherited_metadata.get("action_source", "raw")
+        ),
         "door_dp_mode": controller_mode,
         "controller_mode": controller_mode,
         "image_storage": args.image_storage,
@@ -1214,6 +1560,18 @@ def main():
         sidecar_payload["handle_latent_bbox_margin"] = float(args.handle_latent_bbox_margin)
         sidecar_payload["handle_bbox_min_area"] = float(args.handle_bbox_min_area)
         sidecar_payload["handle_bbox_min_size"] = float(args.handle_bbox_min_size)
+    if args.add_interaction_state:
+        sidecar_payload["interaction_state_features"] = list(INTERACTION_STATE_FEATURES)
+        sidecar_payload["interaction_state_version"] = "causal_cummax_v1"
+        sidecar_payload["interaction_contact_min_consecutive_frames"] = int(
+            args.interaction_contact_min_consecutive_frames
+        )
+        sidecar_payload["interaction_handle_unlock_angle_deg"] = float(
+            args.interaction_handle_unlock_angle_deg
+        )
+        sidecar_payload["interaction_door_goal_angle_deg"] = float(
+            args.interaction_door_goal_angle_deg
+        )
     if sidecar:
         for key in DATASET_METADATA_KEYS:
             if key in sidecar and key not in sidecar_payload:

@@ -99,9 +99,21 @@ def auto_wrap_official_lerobot_checkpoint(checkpoint_path, args):
     cache_root = DP_ROOT / "logs" / "door-auto-wrapped" / run_name / step_name
     out_dir = cache_root / "model_latest"
     manifest_path = cache_root / "model_latest.pt"
-    if (out_dir / "door_policy_meta.json").is_file() and manifest_path.is_file():
-        print(f"Using cached Door-wrapped checkpoint: {manifest_path}", flush=True)
-        return manifest_path.resolve()
+    cached_meta_path = out_dir / "door_policy_meta.json"
+    if cached_meta_path.is_file() and manifest_path.is_file():
+        cached_meta = load_json(cached_meta_path)
+        cached_policy = cached_meta.get("policy_config") or {}
+        cached_end = bool(cached_policy.get("end_signal_prediction", False))
+        requested_end = bool(policy_config.get("end_signal_prediction", False))
+        cached_interaction = bool(cached_policy.get("interaction_state_conditioning", False))
+        requested_interaction = bool(policy_config.get("interaction_state_conditioning", False))
+        if cached_end == requested_end and cached_interaction == requested_interaction:
+            print(f"Using cached Door-wrapped checkpoint: {manifest_path}", flush=True)
+            return manifest_path.resolve()
+        print(
+            "Cached Door wrapper has stale end-signal metadata; rebuilding it from the official checkpoint.",
+            flush=True,
+        )
 
     if policy_type == "act":
         export_script = DP_ROOT / "export_official_lerobot_act_to_door_checkpoint.py"
@@ -197,6 +209,9 @@ def parse_args():
     parser.add_argument("--dp_temporal_prefetch_actions", type=int, default=3)
     parser.add_argument("--dp_temporal_old_weight", type=float, default=0.3)
     parser.add_argument("--dp_temporal_new_weight", type=float, default=0.7)
+    parser.add_argument("--dp_end_signal_monitor", action="store_true")
+    parser.add_argument("--dp_end_signal_threshold", type=float, default=0.8)
+    parser.add_argument("--dp_end_signal_consecutive_steps", type=int, default=10)
     parser.add_argument("--dp_control_env_id", type=int, default=0)
     parser.add_argument("--dp_control_all_envs", dest="dp_control_all_envs", action="store_true", default=True)
     parser.add_argument("--no_dp_control_all_envs", dest="dp_control_all_envs", action="store_false")
@@ -342,6 +357,10 @@ def main():
         cmd += ["--dp_temporal_prefetch_actions", str(args.dp_temporal_prefetch_actions)]
         cmd += ["--dp_temporal_old_weight", str(args.dp_temporal_old_weight)]
         cmd += ["--dp_temporal_new_weight", str(args.dp_temporal_new_weight)]
+    if args.dp_end_signal_monitor:
+        cmd.append("--dp_end_signal_monitor")
+        cmd += ["--dp_end_signal_threshold", str(args.dp_end_signal_threshold)]
+        cmd += ["--dp_end_signal_consecutive_steps", str(args.dp_end_signal_consecutive_steps)]
     if args.dp_warmstart:
         cmd += [
             "--dp_warmstart",

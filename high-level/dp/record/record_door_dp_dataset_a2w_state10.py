@@ -142,6 +142,16 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--record_end_signal",
+        action="store_true",
+        help="Save end_signal=1 during return_home/hold_home and 0 during all other phases.",
+    )
+    parser.add_argument(
+        "--end_signal_positive_phases",
+        type=str,
+        default="return_home,hold_home",
+    )
+    parser.add_argument(
         "--record_handle_bbox",
         action="store_true",
         help=(
@@ -519,6 +529,12 @@ def run_one(mode, rollout_idx, args):
             cmd.append("--no_keyframe_loss_weights")
         if args.record_camera_pose:
             cmd.append("--record_camera_pose")
+        if args.record_end_signal:
+            cmd += [
+                "--record_end_signal",
+                "--end_signal_positive_phases",
+                str(args.end_signal_positive_phases),
+            ]
         if args.record_handle_bbox:
             cmd.append("--record_handle_bbox")
         if args.record_gripper_handle_contact or args.filter_gripper_handle_contact:
