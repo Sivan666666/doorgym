@@ -1495,6 +1495,16 @@ def parse_args():
                 ),
             },
             {
+                "name": "--pull_base_progress_reference_angle_deg",
+                "type": float,
+                "default": 48.0,
+                "help": (
+                    "Door angle used to normalize the primary straight-back base retreat. "
+                    "It is intentionally independent of pull_release_angle_deg so raising "
+                    "the physical release threshold does not slow the established early pull."
+                ),
+            },
+            {
                 "name": "--pull_late_retreat_start_angle_deg",
                 "type": float,
                 "default": 38.0,
@@ -1524,6 +1534,45 @@ def parse_args():
                 ),
             },
             {
+                "name": "--pull_high_angle_base_lateral_follow_ratio",
+                "type": float,
+                "default": 1.0,
+                "help": (
+                    "Fraction of the high-angle handle-arc lateral sweep followed smoothly by "
+                    "the base. This preserves tangential pulling geometry after about 40 deg."
+                ),
+            },
+            {
+                "name": "--pull_late_base_lateral_follow_ratio",
+                "type": float,
+                "default": 1.80,
+                "help": (
+                    "Late-pull lateral follow ratio reached smoothly at large door angles. "
+                    "Keeping the early ratio near 1 avoids tearing the fingers off the handle, "
+                    "while a small late over-travel maintains tangential pulling force."
+                ),
+            },
+            {
+                "name": "--pull_late_base_lateral_boost_start_deg",
+                "type": float,
+                "default": 55.0,
+                "help": "Measured door angle at which late lateral over-travel starts.",
+            },
+            {
+                "name": "--pull_late_base_lateral_boost_full_deg",
+                "type": float,
+                "default": 65.0,
+                "help": "Measured door angle at which the late lateral ratio is fully applied.",
+            },
+            {
+                "name": "--pull_high_angle_base_lateral_max_distance",
+                "type": float,
+                "default": 0.40,
+                "help": (
+                    "Maximum lateral base displacement used for smooth high-angle arc following."
+                ),
+            },
+            {
                 "name": "--release_base_retreat_distance",
                 "type": float,
                 "default": 0.76,
@@ -1535,10 +1584,11 @@ def parse_args():
             {
                 "name": "--pull_target_max_distance",
                 "type": float,
-                "default": 0.20,
+                "default": 0.04,
                 "help": (
-                    "Maximum tangential EE lead ahead of the live handle during pull_door. "
-                    "This lead supplies the pulling force without abandoning handle tracking."
+                    "Maximum per-frame Cartesian lead from the measured EE to the circular-arc "
+                    "pull target. Bounding this lead keeps the Jacobian IK command reachable "
+                    "while maintaining physical tensile force. Set <=0 to disable the bound."
                 ),
             },
             {
@@ -1622,11 +1672,11 @@ def parse_args():
             {
                 "name": "--pull_late_arc_lead_angle_deg",
                 "type": float,
-                "default": 2.5,
+                "default": 5.0,
                 "help": (
                     "Circular-arc angular lead reached after the late-retreat "
-                    "threshold. This lets the arm finish the pull without moving "
-                    "the base sideways."
+                    "threshold. The stronger tangential lead keeps pulling beyond "
+                    "60 degrees without relying on post-release inertia."
                 ),
             },
             {
@@ -1642,8 +1692,12 @@ def parse_args():
             {
                 "name": "--pull_release_angle_deg",
                 "type": float,
-                "default": 48.0,
-                "help": "Start loosening/releasing the handle once the pull-side door reaches this angle.",
+                "default": 65.0,
+                "help": (
+                    "Measured pull-side door angle that starts releasing the handle. "
+                    "The default keeps a physical grasp beyond the 60 degree task threshold "
+                    "so success never depends on post-release inertia."
+                ),
             },
             {
                 "name": "--pull_release_angle_tolerance_deg",
@@ -1652,7 +1706,7 @@ def parse_args():
                 "help": (
                     "Physical-contact tolerance for the measured release angle. "
                     "The default is zero so the release transition starts as soon "
-                    "as the measured door angle reaches 48 degrees."
+                    "as the measured door angle reaches pull_release_angle_deg."
                 ),
             },
             {
@@ -1673,7 +1727,7 @@ def parse_args():
             {
                 "name": "--release_handle_steps",
                 "type": int,
-                "default": 180,
+                "default": 50,
                 "help": (
                     "Total release_handle frames, including the final stationary "
                     "home-pose convergence period before pass_through."
@@ -1682,7 +1736,7 @@ def parse_args():
             {
                 "name": "--release_handle_motion_steps",
                 "type": int,
-                "default": 110,
+                "default": 50,
                 "help": (
                     "Frames used to open, extract, and retract the arm. Remaining "
                     "release_handle frames hold the arm home before pass_through."
@@ -1706,23 +1760,23 @@ def parse_args():
                 "help": (
                     "Fraction of release_handle_motion_steps for which the gripper "
                     "remains fully closed while the arm starts extracting outward. "
-                    "The default starts opening immediately at the 48 degree release event."
+                    "The default starts opening immediately at the measured-angle release event."
                 ),
             },
             {
                 "name": "--release_gripper_open_fraction",
                 "type": float,
-                "default": 0.05,
+                "default": 0.04,
                 "help": (
                     "Fraction of release_handle_motion_steps used to open the gripper "
                     "after release_gripper_open_start_fraction. The default opens "
-                    "quickly over about six control frames."
+                    "quickly over about four control frames."
                 ),
             },
             {
                 "name": "--release_outward_fraction",
                 "type": float,
-                "default": 0.10,
+                "default": 0.08,
                 "help": (
                     "Fraction of release_handle used for the immediate outward extraction. "
                     "The remaining time is kept for the collision-avoiding lateral retraction."
@@ -1731,13 +1785,13 @@ def parse_args():
             {
                 "name": "--release_outward_distance",
                 "type": float,
-                "default": 0.12,
+                "default": 0.14,
                 "help": "Extra pull-direction clearance before sweeping the released arm laterally.",
             },
             {
                 "name": "--release_extra_outward_distance",
                 "type": float,
-                "default": 0.18,
+                "default": 0.20,
                 "help": (
                     "Additional outward travel after the gripper has cleared the handle, "
                     "before beginning the outside retraction arc."
@@ -5237,6 +5291,26 @@ def trajectory_targets(
                     planned_yaw,
                 )
                 target_pos = desired_handle + desired_ee_offset
+                # Keep an unclipped geometric reference for the base.  The EE
+                # target below is intentionally bounded relative to the
+                # measured EE for stable Jacobian IK, but using that bounded
+                # target to drive the base creates a feedback dead-zone: once
+                # the arm reaches its lateral workspace limit, the reference
+                # itself stops moving and the base never catches up.  The base
+                # should instead follow the true hinge-centred handle arc.
+                base_arc_target_pos = np.asarray(target_pos, dtype=np.float32).copy()
+                max_target_lead = float(args.pull_target_max_distance)
+                current_ee = ik_state.current_pos_np
+                if max_target_lead > 0.0 and current_ee is not None:
+                    current_ee = np.asarray(current_ee, dtype=np.float32)
+                    target_delta = np.asarray(target_pos, dtype=np.float32) - current_ee
+                    target_delta_norm = float(np.linalg.norm(target_delta))
+                    if target_delta_norm > max_target_lead:
+                        target_pos = (
+                            current_ee
+                            + target_delta
+                            * (max_target_lead / max(target_delta_norm, 1.0e-9))
+                        ).astype(np.float32)
                 if args.ik_position_only:
                     target_quat = None
                 else:
@@ -5263,7 +5337,10 @@ def trajectory_targets(
                             / max(1, int(args.pull_base_retreat_steps))
                         )
                     )
-                    / max(1.0e-6, float(args.pull_release_angle_deg)),
+                    / max(
+                        1.0e-6,
+                        float(args.pull_base_progress_reference_angle_deg),
+                    ),
                     0.0,
                     1.0,
                 )
@@ -5291,6 +5368,72 @@ def trajectory_targets(
                 * float(args.pull_late_retreat_distance)
                 * float(late_retreat_t)
             )
+            lateral_dir = np.array(
+                [-float(traj["pull_dir"][1]), float(traj["pull_dir"][0])],
+                dtype=np.float32,
+            )
+            lateral_norm = float(np.linalg.norm(lateral_dir))
+            if lateral_norm > 1.0e-9:
+                lateral_dir /= lateral_norm
+            if "pull_late_retreat_start_step" in traj:
+                if "pull_lateral_follow_target_start" not in traj:
+                    traj["pull_lateral_follow_target_start"] = np.asarray(
+                        base_arc_target_pos,
+                        dtype=np.float32,
+                    ).copy()
+                target_sweep = float(
+                    np.dot(
+                        np.asarray(base_arc_target_pos, dtype=np.float32)[:2]
+                        - np.asarray(
+                            traj["pull_lateral_follow_target_start"],
+                            dtype=np.float32,
+                        )[:2],
+                        lateral_dir,
+                    )
+                )
+                late_lateral_start = float(
+                    args.pull_late_base_lateral_boost_start_deg
+                )
+                late_lateral_full = max(
+                    late_lateral_start + 1.0e-6,
+                    float(args.pull_late_base_lateral_boost_full_deg),
+                )
+                late_lateral_t = smoothstep(
+                    float(
+                        np.clip(
+                            (float(door_open_deg) - late_lateral_start)
+                            / (late_lateral_full - late_lateral_start),
+                            0.0,
+                            1.0,
+                        )
+                    )
+                )
+                lateral_follow_ratio = float(
+                    lerp(
+                        np.array(
+                            [float(args.pull_high_angle_base_lateral_follow_ratio)],
+                            dtype=np.float32,
+                        ),
+                        np.array(
+                            [float(args.pull_late_base_lateral_follow_ratio)],
+                            dtype=np.float32,
+                        ),
+                        late_lateral_t,
+                    )[0]
+                )
+                lateral_follow = float(
+                    np.clip(
+                        target_sweep
+                        * lateral_follow_ratio,
+                        -float(args.pull_high_angle_base_lateral_max_distance),
+                        float(args.pull_high_angle_base_lateral_max_distance),
+                    )
+                )
+                base_xy = (
+                    np.asarray(base_xy, dtype=np.float32)
+                    + lateral_dir * lateral_follow
+                )
+            yaw = float(yaw_stop)
             if (
                 "pull_complete_step" in traj
                 and "pull_release_base_xy" not in traj
@@ -5299,7 +5442,7 @@ def trajectory_targets(
                     base_xy,
                     dtype=np.float32,
                 ).copy()
-            yaw = yaw_stop
+                traj["pull_release_yaw"] = float(yaw)
             tighten_t = smoothstep(
                 (pull_step + 1)
                 / max(1, int(args.pull_gripper_tighten_steps))
@@ -5337,7 +5480,7 @@ def trajectory_targets(
                 traj.get("pull_release_base_xy", base_pull),
                 dtype=np.float32,
             ).copy()
-            yaw = yaw_stop
+            yaw = float(traj.get("pull_release_yaw", yaw_stop))
             # pull_door has already tightened to the fully closed command.
             gripper = float(
                 lerp(
@@ -5550,7 +5693,7 @@ def trajectory_targets(
                 base_release,
                 smoothstep(release_t),
             )
-            yaw = yaw_stop
+            yaw = float(yaw_stop)
             joint_home_start = float(
                 np.clip(args.release_joint_home_start_fraction, 0.0, 0.95)
             )
@@ -7304,6 +7447,31 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
         step += 1
 
     elapsed = time.time() - start
+    release_angles = [
+        float(st.traj["pull_release_angle_observed_deg"])
+        for st in env_states
+        if "pull_release_angle_observed_deg" in st.traj
+    ]
+    completed_phases = {"return_home", "hold_home"}
+    completed_count = sum(st.last_phase in completed_phases for st in env_states)
+    max_open_angles = [
+        float(st.traj.get("pull_max_open_deg", 0.0)) for st in env_states
+    ]
+    if release_angles:
+        release_stats = (
+            f"min/mean/max={min(release_angles):.2f}/"
+            f"{float(np.mean(release_angles)):.2f}/{max(release_angles):.2f} deg"
+        )
+    else:
+        release_stats = "min/mean/max=n/a"
+    print(
+        "[A2WPullValidation] "
+        f"released={len(release_angles)}/{len(env_states)} "
+        f"release_angle_{release_stats} "
+        f"max_open_ge_60={sum(angle >= 60.0 for angle in max_open_angles)}/"
+        f"{len(env_states)} completed_traverse={completed_count}/{len(env_states)}",
+        flush=True,
+    )
     print(f"Done after {step} steps ({elapsed:.2f}s).")
     raw_episode_snapshots = snapshot_raw_dp_episodes(env_states)
     dc.finish_float_dp_recorders(env_states, args)
