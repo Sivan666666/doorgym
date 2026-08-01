@@ -15,6 +15,7 @@
 # limitations under the License.
 from datasets import Dataset
 import pytest
+import torch
 
 from lerobot.datasets.push_dataset_to_hub.utils import calculate_episode_data_index
 from lerobot.datasets.sampler import EpisodeAwareSampler, make_recovery_sampler
@@ -91,6 +92,21 @@ def test_shuffle():
     assert sampler.indices == [0, 1, 2, 3, 4, 5]
     assert len(sampler) == 6
     assert set(sampler) == {0, 1, 2, 3, 4, 5}
+
+
+def test_shuffle_generator_isolated_from_global_rng():
+    generator_a = torch.Generator().manual_seed(123)
+    generator_b = torch.Generator().manual_seed(123)
+    sampler_a = EpisodeAwareSampler([0], [10], shuffle=True, generator=generator_a)
+    sampler_b = EpisodeAwareSampler([0], [10], shuffle=True, generator=generator_b)
+
+    torch.manual_seed(999)
+    _ = torch.rand(1000)
+    order_a = list(sampler_a)
+    torch.manual_seed(1)
+    _ = torch.rand(3)
+    order_b = list(sampler_b)
+    assert order_a == order_b
 
 
 class _RecoverySamplerDataset:

@@ -1857,3 +1857,152 @@ python3 high-level/real_deploy/keyboard_z1_ee_teleop.py \
 ```bash
 --min_xyz XMIN YMIN ZMIN --max_xyz XMAX YMAX ZMAX
 ```
+
+## 18. 2026-07-20 Joint9 ACT / Z1 bridge
+
+新模型的 state/action 都是 9 维关节格式：
+
+```text
+state  = [last_command_vx, last_command_vyaw, q1, q2, q3, q4, q5, q6, gripper]
+action = [vx,              vyaw,              q1, q2, q3, q4, q5, q6, gripper]
+```
+
+bridge 新增显式模式：
+
+```bash
+--act_state_action_mode joint9
+```
+
+该模式的控制路径：
+
+1. 50 Hz 异步读取 Z1 实际 `q/qd/gripper`，直接组装 joint9 state。
+2. 收到 ACT joint9 action 后，直接取 `action[2:8]` 作为关节路点；不做 EE IK。
+3. 保留关节范围和跳变检查。
+4. 保留相邻实时路点终点速度估计。
+5. 保留在线 quintic 重规划，以及最大关节速度/加速度约束。
+6. 保留 500 Hz LOWCMD、命令超时平滑刹车、夹爪限速/限加速度和 close latch。
+7. 保留启动 `backToStart()`、实际 `home_q` 稳定检测和退出回零流程。
+
+ACT runner 默认 `--z1_state_action_mode auto`：checkpoint 的 state/action 都为
+9 维时自动选 `joint9`；都为 10 维时保持旧 `ee10`。chunk overlap 对
+`vx/vyaw/q1..q6` 使用 `0.3 old + 0.7 new`，夹爪采用最新预测，不融合。
+
+joint9 bridge 启动参数：
+
+```bash
+cd /home/anx/door_act_deploy/visual_whole_body
+
+high-level/real_deploy/run_z1_act_ee_bridge.sh \
+  --act_state_action_mode joint9 \
+  --enable_arm \
+  --max_joint_speed 3.0 \
+  --max_joint_acceleration 15.0 \
+  --joint_trajectory_duration_s 0.02 \
+  --max_gripper_speed 3.14 \
+  --max_gripper_acceleration 120.0 \
+  --state_tx_host 127.0.0.1 \
+  --state_tx_port 15013 \
+  --log_path /tmp/door_act_services/z1_bridge_joint9.jsonl
+```
+
+验证记录：协议/维度/旧模式兼容测试共 41 项通过；joint9 UDP dry-run 已确认
+state 返回 9 维并跟随输入关节目标，测试全程 `--no_enable_arm`，没有发送 LOWCMD。
+
+Plücker camera pose 已接入：front pose 固定使用仿真默认安装位姿；wrist pose 使用
+`forwardKinematics(q, 6)`，先右乘现有 `+0.086 m` tool offset 得到 ACT EE，再右乘
+EE-to-camera 相对变换。两者都以 robot base 表达为
+`[x,y,z,qx,qy,qz,qw]`。这里的 FK 只服务于移动相机 extrinsic，不参与 joint9 state
+构造或 joint command 求解。
+
+注意：Z1 SDK `forwardKinematics(q, 6)` 的输出原点不是 Isaac Gym 的 `link06`
+原点，而是沿末端局部 x 轴前移约 `0.100 m`。不能直接在 SDK FK 后加仿真的
+link06 camera offset，否则 wrist pose 会多出约 10 cm。当前实现使用等价且旋转正确的
+ACT-EE 局部变换：
+
+仿真一致的默认值：
+
+```text
+front @ robot base: xyz=[0.29, 0.031, 0.165], ypr_deg=[0, -45, 0]
+wrist @ ACT EE:     xyz=[-0.093, 0.031, 0.22], ypr_deg=[0, 60, 0]
+```
+
+等价仿真定义仍是 `wrist @ Isaac link06 = [0.093, 0.031, 0.22]`。使用同一条
+episode 的 5 组大范围关节姿态反推 SDK-FK-to-camera 固定变换，平移各轴极差均小于
+`1e-6 m`，确认该差异是固定坐标系定义，不是跟踪误差。
+
+NX 离线前向验证（50K checkpoint，500 帧 joint9/Plücker episode 中按 25 step
+抽样，18 个 query、共 180 个 action）：
+
+```text
+motion_l1=0.01118
+normalized_motion_l1=0.02441
+threshold_accuracy=99.58%
+all_action_accuracy=98.33%
+vx_mae=0.0052
+joint_l2_mean=0.0451 rad
+joint_max_abs_mean=0.0316 rad
+gripper_mae=0.0034 rad
+interaction contact precision/recall/F1=1.0/1.0/1.0
+```
+
+### 2026-07-21 joint9 raw episode 0 真机实时重放
+
+新增 `high-level/real_deploy/replay_joint9_episode_z1.py`，专门将 joint9 raw
+episode 按原始采样频率送入 Z1 bridge，并同步接收 `q/qd/gripper` 反馈。脚本会将
+`action[0:2]` 强制清零且不创建 ROS publisher，因此不会控制底盘；结束时请求 bridge
+执行 `backToStart()`。
+
+本次在 NX 上重放：
+
+```text
+episode: episode_000000_joint9_eval.npz
+frames: 500
+frequency: 25 Hz
+duration: 20 s trajectory + settle/backToStart
+joint bridge limits: 3.0 rad/s, 15.0 rad/s^2
+valid feedback: 498/500
+dog command published: false
+shutdown backToStart confirmed: true
+```
+
+跟踪结果：
+
+```text
+raw target vs feedback abs error: p50=0.0269 rad, p95=0.1561 rad, max=0.2922 rad
+best causal lag: 6 frames = 240 ms
+lag-compensated median abs error: 0.00485 rad (about 0.28 deg)
+measured joint speed: p95=0.6310 rad/s, max=1.0455 rad/s
+gripper target vs feedback: p50=0.00373 rad, p95=0.2481 rad, max=0.4229 rad
+```
+
+原始 episode 少数帧的离散目标速度达到约 `2.77 rad/s`、离散加速度达到约
+`88.5 rad/s^2`。bridge 没有原样下发这些尖峰，而是通过在线 quintic 和
+`15 rad/s^2` 加速度上限自动延长轨迹段。因此主要问题是约 240 ms 的轨迹滞后，
+不是关节稳态精度；去除估计滞后后中位误差约 0.28°。
+
+完整日志：
+
+```text
+high-level/real_deploy/nx_runs/joint9_episode0_replay_20260721_010213/
+```
+
+### 2026-07-22 interaction decoder chunk 部署日志
+
+ACT 部署日志已补齐 interaction decoder 输出。每次新策略 chunk 到达时，
+`policy_chunk_ingests[*].interaction_state_chunk` 保存未经 action horizon 截断的
+完整 `H x 3`：
+
+```text
+[contact_probability, handle_progress, door_progress]
+```
+
+每个控制 step 的 `executed_interaction_state` 保存与当步实际发布 action 严格按
+全局 timestep 对齐的三维预测，并记录 `chunk_ids/action_source/blend_count`。异步
+推理迟到时，过期 action 与对应 interaction 行会一起丢弃；新旧 chunk 重叠时，
+interaction 与运动 action 一样执行 `0.3 old + 0.7 new`。新增复数记录字段
+`policy_chunk_ingests`，避免同一个控制周期摄取两次推理结果时覆盖第一份完整 chunk；
+原有 `policy_chunk_ingest` 保留兼容旧分析脚本。
+
+本地验证：静态编译通过，action/interaction 时间对齐、迟到跳过、重叠融合和无
+interaction 旧模型兼容测试共 6 项通过。此次只修改并离线验证日志链路，没有启动
+Z1、底盘或任何真机控制进程。

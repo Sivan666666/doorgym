@@ -52,6 +52,20 @@ class TrainPipelineConfig(HubMixin):
     seed: int | None = 1000
     # Number of workers for the dataloader.
     num_workers: int = 4
+    # Optional RNG stream dedicated to sample ordering and worker seeding.
+    # When set, model construction cannot silently change the DataLoader order.
+    dataloader_seed: int | None = None
+    # Clip detached auxiliary heads separately from motion-policy parameters so
+    # auxiliary gradients cannot rescale the main gradients through global norm clipping.
+    separate_auxiliary_grad_clip: bool = False
+    # Optional runtime override for torch Adam/AdamW foreach updates. Setting
+    # this to false is useful in strict paired ablations because the optimizer
+    # then updates each ACT tensor independently of any extra probe parameters.
+    optimizer_foreach: bool | None = None
+    # Opt-in deterministic CUDA/cuDNN execution for scientific paired runs.
+    # Disabled by default so existing training commands retain their original
+    # throughput and numerical behavior.
+    strict_determinism: bool = False
     batch_size: int = 8
     steps: int = 50_000
     eval_freq: int = 20_000

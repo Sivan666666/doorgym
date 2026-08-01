@@ -1,0 +1,64 @@
+schema_version: door_twin_agent_benchmark_v1
+name: door_twin_fresh1_pushdoor_agent_ablation_99690329960019
+base_door_cfg: /home/sivan/whole_body/visual_whole_body/high-level/data/cfg/b1z1_opendoor.yaml
+runner_script: /home/sivan/whole_body/visual_whole_body/high-level/float_ik/isaacgym_float_ik_a2w_basearn_push_door_parallel.py
+output_root: /home/sivan/whole_body/visual_whole_body/high-level/float_ik/door_twin/experiments/runs/agent_ablation_codex
+python_executable: /home/sivan/miniconda3/envs/b1z1/bin/python
+candidate_repeats: 3
+max_repair_rounds: 5
+development_seeds: [41001, 41002, 41003, 41004]
+heldout_seeds:
+  - 42001
+  - 42002
+  - 42003
+  - 42004
+  - 42005
+  - 42006
+  - 42007
+  - 42008
+  - 42009
+  - 42010
+  - 42011
+  - 42012
+  - 42013
+  - 42014
+  - 42015
+  - 42016
+generation_success_min: 12
+asset_probe_seed: 43001
+asset_probe_steps: 120
+asset_probe_force: 20.0
+steps: 2405
+methods:
+  - ours
+  - without_visual_feedback
+  - without_vlm_fix
+  - validation_only_log
+  - validation_only
+  - without_simulation_rollout
+vlm:
+  model: codex-current-session
+  temperature: 0.0
+  timeout_s: 180
+  max_retries: 3
+common_runner_args:
+  - --headless
+  - --rl_device
+  - cuda:0
+  - --sim_device
+  - cuda:0
+  - --graphics_device_id
+  - "0"
+  - --no_enable_depth_noise
+  - --no_enable_depth_gaussian_blur
+  - --no_show_seg
+doors:
+  - id: "99690329960019"
+    door_name: "99690329960019"
+    tags: [fresh, aigc, hinged_lever_push, single_door_pilot]
+    hidden_ground_truth:
+      door_body_name: link_1
+      handle_body_name: link_2
+      door_dof_name: joint_1
+      handle_dof_name: joint_2
+      handle_goal_pos: [-0.05320285327333322, 0.005233113443896223, 0.049297813034858806]

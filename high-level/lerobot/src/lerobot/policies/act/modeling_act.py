@@ -22,6 +22,7 @@ The majority of changes here involve removing unused code, unifying naming, and 
 import math
 from collections import deque
 from collections.abc import Callable
+from contextlib import nullcontext
 from itertools import chain
 from pathlib import Path
 from typing import Any
@@ -280,9 +281,43 @@ class ACTPolicy(PreTrainedPolicy):
     config_class = ACTConfig
     name = "act"
 
+    @staticmethod
+    def _local_saved_keys(pretrained_name_or_path) -> set[str]:
+        """Read local checkpoint keys without constructing a potentially incompatible model."""
+        path = Path(pretrained_name_or_path).expanduser()
+        model_file = path / "model.safetensors" if path.is_dir() else path
+        if not model_file.is_file():
+            return set()
+        with safe_open(str(model_file), framework="pt", device="cpu") as handle:
+            return set(handle.keys())
+
+    @staticmethod
+    def _legacy_point_cloud_mode(saved_keys: set[str]) -> str | None:
+        """Identify the two early PointCloud ACT encoders from their state-dict layout."""
+        prefix = "model.point_cloud_encoder."
+        has_early_point_mlp = any(key.startswith(prefix + "point_mlp.") for key in saved_keys)
+        if not has_early_point_mlp:
+            return None
+        if any(key.startswith(prefix + "projection.") for key in saved_keys):
+            return "dp3_global_legacy"
+        if any(key.startswith(prefix + "local_projection.") for key in saved_keys):
+            return "obsbench_local_legacy"
+        return None
+
     @classmethod
     def from_pretrained(cls, pretrained_name_or_path, *, config=None, strict=False, **kwargs):
-        """Allow old ACT weights to initialize only explicitly enabled new heads."""
+        """Load ACT while preserving compatibility with opt-in heads and early PCD encoders."""
+        saved_keys = cls._local_saved_keys(pretrained_name_or_path)
+        legacy_point_cloud_mode = cls._legacy_point_cloud_mode(saved_keys)
+        if legacy_point_cloud_mode is not None:
+            if config is not None:
+                configured_mode = str(getattr(config, "point_cloud_encoder_mode", ""))
+                if configured_mode in {"dp3_global", "obsbench_local", "obsbench_post_pointnet"}:
+                    config.point_cloud_encoder_mode = legacy_point_cloud_mode
+            else:
+                cli_overrides = list(kwargs.pop("cli_overrides", []))
+                cli_overrides.append(f"--point_cloud_encoder_mode={legacy_point_cloud_mode}")
+                kwargs["cli_overrides"] = cli_overrides
         policy = super().from_pretrained(
             pretrained_name_or_path,
             config=config,
@@ -294,12 +329,8 @@ class ACTPolicy(PreTrainedPolicy):
         )
         if strict or not optional_warmstart:
             return policy
-        path = Path(pretrained_name_or_path).expanduser()
-        model_file = path / "model.safetensors" if path.is_dir() else path
-        if not model_file.is_file():
+        if not saved_keys:
             return policy
-        with safe_open(str(model_file), framework="pt", device="cpu") as handle:
-            saved_keys = set(handle.keys())
         expected_keys = set(policy.state_dict().keys())
         missing = expected_keys - saved_keys
         unexpected = saved_keys - expected_keys
@@ -311,6 +342,7 @@ class ACTPolicy(PreTrainedPolicy):
                 key
                 for key in expected_keys
                 if key.startswith("model.interaction_state_head.")
+                or key.startswith("model.interaction_state_chunk_head.")
                 or key.startswith("model.interaction_conditioner.")
             )
         if missing - allowed_missing or unexpected:
@@ -335,6 +367,14 @@ class ACTPolicy(PreTrainedPolicy):
         self.config = config
 
         self.model = ACT(config)
+        self._last_separate_auxiliary_loss: Tensor | None = None
+
+        if config.interaction_state_probe_freeze_main:
+            for name, parameter in self.model.named_parameters():
+                parameter.requires_grad_(
+                    name.startswith("interaction_state_head.")
+                    or name.startswith("interaction_state_chunk_head.")
+                )
 
         if config.temporal_ensemble_coeff is not None:
             self.temporal_ensembler = ACTTemporalEnsembler(config.temporal_ensemble_coeff, config.chunk_size)
@@ -424,6 +464,7 @@ class ACTPolicy(PreTrainedPolicy):
             batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original
             batch[OBS_IMAGES] = [batch[key] for key in self.config.image_features]
 
+        self._last_separate_auxiliary_loss = None
         actions_hat, (mu_hat, log_sigma_x2_hat) = self.model(batch)
 
         valid = ~batch["action_is_pad"].unsqueeze(-1)
@@ -505,7 +546,7 @@ class ACTPolicy(PreTrainedPolicy):
             logits = self.model._last_interaction_state_logits
             probabilities = self.model._last_interaction_state_probabilities
             if logits is None or probabilities is None or logits.shape[-1] != 3:
-                raise RuntimeError("ACT interaction-state conditioning did not produce Bx3 predictions.")
+                raise RuntimeError("ACT interaction-state conditioning did not produce three-state predictions.")
             target_keys = (
                 str(self.config.interaction_contact_target_key),
                 str(self.config.interaction_handle_target_key),
@@ -517,15 +558,114 @@ class ACTPolicy(PreTrainedPolicy):
                     f"ACT interaction-state conditioning requires {missing}. "
                     "Re-convert the dataset with --add_interaction_state."
                 )
-            targets = []
-            for key in target_keys:
-                target = batch[key].to(device=logits.device, dtype=logits.dtype).reshape(logits.shape[0], -1)[:, 0]
-                if not torch.all(torch.isfinite(target)) or torch.any(target < 0.0) or torch.any(target > 1.0):
-                    raise ValueError(f"Interaction target {key!r} must contain finite values in [0, 1].")
-                targets.append(target)
-            contact_per_sample = F.binary_cross_entropy_with_logits(logits[:, 0], targets[0], reduction="none")
-            handle_per_sample = F.smooth_l1_loss(probabilities[:, 1], targets[1], reduction="none")
-            door_per_sample = F.smooth_l1_loss(probabilities[:, 2], targets[2], reduction="none")
+            mode = str(self.config.interaction_state_prediction_mode)
+            if mode == "encoder_current":
+                if logits.ndim != 2:
+                    raise RuntimeError(
+                        "encoder_current interaction mode expects Bx3 predictions; "
+                        f"got {tuple(logits.shape)}."
+                    )
+                targets = []
+                for key in target_keys:
+                    target = (
+                        batch[key]
+                        .to(device=logits.device, dtype=logits.dtype)
+                        .reshape(logits.shape[0], -1)[:, 0]
+                    )
+                    if (
+                        not torch.all(torch.isfinite(target))
+                        or torch.any(target < 0.0)
+                        or torch.any(target > 1.0)
+                    ):
+                        raise ValueError(f"Interaction target {key!r} must contain finite values in [0, 1].")
+                    targets.append(target)
+                contact_per_sample = F.binary_cross_entropy_with_logits(
+                    logits[:, 0], targets[0], reduction="none"
+                )
+                handle_per_sample = F.smooth_l1_loss(
+                    probabilities[:, 1], targets[1], reduction="none"
+                )
+                door_per_sample = F.smooth_l1_loss(
+                    probabilities[:, 2], targets[2], reduction="none"
+                )
+                contact_loss = contact_per_sample.mean()
+                handle_loss = handle_per_sample.mean()
+                door_loss = door_per_sample.mean()
+                probability_means = probabilities.mean(dim=0)
+            elif mode == "decoder_chunk":
+                if logits.ndim != 3:
+                    raise RuntimeError(
+                        "decoder_chunk interaction mode expects BxHx3 predictions; "
+                        f"got {tuple(logits.shape)}."
+                    )
+                batch_size, horizon, _ = logits.shape
+                targets = []
+                valid_interaction = ~batch["action_is_pad"].to(device=logits.device, dtype=torch.bool)
+                if valid_interaction.shape != (batch_size, horizon):
+                    raise ValueError(
+                        "Interaction/action padding shape mismatch: "
+                        f"action_is_pad={tuple(valid_interaction.shape)}, logits={tuple(logits.shape)}."
+                    )
+                for key in target_keys:
+                    target = batch[key].to(device=logits.device, dtype=logits.dtype)
+                    if target.ndim == 3 and target.shape[-1] == 1:
+                        target = target.squeeze(-1)
+                    if target.shape != (batch_size, horizon):
+                        raise ValueError(
+                            f"decoder_chunk interaction target {key!r} must have shape "
+                            f"(B, H, 1) or (B, H); got {tuple(batch[key].shape)} for "
+                            f"prediction shape {tuple(logits.shape)}. Ensure future delta timestamps "
+                            "are configured for all three interaction targets."
+                        )
+                    if (
+                        not torch.all(torch.isfinite(target))
+                        or torch.any(target < 0.0)
+                        or torch.any(target > 1.0)
+                    ):
+                        raise ValueError(f"Interaction target {key!r} must contain finite values in [0, 1].")
+                    target_pad_key = f"{key}_is_pad"
+                    if target_pad_key in batch:
+                        target_is_pad = batch[target_pad_key].to(device=logits.device, dtype=torch.bool)
+                        if target_is_pad.ndim == 3 and target_is_pad.shape[-1] == 1:
+                            target_is_pad = target_is_pad.squeeze(-1)
+                        if target_is_pad.shape != (batch_size, horizon):
+                            raise ValueError(
+                                f"Interaction target padding {target_pad_key!r} has shape "
+                                f"{tuple(batch[target_pad_key].shape)}; expected (B, H)."
+                            )
+                        valid_interaction = valid_interaction & ~target_is_pad
+                    targets.append(target)
+
+                contact_per_timestep = F.binary_cross_entropy_with_logits(
+                    logits[..., 0], targets[0], reduction="none"
+                )
+                handle_per_timestep = F.smooth_l1_loss(
+                    probabilities[..., 1], targets[1], reduction="none"
+                )
+                door_per_timestep = F.smooth_l1_loss(
+                    probabilities[..., 2], targets[2], reduction="none"
+                )
+                valid_interaction_f = valid_interaction.to(dtype=logits.dtype)
+                count_per_sample = valid_interaction_f.sum(dim=1)
+
+                def masked_per_sample(value: Tensor) -> Tensor:
+                    return (value * valid_interaction_f).sum(dim=1) / torch.clamp(
+                        count_per_sample, min=1.0
+                    )
+
+                contact_per_sample = masked_per_sample(contact_per_timestep)
+                handle_per_sample = masked_per_sample(handle_per_timestep)
+                door_per_sample = masked_per_sample(door_per_timestep)
+                valid_count = torch.clamp(valid_interaction_f.sum(), min=1.0)
+                contact_loss = (contact_per_timestep * valid_interaction_f).sum() / valid_count
+                handle_loss = (handle_per_timestep * valid_interaction_f).sum() / valid_count
+                door_loss = (door_per_timestep * valid_interaction_f).sum() / valid_count
+                probability_means = (
+                    probabilities * valid_interaction_f.unsqueeze(-1)
+                ).sum(dim=(0, 1)) / valid_count
+            else:
+                raise RuntimeError(f"Unsupported interaction_state_prediction_mode={mode!r}.")
+
             contact_weight = float(self.config.interaction_contact_loss_weight)
             handle_weight = float(self.config.interaction_handle_loss_weight)
             door_weight = float(self.config.interaction_door_loss_weight)
@@ -534,16 +674,27 @@ class ACTPolicy(PreTrainedPolicy):
                 + handle_weight * handle_per_sample
                 + door_weight * door_per_sample
             )
-            per_sample_loss = per_sample_loss + interaction_per_sample
-            loss = loss + interaction_per_sample.mean()
+            interaction_loss = (
+                contact_weight * contact_loss
+                + handle_weight * handle_loss
+                + door_weight * door_loss
+            )
+            if (
+                self.config.interaction_state_probe_only
+                and self.config.interaction_state_probe_separate_backward
+            ):
+                self._last_separate_auxiliary_loss = interaction_loss
+            else:
+                per_sample_loss = per_sample_loss + interaction_per_sample
+                loss = loss + interaction_loss
             loss_dict.update(
                 {
-                    "interaction_contact_loss": float(contact_per_sample.mean().detach().cpu()),
-                    "interaction_handle_loss": float(handle_per_sample.mean().detach().cpu()),
-                    "interaction_door_loss": float(door_per_sample.mean().detach().cpu()),
-                    "interaction_contact_probability": float(probabilities[:, 0].mean().detach().cpu()),
-                    "interaction_handle_progress": float(probabilities[:, 1].mean().detach().cpu()),
-                    "interaction_door_progress": float(probabilities[:, 2].mean().detach().cpu()),
+                    "interaction_contact_loss": float(contact_loss.detach().cpu()),
+                    "interaction_handle_loss": float(handle_loss.detach().cpu()),
+                    "interaction_door_loss": float(door_loss.detach().cpu()),
+                    "interaction_contact_probability": float(probability_means[0].detach().cpu()),
+                    "interaction_handle_progress": float(probability_means[1].detach().cpu()),
+                    "interaction_door_progress": float(probability_means[2].detach().cpu()),
                 }
             )
 
@@ -817,6 +968,33 @@ def make_camera_local_unit_rays(
     return F.normalize(rays, dim=0)
 
 
+def make_camera_local_unit_rays_from_intrinsics(
+    *,
+    height: int,
+    width: int,
+    fx: float,
+    fy: float,
+    cx: float,
+    cy: float,
+    dtype: torch.dtype = torch.float32,
+) -> Tensor:
+    """Create rays using calibrated OpenCV pixel coordinates (u=x, v=y)."""
+    ys, xs = torch.meshgrid(
+        torch.arange(int(height), dtype=dtype),
+        torch.arange(int(width), dtype=dtype),
+        indexing="ij",
+    )
+    rays = torch.stack(
+        [
+            (xs - float(cx)) / float(fx),
+            (ys - float(cy)) / float(fy),
+            torch.ones_like(xs),
+        ],
+        dim=0,
+    )
+    return F.normalize(rays, dim=0)
+
+
 def quat_xyzw_to_matrix(quat: Tensor) -> Tensor:
     """Convert normalized xyzw quaternions to rotation matrices."""
     quat = F.normalize(quat, dim=-1)
@@ -857,8 +1035,14 @@ def make_plucker_map(camera_pose_base: Tensor, camera_local_unit_rays: Tensor) -
 class ACTPluckerEncoder(nn.Module):
     """Small CNN that encodes full-resolution 6D Plücker maps to visual-feature resolution."""
 
-    def __init__(self, out_channels: int, hidden_channels: list[int]) -> None:
+    def __init__(
+        self,
+        out_channels: int,
+        hidden_channels: list[int],
+        deterministic_pooling: bool = False,
+    ) -> None:
         super().__init__()
+        self.deterministic_pooling = bool(deterministic_pooling)
         layers: list[nn.Module] = []
         in_channels = 6
         for hidden in hidden_channels:
@@ -879,7 +1063,20 @@ class ACTPluckerEncoder(nn.Module):
 
     def forward(self, plucker_map: Tensor, target_hw: tuple[int, int]) -> Tensor:
         geom = self.encoder(plucker_map)
-        return F.adaptive_avg_pool2d(geom, output_size=(int(target_hw[0]), int(target_hw[1])))
+        target_h, target_w = int(target_hw[0]), int(target_hw[1])
+        if self.deterministic_pooling:
+            source_h, source_w = int(geom.shape[-2]), int(geom.shape[-1])
+            if source_h % target_h != 0 or source_w % target_w != 0:
+                raise ValueError(
+                    "Deterministic Plucker pooling requires integer spatial ratios, got "
+                    f"source={(source_h, source_w)} target={(target_h, target_w)}."
+                )
+            return F.avg_pool2d(
+                geom,
+                kernel_size=(source_h // target_h, source_w // target_w),
+                stride=(source_h // target_h, source_w // target_w),
+            )
+        return F.adaptive_avg_pool2d(geom, output_size=(target_h, target_w))
 
 
 class ACTHandleLatentHead(nn.Module):
@@ -932,6 +1129,340 @@ class ACTInteractionStateHead(nn.Module):
             value=encoder_tokens_without_vae,
         )[0][0]
         return self.head(pooled)
+
+
+class ACTInteractionStateChunkHead(nn.Module):
+    """Predict one interaction-state triplet from every ACT decoder token."""
+
+    def __init__(self, dim_model: int) -> None:
+        super().__init__()
+        self.head = nn.Sequential(nn.LayerNorm(int(dim_model)), nn.Linear(int(dim_model), 3))
+
+    def forward(self, decoder_tokens: Tensor) -> Tensor:
+        if decoder_tokens.ndim != 3:
+            raise ValueError(
+                "ACTInteractionStateChunkHead expects decoder tokens shaped (batch, horizon, dim); "
+                f"got {tuple(decoder_tokens.shape)}."
+            )
+        return self.head(decoder_tokens)
+
+
+def _parse_xyz_bounds(value: str, name: str) -> tuple[float, float, float]:
+    try:
+        values = tuple(float(part.strip()) for part in str(value).split(","))
+    except ValueError as exc:
+        raise ValueError(f"{name} must contain three comma-separated floats, got {value!r}.") from exc
+    if len(values) != 3:
+        raise ValueError(f"{name} must contain exactly three values, got {value!r}.")
+    return values
+
+
+def _batched_index(points: Tensor, indices: Tensor) -> Tensor:
+    """Gather BxNxC values with Bx... integer indices."""
+    if points.ndim != 3 or indices.ndim < 2 or points.shape[0] != indices.shape[0]:
+        raise ValueError(f"Invalid batched gather shapes points={points.shape}, indices={indices.shape}.")
+    batch_shape = [points.shape[0]] + [1] * (indices.ndim - 1)
+    batch = torch.arange(points.shape[0], device=points.device).view(*batch_shape).expand_as(indices)
+    return points[batch, indices]
+
+
+def deterministic_farthest_point_indices(xyz: Tensor, num_samples: int) -> Tensor:
+    """Pure-PyTorch deterministic FPS with the point farthest from the centroid as seed."""
+    if xyz.ndim != 3 or xyz.shape[-1] != 3:
+        raise ValueError(f"FPS expects BxNx3, got {tuple(xyz.shape)}.")
+    batch_size, point_count, _ = xyz.shape
+    if not 1 <= int(num_samples) <= int(point_count):
+        raise ValueError(f"num_samples must be in [1,{point_count}], got {num_samples}.")
+    centroid = xyz.mean(dim=1, keepdim=True)
+    farthest = ((xyz - centroid) ** 2).sum(dim=-1).argmax(dim=1)
+    selected = torch.empty(batch_size, int(num_samples), dtype=torch.long, device=xyz.device)
+    min_distance = torch.full(
+        (batch_size, point_count), torch.finfo(xyz.dtype).max, dtype=xyz.dtype, device=xyz.device
+    )
+    batch = torch.arange(batch_size, device=xyz.device)
+    for sample_index in range(int(num_samples)):
+        selected[:, sample_index] = farthest
+        center = xyz[batch, farthest].unsqueeze(1)
+        distance = ((xyz - center) ** 2).sum(dim=-1)
+        min_distance = torch.minimum(min_distance, distance)
+        farthest = min_distance.argmax(dim=1)
+    return selected
+
+
+class ACTPointCloudLegacyGlobalEncoder(nn.Module):
+    """Early DP3-style prototype retained for old PointCloud ACT checkpoints."""
+
+    def __init__(self, dim_model: int, global_dim: int) -> None:
+        super().__init__()
+        self.point_mlp = nn.Sequential(
+            nn.Linear(3, 64), nn.ReLU(),
+            nn.Linear(64, 128), nn.ReLU(),
+            nn.Linear(128, 256), nn.ReLU(),
+        )
+        self.projection = nn.Sequential(
+            nn.Linear(256, int(global_dim)), nn.ReLU(), nn.Linear(int(global_dim), int(dim_model))
+        )
+        self.position = nn.Parameter(torch.zeros(1, 1, int(dim_model)))
+
+    def forward(self, xyz: Tensor) -> tuple[Tensor, Tensor]:
+        feature = self.point_mlp(xyz).amax(dim=1, keepdim=True)
+        token = self.projection(feature)
+        return token, self.position.expand(xyz.shape[0], -1, -1).to(dtype=token.dtype)
+
+
+class ACTDP3PointNetEncoderXYZ(nn.Module):
+    """Exact XYZ PointNet used by the original single-view DP3 policy.
+
+    This mirrors ``PointNetEncoderXYZ`` from 3D-Diffusion-Policy: three
+    Linear/LayerNorm/ReLU blocks, global max pooling, and a final
+    Linear/LayerNorm projection. The previous Door DP3 runs used
+    ``out_channels=64``, ``use_layernorm=true`` and
+    ``final_norm=layernorm``.
+    """
+
+    def __init__(self, out_channels: int = 64) -> None:
+        super().__init__()
+        self.mlp = nn.Sequential(
+            nn.Linear(3, 64),
+            nn.LayerNorm(64),
+            nn.ReLU(),
+            nn.Linear(64, 128),
+            nn.LayerNorm(128),
+            nn.ReLU(),
+            nn.Linear(128, 256),
+            nn.LayerNorm(256),
+            nn.ReLU(),
+        )
+        self.final_projection = nn.Sequential(
+            nn.Linear(256, int(out_channels)),
+            nn.LayerNorm(int(out_channels)),
+        )
+        self.out_channels = int(out_channels)
+
+    def forward(self, xyz: Tensor) -> Tensor:
+        if xyz.ndim != 3 or xyz.shape[-1] != 3:
+            raise ValueError(f"DP3 PointNet expects [B,N,3], got {tuple(xyz.shape)}.")
+        point_features = self.mlp(xyz)
+        global_feature = torch.max(point_features, dim=1)[0]
+        return self.final_projection(global_feature)
+
+
+class ACTPointCloudGlobalEncoder(nn.Module):
+    """Original DP3 XYZ PointNet followed by the required ACT token adapter."""
+
+    def __init__(self, dim_model: int, global_dim: int) -> None:
+        super().__init__()
+        self.extractor = ACTDP3PointNetEncoderXYZ(out_channels=int(global_dim))
+        # DP3 feeds the 64D latent to its diffusion condition encoder. ACT
+        # instead requires a dim_model visual token, so this is the only
+        # intentionally ACT-specific layer after the exact DP3 extractor.
+        self.token_projection = nn.Linear(int(global_dim), int(dim_model))
+        self.position = nn.Parameter(torch.zeros(1, 1, int(dim_model)))
+
+    def forward(self, xyz: Tensor) -> tuple[Tensor, Tensor]:
+        feature = self.extractor(xyz)
+        token = self.token_projection(feature).unsqueeze(1)
+        return token, self.position.expand(xyz.shape[0], -1, -1).to(dtype=token.dtype)
+
+
+class ACTPointCloudLegacyLocalEncoder(nn.Module):
+    """Legacy local-token prototype retained only for old point-cloud checkpoints."""
+
+    def __init__(
+        self,
+        dim_model: int,
+        num_tokens: int,
+        knn_k: int,
+        workspace_min: tuple[float, float, float],
+        workspace_max: tuple[float, float, float],
+    ) -> None:
+        super().__init__()
+        self.num_tokens = int(num_tokens)
+        self.knn_k = int(knn_k)
+        self.point_mlp = nn.Sequential(
+            nn.Linear(3, 64), nn.ReLU(),
+            nn.Linear(64, 64), nn.ReLU(),
+            nn.Linear(64, 64), nn.ReLU(),
+            nn.Linear(64, 128), nn.ReLU(),
+            nn.Linear(128, 512), nn.ReLU(),
+        )
+        self.local_projection = nn.Linear(512 + 3, int(dim_model))
+        self.local_norm = nn.BatchNorm1d(int(dim_model))
+        self.register_buffer("workspace_min", torch.tensor(workspace_min, dtype=torch.float32), persistent=True)
+        self.register_buffer("workspace_max", torch.tensor(workspace_max, dtype=torch.float32), persistent=True)
+
+    def _position_embedding(self, xyz: Tensor, dim_model: int) -> Tensor:
+        # Normalize metric XYZ to [0, 1], then allocate an equal Fourier block to each axis.
+        lo = self.workspace_min.to(device=xyz.device, dtype=xyz.dtype)
+        hi = self.workspace_max.to(device=xyz.device, dtype=xyz.dtype)
+        normalized = ((xyz - lo) / (hi - lo).clamp_min(1.0e-6)).clamp(0.0, 1.0)
+        axis_dim = max(2, int(math.ceil(dim_model / 3)))
+        pair_dim = max(1, axis_dim // 2)
+        frequencies = torch.arange(pair_dim, device=xyz.device, dtype=xyz.dtype)
+        frequencies = 2.0 ** frequencies
+        blocks = []
+        for axis in range(3):
+            angles = normalized[..., axis : axis + 1] * math.pi * frequencies
+            blocks.extend((angles.sin(), angles.cos()))
+        embedding = torch.cat(blocks, dim=-1)
+        if embedding.shape[-1] < dim_model:
+            embedding = F.pad(embedding, (0, dim_model - embedding.shape[-1]))
+        return embedding[..., :dim_model]
+
+    def forward(self, xyz: Tensor) -> tuple[Tensor, Tensor]:
+        point_feature = self.point_mlp(xyz)
+        seed_indices = deterministic_farthest_point_indices(xyz, self.num_tokens)
+        seed_xyz = _batched_index(xyz, seed_indices)
+        # cdist/topk has deterministic tie-breaking for a fixed input/order and avoids optional CUDA extensions.
+        knn_indices = torch.cdist(seed_xyz, xyz).topk(self.knn_k, dim=-1, largest=False, sorted=True).indices
+        neighbor_xyz = _batched_index(xyz, knn_indices)
+        neighbor_feature = _batched_index(point_feature, knn_indices)
+        local = torch.cat((neighbor_feature, neighbor_xyz - seed_xyz.unsqueeze(2)), dim=-1)
+        local = self.local_projection(local)
+        batch_size, token_count, neighbor_count, channels = local.shape
+        local = local.reshape(batch_size * token_count * neighbor_count, channels)
+        local = self.local_norm(local)
+        local = F.relu(local).reshape(batch_size, token_count, neighbor_count, channels)
+        tokens = local.amax(dim=2)
+        positions = self._position_embedding(seed_xyz, channels).to(dtype=tokens.dtype)
+        return tokens, positions
+
+
+class ACTOBSBenchPointNet(nn.Module):
+    """Dense equivalent of OBSBench's sparse 1x1 PointNet backbone.
+
+    OBSBench represents the point set with ``spconv.SparseConvTensor`` and applies
+    five bias-free ``SubMConv3d(kernel_size=1)`` blocks.  A 1x1 sparse convolution
+    cannot exchange information between points, so for a fixed-size dense point
+    tensor it is mathematically equivalent to ``Conv1d(kernel_size=1)``.  Keeping
+    the channel widths and BatchNorm hyperparameters identical avoids requiring
+    spconv while preserving the PointNet computation.
+    """
+
+    def __init__(self, in_channels: int = 3) -> None:
+        super().__init__()
+        channels = (int(in_channels), 64, 64, 64, 128, 512)
+        blocks: list[nn.Module] = []
+        for in_dim, out_dim in zip(channels[:-1], channels[1:], strict=True):
+            blocks.extend(
+                (
+                    nn.Conv1d(in_dim, out_dim, kernel_size=1, bias=False),
+                    nn.BatchNorm1d(out_dim, eps=1.0e-3, momentum=0.01),
+                    nn.ReLU(),
+                )
+            )
+        self.network = nn.Sequential(*blocks)
+        self.in_channels = int(in_channels)
+        self.num_channels = 512
+
+    def forward(self, point_features: Tensor) -> Tensor:
+        if point_features.ndim != 3 or point_features.shape[-1] != self.in_channels:
+            raise ValueError(
+                f"OBSBench PointNet expects [B,N,{self.in_channels}], got {tuple(point_features.shape)}."
+            )
+        return self.network(point_features.transpose(1, 2)).transpose(1, 2).contiguous()
+
+
+def obsbench_farthest_point_indices(xyz: Tensor, num_samples: int) -> Tensor:
+    """Pure-PyTorch FPS matching OBSBench pointops' deterministic first seed.
+
+    The pointops CUDA kernel always starts each point set at local index zero.
+    Subsequent seeds maximize the minimum squared distance to selected seeds.
+    """
+
+    if xyz.ndim != 3 or xyz.shape[-1] != 3:
+        raise ValueError(f"Expected point cloud [B,N,3], got {tuple(xyz.shape)}.")
+    batch_size, point_count, _ = xyz.shape
+    if num_samples <= 0 or num_samples > point_count:
+        raise ValueError(f"num_samples must be in [1,{point_count}], got {num_samples}.")
+    selected = torch.empty(batch_size, int(num_samples), dtype=torch.long, device=xyz.device)
+    min_distance = torch.full(
+        (batch_size, point_count), torch.finfo(xyz.dtype).max, dtype=xyz.dtype, device=xyz.device
+    )
+    farthest = torch.zeros(batch_size, dtype=torch.long, device=xyz.device)
+    batch = torch.arange(batch_size, device=xyz.device)
+    for sample_index in range(int(num_samples)):
+        selected[:, sample_index] = farthest
+        center = xyz[batch, farthest].unsqueeze(1)
+        distance = ((xyz - center) ** 2).sum(dim=-1)
+        min_distance = torch.minimum(min_distance, distance)
+        farthest = min_distance.argmax(dim=1)
+    return selected
+
+
+class ACTPointCloudLocalEncoder(nn.Module):
+    """OBSBench PointNet post-sampling local-token encoder.
+
+    This follows ``ACTPCD(pre_sample=False)``: PointNet first computes a
+    feature for every input point, FPS selects seeds afterwards, KNN groups
+    encoded neighboring features plus relative XYZ, and max pooling emits one
+    token per seed.
+    """
+
+    def __init__(
+        self,
+        dim_model: int,
+        num_tokens: int,
+        knn_k: int,
+        workspace_min: tuple[float, float, float],
+        workspace_max: tuple[float, float, float],
+    ) -> None:
+        super().__init__()
+        del workspace_min, workspace_max  # OBSBench uses unnormalized metric XYZ for its sine embedding.
+        self.num_tokens = int(num_tokens)
+        self.knn_k = int(knn_k)
+        self.pointnet = ACTOBSBenchPointNet(in_channels=3)
+        self.local_projection = nn.Linear(3 + self.pointnet.num_channels, int(dim_model), bias=False)
+        self.local_norm = nn.BatchNorm1d(int(dim_model))
+        self.relu = nn.ReLU(inplace=True)
+
+    @staticmethod
+    def _position_embedding(coord: Tensor, dim_model: int, temperature: float = 10000.0) -> Tensor:
+        """OBSBench ACTPCD.coord_embedding_sine for batched metric XYZ."""
+
+        num_pos_feats = int(dim_model) // 3
+        num_pad_feats = int(dim_model) - num_pos_feats * 3
+        dim_t = torch.arange(num_pos_feats, dtype=coord.dtype, device=coord.device)
+        dim_t = float(temperature) ** (2 * torch.div(dim_t, 2, rounding_mode="floor") / num_pos_feats)
+
+        blocks = []
+        for axis in range(3):
+            angles = coord[..., axis : axis + 1] / dim_t
+            sin = angles[..., 0::2].sin()
+            cos = angles[..., 1::2].cos()
+            pair_count = min(sin.shape[-1], cos.shape[-1])
+            paired = torch.stack((sin[..., :pair_count], cos[..., :pair_count]), dim=-1).flatten(-2)
+            if paired.shape[-1] < num_pos_feats:
+                paired = F.pad(paired, (0, num_pos_feats - paired.shape[-1]))
+            blocks.append(paired[..., :num_pos_feats])
+        position = torch.cat(blocks, dim=-1)
+        if num_pad_feats:
+            position = F.pad(position, (0, num_pad_feats))
+        return position
+
+    def forward(self, xyz: Tensor) -> tuple[Tensor, Tensor]:
+        # OBSBench default post-sampling: encode the complete preprocessed cloud first.
+        point_feature = self.pointnet(xyz)
+        seed_indices = obsbench_farthest_point_indices(xyz, self.num_tokens)
+        seed_xyz = _batched_index(xyz, seed_indices)
+
+        # Pure-PyTorch equivalent of pointops.knn_query_and_group(..., with_xyz=True).
+        knn_indices = torch.cdist(seed_xyz, xyz).topk(
+            self.knn_k, dim=-1, largest=False, sorted=True
+        ).indices
+        neighbor_xyz = _batched_index(xyz, knn_indices)
+        neighbor_feature = _batched_index(point_feature, knn_indices)
+        grouped = torch.cat((neighbor_xyz - seed_xyz.unsqueeze(2), neighbor_feature), dim=-1)
+
+        # OBSBench: Linear -> BN -> ReLU -> MaxPool1d(nsample).
+        local = self.local_projection(grouped)
+        batch_size, token_count, neighbor_count, channels = local.shape
+        local = local.reshape(batch_size * token_count, neighbor_count, channels).transpose(1, 2)
+        local = self.relu(self.local_norm(local))
+        tokens = F.max_pool1d(local, kernel_size=neighbor_count).squeeze(-1)
+        tokens = tokens.reshape(batch_size, token_count, channels)
+        positions = self._position_embedding(seed_xyz, channels).to(dtype=tokens.dtype)
+        return tokens, positions
 
 
 class ACT(nn.Module):
@@ -1046,15 +1577,70 @@ class ACT(nn.Module):
                 self.plucker_encoder = ACTPluckerEncoder(
                     out_channels=int(backbone_out_channels),
                     hidden_channels=_parse_plucker_encoder_channels(self.config.plucker_encoder_channels),
+                    deterministic_pooling=self.config.plucker_deterministic_pooling,
                 )
-                self.register_buffer(
-                    "plucker_camera_local_unit_rays",
-                    make_camera_local_unit_rays(
-                        height=int(self.config.plucker_image_height),
-                        width=int(self.config.plucker_image_width),
-                        horizontal_fov_deg=float(self.config.plucker_horizontal_fov_deg),
-                    ),
-                    persistent=False,
+                if getattr(self.config, "plucker_intrinsics_mode", "legacy_shared_fov") == "per_camera":
+                    for camera_name in ("front", "wrist"):
+                        self.register_buffer(
+                            f"plucker_{camera_name}_camera_local_unit_rays",
+                            make_camera_local_unit_rays_from_intrinsics(
+                                height=int(self.config.plucker_image_height),
+                                width=int(self.config.plucker_image_width),
+                                fx=float(getattr(self.config, f"plucker_{camera_name}_fx")),
+                                fy=float(getattr(self.config, f"plucker_{camera_name}_fy")),
+                                cx=float(getattr(self.config, f"plucker_{camera_name}_cx")),
+                                cy=float(getattr(self.config, f"plucker_{camera_name}_cy")),
+                            ),
+                            persistent=False,
+                        )
+                else:
+                    # Keep the historical buffer and ray construction byte-for-byte unchanged.
+                    self.register_buffer(
+                        "plucker_camera_local_unit_rays",
+                        make_camera_local_unit_rays(
+                            height=int(self.config.plucker_image_height),
+                            width=int(self.config.plucker_image_width),
+                            horizontal_fov_deg=float(self.config.plucker_horizontal_fov_deg),
+                        ),
+                        persistent=False,
+                    )
+
+        if self.config.point_cloud_conditioning:
+            workspace_min = _parse_xyz_bounds(
+                self.config.point_cloud_workspace_min, "point_cloud_workspace_min"
+            )
+            workspace_max = _parse_xyz_bounds(
+                self.config.point_cloud_workspace_max, "point_cloud_workspace_max"
+            )
+            if any(upper <= lower for lower, upper in zip(workspace_min, workspace_max, strict=True)):
+                raise ValueError(
+                    f"Invalid point-cloud workspace bounds: min={workspace_min}, max={workspace_max}."
+                )
+            if self.config.point_cloud_encoder_mode == "dp3_global":
+                self.point_cloud_encoder = ACTPointCloudGlobalEncoder(
+                    dim_model=config.dim_model,
+                    global_dim=config.point_cloud_global_dim,
+                )
+            elif self.config.point_cloud_encoder_mode == "dp3_global_legacy":
+                self.point_cloud_encoder = ACTPointCloudLegacyGlobalEncoder(
+                    dim_model=config.dim_model,
+                    global_dim=config.point_cloud_global_dim,
+                )
+            elif self.config.point_cloud_encoder_mode == "obsbench_local_legacy":
+                self.point_cloud_encoder = ACTPointCloudLegacyLocalEncoder(
+                    dim_model=config.dim_model,
+                    num_tokens=config.point_cloud_num_tokens,
+                    knn_k=config.point_cloud_knn_k,
+                    workspace_min=workspace_min,
+                    workspace_max=workspace_max,
+                )
+            else:
+                self.point_cloud_encoder = ACTPointCloudLocalEncoder(
+                    dim_model=config.dim_model,
+                    num_tokens=config.point_cloud_num_tokens,
+                    knn_k=config.point_cloud_knn_k,
+                    workspace_min=workspace_min,
+                    workspace_max=workspace_max,
                 )
 
         # Transformer (acts as VAE decoder when training with the variational objective).
@@ -1095,18 +1681,43 @@ class ACT(nn.Module):
 
         # Final action regression head on the output of the transformer's decoder.
         self.action_head = nn.Linear(config.dim_model, self.config.action_feature.shape[0])
-        self.end_signal_head = nn.Linear(config.dim_model, 1) if self.config.end_signal_prediction else None
+        self.end_signal_head = None
+        if self.config.end_signal_prediction:
+            context = (
+                torch.random.fork_rng(devices=[])
+                if self.config.auxiliary_head_rng_isolation
+                else nullcontext()
+            )
+            with context:
+                self.end_signal_head = nn.Linear(config.dim_model, 1)
         if self.config.interaction_state_conditioning:
-            self.interaction_state_head = ACTInteractionStateHead(
-                config.dim_model,
-                config.n_heads,
-                config.dropout,
+            context = (
+                torch.random.fork_rng(devices=[])
+                if self.config.auxiliary_head_rng_isolation
+                else nullcontext()
             )
-            self.interaction_conditioner = nn.Sequential(
-                nn.Linear(3, config.dim_model),
-                nn.GELU(),
-                nn.Linear(config.dim_model, config.dim_model),
-            )
+            with context:
+                if config.interaction_state_prediction_mode == "decoder_chunk":
+                    self.interaction_state_chunk_head = ACTInteractionStateChunkHead(config.dim_model)
+                else:
+                    interaction_dropout = (
+                        float(config.interaction_state_probe_dropout)
+                        if (
+                            config.interaction_state_probe_only
+                            or config.interaction_state_auxiliary_only
+                        )
+                        else float(config.dropout)
+                    )
+                    self.interaction_state_head = ACTInteractionStateHead(
+                        config.dim_model,
+                        config.n_heads,
+                        interaction_dropout,
+                    )
+                    self.interaction_conditioner = nn.Sequential(
+                        nn.Linear(3, config.dim_model),
+                        nn.GELU(),
+                        nn.Linear(config.dim_model, config.dim_model),
+                    )
 
         self._reset_parameters()
         self._last_camera_gates: Tensor | None = None
@@ -1125,7 +1736,10 @@ class ACT(nn.Module):
             nn.init.zeros_(self.end_signal_head.weight)
             init_probability = float(self.config.end_signal_init_probability)
             nn.init.constant_(self.end_signal_head.bias, math.log(init_probability / (1.0 - init_probability)))
-        if self.config.interaction_state_conditioning:
+        if (
+            self.config.interaction_state_conditioning
+            and self.config.interaction_state_prediction_mode == "encoder_current"
+        ):
             nn.init.zeros_(self.interaction_conditioner[-1].weight)
             nn.init.zeros_(self.interaction_conditioner[-1].bias)
 
@@ -1139,6 +1753,15 @@ class ACT(nn.Module):
             "Could not infer Plücker camera pose key from image feature "
             f"{image_key!r}; expected the key to contain 'front' or 'wrist'."
         )
+
+    @staticmethod
+    def _plucker_camera_name_for_image_key(image_key: str) -> str:
+        image_key_lower = str(image_key).lower()
+        if "front" in image_key_lower:
+            return "front"
+        if "wrist" in image_key_lower:
+            return "wrist"
+        raise ValueError(f"Could not infer Plücker camera name from image feature {image_key!r}.")
 
     @staticmethod
     def _camera_pose_tensor_from_batch(batch: dict[str, Tensor], pose_key: str, batch_size: int) -> Tensor:
@@ -1371,7 +1994,16 @@ class ACT(nn.Module):
         self._last_handle_latent_wrist_loss = None
         self._last_handle_latent_valid_count = None
 
-        batch_size = batch[OBS_IMAGES][0].shape[0] if OBS_IMAGES in batch else batch[OBS_ENV_STATE].shape[0]
+        if OBS_IMAGES in batch:
+            batch_size = batch[OBS_IMAGES][0].shape[0]
+        elif self.config.point_cloud_conditioning and self.config.point_cloud_key in batch:
+            batch_size = batch[self.config.point_cloud_key].shape[0]
+        elif OBS_ENV_STATE in batch:
+            batch_size = batch[OBS_ENV_STATE].shape[0]
+        elif OBS_STATE in batch:
+            batch_size = batch[OBS_STATE].shape[0]
+        else:
+            raise KeyError("ACT batch has no image, point cloud, environment state, or robot state.")
 
         # Prepare the latent for input to the transformer encoder.
         if self.config.use_vae and ACTION in batch and self.training:
@@ -1451,7 +2083,16 @@ class ACT(nn.Module):
                     pose_key = self.plucker_pose_keys[camera_index]
                     camera_pose_base = self._camera_pose_tensor_from_batch(batch, pose_key, batch_size)
                     camera_pose_base = camera_pose_base.to(device=cam_features.device, dtype=cam_features.dtype)
-                    plucker_map = make_plucker_map(camera_pose_base, self.plucker_camera_local_unit_rays)
+                    if getattr(self.config, "plucker_intrinsics_mode", "legacy_shared_fov") == "per_camera":
+                        camera_name = self._plucker_camera_name_for_image_key(
+                            list(self.config.image_features)[camera_index]
+                        )
+                        camera_local_unit_rays = getattr(
+                            self, f"plucker_{camera_name}_camera_local_unit_rays"
+                        )
+                    else:
+                        camera_local_unit_rays = self.plucker_camera_local_unit_rays
+                    plucker_map = make_plucker_map(camera_pose_base, camera_local_unit_rays)
                     geom_features = self.plucker_encoder(plucker_map, target_hw=cam_features.shape[-2:])
                     cam_features = torch.cat([cam_features, geom_features.to(dtype=cam_features.dtype)], dim=1)
                 cam_features = self.encoder_img_feat_input_proj(cam_features)
@@ -1486,6 +2127,34 @@ class ACT(nn.Module):
                 encoder_in_tokens.extend(list(cam_features))
                 encoder_in_pos_embed.extend(list(cam_pos_embed))
 
+        if self.config.point_cloud_conditioning:
+            point_cloud_key = self.config.point_cloud_key
+            if point_cloud_key not in batch:
+                raise KeyError(
+                    f"Point-cloud ACT requires batch feature {point_cloud_key!r}; got {list(batch)}."
+                )
+            point_cloud = batch[point_cloud_key]
+            expected_shape = (batch_size, self.config.point_cloud_num_points, 3)
+            if tuple(point_cloud.shape) != expected_shape:
+                raise ValueError(
+                    f"Point-cloud ACT expected {point_cloud_key!r} shape {expected_shape}, "
+                    f"got {tuple(point_cloud.shape)}."
+                )
+            if not torch.is_floating_point(point_cloud):
+                point_cloud = point_cloud.float()
+            point_tokens, point_positions = self.point_cloud_encoder(point_cloud)
+            point_tokens = point_tokens.transpose(0, 1)
+            point_positions = point_positions.transpose(0, 1)
+            # Legacy 1-D token positions are stored as 1xD and normally
+            # broadcast inside attention. Metric point positions vary per
+            # batch element, so make that batch dimension explicit here.
+            encoder_in_pos_embed = [
+                position.expand(batch_size, -1) if position.shape[0] == 1 else position
+                for position in encoder_in_pos_embed
+            ]
+            encoder_in_tokens.extend(list(point_tokens))
+            encoder_in_pos_embed.extend(list(point_positions))
+
         # Stack all tokens along the sequence dimension.
         encoder_in_tokens = torch.stack(encoder_in_tokens, axis=0)
         encoder_in_pos_embed = torch.stack(encoder_in_pos_embed, axis=0)
@@ -1504,15 +2173,27 @@ class ACT(nn.Module):
             dtype=encoder_in_pos_embed.dtype,
             device=encoder_in_pos_embed.device,
         )
-        if self.config.interaction_state_conditioning:
+        if (
+            self.config.interaction_state_conditioning
+            and self.config.interaction_state_prediction_mode == "encoder_current"
+        ):
             # Token zero is the ACT VAE latent. Excluding it prevents the
             # interaction predictor from reading future ground-truth actions in training.
-            interaction_logits = self.interaction_state_head(encoder_out[1:])
+            interaction_feature = encoder_out[1:]
+            if self.config.interaction_state_probe_only:
+                # Probe-only is a read-only diagnostic head: its auxiliary
+                # losses cannot change the ACT encoder or visual backbone.
+                interaction_feature = interaction_feature.detach()
+            interaction_logits = self.interaction_state_head(interaction_feature)
             interaction_probabilities = torch.sigmoid(interaction_logits)
             self._last_interaction_state_logits = interaction_logits
             self._last_interaction_state_probabilities = interaction_probabilities
-            interaction_residual = self.interaction_conditioner(interaction_probabilities)
-            decoder_in = decoder_in + interaction_residual.unsqueeze(0)
+            if not (
+                self.config.interaction_state_probe_only
+                or self.config.interaction_state_auxiliary_only
+            ):
+                interaction_residual = self.interaction_conditioner(interaction_probabilities)
+                decoder_in = decoder_in + interaction_residual.unsqueeze(0)
         decoder_out = self.decoder(
             decoder_in,
             encoder_out,
@@ -1524,8 +2205,27 @@ class ACT(nn.Module):
         decoder_out = decoder_out.transpose(0, 1)
 
         actions = self.action_head(decoder_out)
+        if (
+            self.config.interaction_state_conditioning
+            and self.config.interaction_state_prediction_mode == "decoder_chunk"
+        ):
+            # Each decoder token is already aligned with one future action
+            # timestep, so predict [contact, handle progress, door progress]
+            # directly for the same t:t+H horizon. Probe-only keeps this as a
+            # read-only diagnostic of decoder features.
+            interaction_feature = (
+                decoder_out.detach() if self.config.interaction_state_probe_only else decoder_out
+            )
+            interaction_logits = self.interaction_state_chunk_head(interaction_feature)
+            self._last_interaction_state_logits = interaction_logits
+            self._last_interaction_state_probabilities = torch.sigmoid(interaction_logits)
         if self.end_signal_head is not None:
-            self._last_end_signal_logits = self.end_signal_head(decoder_out)
+            end_signal_feature = (
+                decoder_out.detach()
+                if self.config.end_signal_detach_decoder_feature
+                else decoder_out
+            )
+            self._last_end_signal_logits = self.end_signal_head(end_signal_feature)
 
         return actions, (mu, log_sigma_x2)
 

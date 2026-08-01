@@ -14,6 +14,43 @@ if str(REAL_DEPLOY_DIR) not in sys.path:
 import door_act_shadow
 
 
+class _ControllerSchema:
+    def __init__(self, dim: int, action_frame: str) -> None:
+        self.config = {"state_dim": dim}
+        self.state_feature_names = [f"s{i}" for i in range(dim)]
+        self.action_dim = dim
+        self.action_frame = action_frame
+
+
+def test_checkpoint_schema_auto_detects_joint9_and_ee10() -> None:
+    assert door_act_shadow.infer_state_action_mode(_ControllerSchema(9, "joint_command")) == "joint9"
+    assert door_act_shadow.infer_state_action_mode(_ControllerSchema(10, "ee_pose")) == "ee10"
+
+
+def test_joint9_zero_state_and_tracking_use_joint_layout() -> None:
+    state = door_act_shadow.zero_state("joint9")
+    target = np.asarray([0.0, 0.0, 0.1, -0.2, 0.3, -0.4, 0.5, -0.6, -1.0], dtype=np.float32)
+    actual = target.copy()
+    actual[4] -= 0.05
+    tracking = door_act_shadow.compute_arm_tracking_error(
+        actual,
+        target,
+        {"stale": False, "count": 1},
+        target_step=0,
+        current_step=1,
+        target_age_s=0.04,
+        position_tolerance_m=0.02,
+        orientation_tolerance_deg=5.0,
+        gripper_tolerance_rad=0.1,
+        state_action_mode="joint9",
+        joint_tolerance_rad=0.1,
+    )
+    assert state.shape == (9,)
+    assert tracking["valid"]
+    assert tracking["joint_max_abs_error_rad"] == pytest.approx(0.05)
+    assert tracking["reached"]
+
+
 class _Filter:
     def __init__(self) -> None:
         self.options = {}
@@ -44,9 +81,9 @@ class _FakeRS:
         return self.hole
 
 
-def test_default_mode_preserves_realsense_behavior() -> None:
+def test_default_mode_preserves_selected_opencv_no_rs_behavior() -> None:
     args = door_act_shadow.parse_args([])
-    assert args.depth_inpaint_mode == "realsense"
+    assert args.depth_inpaint_mode == "opencv_k_no_rs"
     assert args.depth_inpaint_max_distance_px == 64.0
     assert args.depth_inpaint_iterations == 2
     assert args.depth_inpaint_rgb_sigma == 0.10

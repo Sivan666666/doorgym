@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bridge Door-ACT 10D EE actions to Unitree Z1 low-level commands.
+"""Bridge Door-ACT EE10 or joint9 actions to Unitree Z1 low-level commands.
 
 This script is intentionally small and explicit.  It runs two worker threads:
 
@@ -15,9 +15,15 @@ This script is intentionally small and explicit.  It runs two worker threads:
    - optionally publishes the assembled ACT observation.state:
        [vx, yaw_rate, ee_x, ee_y, ee_z, ee_qx, ee_qy, ee_qz, ee_qw, gripper]
 
-The ACT action/state convention follows the checkpoint metadata:
+The bridge supports two checkpoint schemas:
 
-    [vx, yaw_rate, ee_x, ee_y, ee_z, ee_qx, ee_qy, ee_qz, ee_qw, gripper]
+    ee10:    [vx, yaw_rate, ee_x, ee_y, ee_z, ee_qx, ee_qy, ee_qz, ee_qw, gripper]
+    joint9:  [vx, yaw_rate, q1, q2, q3, q4, q5, q6, gripper]
+
+In ``joint9`` mode the six ACT arm values are already Z1 joint-angle targets.
+The bridge therefore bypasses EE FK/IK and feeds those waypoints directly into
+the same online quintic trajectory, joint jump, speed, acceleration, gripper,
+timeout, and LOWCMD safety path used after successful EE IK.
 
 EE pose is in the ACT/base frame.  By default the ACT/A2W base frame is offset
 from the Z1 SDK arm base by the mount translation used in the simulation URDF:
@@ -54,12 +60,28 @@ from typing import Any
 import numpy as np
 
 
-ACT_DIM = 10
+EE_ACT_DIM = 10
+JOINT_ACT_DIM = 9
+ACT_DIM = EE_ACT_DIM  # Backward-compatible alias used by EE helpers/tests.
 EE_POS_SLICE = slice(2, 5)
 EE_QUAT_SLICE = slice(5, 9)
-GRIPPER_INDEX = 9
+EE_GRIPPER_INDEX = 9
+JOINT_Q_SLICE = slice(2, 8)
+JOINT_GRIPPER_INDEX = 8
+GRIPPER_INDEX = EE_GRIPPER_INDEX  # Backward-compatible EE alias.
+STATE_ACTION_MODES = ("ee10", "joint9")
 A2W_Z1_MOUNT_XYZ_ACT_FROM_ARM = np.asarray([0.174, 0.0, 0.142], dtype=np.float64)
 Z1_SDK_EE_TO_ACT_EE_XYZ = np.asarray([0.086, 0.0, 0.0], dtype=np.float64)
+SIM_FRONT_CAMERA_XYZ_BASE = np.asarray([0.29, 0.031, 0.165], dtype=np.float64)
+SIM_FRONT_CAMERA_YPR_DEG = np.asarray([0.0, -45.0, 0.0], dtype=np.float64)
+# The simulator attaches the wrist camera at [0.093, 0.031, 0.22] in
+# Isaac Gym's link06.  Unitree's forwardKinematics(q, 6) frame is 0.100 m
+# ahead of that link06 origin, and the ACT EE is another 0.086 m ahead of the
+# SDK frame.  Expressing the camera from the ACT EE therefore gives
+# [0.093 - 0.100 - 0.086, 0.031, 0.22] = [-0.093, 0.031, 0.22].
+# Keeping this as an EE-local transform makes the offset rotate with the arm.
+SIM_WRIST_CAMERA_XYZ_ACT_EE = np.asarray([-0.093, 0.031, 0.22], dtype=np.float64)
+SIM_WRIST_CAMERA_YPR_DEG = np.asarray([0.0, 60.0, 0.0], dtype=np.float64)
 
 
 def _as_float_array(values: Any, length: int | None = None) -> np.ndarray:
@@ -147,6 +169,46 @@ def make_transform(xyz: Any, rpy: Any) -> np.ndarray:
     return out
 
 
+def make_transform_from_yaw_pitch_roll_deg(xyz: Any, ypr_deg: Any) -> np.ndarray:
+    """Match Isaac Gym ``Quat.from_euler_zyx(yaw, pitch, roll)``."""
+
+    yaw, pitch, roll = np.deg2rad(_as_float_array(ypr_deg, 3)[:3].astype(np.float64))
+    return make_transform(xyz, [roll, pitch, yaw])
+
+
+def simulated_camera_pose_transforms(
+    sdk_ee_transform_arm: np.ndarray,
+    act_from_arm: np.ndarray,
+    act_ee_from_sdk_ee: np.ndarray,
+    *,
+    front_xyz_base: Any = SIM_FRONT_CAMERA_XYZ_BASE,
+    front_ypr_deg: Any = SIM_FRONT_CAMERA_YPR_DEG,
+    wrist_xyz_ee: Any = SIM_WRIST_CAMERA_XYZ_ACT_EE,
+    wrist_ypr_deg: Any = SIM_WRIST_CAMERA_YPR_DEG,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return front/wrist optical-frame transforms in the ACT robot base.
+
+    Front is fixed to the robot root exactly like the simulator.  Wrist uses
+    the ACT EE pose obtained from Z1 SDK FK, then composes the fixed
+    EE-to-camera transform in the rotating EE frame.  The SDK's FK index 6
+    frame is not Isaac Gym's link06 origin, so treating it as link06 would put
+    the camera about 0.10 m too far forward.
+    """
+
+    front_transform_act = make_transform_from_yaw_pitch_roll_deg(front_xyz_base, front_ypr_deg)
+    ee_transform_act = (
+        np.asarray(act_from_arm, dtype=np.float64).reshape(4, 4)
+        @ np.asarray(sdk_ee_transform_arm, dtype=np.float64).reshape(4, 4)
+        @ np.asarray(act_ee_from_sdk_ee, dtype=np.float64).reshape(4, 4)
+    )
+    wrist_from_ee = make_transform_from_yaw_pitch_roll_deg(wrist_xyz_ee, wrist_ypr_deg)
+    wrist_transform_act = (
+        ee_transform_act
+        @ wrist_from_ee
+    )
+    return front_transform_act, wrist_transform_act
+
+
 def pose_to_transform(pos: Any, quat_xyzw: Any) -> np.ndarray:
     out = np.eye(4, dtype=np.float64)
     out[:3, :3] = quat_xyzw_to_rot(quat_xyzw)
@@ -225,23 +287,48 @@ def _try_parse_float32_packet(data: bytes) -> np.ndarray | None:
         return None
 
 
-def parse_action_packet(data: bytes) -> np.ndarray:
+def normalize_state_action_mode(value: str) -> str:
+    mode = str(value).strip().lower()
+    aliases = {
+        "ee": "ee10",
+        "ee_action10": "ee10",
+        "joint": "joint9",
+        "joint_state9": "joint9",
+        "a2w_joint_action9": "joint9",
+    }
+    mode = aliases.get(mode, mode)
+    if mode not in STATE_ACTION_MODES:
+        raise ValueError(f"Unsupported ACT state/action mode {value!r}; expected one of {STATE_ACTION_MODES}.")
+    return mode
+
+
+def action_dim_for_mode(mode: str) -> int:
+    return JOINT_ACT_DIM if normalize_state_action_mode(mode) == "joint9" else EE_ACT_DIM
+
+
+def gripper_index_for_mode(mode: str) -> int:
+    return JOINT_GRIPPER_INDEX if normalize_state_action_mode(mode) == "joint9" else EE_GRIPPER_INDEX
+
+
+def parse_action_packet(data: bytes, state_action_mode: str = "ee10") -> np.ndarray:
+    schema = normalize_state_action_mode(state_action_mode)
+    action_dim = action_dim_for_mode(schema)
     payload = _try_parse_json_packet(data)
     if payload is None:
         arr = _try_parse_float32_packet(data)
         if arr is None:
             raise ValueError("not JSON and not little-endian float32 data")
-        return _as_float_array(arr, ACT_DIM)[:ACT_DIM].astype(np.float32)
+        return _as_float_array(arr, action_dim)[:action_dim].astype(np.float32)
 
     if isinstance(payload, list):
-        return _as_float_array(payload, ACT_DIM)[:ACT_DIM].astype(np.float32)
+        return _as_float_array(payload, action_dim)[:action_dim].astype(np.float32)
 
     if not isinstance(payload, dict):
         raise ValueError("action JSON must be a list or object")
 
     for key in ("action", "act_action", "door_action", "target"):
         if key in payload:
-            return _as_float_array(payload[key], ACT_DIM)[:ACT_DIM].astype(np.float32)
+            return _as_float_array(payload[key], action_dim)[:action_dim].astype(np.float32)
 
     ee_obj = payload.get("ee", {}) if isinstance(payload.get("ee"), dict) else {}
     base_obj = payload.get("base", {}) if isinstance(payload.get("base"), dict) else {}
@@ -251,6 +338,23 @@ def parse_action_packet(data: bytes) -> np.ndarray:
         "yaw_rate",
         payload.get("yaw", payload.get("wz", payload.get("vyaw", base_obj.get("yaw_rate", base_obj.get("wz", 0.0))))),
     )
+    if schema == "joint9":
+        joint_value = payload.get(
+            "joint_target",
+            payload.get("q_target", payload.get("joints", payload.get("arm_q"))),
+        )
+        gripper = payload.get("gripper", payload.get("gripper_q", 0.0))
+        if joint_value is None:
+            raise ValueError("joint9 action object needs action[9] or joint_target/q_target with 6 values")
+        action = np.zeros(JOINT_ACT_DIM, dtype=np.float32)
+        action[0] = float(vx)
+        action[1] = float(yaw_rate)
+        action[JOINT_Q_SLICE] = _as_float_array(joint_value, 6)[:6]
+        action[JOINT_GRIPPER_INDEX] = float(gripper)
+        if not np.isfinite(action).all():
+            raise ValueError("joint9 action contains NaN or Inf")
+        return action
+
     ee_pos = payload.get("ee_pos", payload.get("position", ee_obj.get("pos", ee_obj.get("position"))))
     ee_quat = payload.get(
         "ee_quat_xyzw",
@@ -261,19 +365,26 @@ def parse_action_packet(data: bytes) -> np.ndarray:
     if ee_pos is None or ee_quat is None:
         raise ValueError("action object needs either action[10] or ee_pos + ee_quat_xyzw")
 
-    action = np.zeros(ACT_DIM, dtype=np.float32)
+    action = np.zeros(EE_ACT_DIM, dtype=np.float32)
     action[0] = float(vx)
     action[1] = float(yaw_rate)
     action[EE_POS_SLICE] = _as_float_array(ee_pos, 3)[:3]
     action[EE_QUAT_SLICE] = normalize_quat_xyzw(ee_quat).astype(np.float32)
-    action[GRIPPER_INDEX] = float(gripper)
+    action[EE_GRIPPER_INDEX] = float(gripper)
     return action
 
 
-def parse_action_command(data: bytes) -> tuple[np.ndarray, str, np.ndarray | None]:
+def parse_action_command(
+    data: bytes,
+    state_action_mode: str = "ee10",
+) -> tuple[np.ndarray, str, np.ndarray | None]:
     """Parse an EE action plus an optional explicit joint-space target."""
 
-    action = parse_action_packet(data)
+    schema = normalize_state_action_mode(state_action_mode)
+    action = parse_action_packet(data, schema)
+    if schema == "joint9":
+        joint_target = np.asarray(action[JOINT_Q_SLICE], dtype=np.float32).copy()
+        return action, "joint", joint_target
     payload = _try_parse_json_packet(data)
     if not isinstance(payload, dict):
         return action, "ee", None
@@ -362,12 +473,30 @@ def apply_gripper_close_latch(
     return goal, count, forced
 
 
-def make_act_state(vel_state: np.ndarray, ee_pos_act: np.ndarray, ee_quat_act: np.ndarray, gripper: float) -> np.ndarray:
-    out = np.zeros(ACT_DIM, dtype=np.float32)
+def make_act_state(
+    vel_state: np.ndarray,
+    ee_pos_act: np.ndarray,
+    ee_quat_act: np.ndarray,
+    gripper: float,
+    *,
+    state_action_mode: str = "ee10",
+    q: np.ndarray | None = None,
+) -> np.ndarray:
+    schema = normalize_state_action_mode(state_action_mode)
+    if schema == "joint9":
+        if q is None:
+            raise ValueError("joint9 ACT state requires six measured arm joint angles")
+        out = np.zeros(JOINT_ACT_DIM, dtype=np.float32)
+        out[0:2] = np.asarray(vel_state, dtype=np.float32).reshape(-1)[:2]
+        out[JOINT_Q_SLICE] = np.asarray(q, dtype=np.float32).reshape(6)
+        out[JOINT_GRIPPER_INDEX] = float(gripper)
+        return out
+
+    out = np.zeros(EE_ACT_DIM, dtype=np.float32)
     out[0:2] = np.asarray(vel_state, dtype=np.float32).reshape(-1)[:2]
     out[EE_POS_SLICE] = np.asarray(ee_pos_act, dtype=np.float32).reshape(3)
     out[EE_QUAT_SLICE] = normalize_quat_xyzw(ee_quat_act).astype(np.float32)
-    out[GRIPPER_INDEX] = float(gripper)
+    out[EE_GRIPPER_INDEX] = float(gripper)
     return out
 
 
@@ -502,6 +631,13 @@ class SharedBridgeState:
     gripper: float = 0.0
     q: np.ndarray = field(default_factory=lambda: np.zeros(6, dtype=np.float32))
     qd: np.ndarray = field(default_factory=lambda: np.zeros(6, dtype=np.float32))
+    front_camera_pose_base: np.ndarray = field(
+        default_factory=lambda: np.asarray([0.29, 0.031, 0.165, 0.0, -0.38268343, 0.0, 0.9238795], dtype=np.float32)
+    )
+    wrist_camera_pose_base: np.ndarray = field(
+        default_factory=lambda: np.asarray([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0], dtype=np.float32)
+    )
+    has_camera_pose: bool = False
     ik_ok: bool = False
     ik_source: str = ""
     ik_fail_count: int = 0
@@ -532,10 +668,20 @@ class SharedBridgeState:
             vel = self.vel_state.copy()
             if (not self.has_vel_state) or (now - self.vel_state_stamp > args.vel_timeout_s):
                 vel[:] = 0.0
-            act_state = make_act_state(vel, self.ee_pos_act, self.ee_quat_act, self.gripper)
+            schema = normalize_state_action_mode(args.act_state_action_mode)
+            act_state = make_act_state(
+                vel,
+                self.ee_pos_act,
+                self.ee_quat_act,
+                self.gripper,
+                state_action_mode=schema,
+                q=self.q,
+            )
             return {
                 "type": "act_state",
                 "stamp": now,
+                "state_action_mode": schema,
+                "state_dim": int(act_state.shape[0]),
                 "state": np.round(act_state, 6).tolist(),
                 "vel_state": np.round(vel, 6).tolist(),
                 "vel_state_age_s": None if not self.has_vel_state else round(now - self.vel_state_stamp, 4),
@@ -560,6 +706,9 @@ class SharedBridgeState:
                 "gripper": round(float(self.gripper), 6),
                 "q": np.round(self.q, 6).tolist(),
                 "qd": np.round(self.qd, 6).tolist(),
+                "front_camera_pose_base": np.round(self.front_camera_pose_base, 7).tolist(),
+                "wrist_camera_pose_base": np.round(self.wrist_camera_pose_base, 7).tolist(),
+                "has_camera_pose": bool(self.has_camera_pose),
                 "ik_ok": bool(self.ik_ok),
                 "ik_source": self.ik_source,
                 "ik_fail_count": int(self.ik_fail_count),
@@ -644,6 +793,36 @@ def update_shared_arm_feedback(
         shared.gripper = float(gripper)
         shared.ee_pos_act = np.asarray(ee_pos_act, dtype=np.float32).reshape(3)
         shared.ee_quat_act = normalize_quat_xyzw(ee_quat_act).astype(np.float32)
+
+
+def update_shared_arm_joint_feedback(
+    shared: SharedBridgeState,
+    q: np.ndarray,
+    qd: np.ndarray,
+    gripper: float,
+) -> None:
+    """Update joint9 feedback without evaluating Z1 forward kinematics."""
+
+    with shared.lock:
+        shared.q = np.asarray(q, dtype=np.float32).reshape(6)
+        shared.qd = np.asarray(qd, dtype=np.float32).reshape(6)
+        shared.gripper = float(gripper)
+
+
+def update_shared_camera_poses(
+    shared: SharedBridgeState,
+    front_transform_act: np.ndarray,
+    wrist_transform_act: np.ndarray,
+) -> None:
+    front_pos, front_quat = transform_to_pose(front_transform_act)
+    wrist_pos, wrist_quat = transform_to_pose(wrist_transform_act)
+    with shared.lock:
+        shared.front_camera_pose_base = np.concatenate([front_pos, front_quat]).astype(np.float32)
+        shared.wrist_camera_pose_base = np.concatenate([wrist_pos, wrist_quat]).astype(np.float32)
+        shared.has_camera_pose = bool(
+            np.isfinite(shared.front_camera_pose_base).all()
+            and np.isfinite(shared.wrist_camera_pose_base).all()
+        )
 
 
 def update_shared_control_status(
@@ -1547,6 +1726,8 @@ def arm_state_read_loop(
     act_from_arm: np.ndarray,
     act_ee_from_sdk_ee: np.ndarray,
 ) -> None:
+    joint9_mode = normalize_state_action_mode(args.act_state_action_mode) == "joint9"
+    publish_camera_pose = bool(args.publish_camera_pose)
     period = 1.0 / max(float(args.arm_state_hz), 1.0)
     next_t = time.monotonic()
     while not stop_event.is_set() and not arm_stop_event.is_set():
@@ -1555,18 +1736,36 @@ def arm_state_read_loop(
                 q_actual = np.asarray(arm.lowstate.getQ(), dtype=np.float64).reshape(6)
                 qd_actual = np.asarray(arm.lowstate.getQd(), dtype=np.float64).reshape(6)
                 gripper_actual = float(arm.lowstate.getGripperQ())
-                ee_transform_sdk_arm = np.asarray(arm_model.forwardKinematics(q_actual, 6), dtype=np.float64).reshape(4, 4)
-                ee_transform_arm = ee_transform_sdk_arm @ act_ee_from_sdk_ee
-            ee_transform_act = act_from_arm @ ee_transform_arm
-            ee_pos_act, ee_quat_act = transform_to_pose(ee_transform_act)
-            update_shared_arm_feedback(
-                shared,
-                q_actual,
-                qd_actual,
-                gripper_actual,
-                ee_pos_act,
-                ee_quat_act,
-            )
+                if (not joint9_mode) or publish_camera_pose:
+                    sdk_ee_transform_arm = np.asarray(
+                        arm_model.forwardKinematics(q_actual, 6), dtype=np.float64
+                    ).reshape(4, 4)
+                if not joint9_mode:
+                    ee_transform_arm = sdk_ee_transform_arm @ act_ee_from_sdk_ee
+            if joint9_mode:
+                update_shared_arm_joint_feedback(shared, q_actual, qd_actual, gripper_actual)
+            else:
+                ee_transform_act = act_from_arm @ ee_transform_arm
+                ee_pos_act, ee_quat_act = transform_to_pose(ee_transform_act)
+                update_shared_arm_feedback(
+                    shared,
+                    q_actual,
+                    qd_actual,
+                    gripper_actual,
+                    ee_pos_act,
+                    ee_quat_act,
+                )
+            if publish_camera_pose:
+                front_transform_act, wrist_transform_act = simulated_camera_pose_transforms(
+                    sdk_ee_transform_arm,
+                    act_from_arm,
+                    act_ee_from_sdk_ee,
+                    front_xyz_base=args.front_camera_xyz_base,
+                    front_ypr_deg=args.front_camera_ypr_deg,
+                    wrist_xyz_ee=args.wrist_camera_xyz_ee,
+                    wrist_ypr_deg=args.wrist_camera_ypr_deg,
+                )
+                update_shared_camera_poses(shared, front_transform_act, wrist_transform_act)
         except Exception as exc:
             with shared.lock:
                 shared.last_error = f"state_read_exception:{exc}"
@@ -1599,6 +1798,9 @@ def arm_command_loop(
     shared: SharedBridgeState,
     stop_event: threading.Event,
 ) -> None:
+    state_action_mode = normalize_state_action_mode(args.act_state_action_mode)
+    joint9_mode = state_action_mode == "joint9"
+    gripper_index = gripper_index_for_mode(state_action_mode)
     arm_from_act = make_transform(args.arm_from_act_xyz, args.arm_from_act_rpy)
     act_from_arm = np.linalg.inv(arm_from_act)
     act_ee_from_sdk_ee = make_transform(args.act_ee_from_sdk_ee_xyz, args.act_ee_from_sdk_ee_rpy)
@@ -1629,11 +1831,14 @@ def arm_command_loop(
         while not stop_event.is_set():
             action, has_action, action_age, action_stamp, _, _, _ = get_action_snapshot(shared)
             if has_action and action_age <= args.command_timeout_s:
-                ee_pos = action[EE_POS_SLICE].astype(np.float32)
-                ee_quat = normalize_quat_xyzw(action[EE_QUAT_SLICE]).astype(np.float32)
+                if joint9_mode:
+                    q_cmd = np.asarray(action[JOINT_Q_SLICE], dtype=np.float64).copy()
+                else:
+                    ee_pos = action[EE_POS_SLICE].astype(np.float32)
+                    ee_quat = normalize_quat_xyzw(action[EE_QUAT_SLICE]).astype(np.float32)
                 if action_stamp > last_processed_gripper_action_stamp:
                     last_processed_gripper_action_stamp = action_stamp
-                    raw_gripper_action = float(action[GRIPPER_INDEX])
+                    raw_gripper_action = float(action[gripper_index])
                     mapped_gripper_goal = map_act_gripper_to_z1(raw_gripper_action, args)
                     gripper_cmd, gripper_close_latch_count, gripper_force_closed = apply_gripper_close_latch(
                         mapped_gripper_goal,
@@ -1700,6 +1905,7 @@ def arm_command_loop(
 
     print(
         f"z1_bridge enabling LOWCMD dt={period:.6f}s "
+        f"act_state_action_mode={state_action_mode} "
         "joint_command_mode=online_quintic "
         f"max_joint_speed={np.round(joint_speed_limit, 3)} "
         f"max_joint_acceleration={np.round(joint_acceleration_limit, 3)} "
@@ -1754,10 +1960,14 @@ def arm_command_loop(
         control_count,
         startup_home_q,
     )
-    with sdk_lock:
-        initial_transform_sdk_arm = np.asarray(arm_model.forwardKinematics(q_cmd, 6), dtype=np.float64).reshape(4, 4)
-        initial_transform_arm = initial_transform_sdk_arm @ act_ee_from_sdk_ee
-    initial_transform_act = act_from_arm @ initial_transform_arm
+    initial_transform_act: np.ndarray | None = None
+    if not joint9_mode:
+        with sdk_lock:
+            initial_transform_sdk_arm = np.asarray(
+                arm_model.forwardKinematics(q_cmd, 6), dtype=np.float64
+            ).reshape(4, 4)
+            initial_transform_arm = initial_transform_sdk_arm @ act_ee_from_sdk_ee
+        initial_transform_act = act_from_arm @ initial_transform_arm
     q_goal = q_cmd.copy()
     joint_trajectory = OnlineQuinticJointTrajectory.hold(q_cmd, time.monotonic())
     gripper_goal = gripper_cmd
@@ -1776,7 +1986,8 @@ def arm_command_loop(
         min_pos_delta=args.ik_cache_min_pos_delta,
         min_rot_delta_rad=math.radians(args.ik_cache_min_rot_delta_deg),
     )
-    pose_q_cache.add_transform(initial_transform_act, q_cmd)
+    if initial_transform_act is not None:
+        pose_q_cache.add_transform(initial_transform_act, q_cmd)
     next_t = time.monotonic()
     arm_stop_event = threading.Event()
     state_thread = threading.Thread(
@@ -1825,11 +2036,17 @@ def arm_command_loop(
             q_plan, _, _ = joint_trajectory.sample(loop_now)
             with sdk_lock:
                 q_meas = np.asarray(arm.lowstate.getQ(), dtype=np.float64).reshape(6)
-                ee_transform_sdk_arm_meas = np.asarray(arm_model.forwardKinematics(q_meas, 6), dtype=np.float64).reshape(4, 4)
-                ee_transform_arm_meas = ee_transform_sdk_arm_meas @ act_ee_from_sdk_ee
-            ee_transform_act_meas = act_from_arm @ ee_transform_arm_meas
+                if not joint9_mode:
+                    ee_transform_sdk_arm_meas = np.asarray(
+                        arm_model.forwardKinematics(q_meas, 6), dtype=np.float64
+                    ).reshape(4, 4)
+                    ee_transform_arm_meas = ee_transform_sdk_arm_meas @ act_ee_from_sdk_ee
+            ee_transform_act_meas: np.ndarray | None = None
+            if not joint9_mode:
+                ee_transform_act_meas = act_from_arm @ ee_transform_arm_meas
             q_feedback = q_meas if np.isfinite(q_meas).all() else q_cmd
-            pose_q_cache.add_transform(ee_transform_act_meas, q_feedback)
+            if ee_transform_act_meas is not None:
+                pose_q_cache.add_transform(ee_transform_act_meas, q_feedback)
             # Seed IK from measured feedback, not the planned trajectory. When
             # the arm lags behind a fast VR target, q_plan can be far ahead of
             # the real robot and can make IK jump to a distant branch.
@@ -1845,7 +2062,7 @@ def arm_command_loop(
             if has_action and action_age <= args.command_timeout_s:
                 if action_stamp > last_processed_gripper_action_stamp:
                     last_processed_gripper_action_stamp = action_stamp
-                    raw_gripper_action = float(action[GRIPPER_INDEX])
+                    raw_gripper_action = float(action[gripper_index])
                     mapped_gripper_goal = map_act_gripper_to_z1(raw_gripper_action, args)
                     gripper_goal, gripper_close_latch_count, gripper_force_closed = apply_gripper_close_latch(
                         mapped_gripper_goal,
@@ -1871,13 +2088,29 @@ def arm_command_loop(
                 if new_command:
                     ik_total_start = time.perf_counter()
                     last_processed_action_stamp = action_stamp
-                    target_pos_act = action[EE_POS_SLICE].astype(np.float64)
-                    target_quat_act = normalize_quat_xyzw(action[EE_QUAT_SLICE])
+                    if joint9_mode:
+                        target_pos_act = np.zeros(3, dtype=np.float64)
+                        target_quat_act = np.asarray([0.0, 0.0, 0.0, 1.0], dtype=np.float64)
+                    else:
+                        target_pos_act = action[EE_POS_SLICE].astype(np.float64)
+                        target_quat_act = normalize_quat_xyzw(action[EE_QUAT_SLICE])
                     candidate: np.ndarray | None = None
                     attempt_errors: list[str] = []
                     candidate_note = ""
 
-                    if action_mode in ("joint", "joint_target", "home") and explicit_joint_target is not None:
+                    if joint9_mode:
+                        candidate = np.clip(
+                            np.asarray(action[JOINT_Q_SLICE], dtype=np.float64).reshape(6),
+                            joint_min,
+                            joint_max,
+                        )
+                        candidate_delta = float(np.max(np.abs(candidate - q_seed)))
+                        if candidate_delta > float(args.joint_target_max_delta):
+                            attempt_errors.append(f"joint9_target_jump:{candidate_delta:.3f}")
+                            candidate = None
+                        else:
+                            ik_source = "joint9_direct"
+                    elif action_mode in ("joint", "joint_target", "home") and explicit_joint_target is not None:
                         candidate = np.clip(
                             np.asarray(explicit_joint_target, dtype=np.float64).reshape(6),
                             joint_min,
@@ -2046,8 +2279,9 @@ def arm_command_loop(
                             last_successful_waypoint_stamp = action_stamp
                             last_waypoint_velocity = waypoint_velocity.copy()
                             last_brake_action_stamp = -1.0
-                            last_target_pos_act = target_pos_act.copy()
-                            last_target_quat_act = target_quat_act.copy()
+                            if not joint9_mode:
+                                last_target_pos_act = target_pos_act.copy()
+                                last_target_quat_act = target_quat_act.copy()
                             last_ik_source = ik_source
                             ik_ok = True
                             last_error = candidate_note
@@ -2162,8 +2396,10 @@ def arm_command_loop(
                     if provider_stamp > 0.0
                     else float("nan")
                 )
-                target_actual_err = float(
-                    np.linalg.norm(target_pos_act - ee_transform_act_meas[:3, 3])
+                target_actual_err = (
+                    float("nan")
+                    if joint9_mode or ee_transform_act_meas is None
+                    else float(np.linalg.norm(target_pos_act - ee_transform_act_meas[:3, 3]))
                 )
                 q_err = float(np.max(np.abs(q_goal - q_meas)))
                 print(
@@ -2349,8 +2585,14 @@ def io_loop(
                             continue
                         if bridge_command:
                             raise ValueError(f"unknown bridge_command: {bridge_command}")
-                        action, action_mode, joint_target = parse_action_command(data)
-                        action[EE_QUAT_SLICE] = normalize_quat_xyzw(action[EE_QUAT_SLICE]).astype(np.float32)
+                        action, action_mode, joint_target = parse_action_command(
+                            data,
+                            args.act_state_action_mode,
+                        )
+                        if normalize_state_action_mode(args.act_state_action_mode) == "ee10":
+                            action[EE_QUAT_SLICE] = normalize_quat_xyzw(
+                                action[EE_QUAT_SLICE]
+                            ).astype(np.float32)
                         with shared.lock:
                             shared.action = action.astype(np.float32)
                             shared.action_stamp = now
@@ -2395,15 +2637,26 @@ def io_loop(
             if args.print_hz > 0 and mono >= next_print_t:
                 record = shared.snapshot(args)
                 state = record["state"]
-                print(
-                    "act_state "
-                    f"vx={state[0]:+.3f} yaw_rate={state[1]:+.3f} "
-                    f"ee=({state[2]:+.3f},{state[3]:+.3f},{state[4]:+.3f}) "
-                    f"grip={state[9]:+.3f} ik={record['ik_ok']} src={record.get('ik_source', '')} "
-                    f"age_action={record['action_age_s']} age_vel={record['vel_state_age_s']} "
-                    f"err={record['last_error']}",
-                    flush=True,
-                )
+                if normalize_state_action_mode(args.act_state_action_mode) == "joint9":
+                    print(
+                        "act_state "
+                        f"vx={state[0]:+.3f} yaw_rate={state[1]:+.3f} "
+                        f"q={np.round(np.asarray(state[2:8]), 3).tolist()} "
+                        f"grip={state[8]:+.3f} control={record['ik_ok']} src={record.get('ik_source', '')} "
+                        f"age_action={record['action_age_s']} age_vel={record['vel_state_age_s']} "
+                        f"err={record['last_error']}",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        "act_state "
+                        f"vx={state[0]:+.3f} yaw_rate={state[1]:+.3f} "
+                        f"ee=({state[2]:+.3f},{state[3]:+.3f},{state[4]:+.3f}) "
+                        f"grip={state[9]:+.3f} ik={record['ik_ok']} src={record.get('ik_source', '')} "
+                        f"age_action={record['action_age_s']} age_vel={record['vel_state_age_s']} "
+                        f"err={record['last_error']}",
+                        flush=True,
+                    )
                 next_print_t += print_period
                 if next_print_t < mono - print_period:
                     next_print_t = mono + print_period
@@ -2417,7 +2670,16 @@ def io_loop(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Z1 LOWCMD bridge for Door ACT EE actions.")
+    parser = argparse.ArgumentParser(description="Z1 LOWCMD bridge for Door ACT EE10 or joint9 actions.")
+    parser.add_argument(
+        "--act_state_action_mode",
+        choices=STATE_ACTION_MODES,
+        default="ee10",
+        help=(
+            "ee10 converts ACT EE pose commands through FK/IK; joint9 uses "
+            "[vx, vyaw, q1..q6, gripper] and bypasses FK/IK while retaining online quintic LOWCMD smoothing."
+        ),
+    )
     add_bool_argument(
         parser,
         "--enable_arm",
@@ -2442,7 +2704,53 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--command_timeout_s", type=float, default=0.25)
     parser.add_argument("--vel_timeout_s", type=float, default=0.5)
     parser.add_argument("--dry_run_hz", type=float, default=100.0)
-    parser.add_argument("--arm_state_hz", type=float, default=50.0, help="Asynchronous Z1 lowstate/FK read frequency.")
+    parser.add_argument(
+        "--arm_state_hz",
+        type=float,
+        default=50.0,
+        help="Asynchronous Z1 lowstate frequency; also computes wrist-camera FK when camera-pose publishing is enabled.",
+    )
+    add_bool_argument(
+        parser,
+        "--publish_camera_pose",
+        default=True,
+        help_text=(
+            "Publish simulator-aligned front/wrist optical-frame poses in robot base. "
+            "Joint9 state/action still bypasses EE FK/IK; FK is used only for the wrist camera extrinsic."
+        ),
+    )
+    parser.add_argument(
+        "--front_camera_xyz_base",
+        type=float,
+        nargs=3,
+        default=SIM_FRONT_CAMERA_XYZ_BASE.tolist(),
+    )
+    parser.add_argument(
+        "--front_camera_ypr_deg",
+        type=float,
+        nargs=3,
+        default=SIM_FRONT_CAMERA_YPR_DEG.tolist(),
+        help="Simulator camera Euler angles in yaw, pitch, roll degrees.",
+    )
+    parser.add_argument(
+        "--wrist_camera_xyz_ee",
+        type=float,
+        nargs=3,
+        default=SIM_WRIST_CAMERA_XYZ_ACT_EE.tolist(),
+        help=(
+            "Wrist optical-frame translation in the ACT EE local frame. "
+            "Default [-0.093, 0.031, 0.22] reproduces the simulator's "
+            "link06-mounted [0.093, 0.031, 0.22] pose after accounting for "
+            "the SDK FK frame and ACT tool offsets."
+        ),
+    )
+    parser.add_argument(
+        "--wrist_camera_ypr_deg",
+        type=float,
+        nargs=3,
+        default=SIM_WRIST_CAMERA_YPR_DEG.tolist(),
+        help="Simulator wrist-camera Euler angles relative to ACT EE in yaw, pitch, roll degrees.",
+    )
     add_bool_argument(
         parser,
         "--zero_joints_on_start",

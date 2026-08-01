@@ -84,9 +84,31 @@ DATASET_METADATA_KEYS = (
     "depth_noise_config",
     "depth_camera_randomization_config",
     "camera_intrinsics",
+    "camera_intrinsics_mode",
+    "camera_render_intrinsics",
+    "camera_intrinsics_remap_version",
+    "camera_intrinsics_config",
+    "camera_intrinsics_remap_coverage",
+    "render_resolution",
+    "output_resolution",
     "camera_pose_frame",
     "camera_pose_convention",
     "camera_pose_features",
+    "point_cloud_conditioning",
+    "point_cloud_feature",
+    "point_cloud_views",
+    "point_cloud_num_points",
+    "point_cloud_candidate_rows",
+    "point_cloud_candidate_cols",
+    "point_cloud_workspace_min",
+    "point_cloud_workspace_max",
+    "point_cloud_near_clip_m",
+    "point_cloud_far_clip_m",
+    "point_cloud_empty_depth_policy",
+    "point_cloud_storage",
+    "point_cloud_frame",
+    "front_camera_intrinsics",
+    "wrist_camera_intrinsics",
     "handle_bbox_features",
     "handle_bbox_convention",
     "handle_latent_features",
@@ -130,6 +152,7 @@ INTERACTION_STATE_FEATURES = (
     INTERACTION_HANDLE_PROGRESS_FEATURE,
     INTERACTION_DOOR_PROGRESS_FEATURE,
 )
+POINT_CLOUD_FEATURE = "observation.point_cloud"
 DEFAULT_KEYFRAME_LOSS_WEIGHT = 8.0
 DEFAULT_KEYFRAME_LOSS_RADIUS = 3
 DEFAULT_KEYFRAME_NAMES = (
@@ -1373,6 +1396,9 @@ class DoorDPLeRobotRecorder:
         include_handle_latent=False,
         include_end_signal=False,
         include_interaction_state=False,
+        include_images=True,
+        include_point_cloud=False,
+        point_cloud_num_points=1024,
     ):
         from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
@@ -1393,6 +1419,11 @@ class DoorDPLeRobotRecorder:
         self.include_handle_latent = bool(include_handle_latent)
         self.include_end_signal = bool(include_end_signal)
         self.include_interaction_state = bool(include_interaction_state)
+        self.include_images = bool(include_images)
+        self.include_point_cloud = bool(include_point_cloud)
+        self.point_cloud_num_points = int(point_cloud_num_points)
+        if self.include_point_cloud and self.point_cloud_num_points <= 0:
+            raise ValueError("point_cloud_num_points must be positive.")
         self.metadata = dict(metadata or {})
         self.root.mkdir(parents=True, exist_ok=True)
         self.dataset_root = self.root / repo_id
@@ -1462,12 +1493,19 @@ class DoorDPLeRobotRecorder:
                 "shape": (1,),
                 "names": ["valid"],
             }
-        for key in lerobot_image_keys_for_vision_mode(self.vision_mode):
-            features[key] = {
-                "dtype": self.image_storage,
-                "shape": (IMAGE_HEIGHT, IMAGE_WIDTH, 3),
-                "names": ["height", "width", "channels"],
+        if self.include_point_cloud:
+            features[POINT_CLOUD_FEATURE] = {
+                "dtype": "float32",
+                "shape": (self.point_cloud_num_points, 3),
+                "names": ["point", ["x", "y", "z"]],
             }
+        if self.include_images:
+            for key in lerobot_image_keys_for_vision_mode(self.vision_mode):
+                features[key] = {
+                    "dtype": self.image_storage,
+                    "shape": (IMAGE_HEIGHT, IMAGE_WIDTH, 3),
+                    "names": ["height", "width", "channels"],
+                }
         if resume and self.dataset_root.exists():
             try:
                 self.dataset = LeRobotDataset(repo_id=repo_id, root=str(self.dataset_root))
@@ -1480,7 +1518,7 @@ class DoorDPLeRobotRecorder:
                     root=str(self.dataset_root),
                     fps=self.fps,
                     features=features,
-                    use_videos=self.image_storage == "video",
+                    use_videos=self.include_images and self.image_storage == "video",
                     vcodec=self.video_codec,
                 )
             except TypeError:
@@ -1493,7 +1531,7 @@ class DoorDPLeRobotRecorder:
         sidecar = {
             "state": self.state_feature_names,
             "action": self.action_names,
-            "image_features": lerobot_image_keys_for_vision_mode(self.vision_mode),
+            "image_features": lerobot_image_keys_for_vision_mode(self.vision_mode) if self.include_images else [],
             "image_width": IMAGE_WIDTH,
             "image_height": IMAGE_HEIGHT,
             "image_storage": self.image_storage,
@@ -1507,6 +1545,9 @@ class DoorDPLeRobotRecorder:
             sidecar["end_signal_feature"] = END_SIGNAL_FEATURE
         if self.include_interaction_state:
             sidecar["interaction_state_features"] = list(INTERACTION_STATE_FEATURES)
+        if self.include_point_cloud:
+            sidecar["point_cloud_feature"] = POINT_CLOUD_FEATURE
+            sidecar["point_cloud_num_points"] = self.point_cloud_num_points
         if self.include_camera_pose:
             sidecar["camera_pose_features"] = CAMERA_POSE_FEATURES
             sidecar.setdefault("camera_pose_frame", "robot_base")
@@ -1544,6 +1585,7 @@ class DoorDPLeRobotRecorder:
         interaction_contact=None,
         interaction_handle_progress=None,
         interaction_door_progress=None,
+        point_cloud=None,
     ):
         if self.vision_mode == "depth":
             front_mask_rgb = _zero_image_like(wrist_mask_rgb) if front_mask_rgb is None else front_mask_rgb
@@ -1559,6 +1601,18 @@ class DoorDPLeRobotRecorder:
             "subtask_index": np.asarray([subtask_index], dtype=np.int64),
             "task": self.task,
         }
+        if self.include_point_cloud:
+            if point_cloud is None:
+                raise ValueError("LeRobot point-cloud frame requires observation.point_cloud.")
+            point_cloud_array = np.asarray(point_cloud, dtype=np.float32)
+            expected_shape = (self.point_cloud_num_points, 3)
+            if point_cloud_array.shape != expected_shape:
+                raise ValueError(
+                    f"Point cloud must have shape {expected_shape}, got {point_cloud_array.shape}."
+                )
+            if not np.all(np.isfinite(point_cloud_array)):
+                raise ValueError("Point cloud contains NaN or Inf values.")
+            frame[POINT_CLOUD_FEATURE] = point_cloud_array
         if self.include_action_loss_weight:
             weight = 1.0 if action_loss_weight is None else float(np.asarray(action_loss_weight).reshape(-1)[0])
             frame[ACTION_LOSS_WEIGHT_FEATURE] = np.asarray([weight], dtype=np.float32)
@@ -1591,22 +1645,31 @@ class DoorDPLeRobotRecorder:
                 raise ValueError("LeRobot handle-latent frames require both front and wrist latent arrays.")
             frame[FRONT_HANDLE_LATENT_FEATURE] = np.asarray(front_handle_latent, dtype=np.float32).reshape(384)
             frame[FRONT_HANDLE_LATENT_VALID_FEATURE] = np.asarray(
-                [0.0 if front_handle_latent_valid is None else float(np.asarray(front_handle_latent_valid).reshape(-1)[0])],
+                [
+                    0.0
+                    if front_handle_latent_valid is None
+                    else np.asarray(front_handle_latent_valid).reshape(-1)[0]
+                ],
                 dtype=np.float32,
             )
             frame[WRIST_HANDLE_LATENT_FEATURE] = np.asarray(wrist_handle_latent, dtype=np.float32).reshape(384)
             frame[WRIST_HANDLE_LATENT_VALID_FEATURE] = np.asarray(
-                [0.0 if wrist_handle_latent_valid is None else float(np.asarray(wrist_handle_latent_valid).reshape(-1)[0])],
+                [
+                    0.0
+                    if wrist_handle_latent_valid is None
+                    else np.asarray(wrist_handle_latent_valid).reshape(-1)[0]
+                ],
                 dtype=np.float32,
             )
-        if self.vision_mode == "depth_only":
-            frame[image_keys[0]] = np.asarray(wrist_second_rgb, dtype=np.uint8)
-            frame[image_keys[1]] = np.asarray(front_second_rgb, dtype=np.uint8)
-        else:
-            frame[image_keys[0]] = np.asarray(wrist_mask_rgb, dtype=np.uint8)
-            frame[image_keys[1]] = np.asarray(wrist_second_rgb, dtype=np.uint8)
-            frame[image_keys[2]] = np.asarray(front_mask_rgb, dtype=np.uint8)
-            frame[image_keys[3]] = np.asarray(front_second_rgb, dtype=np.uint8)
+        if self.include_images:
+            if self.vision_mode == "depth_only":
+                frame[image_keys[0]] = np.asarray(wrist_second_rgb, dtype=np.uint8)
+                frame[image_keys[1]] = np.asarray(front_second_rgb, dtype=np.uint8)
+            else:
+                frame[image_keys[0]] = np.asarray(wrist_mask_rgb, dtype=np.uint8)
+                frame[image_keys[1]] = np.asarray(wrist_second_rgb, dtype=np.uint8)
+                frame[image_keys[2]] = np.asarray(front_mask_rgb, dtype=np.uint8)
+                frame[image_keys[3]] = np.asarray(front_second_rgb, dtype=np.uint8)
         try:
             self.dataset.add_frame(frame)
         except TypeError:

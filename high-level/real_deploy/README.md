@@ -86,9 +86,9 @@ latency, and camera timestamp metadata.
 - Logs: `/home/anx/door_act_deploy/logs`
 - Z1 SDK Python module: `/home/anx/door_act_deploy/z1_sdk/lib/unitree_arm_interface.cpython-310-aarch64-linux-gnu.so`
 
-## Z1 ACT EE bridge
+## Z1 ACT EE/joint bridge
 
-The Z1 bridge converts Door-ACT 10D actions to Z1 end-effector LOWCMD control.
+The Z1 bridge supports legacy 10D EE actions and new 9D joint-state actions.
 It uses exactly two worker threads: one arm command thread and one UDP IO thread.
 
 ACT action/state layout:
@@ -96,6 +96,71 @@ ACT action/state layout:
 ```text
 [vx, yaw_rate, ee_x, ee_y, ee_z, ee_qx, ee_qy, ee_qz, ee_qw, gripper]
 ```
+
+Joint checkpoint layout (`--act_state_action_mode joint9`):
+
+```text
+[last_vx, last_yaw_rate, q1, q2, q3, q4, q5, q6, gripper]  # state
+[vx,      yaw_rate,      q1, q2, q3, q4, q5, q6, gripper]  # action
+```
+
+In `joint9` mode the bridge does not call arm FK or IK for the ACT state/action
+conversion. Measured joint feedback is published directly, and each predicted
+`q1..q6` target enters the existing joint-jump guard, online quintic trajectory,
+joint speed/acceleration caps, 500 Hz LOWCMD output, timeout braking, and gripper
+smoothing. The legacy default remains `ee10` so old checkpoints are unchanged.
+
+For Plücker-conditioned checkpoints, FK is still evaluated asynchronously for
+one separate purpose: computing the moving wrist-camera optical-frame pose.
+This FK result is never used to convert the joint9 state or joint9 command.
+The default camera transforms match the simulator:
+
+```text
+front in robot base: position [0.29, 0.031, 0.165], yaw/pitch/roll [0, -45, 0] deg
+wrist in link06:     position [0.093, 0.031, 0.22], yaw/pitch/roll [0, 60, 0] deg
+```
+
+The bridge publishes both poses as `[x,y,z,qx,qy,qz,qw]`; the ACT runner passes
+them directly to the Plücker inputs. A missing/non-finite pose stops inference
+before any new action is published.
+
+Joint-mode bridge example:
+
+```bash
+/home/anx/door_act_deploy/visual_whole_body/high-level/real_deploy/run_z1_act_ee_bridge.sh \
+  --act_state_action_mode joint9 \
+  --enable_arm \
+  --max_joint_speed 3.0 \
+  --max_joint_acceleration 15.0 \
+  --joint_trajectory_duration_s 0.02 \
+  --state_tx_host 127.0.0.1 \
+  --state_tx_port 15013
+```
+
+`door_act_shadow.py` accepts `--z1_state_action_mode auto` (default) and checks
+that checkpoint state/action dimensions are both 9 or both 10 before starting.
+For a joint checkpoint, chunk overlap blends `vx/vyaw/q1..q6` as
+`0.3 old + 0.7 new`; gripper always uses the newest prediction.
+
+### Interaction-state deployment logging
+
+For ACT checkpoints with the interaction decoder head, every JSONL control
+record now preserves both chunk-level and executed-step predictions:
+
+- `policy_chunk_ingests[*].interaction_state_chunk`: the complete raw `H x 3`
+  prediction produced by each newly ingested chunk, before the executable
+  action horizon is truncated. Columns are `contact_probability`,
+  `handle_progress`, and `door_progress`.
+- `executed_interaction_state`: the three values aligned to the action actually
+  published at this control step, together with its global action timestep,
+  chunk IDs, and overlap count.
+
+If old and new chunks overlap at one global timestep, the three interaction
+values use the same `0.3 old + 0.7 new` aggregation as the motion action. The
+legacy singular `policy_chunk_ingest` field remains for existing log readers;
+`policy_chunk_ingests` is the lossless list when more than one result is
+ingested during one control cycle. Checkpoints without an interaction head log
+`null` for the executed value and remain compatible.
 
 Dry-run first; this does not instantiate or command the Z1:
 
@@ -154,6 +219,16 @@ the last safe joint target.
 Use `--arm_from_act_xyz x y z --arm_from_act_rpy r p y` after measuring the real
 A2-W/Z1 mount transform.  Until then, the bridge assumes the ACT base frame is
 the Z1 arm base frame.
+
+For joint9 Plücker checkpoints, the bridge publishes simulator-aligned camera
+poses together with the 9D state.  Front is fixed in the ACT robot base at
+`xyz=[0.29, 0.031, 0.165], ypr_deg=[0, -45, 0]`.  Wrist is computed online as
+`ACT_from_arm @ SDK_FK(q,6) @ SDK_EE_to_ACT_EE @ ACT_EE_to_camera`, where the
+default EE-local camera transform is
+`xyz=[-0.093, 0.031, 0.22], ypr_deg=[0, 60, 0]`.  This is equivalent to the
+simulator's `link06` camera offset `[0.093, 0.031, 0.22]`; the different x value
+accounts for the SDK FK frame being 0.100 m ahead of Isaac Gym `link06` and the
+ACT EE being another 0.086 m ahead of the SDK frame.
 
 ## Important safety boundary
 

@@ -12,6 +12,11 @@ import torch
 import torch.nn.functional as F
 
 try:
+    from .dp3.pointcloud import FrontDepthPointCloudConfig, depth_to_point_cloud, intrinsics_dict
+except ImportError:
+    from dp3.pointcloud import FrontDepthPointCloudConfig, depth_to_point_cloud, intrinsics_dict
+
+try:
     from .door_dp_common import (
         ACTION_NAMES,
         ACTION_LOSS_WEIGHT_FEATURE,
@@ -36,6 +41,7 @@ try:
         INTERACTION_DOOR_PROGRESS_FEATURE,
         INTERACTION_HANDLE_PROGRESS_FEATURE,
         INTERACTION_STATE_FEATURES,
+        POINT_CLOUD_FEATURE,
         RAW_END_SIGNAL_KEY,
         RAW_ACTION_LOSS_WEIGHT_KEY,
         WRIST_HANDLE_LATENT_FEATURE,
@@ -82,6 +88,7 @@ except ImportError:
         INTERACTION_DOOR_PROGRESS_FEATURE,
         INTERACTION_HANDLE_PROGRESS_FEATURE,
         INTERACTION_STATE_FEATURES,
+        POINT_CLOUD_FEATURE,
         RAW_END_SIGNAL_KEY,
         RAW_ACTION_LOSS_WEIGHT_KEY,
         WRIST_HANDLE_LATENT_FEATURE,
@@ -109,7 +116,9 @@ DP_ROOT = Path(__file__).resolve().parent
 HIGH_LEVEL_ROOT = DP_ROOT.parent
 
 RAW_STATE_ACTION_MODE = "raw"
+DIRECT_JOINT_STATE9_MODE = "joint_state9"
 TRACIK_JOINT_STATE9_MODE = "tracik_joint_state9"
+JOINT_STATE9_MODES = (DIRECT_JOINT_STATE9_MODE, TRACIK_JOINT_STATE9_MODE)
 TRACIK_JOINT_STATE9_NAMES = [
     "last_command_vx",
     "last_command_vyaw",
@@ -152,10 +161,12 @@ def parse_args():
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument(
         "--state_action_mode",
-        choices=[RAW_STATE_ACTION_MODE, TRACIK_JOINT_STATE9_MODE],
+        choices=[RAW_STATE_ACTION_MODE, DIRECT_JOINT_STATE9_MODE, TRACIK_JOINT_STATE9_MODE],
         default=RAW_STATE_ACTION_MODE,
         help=(
-            "raw keeps the recorded state/action arrays. tracik_joint_state9 derives "
+            "raw keeps the recorded state/action arrays and metadata. joint_state9 reads an "
+            "already-recorded 9D joint state/action dataset and marks actions as joint commands. "
+            "tracik_joint_state9 derives "
             "state=[last base command,current arm q,current gripper] and "
             "action=[base command,TRAC-IK q_command,gripper command] from an EE-state raw dataset."
         ),
@@ -181,6 +192,28 @@ def parse_args():
         help="Store visual observations as LeRobot v3 videos by default; use 'image' for embedded parquet images.",
     )
     parser.add_argument("--video_codec", type=str, default="h264", help="Video codec used when --image_storage video.")
+    parser.add_argument(
+        "--point_cloud_views",
+        choices=["front", "wrist", "front,wrist"],
+        default=None,
+        help="Convert depth to one fused robot-base point cloud from front, wrist, or both views.",
+    )
+    parser.add_argument("--point_cloud_num_points", type=int, default=1024)
+    parser.add_argument("--point_cloud_candidate_rows", type=int, default=64)
+    parser.add_argument("--point_cloud_candidate_cols", type=int, default=64)
+    parser.add_argument("--point_cloud_workspace_min", type=str, default="0.20,-1.00,0.00")
+    parser.add_argument("--point_cloud_workspace_max", type=str, default="2.00,1.00,1.80")
+    parser.add_argument(
+        "--point_cloud_empty_depth_policy",
+        choices=["previous", "error"],
+        default="previous",
+    )
+    parser.add_argument(
+        "--point_cloud_storage",
+        choices=["point_cloud_only"],
+        default="point_cloud_only",
+        help="Point-cloud datasets omit depth videos to avoid lossy H264 depth storage.",
+    )
     parser.add_argument(
         "--include_recovery_indicator",
         action="store_true",
@@ -296,6 +329,37 @@ def load_sidecar(raw_root):
         return json.load(f)
 
 
+def validate_calibrated_camera_metadata(sidecar, first_episode, episode_path):
+    if not sidecar or sidecar.get("camera_intrinsics_mode") != "real_k_remap":
+        return
+    required = [
+        "camera_intrinsics",
+        "camera_render_intrinsics",
+        "camera_intrinsics_remap_version",
+        "render_resolution",
+        "output_resolution",
+    ]
+    missing = [key for key in required if key not in sidecar]
+    if missing:
+        raise ValueError(f"real_k_remap raw sidecar is missing metadata: {missing}.")
+    camera_intrinsics = sidecar["camera_intrinsics"]
+    for camera_name in ("front", "wrist"):
+        values = camera_intrinsics.get(camera_name) or {}
+        missing_k = [key for key in ("fx", "fy", "cx", "cy", "width", "height") if key not in values]
+        if missing_k:
+            raise ValueError(f"real_k_remap metadata for {camera_name} is missing {missing_k}.")
+    expected_width, expected_height = [int(value) for value in sidecar["output_resolution"]]
+    for key in ("wrist_masked_depth", "front_masked_depth", "wrist_rgb", "front_rgb"):
+        if key not in first_episode.files:
+            continue
+        shape = np.asarray(first_episode[key]).shape
+        if len(shape) < 3 or tuple(shape[1:3]) != (expected_height, expected_width):
+            raise ValueError(
+                f"{episode_path} field {key!r} has shape {shape}, expected "
+                f"(T, {expected_height}, {expected_width}, ...)."
+            )
+
+
 def episode_files(raw_root):
     files = sorted(Path(raw_root).glob("episode_*.npz"))
     if not files:
@@ -312,6 +376,63 @@ def scalar_str(value):
 
 def parse_csv_names(value):
     return [item.strip() for item in str(value or "").split(",") if item.strip()]
+
+
+def parse_xyz_csv(value, name):
+    try:
+        result = tuple(float(item.strip()) for item in str(value).split(","))
+    except ValueError as exc:
+        raise ValueError(f"{name} must contain three comma-separated floats, got {value!r}.") from exc
+    if len(result) != 3:
+        raise ValueError(f"{name} must contain exactly three values, got {value!r}.")
+    return result
+
+
+def make_episode_point_clouds(
+    *,
+    path,
+    views,
+    wrist_depth,
+    front_depth,
+    wrist_camera_pose_base,
+    front_camera_pose_base,
+    camera_intrinsics,
+    config,
+    empty_depth_policy,
+):
+    """Use the same deterministic geometry path as online Door inference."""
+    requested_views = tuple(str(views).split(","))
+    if requested_views == ("front", "wrist") and config.num_points % 2:
+        raise ValueError("Dual-view point_cloud_num_points must be even.")
+    per_view_count = config.num_points if len(requested_views) == 1 else config.num_points // 2
+    per_view_config = FrontDepthPointCloudConfig(
+        **{**config.to_dict(), "num_points": int(per_view_count)}
+    )
+    depth_by_view = {"front": front_depth, "wrist": wrist_depth}
+    pose_by_view = {"front": front_camera_pose_base, "wrist": wrist_camera_pose_base}
+    previous = {view: None for view in requested_views}
+    result = np.empty((front_depth.shape[0], config.num_points, 3), dtype=np.float32)
+    for frame_index in range(result.shape[0]):
+        clouds = []
+        for view in requested_views:
+            try:
+                cloud = depth_to_point_cloud(
+                    depth_by_view[view][frame_index],
+                    pose_by_view[view][frame_index],
+                    intrinsics_dict(camera_intrinsics, camera=view),
+                    per_view_config,
+                )
+                previous[view] = cloud
+            except ValueError as exc:
+                if empty_depth_policy != "previous" or previous[view] is None:
+                    raise ValueError(
+                        f"Point-cloud conversion failed for episode={path}, camera={view}, "
+                        f"frame={frame_index}: {exc}"
+                    ) from exc
+                cloud = previous[view]
+            clouds.append(cloud)
+        result[frame_index] = np.concatenate(clouds, axis=0)
+    return result
 
 
 def _normalize_handle_bbox_array(value, frame_count, key, path):
@@ -467,6 +588,17 @@ def state_action_arrays(data, mode, path=None):
     mode = str(mode or RAW_STATE_ACTION_MODE)
     if mode == RAW_STATE_ACTION_MODE:
         return data["state"].astype(np.float32), data["action"].astype(np.float32)
+    if mode == DIRECT_JOINT_STATE9_MODE:
+        states = np.asarray(data["state"], dtype=np.float32)
+        actions = np.asarray(data["action"], dtype=np.float32)
+        label = str(path or "raw episode")
+        if states.ndim != 2 or states.shape[1] != 9:
+            raise ValueError(f"{label} joint_state9 requires state shape [T, 9], got {states.shape}")
+        if actions.ndim != 2 or actions.shape != states.shape:
+            raise ValueError(
+                f"{label} joint_state9 requires action shape {states.shape}, got {actions.shape}"
+            )
+        return states, actions
     if mode != TRACIK_JOINT_STATE9_MODE:
         raise ValueError(f"Unsupported state_action_mode={mode!r}")
 
@@ -711,6 +843,10 @@ def load_episode_payload(
     interaction_contact_min_consecutive_frames=3,
     interaction_handle_unlock_angle_deg=40.0,
     interaction_door_goal_angle_deg=90.0,
+    point_cloud_views=None,
+    point_cloud_config=None,
+    point_cloud_camera_intrinsics=None,
+    point_cloud_empty_depth_policy="previous",
 ):
     with np.load(path, allow_pickle=True) as data:
         validate_episode_metadata(path, data, sidecar, action_frame, ikpush_state_version, controller_mode)
@@ -731,7 +867,29 @@ def load_episode_payload(
             raise ValueError(
                 f"Episode {path} has invalid {RECOVERY_INDICATOR_FEATURE}; expected finite values in [0, 1]."
             )
-        if vision_mode == "depth_only":
+        if point_cloud_views is not None:
+            requested_views = tuple(str(point_cloud_views).split(","))
+            depth_key_by_view = (
+                {"wrist": image_keys[0], "front": image_keys[1]}
+                if vision_mode == "depth_only"
+                else {"wrist": image_keys[1], "front": image_keys[3]}
+            )
+            require_fields(data, [depth_key_by_view[view] for view in requested_views], path)
+            reference_depth = data[depth_key_by_view[requested_views[0]]].astype(np.uint8)
+            empty_depth = np.zeros((reference_depth.shape[0], 1, 1), dtype=np.uint8)
+            wrist_second = (
+                data[depth_key_by_view["wrist"]].astype(np.uint8)
+                if "wrist" in requested_views
+                else empty_depth
+            )
+            front_second = (
+                data[depth_key_by_view["front"]].astype(np.uint8)
+                if "front" in requested_views
+                else empty_depth
+            )
+            wrist_first = np.zeros_like(wrist_second)
+            front_first = np.zeros_like(front_second)
+        elif vision_mode == "depth_only":
             require_fields(data, image_keys, path)
             wrist_second = data[image_keys[0]].astype(np.uint8)
             front_second = data[image_keys[1]].astype(np.uint8)
@@ -741,7 +899,9 @@ def load_episode_payload(
             require_fields(data, image_keys[:2], path)
             wrist_first = data[image_keys[0]].astype(np.uint8)
             wrist_second = data[image_keys[1]].astype(np.uint8)
-        if vision_mode == "rgb":
+        if point_cloud_views is not None:
+            pass
+        elif vision_mode == "rgb":
             require_fields(data, image_keys[2:], path)
             front_first = data[image_keys[2]].astype(np.uint8)
             front_second = data[image_keys[3]].astype(np.uint8)
@@ -825,17 +985,46 @@ def load_episode_payload(
             )
         has_front_pose = RAW_FRONT_CAMERA_POSE_KEY in data.files
         has_wrist_pose = RAW_WRIST_CAMERA_POSE_KEY in data.files
-        if has_front_pose != has_wrist_pose:
+        if has_front_pose != has_wrist_pose and point_cloud_views is None:
             raise ValueError(
                 f"Episode {path} has incomplete camera pose fields: "
                 f"{RAW_FRONT_CAMERA_POSE_KEY}={has_front_pose}, {RAW_WRIST_CAMERA_POSE_KEY}={has_wrist_pose}."
             )
         if has_front_pose:
             front_camera_pose_base = data[RAW_FRONT_CAMERA_POSE_KEY].astype(np.float32).reshape(-1, 7)
-            wrist_camera_pose_base = data[RAW_WRIST_CAMERA_POSE_KEY].astype(np.float32).reshape(-1, 7)
         else:
             front_camera_pose_base = None
+        if has_wrist_pose:
+            wrist_camera_pose_base = data[RAW_WRIST_CAMERA_POSE_KEY].astype(np.float32).reshape(-1, 7)
+        else:
             wrist_camera_pose_base = None
+        point_cloud = None
+        if point_cloud_views is not None:
+            required_poses = {
+                "front": front_camera_pose_base,
+                "wrist": wrist_camera_pose_base,
+            }
+            missing_pose_views = [
+                view for view in str(point_cloud_views).split(",") if required_poses[view] is None
+            ]
+            if missing_pose_views:
+                raise ValueError(
+                    f"Episode {path} cannot generate {point_cloud_views} point clouds; "
+                    f"missing per-frame poses for {missing_pose_views}."
+                )
+            if point_cloud_camera_intrinsics is None:
+                raise ValueError(f"Episode {path} has no front/wrist camera intrinsics metadata.")
+            point_cloud = make_episode_point_clouds(
+                path=path,
+                views=point_cloud_views,
+                wrist_depth=wrist_second,
+                front_depth=front_second,
+                wrist_camera_pose_base=wrist_camera_pose_base,
+                front_camera_pose_base=front_camera_pose_base,
+                camera_intrinsics=point_cloud_camera_intrinsics,
+                config=point_cloud_config,
+                empty_depth_policy=point_cloud_empty_depth_policy,
+            )
         has_handle_bbox = bool(load_handle_bbox) and (
             RAW_FRONT_HANDLE_BBOX_KEY in data.files or RAW_WRIST_HANDLE_BBOX_KEY in data.files
         )
@@ -931,14 +1120,23 @@ def load_episode_payload(
         == n
     ):
         raise ValueError(f"Episode {path} has inconsistent lengths.")
-    if front_camera_pose_base is not None and (
-        front_camera_pose_base.shape[0] != n or wrist_camera_pose_base.shape[0] != n
+    for camera_name, camera_pose in (
+        ("front", front_camera_pose_base),
+        ("wrist", wrist_camera_pose_base),
     ):
-        raise ValueError(f"Episode {path} has camera pose length inconsistent with frame count.")
+        if camera_pose is not None and camera_pose.shape[0] != n:
+            raise ValueError(
+                f"Episode {path} {camera_name} camera pose length is inconsistent with frame count."
+            )
     if end_signal is not None and end_signal.shape[0] != n:
         raise ValueError(f"Episode {path} has end_signal length inconsistent with frame count.")
     if interaction_state is not None and any(value.shape[0] != n for value in interaction_state.values()):
         raise ValueError(f"Episode {path} has interaction-state length inconsistent with frame count.")
+    if point_cloud is not None and point_cloud.shape != (n, point_cloud_config.num_points, 3):
+        raise ValueError(
+            f"Episode {path} has invalid point-cloud shape {point_cloud.shape}; expected "
+            f"{(n, point_cloud_config.num_points, 3)}."
+        )
     if front_handle_bbox_xyxy is not None and (
         front_handle_bbox_xyxy.shape[0] != n
         or front_handle_bbox_valid.shape[0] != n
@@ -960,10 +1158,11 @@ def load_episode_payload(
         "is_recovery": is_recovery,
         "end_signal": end_signal,
         "interaction_state": interaction_state,
+        "point_cloud": point_cloud,
         "door_asset_name": door_asset_name,
         "front_camera_pose_base": front_camera_pose_base,
         "wrist_camera_pose_base": wrist_camera_pose_base,
-        "has_camera_pose": front_camera_pose_base is not None,
+        "has_camera_pose": front_camera_pose_base is not None and wrist_camera_pose_base is not None,
         "has_handle_bbox": front_handle_bbox_xyxy is not None,
         "front_handle_bbox_xyxy": front_handle_bbox_xyxy,
         "front_handle_bbox_valid": front_handle_bbox_valid,
@@ -1005,6 +1204,23 @@ def main():
     args = parse_args()
     if args.num_workers < 1:
         raise ValueError("--num_workers must be >= 1")
+    point_cloud_enabled = args.point_cloud_views is not None
+    point_cloud_config = None
+    point_cloud_camera_intrinsics = None
+    if point_cloud_enabled:
+        point_cloud_config = FrontDepthPointCloudConfig(
+            num_points=int(args.point_cloud_num_points),
+            candidate_rows=int(args.point_cloud_candidate_rows),
+            candidate_cols=int(args.point_cloud_candidate_cols),
+            workspace_min=parse_xyz_csv(args.point_cloud_workspace_min, "--point_cloud_workspace_min"),
+            workspace_max=parse_xyz_csv(args.point_cloud_workspace_max, "--point_cloud_workspace_max"),
+            near_clip_m=0.20,
+            far_clip_m=1.50,
+            point_frame="robot_base",
+        )
+        point_cloud_config.validate()
+        if args.point_cloud_views == "front,wrist" and point_cloud_config.num_points % 2:
+            raise ValueError("--point_cloud_num_points must be even for front,wrist fusion.")
     if args.keyframe_loss_weight is not None and args.keyframe_loss_weight <= 0.0:
         raise ValueError("--keyframe_loss_weight must be > 0")
     if args.keyframe_loss_radius is not None and args.keyframe_loss_radius < 0:
@@ -1014,7 +1230,8 @@ def main():
     raw_root = raw_roots[0]
     sidecar = load_sidecar(raw_root)
     first = np.load(files[0], allow_pickle=True)
-    if args.state_action_mode == TRACIK_JOINT_STATE9_MODE:
+    validate_calibrated_camera_metadata(sidecar, first, files[0])
+    if args.state_action_mode in JOINT_STATE9_MODES:
         state_names = list(TRACIK_JOINT_STATE9_NAMES)
         action_names = list(TRACIK_JOINT_ACTION9_NAMES)
     else:
@@ -1026,15 +1243,34 @@ def main():
             state_names = [f"state_{i}" for i in range(first["state"].shape[-1])]
         action_names = detect_action_names(first, sidecar)
     first_states, first_actions = state_action_arrays(first, args.state_action_mode, files[0])
-    has_camera_pose = RAW_FRONT_CAMERA_POSE_KEY in first.files or RAW_WRIST_CAMERA_POSE_KEY in first.files
-    if has_camera_pose and not (
-        RAW_FRONT_CAMERA_POSE_KEY in first.files and RAW_WRIST_CAMERA_POSE_KEY in first.files
-    ):
+    has_front_camera_pose = RAW_FRONT_CAMERA_POSE_KEY in first.files
+    has_wrist_camera_pose = RAW_WRIST_CAMERA_POSE_KEY in first.files
+    has_camera_pose = has_front_camera_pose and has_wrist_camera_pose
+    if not point_cloud_enabled and has_front_camera_pose != has_wrist_camera_pose:
         raise ValueError(
             "Raw data has incomplete camera pose fields in the first episode: "
             f"{RAW_FRONT_CAMERA_POSE_KEY}={RAW_FRONT_CAMERA_POSE_KEY in first.files}, "
             f"{RAW_WRIST_CAMERA_POSE_KEY}={RAW_WRIST_CAMERA_POSE_KEY in first.files}."
         )
+    if point_cloud_enabled:
+        missing_pose_views = [
+            view
+            for view in args.point_cloud_views.split(",")
+            if not {"front": has_front_camera_pose, "wrist": has_wrist_camera_pose}[view]
+        ]
+        if missing_pose_views:
+            raise ValueError(
+                f"Point-cloud conversion for {args.point_cloud_views!r} is missing raw camera poses "
+                f"for {missing_pose_views}."
+            )
+        point_cloud_camera_intrinsics = (sidecar or {}).get("camera_intrinsics")
+        if not point_cloud_camera_intrinsics and "camera_intrinsics" in first.files:
+            point_cloud_camera_intrinsics = np.asarray(first["camera_intrinsics"]).item()
+        if not point_cloud_camera_intrinsics:
+            raise ValueError("Point-cloud conversion requires camera_intrinsics metadata for the requested view(s).")
+        requested = tuple(args.point_cloud_views.split(","))
+        for view in requested:
+            intrinsics_dict(point_cloud_camera_intrinsics, camera=view)
     has_handle_bbox = bool(args.add_handle_latent) and (
         RAW_FRONT_HANDLE_BBOX_KEY in first.files or RAW_WRIST_HANDLE_BBOX_KEY in first.files
     )
@@ -1083,13 +1319,17 @@ def main():
     if args.rgb:
         args.depth_only = False
     vision_mode = "rgb" if args.rgb else ("depth_only" if args.depth_only else "depth")
+    if point_cloud_enabled and vision_mode == "rgb":
+        raise ValueError(
+            "Point-cloud conversion requires depth observations; RGB-only raw data has no metric depth field."
+        )
     raw_vision_mode = detect_raw_vision_mode(first, sidecar)
     raw_action_frame = detect_action_frame(first, sidecar)
     raw_ikpush_state_version = detect_ikpush_state_version(first, sidecar)
-    action_frame = "joint_command" if args.state_action_mode == TRACIK_JOINT_STATE9_MODE else raw_action_frame
+    action_frame = "joint_command" if args.state_action_mode in JOINT_STATE9_MODES else raw_action_frame
     ikpush_state_version = (
         "a2w_last_command_joint_state9"
-        if args.state_action_mode == TRACIK_JOINT_STATE9_MODE
+        if args.state_action_mode in JOINT_STATE9_MODES
         else raw_ikpush_state_version
     )
     controller_mode = detect_controller_mode(first, sidecar)
@@ -1110,6 +1350,34 @@ def main():
     state_preprocess_config = None
     action_preprocess_config = None
     if existing_sidecar and not args.overwrite:
+        existing_point_cloud_enabled = bool(existing_sidecar.get("point_cloud_conditioning", False))
+        if existing_point_cloud_enabled != point_cloud_enabled:
+            raise ValueError(
+                f"Existing LeRobot dataset at {out_dir} has point_cloud_conditioning="
+                f"{existing_point_cloud_enabled}, but this conversion requested {point_cloud_enabled}; "
+                "use --overwrite or a new --repo_id."
+            )
+        if point_cloud_enabled:
+            expected_point_cloud_metadata = {
+                "point_cloud_views": str(args.point_cloud_views),
+                "point_cloud_num_points": int(args.point_cloud_num_points),
+                "point_cloud_candidate_rows": int(args.point_cloud_candidate_rows),
+                "point_cloud_candidate_cols": int(args.point_cloud_candidate_cols),
+                "point_cloud_workspace_min": list(point_cloud_config.workspace_min),
+                "point_cloud_workspace_max": list(point_cloud_config.workspace_max),
+                "point_cloud_empty_depth_policy": str(args.point_cloud_empty_depth_policy),
+                "point_cloud_frame": "robot_base",
+            }
+            mismatched = {
+                key: (existing_sidecar.get(key), value)
+                for key, value in expected_point_cloud_metadata.items()
+                if existing_sidecar.get(key) != value
+            }
+            if mismatched:
+                raise ValueError(
+                    f"Existing point-cloud dataset at {out_dir} has incompatible geometry metadata: "
+                    f"{mismatched}. Use --overwrite or a new --repo_id."
+                )
         existing_vision_mode = normalize_vision_mode(existing_sidecar.get("vision_mode", "depth"))
         if existing_vision_mode != vision_mode:
             raise ValueError(
@@ -1271,10 +1539,13 @@ def main():
         video_codec=args.video_codec,
         include_action_loss_weight=True,
         include_recovery_indicator=bool(args.include_recovery_indicator),
-        include_camera_pose=has_camera_pose,
+        include_camera_pose=has_camera_pose and not point_cloud_enabled,
         include_handle_latent=bool(args.add_handle_latent),
         include_end_signal=bool(args.add_end_signal),
         include_interaction_state=bool(args.add_interaction_state),
+        include_images=not point_cloud_enabled,
+        include_point_cloud=point_cloud_enabled,
+        point_cloud_num_points=int(args.point_cloud_num_points),
         metadata={
             **inherited_metadata,
             "action_frame": action_frame,
@@ -1285,12 +1556,41 @@ def main():
             "action_source": (
                 "base_command_plus_tracik_smoothed_joint_command"
                 if args.state_action_mode == TRACIK_JOINT_STATE9_MODE
-                else inherited_metadata.get("action_source", "raw")
+                else (
+                    "base_command_plus_a2w_z1_joint_targets"
+                    if args.state_action_mode == DIRECT_JOINT_STATE9_MODE
+                    else inherited_metadata.get("action_source", "raw")
+                )
             ),
             "door_dp_mode": controller_mode,
             "controller_mode": controller_mode,
             "image_storage": args.image_storage,
             "video_codec": args.video_codec,
+            **(
+                {
+                    "point_cloud_conditioning": True,
+                    "point_cloud_feature": POINT_CLOUD_FEATURE,
+                    "point_cloud_views": args.point_cloud_views,
+                    "point_cloud_num_points": int(args.point_cloud_num_points),
+                    "point_cloud_candidate_rows": int(args.point_cloud_candidate_rows),
+                    "point_cloud_candidate_cols": int(args.point_cloud_candidate_cols),
+                    "point_cloud_workspace_min": list(point_cloud_config.workspace_min),
+                    "point_cloud_workspace_max": list(point_cloud_config.workspace_max),
+                    "point_cloud_near_clip_m": float(point_cloud_config.near_clip_m),
+                    "point_cloud_far_clip_m": float(point_cloud_config.far_clip_m),
+                    "point_cloud_empty_depth_policy": args.point_cloud_empty_depth_policy,
+                    "point_cloud_storage": args.point_cloud_storage,
+                    "point_cloud_frame": "robot_base",
+                    **{
+                        f"{view}_camera_intrinsics": intrinsics_dict(
+                            point_cloud_camera_intrinsics, camera=view
+                        )
+                        for view in args.point_cloud_views.split(",")
+                    },
+                }
+                if point_cloud_enabled
+                else {}
+            ),
             "state_sanitize": state_sanitize_config,
             "action_sanitize": action_sanitize_config,
             "state_preprocess": state_preprocess_config,
@@ -1362,6 +1662,10 @@ def main():
         interaction_contact_min_consecutive_frames=int(args.interaction_contact_min_consecutive_frames),
         interaction_handle_unlock_angle_deg=float(args.interaction_handle_unlock_angle_deg),
         interaction_door_goal_angle_deg=float(args.interaction_door_goal_angle_deg),
+        point_cloud_views=args.point_cloud_views,
+        point_cloud_config=point_cloud_config,
+        point_cloud_camera_intrinsics=point_cloud_camera_intrinsics,
+        point_cloud_empty_depth_policy=args.point_cloud_empty_depth_policy,
     )
     end_positive_frames = 0
     end_total_frames = 0
@@ -1385,6 +1689,7 @@ def main():
         is_recovery = payload["is_recovery"]
         end_signal = payload.get("end_signal")
         interaction_state = payload.get("interaction_state")
+        point_cloud = payload.get("point_cloud")
         if end_signal is not None:
             episode_positive = int(np.count_nonzero(end_signal > 0.5))
             end_positive_frames += episode_positive
@@ -1422,7 +1727,7 @@ def main():
                 f"Interaction state {payload['path_name']} door={door_name}: " + " ".join(episode_summary),
                 flush=True,
             )
-        if bool(payload.get("has_camera_pose", False)) != bool(has_camera_pose):
+        if not point_cloud_enabled and bool(payload.get("has_camera_pose", False)) != bool(has_camera_pose):
             raise ValueError(
                 f"Episode {payload['path_name']} camera-pose presence does not match the first episode. "
                 "Do not mix Plücker-ready and legacy raw episodes in one conversion."
@@ -1447,14 +1752,24 @@ def main():
             )
         n = payload["n"]
         for i in range(n):
+            if point_cloud_enabled:
+                wrist_first_frame = wrist_first[i]
+                wrist_second_frame = wrist_second[i]
+                front_first_frame = front_first[i]
+                front_second_frame = front_second[i]
+            else:
+                wrist_first_frame = image_to_three_channel_uint8(wrist_first[i])
+                wrist_second_frame = image_to_three_channel_uint8(wrist_second[i])
+                front_first_frame = image_to_three_channel_uint8(front_first[i])
+                front_second_frame = image_to_three_channel_uint8(front_second[i])
             recorder.add_frame(
                 states[i],
-                image_to_three_channel_uint8(wrist_first[i]),
-                image_to_three_channel_uint8(wrist_second[i]),
+                wrist_first_frame,
+                wrist_second_frame,
                 actions[i],
                 int(subtasks[i]),
-                front_mask_rgb=image_to_three_channel_uint8(front_first[i]),
-                front_second_rgb=image_to_three_channel_uint8(front_second[i]),
+                front_mask_rgb=front_first_frame,
+                front_second_rgb=front_second_frame,
                 action_loss_weight=action_loss_weight[i],
                 is_recovery=is_recovery[i] if args.include_recovery_indicator else None,
                 front_camera_pose_base=None if front_camera_pose_base is None else front_camera_pose_base[i],
@@ -1473,6 +1788,7 @@ def main():
                 interaction_door_progress=(
                     None if interaction_state is None else interaction_state[INTERACTION_DOOR_PROGRESS_FEATURE][i]
                 ),
+                point_cloud=None if point_cloud is None else point_cloud[i],
             )
         recorder.save_episode()
         print(f"Converted {payload['path_name']}: {n} frames task={task!r} ({ep_idx + 1}/{len(files)})", flush=True)
@@ -1505,7 +1821,7 @@ def main():
         "fps": fps,
         "state": state_names,
         "action": action_names,
-        "image_features": lerobot_image_keys_for_vision_mode(vision_mode),
+        "image_features": [] if point_cloud_enabled else lerobot_image_keys_for_vision_mode(vision_mode),
         "source_raw_root": str(raw_root),
         "source_raw_roots": [str(root) for root in raw_roots],
         "action_frame": action_frame,
@@ -1516,7 +1832,11 @@ def main():
         "action_source": (
             "base_command_plus_tracik_smoothed_joint_command"
             if args.state_action_mode == TRACIK_JOINT_STATE9_MODE
-            else inherited_metadata.get("action_source", "raw")
+            else (
+                "base_command_plus_a2w_z1_joint_targets"
+                if args.state_action_mode == DIRECT_JOINT_STATE9_MODE
+                else inherited_metadata.get("action_source", "raw")
+            )
         ),
         "door_dp_mode": controller_mode,
         "controller_mode": controller_mode,
@@ -1536,7 +1856,7 @@ def main():
         "keyframe_loss_weight": converted_keyframe_loss_weight,
         "keyframe_loss_radius": converted_keyframe_loss_radius,
     }
-    if has_camera_pose:
+    if has_camera_pose and not point_cloud_enabled:
         sidecar_payload["camera_pose_features"] = [FRONT_CAMERA_POSE_FEATURE, WRIST_CAMERA_POSE_FEATURE]
         sidecar_payload["camera_pose_frame"] = "robot_base"
         sidecar_payload["camera_pose_convention"] = "optical_frame"
@@ -1572,8 +1892,38 @@ def main():
         sidecar_payload["interaction_door_goal_angle_deg"] = float(
             args.interaction_door_goal_angle_deg
         )
+    if point_cloud_enabled:
+        sidecar_payload.update(
+            {
+                "point_cloud_conditioning": True,
+                "point_cloud_feature": POINT_CLOUD_FEATURE,
+                "point_cloud_views": args.point_cloud_views,
+                "point_cloud_num_points": int(args.point_cloud_num_points),
+                "point_cloud_candidate_rows": int(args.point_cloud_candidate_rows),
+                "point_cloud_candidate_cols": int(args.point_cloud_candidate_cols),
+                "point_cloud_workspace_min": list(point_cloud_config.workspace_min),
+                "point_cloud_workspace_max": list(point_cloud_config.workspace_max),
+                "point_cloud_near_clip_m": float(point_cloud_config.near_clip_m),
+                "point_cloud_far_clip_m": float(point_cloud_config.far_clip_m),
+                "point_cloud_empty_depth_policy": args.point_cloud_empty_depth_policy,
+                "point_cloud_storage": args.point_cloud_storage,
+                "point_cloud_frame": "robot_base",
+                **{
+                    f"{view}_camera_intrinsics": intrinsics_dict(
+                        point_cloud_camera_intrinsics, camera=view
+                    )
+                    for view in args.point_cloud_views.split(",")
+                },
+            }
+        )
     if sidecar:
         for key in DATASET_METADATA_KEYS:
+            if point_cloud_enabled and key in {
+                "camera_pose_features",
+                "handle_bbox_features",
+                "handle_latent_features",
+            }:
+                continue
             if key in sidecar and key not in sidecar_payload:
                 sidecar_payload[key] = sidecar[key]
     if vision_mode != "depth":

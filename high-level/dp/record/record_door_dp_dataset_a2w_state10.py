@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import shlex
+import signal
 import subprocess
 import sys
 from datetime import datetime
@@ -24,6 +25,9 @@ from door_dp_common import DEFAULT_KEYFRAME_LOSS_RADIUS, DEFAULT_KEYFRAME_LOSS_W
 A2W_IKPUSH_SCRIPT = (
     HIGH_LEVEL_ROOT / "float_ik" / "isaacgym_float_ik_a2w_basearn_push_door_parallel.py"
 )
+A2W_IKPULL_SCRIPT = (
+    HIGH_LEVEL_ROOT / "float_ik" / "isaacgym_float_ik_a2w_basearn_pull_door_parallel.py"
+)
 A2W_RAW_ROOT = HIGH_LEVEL_ROOT / "data" / "door_dp_raw" / "local_door_dp_a2w_state10"
 A2W_LEROBOT_REPO_ID = "local/door_a2w_state10"
 A2W_EE_ACTION10_NAMES = ["vx", "yaw", "ee_x", "ee_y", "ee_z", "ee_qx", "ee_qy", "ee_qz", "ee_qw", "gripper"]
@@ -33,13 +37,13 @@ A2W_JOINT_ACTION9_NAMES = ["vx", "yaw", "joint1", "joint2", "joint3", "joint4", 
 def parse_args():
     parser = argparse.ArgumentParser(
         description=(
-            "Record A2W+Z1 ikpush float-IK door expert rollouts into raw .npz episodes "
+            "Record A2W+Z1 ikpush/ikpull float-IK door expert rollouts into raw .npz episodes "
             "with a PI0.5-friendly 10D state whose first two dimensions are the last "
             "commanded vx/vyaw. Recording frequency and the remaining state dimensions "
             "match record_door_dp_dataset_pi05_state10.py. Only successful envs are saved."
         )
     )
-    parser.add_argument("--mode", choices=["ikpush"], default="ikpush")
+    parser.add_argument("--mode", choices=["ikpush", "ikpull"], default="ikpush")
     parser.add_argument(
         "--num_episodes",
         type=int,
@@ -93,6 +97,18 @@ def parse_args():
     parser.add_argument("--camera_fps", type=float, default=25.0)
     parser.add_argument("--camera_depth_clip_lower", type=float, default=0.2)
     parser.add_argument("--camera_depth_clip_far", type=float, default=1.5)
+    parser.add_argument(
+        "--camera_intrinsics_mode",
+        choices=["legacy", "real_k_remap"],
+        default="legacy",
+        help="Opt-in calibrated-intrinsics remap. legacy preserves previous recordings exactly.",
+    )
+    parser.add_argument(
+        "--camera_intrinsics_config",
+        type=str,
+        default="high-level/data/cfg/a2w_real_camera_intrinsics_640x480.yaml",
+    )
+    parser.add_argument("--camera_render_horizontal_fov_deg", type=float, default=60.0)
     parser.add_argument(
         "--keyframe_loss_weight",
         type=float,
@@ -215,6 +231,8 @@ def parse_args():
 def script_for_mode(mode):
     if mode == "ikpush":
         return A2W_IKPUSH_SCRIPT, "push lever door open", True
+    if mode == "ikpull":
+        return A2W_IKPULL_SCRIPT, "pull lever door open", True
     raise ValueError(mode)
 
 
@@ -518,6 +536,12 @@ def run_one(mode, rollout_idx, args):
             str(args.camera_depth_clip_lower),
             "--camera_depth_clip_far",
             str(args.camera_depth_clip_far),
+            "--camera_intrinsics_mode",
+            str(args.camera_intrinsics_mode),
+            "--camera_intrinsics_config",
+            str(args.camera_intrinsics_config),
+            "--camera_render_horizontal_fov_deg",
+            str(args.camera_render_horizontal_fov_deg),
             "--dp_record_state_mode",
             dp_record_state_mode_for_schema(args.state_action_mode),
             "--keyframe_loss_weight",
@@ -659,8 +683,26 @@ def record_until_target_successes(args, mode):
             f"remaining={remaining} batch_envs={args.num_envs}",
             flush=True,
         )
-        run_one(mode, rollout_idx, args)
+        batch_error = None
+        try:
+            run_one(mode, rollout_idx, args)
+        except subprocess.CalledProcessError as exc:
+            batch_error = exc
         saved_after = count_saved_episodes(args.raw_root)
+        if batch_error is not None:
+            # Some Isaac Gym builds segfault while tearing down a completed
+            # headless process, after every successful episode has already
+            # been flushed to disk. Continue only for that exact case; all
+            # other failures, or a cleanup crash that produced no episodes,
+            # remain fatal.
+            cleanup_sigsegv = int(batch_error.returncode) == -int(signal.SIGSEGV)
+            if not cleanup_sigsegv or saved_after <= saved_before:
+                raise batch_error
+            print(
+                f"Warning: recording subprocess exited with SIGSEGV during cleanup, "
+                f"but {saved_after - saved_before} new episode(s) were saved; continuing.",
+                flush=True,
+            )
         print(
             f"[target] after batch {rollout_idx + 1}: successful={saved_after}/{target} "
             f"new={saved_after - saved_before}",
@@ -701,15 +743,15 @@ def main():
         )
     if args.record_all_envs:
         print(
-            f"A2W ikpush recording target={args.num_episodes} successful episode(s), "
+            f"A2W {args.mode} recording target={args.num_episodes} successful episode(s), "
             f"batch_size={args.num_envs} env(s), schema={args.state_action_mode}; failed attempts are discarded.",
             flush=True,
         )
     else:
         print(f"Raw recording uses only env {args.record_env_id}; failed rollouts are discarded.", flush=True)
     if int(args.success_per_door) > 0:
-        if modes != ["ikpush"]:
-            raise ValueError("--success_per_door quota mode is only supported for A2W ikpush.")
+        if modes not in (["ikpush"], ["ikpull"]):
+            raise ValueError("--success_per_door quota mode is only supported for one A2W float-IK mode.")
         if not args.record_all_envs:
             raise ValueError("--success_per_door requires --record_all_envs so every door can be sampled.")
         extra = forwarded_play_args(args)

@@ -104,6 +104,10 @@ class AdamWConfig(OptimizerConfig):
     eps: float = 1e-8
     weight_decay: float = 1e-2
     grad_clip_norm: float = 10.0
+    # Leave PyTorch's existing behavior unchanged by default. Strict paired
+    # ablations can set this to false so adding a detached probe parameter
+    # group cannot change CUDA foreach/multi-tensor grouping for the ACT trunk.
+    foreach: bool | None = None
 
     def build(self, params: OptimizerParams) -> torch.optim.Optimizer:
         kwargs = asdict(self)

@@ -71,6 +71,10 @@ BACKEND_LEROBOT_DIFFUSION = "lerobot_diffusion"
 BACKEND_LEROBOT_ACT = "lerobot_act"
 BACKEND_LEROBOT_PI05 = "lerobot_pi05"
 BACKEND_LEROBOT_PI05_EVO = "lerobot_pi05_evo"
+BACKEND_DP3 = "dp3"
+OBS_POINT_CLOUD = "observation.point_cloud"
+OBS_FRONT_POINT_CLOUD = "observation.front_point_cloud"
+OBS_WRIST_POINT_CLOUD = "observation.wrist_point_cloud"
 CHECKPOINT_META = "door_policy_meta.json"
 CHECKPOINT_STATS = "door_policy_stats.pt"
 CHECKPOINT_POLICY_DIR = "policy"
@@ -653,7 +657,9 @@ class DoorPolicySequenceDataset(Dataset):
         self.dataset_root = _resolve_lerobot_root(root, repo_id)
         self.dataset = _load_lerobot_dataset(self.dataset_root, repo_id)
         self.vision_mode = normalize_vision_mode(vision_mode)
-        self.image_keys = lerobot_image_keys_for_vision_mode(self.vision_mode)
+        meta = getattr(self.dataset, "meta", None)
+        self.has_point_cloud = bool(meta is not None and OBS_POINT_CLOUD in getattr(meta, "features", {}))
+        self.image_keys = [] if self.has_point_cloud else lerobot_image_keys_for_vision_mode(self.vision_mode)
         self.obs_horizon = int(obs_horizon)
         self.horizon = int(horizon)
         if self.horizon < self.obs_horizon:
@@ -705,10 +711,15 @@ class DoorPolicySequenceDataset(Dataset):
         image_required = self.vision_mode == "rgb"
 
         states: List[torch.Tensor] = []
+        point_clouds: List[torch.Tensor] = []
         images: Dict[str, List[torch.Tensor]] = {key: [] for key in self.image_keys}
         for idx in obs_ids:
             frame = self._frame(idx)
             states.append(torch.as_tensor(_as_numpy(_field(frame, OBS_STATE)), dtype=torch.float32))
+            if self.has_point_cloud:
+                point_clouds.append(
+                    torch.as_tensor(_as_numpy(_field(frame, OBS_POINT_CLOUD)), dtype=torch.float32)
+                )
             for key in self.image_keys:
                 images[key].append(_image_from_frame(frame, key, required=image_required))
 
@@ -722,6 +733,8 @@ class DoorPolicySequenceDataset(Dataset):
             ACTION: torch.stack(actions, dim=0),
             ACTION_IS_PAD: torch.zeros(self.horizon, dtype=torch.bool),
         }
+        if self.has_point_cloud:
+            sample[OBS_POINT_CLOUD] = torch.stack(point_clouds, dim=0)
         for key, values in images.items():
             sample[key] = torch.stack(values, dim=0)
         return sample
@@ -740,7 +753,9 @@ class DoorPolicyChunkDataset(Dataset):
         self.dataset_root = _resolve_lerobot_root(root, repo_id)
         self.dataset = _load_lerobot_dataset(self.dataset_root, repo_id)
         self.vision_mode = normalize_vision_mode(vision_mode)
-        self.image_keys = lerobot_image_keys_for_vision_mode(self.vision_mode)
+        meta = getattr(self.dataset, "meta", None)
+        self.has_point_cloud = bool(meta is not None and OBS_POINT_CLOUD in getattr(meta, "features", {}))
+        self.image_keys = [] if self.has_point_cloud else lerobot_image_keys_for_vision_mode(self.vision_mode)
         self.chunk_size = int(chunk_size)
         self.length = len(self.dataset)
         if self.length < self.chunk_size:
@@ -789,6 +804,11 @@ class DoorPolicyChunkDataset(Dataset):
             OBS_STATE: torch.as_tensor(_as_numpy(_field(frame, OBS_STATE)), dtype=torch.float32),
             ACTION_IS_PAD: torch.zeros(self.chunk_size, dtype=torch.bool),
         }
+        if self.has_point_cloud:
+            point_cloud = torch.as_tensor(_as_numpy(_field(frame, OBS_POINT_CLOUD)), dtype=torch.float32)
+            if point_cloud.ndim != 2 or point_cloud.shape[-1] != 3:
+                raise ValueError(f"Invalid point cloud in dataset frame {center}: {tuple(point_cloud.shape)}")
+            sample[OBS_POINT_CLOUD] = point_cloud
         for key in self.interaction_state_features:
             sample[key] = torch.as_tensor(_as_numpy(_field(frame, key)), dtype=torch.float32)
         for key in self.image_keys:
@@ -1039,6 +1059,17 @@ def make_lerobot_act_config(
     action_horizon: int,
     image_keys: Sequence[str],
     device: str,
+    point_cloud_conditioning: bool = False,
+    point_cloud_key: str = OBS_POINT_CLOUD,
+    point_cloud_views: str = "front",
+    point_cloud_encoder_mode: str = "obsbench_local",
+    point_cloud_num_points: int = 1024,
+    point_cloud_num_tokens: int = 256,
+    point_cloud_knn_k: int = 16,
+    point_cloud_global_dim: int = 64,
+    point_cloud_frame: str = "robot_base",
+    point_cloud_workspace_min: str = "0.20,-1.00,0.00",
+    point_cloud_workspace_max: str = "2.00,1.00,1.80",
     normalization_mapping: Optional[Mapping[str, Any]] = None,
     vision_backbone: str = "resnet18",
     pretrained_backbone_weights: Optional[str] = "ResNet18_Weights.IMAGENET1K_V1",
@@ -1063,9 +1094,19 @@ def make_lerobot_act_config(
     plucker_front_pose_key: str = FRONT_CAMERA_POSE_FEATURE,
     plucker_wrist_pose_key: str = WRIST_CAMERA_POSE_FEATURE,
     plucker_encoder_channels: str = "32,64",
+    plucker_deterministic_pooling: bool = False,
     plucker_image_width: int = IMAGE_WIDTH,
     plucker_image_height: int = IMAGE_HEIGHT,
     plucker_horizontal_fov_deg: float = 69.0,
+    plucker_intrinsics_mode: str = "legacy_shared_fov",
+    plucker_front_fx: float = 0.0,
+    plucker_front_fy: float = 0.0,
+    plucker_front_cx: float = 0.0,
+    plucker_front_cy: float = 0.0,
+    plucker_wrist_fx: float = 0.0,
+    plucker_wrist_fy: float = 0.0,
+    plucker_wrist_cx: float = 0.0,
+    plucker_wrist_cy: float = 0.0,
     handle_latent_aux: bool = False,
     handle_latent_dim: int = 384,
     handle_latent_loss_weight: float = 0.1,
@@ -1075,9 +1116,17 @@ def make_lerobot_act_config(
     handle_latent_wrist_valid_key: str = "aux.wrist_handle_latent_valid",
     end_signal_prediction: bool = False,
     end_signal_target_key: str = "aux.end_signal",
-    end_signal_loss_weight: float = 1.0,
+    end_signal_loss_weight: float = 0.1,
     end_signal_init_probability: float = 0.01,
+    end_signal_detach_decoder_feature: bool = True,
+    auxiliary_head_rng_isolation: bool = True,
     interaction_state_conditioning: bool = False,
+    interaction_state_prediction_mode: str = "encoder_current",
+    interaction_state_probe_only: bool = False,
+    interaction_state_auxiliary_only: bool = False,
+    interaction_state_probe_dropout: float = 0.0,
+    interaction_state_probe_separate_backward: bool = True,
+    interaction_state_probe_freeze_main: bool = False,
     interaction_contact_target_key: str = "aux.interaction_contact",
     interaction_handle_target_key: str = "aux.interaction_handle_progress",
     interaction_door_target_key: str = "aux.interaction_door_progress",
@@ -1109,6 +1158,7 @@ def make_lerobot_act_config(
     if normalization_mapping is None:
         normalization_mapping = {
             "VISUAL": "MEAN_STD",
+            "POINT_CLOUD": "IDENTITY",
             "STATE": "MEAN_STD",
             "ACTION": "MEAN_STD",
         }
@@ -1129,6 +1179,11 @@ def make_lerobot_act_config(
     input_features = {
         OBS_STATE: PolicyFeature(type=FeatureType.STATE, shape=(int(state_dim),)),
     }
+    if point_cloud_conditioning:
+        input_features[str(point_cloud_key)] = PolicyFeature(
+            type=FeatureType.POINT_CLOUD,
+            shape=(int(point_cloud_num_points), 3),
+        )
     for key in image_keys:
         input_features[key] = PolicyFeature(type=FeatureType.VISUAL, shape=(3, IMAGE_HEIGHT, IMAGE_WIDTH))
     if bool(plucker_conditioning):
@@ -1160,6 +1215,17 @@ def make_lerobot_act_config(
         defm_depth_far=float(defm_depth_far),
         defm_pretrained=bool(defm_pretrained),
         defm_pretrained_path=defm_pretrained_path,
+        point_cloud_conditioning=bool(point_cloud_conditioning),
+        point_cloud_key=str(point_cloud_key),
+        point_cloud_views=str(point_cloud_views),
+        point_cloud_encoder_mode=str(point_cloud_encoder_mode),
+        point_cloud_num_points=int(point_cloud_num_points),
+        point_cloud_num_tokens=int(point_cloud_num_tokens),
+        point_cloud_knn_k=int(point_cloud_knn_k),
+        point_cloud_global_dim=int(point_cloud_global_dim),
+        point_cloud_frame=str(point_cloud_frame),
+        point_cloud_workspace_min=str(point_cloud_workspace_min),
+        point_cloud_workspace_max=str(point_cloud_workspace_max),
         camera_input_gating=bool(camera_input_gating),
         camera_input_gating_hidden_dim=int(camera_input_gating_hidden_dim),
         camera_input_gating_temperature=float(camera_input_gating_temperature),
@@ -1169,9 +1235,19 @@ def make_lerobot_act_config(
         plucker_front_pose_key=str(plucker_front_pose_key),
         plucker_wrist_pose_key=str(plucker_wrist_pose_key),
         plucker_encoder_channels=str(plucker_encoder_channels),
+        plucker_deterministic_pooling=bool(plucker_deterministic_pooling),
         plucker_image_width=int(plucker_image_width),
         plucker_image_height=int(plucker_image_height),
         plucker_horizontal_fov_deg=float(plucker_horizontal_fov_deg),
+        plucker_intrinsics_mode=str(plucker_intrinsics_mode),
+        plucker_front_fx=float(plucker_front_fx),
+        plucker_front_fy=float(plucker_front_fy),
+        plucker_front_cx=float(plucker_front_cx),
+        plucker_front_cy=float(plucker_front_cy),
+        plucker_wrist_fx=float(plucker_wrist_fx),
+        plucker_wrist_fy=float(plucker_wrist_fy),
+        plucker_wrist_cx=float(plucker_wrist_cx),
+        plucker_wrist_cy=float(plucker_wrist_cy),
         handle_latent_aux=bool(handle_latent_aux),
         handle_latent_dim=int(handle_latent_dim),
         handle_latent_loss_weight=float(handle_latent_loss_weight),
@@ -1183,7 +1259,15 @@ def make_lerobot_act_config(
         end_signal_target_key=str(end_signal_target_key),
         end_signal_loss_weight=float(end_signal_loss_weight),
         end_signal_init_probability=float(end_signal_init_probability),
+        end_signal_detach_decoder_feature=bool(end_signal_detach_decoder_feature),
+        auxiliary_head_rng_isolation=bool(auxiliary_head_rng_isolation),
         interaction_state_conditioning=bool(interaction_state_conditioning),
+        interaction_state_prediction_mode=str(interaction_state_prediction_mode),
+        interaction_state_probe_only=bool(interaction_state_probe_only),
+        interaction_state_auxiliary_only=bool(interaction_state_auxiliary_only),
+        interaction_state_probe_dropout=float(interaction_state_probe_dropout),
+        interaction_state_probe_separate_backward=bool(interaction_state_probe_separate_backward),
+        interaction_state_probe_freeze_main=bool(interaction_state_probe_freeze_main),
         interaction_contact_target_key=str(interaction_contact_target_key),
         interaction_handle_target_key=str(interaction_handle_target_key),
         interaction_door_target_key=str(interaction_door_target_key),
@@ -1643,7 +1727,8 @@ class LeRobotActDoorPolicyBackend:
         self.device = torch.device(device or getattr(config, "device", "cpu"))
         self.policy.to(self.device)
         self.vision_mode = normalize_vision_mode(vision_mode)
-        self.image_keys = lerobot_image_keys_for_vision_mode(self.vision_mode)
+        self.pointcloud_conditioning = bool(getattr(config, "point_cloud_conditioning", False))
+        self.image_keys = list(config.image_features) if not self.pointcloud_conditioning else []
         self.action_frame = str(action_frame or "world").lower()
         self.sidecar_config = dict(sidecar_config or {})
         self.stats = _stats_to_cpu(stats)
@@ -1655,6 +1740,7 @@ class LeRobotActDoorPolicyBackend:
         )
         self.last_camera_gates: Optional[np.ndarray] = None
         self.last_interaction_state: Optional[np.ndarray] = None
+        self.last_interaction_state_chunk: Optional[np.ndarray] = None
 
     @property
     def obs_horizon(self) -> int:
@@ -1695,7 +1781,8 @@ class LeRobotActDoorPolicyBackend:
         modules = import_lerobot_act_modules()
         ACTPolicy = modules["ACTPolicy"]
         vision_mode = normalize_vision_mode(vision_mode)
-        image_keys = lerobot_image_keys_for_vision_mode(vision_mode)
+        point_cloud_conditioning = bool(policy_kwargs.get("point_cloud_conditioning", False))
+        image_keys = [] if point_cloud_conditioning else lerobot_image_keys_for_vision_mode(vision_mode)
         state_dim = int(state_dim or _feature_dim_from_stats(stats, OBS_STATE))
         action_dim = int(action_dim or _feature_dim_from_stats(stats, ACTION))
         config = make_lerobot_act_config(
@@ -1751,6 +1838,17 @@ class LeRobotActDoorPolicyBackend:
             image_keys=cfg["image_features"],
             device=cfg.get("device", "cpu"),
             normalization_mapping=cfg.get("normalization_mapping"),
+            point_cloud_conditioning=bool(cfg.get("point_cloud_conditioning", False)),
+            point_cloud_key=cfg.get("point_cloud_key", OBS_POINT_CLOUD),
+            point_cloud_views=cfg.get("point_cloud_views", "front"),
+            point_cloud_encoder_mode=cfg.get("point_cloud_encoder_mode", "obsbench_local"),
+            point_cloud_num_points=int(cfg.get("point_cloud_num_points", 1024)),
+            point_cloud_num_tokens=int(cfg.get("point_cloud_num_tokens", 256)),
+            point_cloud_knn_k=int(cfg.get("point_cloud_knn_k", 16)),
+            point_cloud_global_dim=int(cfg.get("point_cloud_global_dim", 64)),
+            point_cloud_frame=cfg.get("point_cloud_frame", "robot_base"),
+            point_cloud_workspace_min=cfg.get("point_cloud_workspace_min", "0.20,-1.00,0.00"),
+            point_cloud_workspace_max=cfg.get("point_cloud_workspace_max", "2.00,1.00,1.80"),
             vision_backbone=cfg.get("vision_backbone", "resnet18"),
             pretrained_backbone_weights=pretrained_backbone_weights,
             replace_final_stride_with_dilation=bool(cfg.get("replace_final_stride_with_dilation", False)),
@@ -1777,6 +1875,18 @@ class LeRobotActDoorPolicyBackend:
             plucker_image_width=int(cfg.get("plucker_image_width", IMAGE_WIDTH)),
             plucker_image_height=int(cfg.get("plucker_image_height", IMAGE_HEIGHT)),
             plucker_horizontal_fov_deg=float(cfg.get("plucker_horizontal_fov_deg", 69.0)),
+            plucker_intrinsics_mode=cfg.get("plucker_intrinsics_mode", "legacy_shared_fov"),
+            plucker_front_fx=float(cfg.get("plucker_front_fx", 0.0)),
+            plucker_front_fy=float(cfg.get("plucker_front_fy", 0.0)),
+            plucker_front_cx=float(cfg.get("plucker_front_cx", 0.0)),
+            plucker_front_cy=float(cfg.get("plucker_front_cy", 0.0)),
+            plucker_wrist_fx=float(cfg.get("plucker_wrist_fx", 0.0)),
+            plucker_wrist_fy=float(cfg.get("plucker_wrist_fy", 0.0)),
+            plucker_wrist_cx=float(cfg.get("plucker_wrist_cx", 0.0)),
+            plucker_wrist_cy=float(cfg.get("plucker_wrist_cy", 0.0)),
+            plucker_deterministic_pooling=bool(
+                cfg.get("plucker_deterministic_pooling", False)
+            ),
             handle_latent_aux=bool(cfg.get("handle_latent_aux", False)),
             handle_latent_dim=int(cfg.get("handle_latent_dim", 384)),
             handle_latent_loss_weight=float(cfg.get("handle_latent_loss_weight", 0.1)),
@@ -1792,9 +1902,27 @@ class LeRobotActDoorPolicyBackend:
             ),
             end_signal_prediction=bool(cfg.get("end_signal_prediction", False)),
             end_signal_target_key=cfg.get("end_signal_target_key", "aux.end_signal"),
-            end_signal_loss_weight=float(cfg.get("end_signal_loss_weight", 1.0)),
+            end_signal_loss_weight=float(cfg.get("end_signal_loss_weight", 0.1)),
             end_signal_init_probability=float(cfg.get("end_signal_init_probability", 0.01)),
+            end_signal_detach_decoder_feature=bool(
+                cfg.get("end_signal_detach_decoder_feature", True)
+            ),
+            auxiliary_head_rng_isolation=bool(cfg.get("auxiliary_head_rng_isolation", True)),
             interaction_state_conditioning=bool(cfg.get("interaction_state_conditioning", False)),
+            interaction_state_prediction_mode=str(
+                cfg.get("interaction_state_prediction_mode", "encoder_current")
+            ),
+            interaction_state_probe_only=bool(cfg.get("interaction_state_probe_only", False)),
+            interaction_state_auxiliary_only=bool(
+                cfg.get("interaction_state_auxiliary_only", False)
+            ),
+            interaction_state_probe_dropout=float(cfg.get("interaction_state_probe_dropout", 0.0)),
+            interaction_state_probe_separate_backward=bool(
+                cfg.get("interaction_state_probe_separate_backward", True)
+            ),
+            interaction_state_probe_freeze_main=bool(
+                cfg.get("interaction_state_probe_freeze_main", False)
+            ),
             interaction_contact_target_key=cfg.get(
                 "interaction_contact_target_key", "aux.interaction_contact"
             ),
@@ -1870,15 +1998,47 @@ class LeRobotActDoorPolicyBackend:
         interaction = getattr(
             getattr(self.policy, "model", None), "_last_interaction_state_probabilities", None
         )
-        self.last_interaction_state = (
-            None if interaction is None else interaction.detach().cpu().float().numpy()
-        )
+        if interaction is None:
+            self.last_interaction_state = None
+            self.last_interaction_state_chunk = None
+        else:
+            interaction_np = interaction.detach().cpu().float().numpy()
+            if interaction_np.ndim == 3:
+                interaction_chunk_np = interaction_np
+            elif interaction_np.ndim == 2:
+                interaction_chunk_np = interaction_np[:, None, :]
+            else:
+                raise RuntimeError(
+                    "ACT interaction prediction must have shape Bx3 or BxHx3, "
+                    f"got {interaction_np.shape}."
+                )
+            # Keep both APIs: the current Bx3 value is used by existing
+            # callers, while deployment logging consumes the complete BxHx3
+            # decoder chunk before any action-horizon truncation.
+            self.last_interaction_state_chunk = interaction_chunk_np.copy()
+            self.last_interaction_state = interaction_chunk_np[:, 0, :].copy()
         actions = self.normalizer.denormalize_action(actions)
         if end_probability is not None:
             actions = torch.cat([actions, end_probability.to(device=actions.device, dtype=actions.dtype)], dim=-1)
         return actions
 
     def metadata(self, extra_config: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+        point_cloud_enabled = bool(getattr(self.config, "point_cloud_conditioning", False))
+        point_cloud_views = str(getattr(self.config, "point_cloud_views", "front"))
+        pointcloud_mode = {
+            "front": "single_front",
+            "wrist": "single_wrist",
+            "front,wrist": "dual_fused",
+        }.get(point_cloud_views, "single_front")
+
+        def _pc_bounds(config_value: Any, sidecar_key: str, fallback: Sequence[float]) -> list[float]:
+            sidecar_value = self.sidecar_config.get(sidecar_key)
+            if sidecar_value is not None:
+                return [float(value) for value in sidecar_value]
+            if isinstance(config_value, str):
+                return [float(value.strip()) for value in config_value.split(",")]
+            return [float(value) for value in (config_value or fallback)]
+
         policy_config = {
             "state_dim": int(self.config.robot_state_feature.shape[0]),
             "action_dim": int(self.config.action_feature.shape[0]),
@@ -1891,10 +2051,34 @@ class LeRobotActDoorPolicyBackend:
                 else None
             ),
             "end_signal_target_key": str(getattr(self.config, "end_signal_target_key", "aux.end_signal")),
-            "end_signal_loss_weight": float(getattr(self.config, "end_signal_loss_weight", 1.0)),
+            "end_signal_loss_weight": float(getattr(self.config, "end_signal_loss_weight", 0.1)),
             "end_signal_init_probability": float(getattr(self.config, "end_signal_init_probability", 0.01)),
+            "end_signal_detach_decoder_feature": bool(
+                getattr(self.config, "end_signal_detach_decoder_feature", True)
+            ),
+            "auxiliary_head_rng_isolation": bool(
+                getattr(self.config, "auxiliary_head_rng_isolation", True)
+            ),
             "interaction_state_conditioning": bool(
                 getattr(self.config, "interaction_state_conditioning", False)
+            ),
+            "interaction_state_prediction_mode": str(
+                getattr(self.config, "interaction_state_prediction_mode", "encoder_current")
+            ),
+            "interaction_state_probe_only": bool(
+                getattr(self.config, "interaction_state_probe_only", False)
+            ),
+            "interaction_state_auxiliary_only": bool(
+                getattr(self.config, "interaction_state_auxiliary_only", False)
+            ),
+            "interaction_state_probe_dropout": float(
+                getattr(self.config, "interaction_state_probe_dropout", 0.0)
+            ),
+            "interaction_state_probe_separate_backward": bool(
+                getattr(self.config, "interaction_state_probe_separate_backward", True)
+            ),
+            "interaction_state_probe_freeze_main": bool(
+                getattr(self.config, "interaction_state_probe_freeze_main", False)
             ),
             "interaction_contact_target_key": str(
                 getattr(self.config, "interaction_contact_target_key", "aux.interaction_contact")
@@ -1923,6 +2107,56 @@ class LeRobotActDoorPolicyBackend:
             "image_width": IMAGE_WIDTH,
             "vision_mode": self.vision_mode,
             "image_features": list(self.image_keys),
+            "point_cloud_conditioning": bool(getattr(self.config, "point_cloud_conditioning", False)),
+            "point_cloud_key": str(getattr(self.config, "point_cloud_key", OBS_POINT_CLOUD)),
+            "point_cloud_views": str(getattr(self.config, "point_cloud_views", "front")),
+            "point_cloud_encoder_mode": str(
+                getattr(self.config, "point_cloud_encoder_mode", "obsbench_local")
+            ),
+            "point_cloud_num_points": int(getattr(self.config, "point_cloud_num_points", 1024)),
+            "point_cloud_num_tokens": int(getattr(self.config, "point_cloud_num_tokens", 256)),
+            "point_cloud_knn_k": int(getattr(self.config, "point_cloud_knn_k", 16)),
+            "point_cloud_global_dim": int(getattr(self.config, "point_cloud_global_dim", 64)),
+            "point_cloud_frame": str(getattr(self.config, "point_cloud_frame", "robot_base")),
+            "point_cloud_workspace_min": str(
+                getattr(self.config, "point_cloud_workspace_min", "0.20,-1.00,0.00")
+            ),
+            "point_cloud_workspace_max": str(
+                getattr(self.config, "point_cloud_workspace_max", "2.00,1.00,1.80")
+            ),
+            # Runtime aliases shared with the existing DP3 Door controller.
+            "pointcloud_conditioning": point_cloud_enabled,
+            "pointcloud_mode": pointcloud_mode,
+            "pointcloud_empty_depth_policy": str(
+                self.sidecar_config.get("point_cloud_empty_depth_policy", "previous")
+            ),
+            "pointcloud_config": {
+                "num_points": int(getattr(self.config, "point_cloud_num_points", 1024)),
+                "candidate_rows": int(self.sidecar_config.get("point_cloud_candidate_rows", 64)),
+                "candidate_cols": int(self.sidecar_config.get("point_cloud_candidate_cols", 64)),
+                "workspace_min": _pc_bounds(
+                    getattr(self.config, "point_cloud_workspace_min", None),
+                    "point_cloud_workspace_min",
+                    (0.20, -1.00, 0.00),
+                ),
+                "workspace_max": _pc_bounds(
+                    getattr(self.config, "point_cloud_workspace_max", None),
+                    "point_cloud_workspace_max",
+                    (2.00, 1.00, 1.80),
+                ),
+                "near_clip_m": float(self.sidecar_config.get("point_cloud_near_clip_m", 0.20)),
+                "far_clip_m": float(self.sidecar_config.get("point_cloud_far_clip_m", 1.50)),
+                "point_frame": "robot_base",
+                "sampling": "deterministic_image_grid",
+            },
+            "front_camera_intrinsics": _json_safe(
+                self.sidecar_config.get("front_camera_intrinsics")
+                or (self.sidecar_config.get("camera_intrinsics") or {}).get("front", {})
+            ),
+            "wrist_camera_intrinsics": _json_safe(
+                self.sidecar_config.get("wrist_camera_intrinsics")
+                or (self.sidecar_config.get("camera_intrinsics") or {}).get("wrist", {})
+            ),
             "action_frame": self.action_frame,
             "action_pose_frame": self.action_frame,
             "target_pose_frame": self.action_frame,
@@ -1953,6 +2187,18 @@ class LeRobotActDoorPolicyBackend:
             "plucker_image_width": int(getattr(self.config, "plucker_image_width", IMAGE_WIDTH)),
             "plucker_image_height": int(getattr(self.config, "plucker_image_height", IMAGE_HEIGHT)),
             "plucker_horizontal_fov_deg": float(getattr(self.config, "plucker_horizontal_fov_deg", 69.0)),
+            "plucker_intrinsics_mode": getattr(self.config, "plucker_intrinsics_mode", "legacy_shared_fov"),
+            "plucker_front_fx": float(getattr(self.config, "plucker_front_fx", 0.0)),
+            "plucker_front_fy": float(getattr(self.config, "plucker_front_fy", 0.0)),
+            "plucker_front_cx": float(getattr(self.config, "plucker_front_cx", 0.0)),
+            "plucker_front_cy": float(getattr(self.config, "plucker_front_cy", 0.0)),
+            "plucker_wrist_fx": float(getattr(self.config, "plucker_wrist_fx", 0.0)),
+            "plucker_wrist_fy": float(getattr(self.config, "plucker_wrist_fy", 0.0)),
+            "plucker_wrist_cx": float(getattr(self.config, "plucker_wrist_cx", 0.0)),
+            "plucker_wrist_cy": float(getattr(self.config, "plucker_wrist_cy", 0.0)),
+            "plucker_deterministic_pooling": bool(
+                getattr(self.config, "plucker_deterministic_pooling", False)
+            ),
             "handle_latent_aux": bool(getattr(self.config, "handle_latent_aux", False)),
             "handle_latent_dim": int(getattr(self.config, "handle_latent_dim", 384)),
             "handle_latent_loss_weight": float(getattr(self.config, "handle_latent_loss_weight", 0.1)),
@@ -2360,6 +2606,182 @@ class LeRobotPI05DoorPolicyBackend:
         return checkpoint_dir
 
 
+class _DP3IdentityNormalizer:
+    """Compatibility shim; DP3 owns and applies its checkpoint normalizer."""
+
+    @staticmethod
+    def normalize_state(value: Any) -> torch.Tensor:
+        return torch.as_tensor(value, dtype=torch.float32)
+
+    @staticmethod
+    def denormalize_action(value: torch.Tensor) -> torch.Tensor:
+        return value
+
+
+class DP3DoorPolicyBackend:
+    """Official DP3 policy adapted to the existing 10D Door controller API."""
+
+    backend_name = BACKEND_DP3
+    uses_observation_sequence = True
+    pointcloud_conditioning = True
+
+    def __init__(
+        self,
+        policy: Any,
+        cfg: Any,
+        meta: Mapping[str, Any],
+        device: Union[str, torch.device],
+        action_horizon: Optional[int] = None,
+    ):
+        self.policy = policy
+        self.cfg = cfg
+        self.device = torch.device(device)
+        self.policy.to(self.device).eval()
+        policy_cfg = dict(meta.get("policy_config", {}))
+        self.sidecar_config = dict(meta.get("sidecar_config", {}))
+        self.vision_mode = "depth_only"
+        self.image_keys: List[str] = []
+        self.action_frame = str(meta.get("action_frame", policy_cfg.get("action_frame", "robot_base_full")))
+        self.normalizer = _DP3IdentityNormalizer()
+        self._obs_horizon = int(policy_cfg.get("obs_horizon", getattr(policy, "n_obs_steps", 2)))
+        self._horizon = int(policy_cfg.get("horizon", getattr(policy, "horizon", 32)))
+        trained_action_horizon = int(
+            policy_cfg.get("action_horizon", getattr(policy, "n_action_steps", 16)))
+        self._action_horizon = trained_action_horizon if action_horizon is None else int(action_horizon)
+        if not 1 <= self._action_horizon <= trained_action_horizon:
+            raise ValueError(
+                f"DP3 action_horizon must be in [1,{trained_action_horizon}], got {self._action_horizon}.")
+        self._action_dim = int(policy_cfg.get("action_dim", getattr(policy, "action_dim", 10)))
+        self.pointcloud_mode = str(policy_cfg.get("pointcloud_mode", "single_front"))
+        if self.pointcloud_mode not in ("single_front", "dual_view"):
+            raise ValueError(f"Unsupported DP3 pointcloud_mode={self.pointcloud_mode!r}.")
+        self.motion_action_dim = self._action_dim
+        self._metadata = dict(meta)
+        self._metadata["policy_config"] = policy_cfg
+
+    @property
+    def obs_horizon(self) -> int:
+        return self._obs_horizon
+
+    @property
+    def horizon(self) -> int:
+        return self._horizon
+
+    @property
+    def action_horizon(self) -> int:
+        return self._action_horizon
+
+    @property
+    def action_dim(self) -> int:
+        return self._action_dim
+
+    @classmethod
+    def load(
+        cls,
+        checkpoint: Union[str, Path],
+        device: Optional[Union[str, torch.device]] = None,
+        num_inference_steps: Optional[int] = DEFAULT_DP_INFERENCE_STEPS,
+        action_horizon: Optional[int] = None,
+    ) -> "DP3DoorPolicyBackend":
+        try:
+            import dill
+            import hydra
+        except Exception as exc:
+            raise RuntimeError(
+                "DP3 inference requires the dedicated dp3 environment. Set DOOR_DP3_PYTHON or "
+                "DOOR_DP3_CONDA_ENV=dp3 so Door policy inference can use its subprocess worker."
+            ) from exc
+
+        ckpt_dir = resolve_checkpoint_dir(checkpoint)
+        meta = _read_json(ckpt_dir / CHECKPOINT_META)
+        if meta.get("backend") != BACKEND_DP3:
+            raise ValueError(f"Expected a DP3 Door checkpoint, got {meta.get('backend')!r}.")
+        checkpoint_name = str(meta.get("dp3_checkpoint", "dp3.ckpt"))
+        checkpoint_path = Path(checkpoint_name).expanduser()
+        if not checkpoint_path.is_absolute():
+            checkpoint_path = ckpt_dir / checkpoint_path
+        if not checkpoint_path.is_file():
+            raise FileNotFoundError(f"Missing official DP3 checkpoint: {checkpoint_path}")
+
+        runtime_device = torch.device(device or meta.get("policy_config", {}).get("device", "cuda:0"))
+        payload = torch.load(
+            checkpoint_path,
+            map_location="cpu",
+            pickle_module=dill,
+        )
+        cfg = payload.get("cfg")
+        if cfg is None:
+            raise ValueError(f"DP3 checkpoint has no Hydra cfg: {checkpoint_path}")
+        try:
+            policy = hydra.utils.instantiate(cfg.policy)
+        except Exception as exc:
+            raise RuntimeError(
+                "Could not instantiate the official DP3 policy in this Python environment. "
+                "Use DOOR_DP3_PYTHON or DOOR_DP3_CONDA_ENV=dp3 for the dedicated worker."
+            ) from exc
+        state_dicts = payload.get("state_dicts", {})
+        state_key = "ema_model" if "ema_model" in state_dicts else "model"
+        if state_key not in state_dicts:
+            raise ValueError(
+                f"DP3 checkpoint contains neither ema_model nor model state_dict: {checkpoint_path}")
+        policy.load_state_dict(state_dicts[state_key], strict=True)
+        if num_inference_steps is not None:
+            policy.num_inference_steps = int(num_inference_steps)
+        return cls(
+            policy=policy,
+            cfg=cfg,
+            meta=meta,
+            device=runtime_device,
+            action_horizon=action_horizon,
+        )
+
+    def metadata(self, extra_config: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+        result = dict(self._metadata)
+        policy_config = dict(result.get("policy_config", {}))
+        policy_config["action_horizon"] = self.action_horizon
+        if extra_config:
+            policy_config.update(dict(extra_config))
+        result["policy_config"] = policy_config
+        return result
+
+    @torch.no_grad()
+    def predict_action_chunks_from_batch(
+        self,
+        batch: Mapping[str, Any],
+        noise: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        if noise is not None:
+            raise ValueError("Explicit diffusion noise is not supported by the official DP3 runtime.")
+        if self.pointcloud_mode == "dual_view":
+            missing = [
+                key for key in (OBS_FRONT_POINT_CLOUD, OBS_WRIST_POINT_CLOUD)
+                if key not in batch
+            ]
+            if missing:
+                raise KeyError(f"Dual-view DP3 batch is missing keys: {missing}.")
+            obs = {
+                "front_point_cloud": batch[OBS_FRONT_POINT_CLOUD].to(
+                    self.device, dtype=torch.float32),
+                "wrist_point_cloud": batch[OBS_WRIST_POINT_CLOUD].to(
+                    self.device, dtype=torch.float32),
+                "agent_pos": batch[OBS_STATE].to(self.device, dtype=torch.float32),
+            }
+        else:
+            if OBS_POINT_CLOUD not in batch:
+                raise KeyError(f"DP3 batch is missing {OBS_POINT_CLOUD!r}.")
+            obs = {
+                "point_cloud": batch[OBS_POINT_CLOUD].to(self.device, dtype=torch.float32),
+                "agent_pos": batch[OBS_STATE].to(self.device, dtype=torch.float32),
+            }
+        self.policy.eval()
+        result = self.policy.predict_action(obs)
+        actions = result.get("action")
+        if actions is None or actions.ndim != 3 or actions.shape[-1] != self.action_dim:
+            raise ValueError(
+                f"DP3 returned invalid action tensor: {None if actions is None else tuple(actions.shape)}")
+        return actions
+
+
 def resolve_checkpoint_dir(checkpoint: Union[str, Path]) -> Path:
     path = Path(checkpoint).expanduser().resolve()
     if path.is_dir():
@@ -2372,10 +2794,10 @@ def resolve_checkpoint_dir(checkpoint: Union[str, Path]) -> Path:
         BACKEND_LEROBOT_ACT,
         BACKEND_LEROBOT_PI05,
         BACKEND_LEROBOT_PI05_EVO,
+        BACKEND_DP3,
     ):
         raise ValueError(
-            f"{path} is not a supported LeRobot Door policy checkpoint manifest. "
-            "Retrain with high-level/dp/train/train_door_dp.py after the LeRobot backend migration."
+            f"{path} is not a supported Door policy checkpoint manifest."
         )
     candidates = []
     if manifest.get("checkpoint_dir"):
@@ -2395,7 +2817,7 @@ def checkpoint_backend_name(checkpoint: Union[str, Path]) -> str:
     ckpt_dir = resolve_checkpoint_dir(checkpoint)
     meta = _read_json(ckpt_dir / CHECKPOINT_META)
     backend = str(meta.get("backend", ""))
-    if backend not in (BACKEND_LEROBOT_DIFFUSION, BACKEND_LEROBOT_ACT, BACKEND_LEROBOT_PI05, BACKEND_LEROBOT_PI05_EVO):
+    if backend not in (BACKEND_LEROBOT_DIFFUSION, BACKEND_LEROBOT_ACT, BACKEND_LEROBOT_PI05, BACKEND_LEROBOT_PI05_EVO, BACKEND_DP3):
         raise ValueError(f"Unsupported Door policy backend in {ckpt_dir}: {backend!r}")
     return backend
 
@@ -2425,6 +2847,13 @@ def load_door_policy_backend(
         )
     if backend in (BACKEND_LEROBOT_PI05, BACKEND_LEROBOT_PI05_EVO):
         return LeRobotPI05DoorPolicyBackend.load(
+            checkpoint,
+            device=device,
+            num_inference_steps=num_inference_steps,
+            action_horizon=action_horizon,
+        )
+    if backend == BACKEND_DP3:
+        return DP3DoorPolicyBackend.load(
             checkpoint,
             device=device,
             num_inference_steps=num_inference_steps,
@@ -2469,8 +2898,16 @@ class DoorPolicyController:
         self.multi_action_queues: Dict[int, deque] = {}
         self.multi_camera_gates: Dict[int, np.ndarray] = {}
         self.multi_interaction_states: Dict[int, np.ndarray] = {}
+        self.multi_interaction_state_chunks: Dict[int, np.ndarray] = {}
+        self.multi_point_clouds: Dict[int, np.ndarray] = {}
+        self.multi_front_point_clouds: Dict[int, np.ndarray] = {}
+        self.multi_wrist_point_clouds: Dict[int, np.ndarray] = {}
         self.last_camera_gates: Optional[np.ndarray] = None
         self.last_interaction_state: Optional[np.ndarray] = None
+        self.last_interaction_state_chunk: Optional[np.ndarray] = None
+        self.last_point_cloud: Optional[np.ndarray] = None
+        self.last_front_point_cloud: Optional[np.ndarray] = None
+        self.last_wrist_point_cloud: Optional[np.ndarray] = None
         self.sidecar_config = dict(getattr(self.backend, "sidecar_config", {}) or {})
         self.state_feature_names = list(self.sidecar_config.get("state") or self.config.get("state_feature_names", []))
         self.state_sanitize = self.sidecar_config.get("state_sanitize") or self.config.get("state_sanitize")
@@ -2479,11 +2916,49 @@ class DoorPolicyController:
         self.action_sanitize = self.sidecar_config.get("action_sanitize") or self.config.get("action_sanitize")
         self.action_preprocess = self.sidecar_config.get("action_preprocess") or self.config.get("action_preprocess")
         self.plucker_conditioning = bool(self.config.get("plucker_conditioning", False))
+        self.pointcloud_conditioning = bool(
+            getattr(self.backend, "pointcloud_conditioning", False)
+            or self.config.get("pointcloud_conditioning", False)
+            or self.config.get("point_cloud_conditioning", False))
         self.plucker_front_pose_key = str(self.config.get("plucker_front_pose_key", FRONT_CAMERA_POSE_FEATURE))
         self.plucker_wrist_pose_key = str(self.config.get("plucker_wrist_pose_key", WRIST_CAMERA_POSE_FEATURE))
-        self.extra_observation_keys = (
-            [self.plucker_front_pose_key, self.plucker_wrist_pose_key] if self.plucker_conditioning else []
-        )
+        self.extra_observation_keys = []
+        if self.plucker_conditioning:
+            self.extra_observation_keys.extend(
+                [self.plucker_front_pose_key, self.plucker_wrist_pose_key])
+        if self.pointcloud_conditioning:
+            try:
+                from .dp3.pointcloud import FrontDepthPointCloudConfig
+            except ImportError:
+                from dp3.pointcloud import FrontDepthPointCloudConfig
+            pointcloud_config = dict(self.config.get("pointcloud_config", {}))
+            self.pointcloud_config = FrontDepthPointCloudConfig(**pointcloud_config)
+            self.pointcloud_mode = str(self.config.get("pointcloud_mode", "single_front"))
+            if self.pointcloud_mode not in ("single_front", "single_wrist", "dual_view", "dual_fused"):
+                raise ValueError(f"Unsupported Door pointcloud_mode={self.pointcloud_mode!r}.")
+            self.pointcloud_empty_depth_policy = str(
+                self.config.get("pointcloud_empty_depth_policy", "error"))
+            if self.pointcloud_empty_depth_policy not in (
+                "error",
+                "previous",
+                "previous_or_zero",
+            ):
+                raise ValueError(
+                    f"Unsupported pointcloud_empty_depth_policy={self.pointcloud_empty_depth_policy!r}.")
+            self.front_camera_intrinsics = dict(self.config.get("front_camera_intrinsics", {}))
+            if self.pointcloud_mode in ("single_front", "dual_view", "dual_fused") and not self.front_camera_intrinsics:
+                raise ValueError("Point-cloud Door checkpoint is missing front_camera_intrinsics metadata.")
+            if self.pointcloud_mode in ("single_wrist", "dual_view", "dual_fused"):
+                self.wrist_camera_intrinsics = dict(
+                    self.config.get("wrist_camera_intrinsics", {}))
+                if not self.wrist_camera_intrinsics:
+                    raise ValueError(
+                        "Point-cloud Door checkpoint is missing wrist_camera_intrinsics metadata.")
+            if self.pointcloud_mode == "dual_view":
+                self.extra_observation_keys.extend(
+                    [OBS_FRONT_POINT_CLOUD, OBS_WRIST_POINT_CLOUD])
+            else:
+                self.extra_observation_keys.append(OBS_POINT_CLOUD)
 
     def reset(self) -> None:
         self.obs_buffer.clear()
@@ -2492,8 +2967,16 @@ class DoorPolicyController:
         self.multi_action_queues.clear()
         self.multi_camera_gates.clear()
         self.multi_interaction_states.clear()
+        self.multi_interaction_state_chunks.clear()
+        self.multi_point_clouds.clear()
+        self.multi_front_point_clouds.clear()
+        self.multi_wrist_point_clouds.clear()
         self.last_camera_gates = None
         self.last_interaction_state = None
+        self.last_interaction_state_chunk = None
+        self.last_point_cloud = None
+        self.last_front_point_cloud = None
+        self.last_wrist_point_cloud = None
 
     def reset_envs(self, env_ids: Optional[Sequence[int]] = None) -> None:
         if env_ids is None:
@@ -2501,8 +2984,16 @@ class DoorPolicyController:
             self.multi_action_queues.clear()
             self.multi_camera_gates.clear()
             self.multi_interaction_states.clear()
+            self.multi_interaction_state_chunks.clear()
+            self.multi_point_clouds.clear()
+            self.multi_front_point_clouds.clear()
+            self.multi_wrist_point_clouds.clear()
             self.last_camera_gates = None
             self.last_interaction_state = None
+            self.last_interaction_state_chunk = None
+            self.last_point_cloud = None
+            self.last_front_point_cloud = None
+            self.last_wrist_point_cloud = None
             return
         for env_id in env_ids:
             env_id = int(env_id)
@@ -2510,6 +3001,10 @@ class DoorPolicyController:
             self.multi_action_queues.pop(env_id, None)
             self.multi_camera_gates.pop(env_id, None)
             self.multi_interaction_states.pop(env_id, None)
+            self.multi_interaction_state_chunks.pop(env_id, None)
+            self.multi_point_clouds.pop(env_id, None)
+            self.multi_front_point_clouds.pop(env_id, None)
+            self.multi_wrist_point_clouds.pop(env_id, None)
 
     def _ensure_env_buffers(self, env_id: int) -> Tuple[deque, deque]:
         env_id = int(env_id)
@@ -2578,15 +3073,119 @@ class DoorPolicyController:
         front_second_rgb: Any = None,
         front_camera_pose_base: Any = None,
         wrist_camera_pose_base: Any = None,
+        env_id: Optional[int] = None,
     ) -> Dict[str, torch.Tensor]:
-        if front_mask_rgb is None:
-            front_mask_rgb = np.zeros_like(mask_rgb)
-        if front_second_rgb is None:
-            front_second_rgb = np.zeros_like(second_rgb)
         state = self._preprocess_state_for_policy(state)
         item = {
             OBS_STATE: _tensor_to_device(state, self.device, torch.float32),
         }
+        if self.pointcloud_conditioning:
+            try:
+                from .dp3.pointcloud import FrontDepthPointCloudConfig, depth_to_point_cloud
+            except ImportError:
+                from dp3.pointcloud import FrontDepthPointCloudConfig, depth_to_point_cloud
+            def make_cloud(depth, pose, intrinsics, previous, config=None):
+                try:
+                    return depth_to_point_cloud(
+                        np.asarray(depth),
+                        np.asarray(pose, dtype=np.float32),
+                        intrinsics,
+                        self.pointcloud_config if config is None else config,
+                    )
+                except ValueError as exc:
+                    if (
+                        self.pointcloud_empty_depth_policy
+                        not in ("previous", "previous_or_zero")
+                        or "No valid" not in str(exc)
+                    ):
+                        raise
+                    if previous is not None:
+                        return np.asarray(previous, dtype=np.float32).copy()
+                    if self.pointcloud_empty_depth_policy == "previous_or_zero":
+                        return np.zeros(
+                            (int((self.pointcloud_config if config is None else config).num_points), 3),
+                            dtype=np.float32,
+                        )
+                    raise
+
+            if self.pointcloud_mode in ("dual_view", "dual_fused"):
+                if front_second_rgb is None or front_camera_pose_base is None:
+                    raise ValueError("Dual-view point-cloud ACT requires front depth and front base-frame pose.")
+                if second_rgb is None or wrist_camera_pose_base is None:
+                    raise ValueError(
+                        "Dual-view point-cloud ACT requires wrist depth and wrist camera pose in "
+                        "robot-base frame.")
+                if self.pointcloud_mode == "dual_fused":
+                    per_view_points = int(self.pointcloud_config.num_points) // 2
+                    if per_view_points * 2 != int(self.pointcloud_config.num_points):
+                        raise ValueError("Dual-fused point-cloud size must be even.")
+                    view_config = FrontDepthPointCloudConfig(
+                        **{**self.pointcloud_config.to_dict(), "num_points": per_view_points}
+                    )
+                    previous_fused = (
+                        self.last_point_cloud if env_id is None else self.multi_point_clouds.get(int(env_id))
+                    )
+                    previous_front = None if previous_fused is None else previous_fused[:per_view_points]
+                    previous_wrist = None if previous_fused is None else previous_fused[per_view_points:]
+                else:
+                    view_config = self.pointcloud_config
+                    if env_id is None:
+                        previous_front = self.last_front_point_cloud
+                        previous_wrist = self.last_wrist_point_cloud
+                    else:
+                        previous_front = self.multi_front_point_clouds.get(int(env_id))
+                        previous_wrist = self.multi_wrist_point_clouds.get(int(env_id))
+                front_cloud = make_cloud(
+                    front_second_rgb,
+                    front_camera_pose_base,
+                    self.front_camera_intrinsics,
+                    previous_front,
+                    view_config,
+                )
+                wrist_cloud = make_cloud(
+                    second_rgb,
+                    wrist_camera_pose_base,
+                    self.wrist_camera_intrinsics,
+                    previous_wrist,
+                    view_config,
+                )
+                if self.pointcloud_mode == "dual_fused":
+                    item[OBS_POINT_CLOUD] = _tensor_to_device(
+                        np.concatenate((front_cloud, wrist_cloud), axis=0), self.device, torch.float32
+                    )
+                else:
+                    item[OBS_FRONT_POINT_CLOUD] = _tensor_to_device(
+                        front_cloud, self.device, torch.float32)
+                    item[OBS_WRIST_POINT_CLOUD] = _tensor_to_device(
+                        wrist_cloud, self.device, torch.float32)
+            elif self.pointcloud_mode == "single_wrist":
+                if second_rgb is None or wrist_camera_pose_base is None:
+                    raise ValueError("Wrist point-cloud ACT requires wrist depth and wrist base-frame pose.")
+                previous = self.last_point_cloud if env_id is None else self.multi_point_clouds.get(int(env_id))
+                point_cloud = make_cloud(
+                    second_rgb, wrist_camera_pose_base, self.wrist_camera_intrinsics, previous
+                )
+                item[OBS_POINT_CLOUD] = _tensor_to_device(point_cloud, self.device, torch.float32)
+            else:
+                if front_second_rgb is None or front_camera_pose_base is None:
+                    raise ValueError("Front point-cloud ACT requires front depth and front base-frame pose.")
+                previous = (
+                    self.last_point_cloud
+                    if env_id is None
+                    else self.multi_point_clouds.get(int(env_id)))
+                point_cloud = make_cloud(
+                    front_second_rgb,
+                    front_camera_pose_base,
+                    self.front_camera_intrinsics,
+                    previous,
+                )
+                item[OBS_POINT_CLOUD] = _tensor_to_device(
+                    point_cloud, self.device, torch.float32)
+            return item
+        if front_mask_rgb is None:
+            front_mask_rgb = np.zeros_like(mask_rgb)
+        if front_second_rgb is None:
+            front_second_rgb = np.zeros_like(second_rgb)
         if self.vision_mode == "depth_only":
             item[self.image_keys[0]] = _image_to_chw_float_device(second_rgb, self.device, required=True)
             item[self.image_keys[1]] = _image_to_chw_float_device(front_second_rgb, self.device, required=True)
@@ -2623,12 +3222,26 @@ class DoorPolicyController:
             front_masked_depth_rgb,
             front_camera_pose_base,
             wrist_camera_pose_base,
+            env_id=None,
         )
         if len(self.obs_buffer) == 0:
             for _ in range(self.obs_horizon):
                 self.obs_buffer.append(item)
         else:
             self.obs_buffer.append(item)
+        if OBS_POINT_CLOUD in item:
+            self.last_point_cloud = item[OBS_POINT_CLOUD].detach().cpu().numpy().copy()
+            if self.pointcloud_mode == "dual_fused":
+                split = self.last_point_cloud.shape[0] // 2
+                self.last_front_point_cloud = self.last_point_cloud[:split].copy()
+                self.last_wrist_point_cloud = self.last_point_cloud[split:].copy()
+        elif OBS_FRONT_POINT_CLOUD in item:
+            self.last_front_point_cloud = (
+                item[OBS_FRONT_POINT_CLOUD].detach().cpu().numpy().copy())
+            self.last_wrist_point_cloud = (
+                item[OBS_WRIST_POINT_CLOUD].detach().cpu().numpy().copy())
+            self.last_point_cloud = np.concatenate(
+                [self.last_front_point_cloud, self.last_wrist_point_cloud], axis=0)
 
     def append_observation_for_env(
         self,
@@ -2649,6 +3262,7 @@ class DoorPolicyController:
             front_masked_depth_rgb,
             front_camera_pose_base,
             wrist_camera_pose_base,
+            env_id=int(env_id),
         )
         obs_buffer, _ = self._ensure_env_buffers(int(env_id))
         if len(obs_buffer) == 0:
@@ -2656,6 +3270,26 @@ class DoorPolicyController:
                 obs_buffer.append(item)
         else:
             obs_buffer.append(item)
+        if OBS_POINT_CLOUD in item:
+            point_cloud = item[OBS_POINT_CLOUD].detach().cpu().numpy().copy()
+            self.multi_point_clouds[int(env_id)] = point_cloud
+            self.last_point_cloud = point_cloud
+            if self.pointcloud_mode == "dual_fused":
+                split = point_cloud.shape[0] // 2
+                self.multi_front_point_clouds[int(env_id)] = point_cloud[:split].copy()
+                self.multi_wrist_point_clouds[int(env_id)] = point_cloud[split:].copy()
+                self.last_front_point_cloud = point_cloud[:split].copy()
+                self.last_wrist_point_cloud = point_cloud[split:].copy()
+        elif OBS_FRONT_POINT_CLOUD in item:
+            front_cloud = item[OBS_FRONT_POINT_CLOUD].detach().cpu().numpy().copy()
+            wrist_cloud = item[OBS_WRIST_POINT_CLOUD].detach().cpu().numpy().copy()
+            self.multi_front_point_clouds[int(env_id)] = front_cloud
+            self.multi_wrist_point_clouds[int(env_id)] = wrist_cloud
+            merged = np.concatenate([front_cloud, wrist_cloud], axis=0)
+            self.multi_point_clouds[int(env_id)] = merged
+            self.last_front_point_cloud = front_cloud
+            self.last_wrist_point_cloud = wrist_cloud
+            self.last_point_cloud = merged
 
     def _batch_from_windows(self, windows: Sequence[Sequence[Mapping[str, torch.Tensor]]]) -> Dict[str, torch.Tensor]:
         batch: Dict[str, List[torch.Tensor]] = {OBS_STATE: []}
@@ -2721,9 +3355,15 @@ class DoorPolicyController:
         actions = self.predict_action_chunks_from_windows(windows, noise=noise)
         gates = getattr(self.backend, "last_camera_gates", None)
         interaction = getattr(self.backend, "last_interaction_state", None)
+        interaction_chunk = getattr(self.backend, "last_interaction_state_chunk", None)
         self.last_camera_gates = None if gates is None else np.asarray(gates, dtype=np.float32).copy()
         self.last_interaction_state = (
             None if interaction is None else np.asarray(interaction, dtype=np.float32).copy()
+        )
+        self.last_interaction_state_chunk = (
+            None
+            if interaction_chunk is None
+            else np.asarray(interaction_chunk, dtype=np.float32).copy()
         )
         actions_np = actions.detach().cpu().numpy().astype(np.float32)
         for row_idx, env_id in enumerate(env_ids):
@@ -2737,10 +3377,15 @@ class DoorPolicyController:
                 self.multi_camera_gates[int(env_id)] = np.asarray(gates[row_idx], dtype=np.float32).copy()
             if interaction is None:
                 self.multi_interaction_states.pop(int(env_id), None)
+                self.multi_interaction_state_chunks.pop(int(env_id), None)
             else:
                 self.multi_interaction_states[int(env_id)] = np.asarray(
                     interaction[row_idx], dtype=np.float32
                 ).copy()
+                if interaction_chunk is not None:
+                    self.multi_interaction_state_chunks[int(env_id)] = np.asarray(
+                        interaction_chunk[row_idx, : self.action_horizon], dtype=np.float32
+                    ).copy()
 
     @torch.no_grad()
     def predict_action_chunks_for_envs(
@@ -2766,9 +3411,15 @@ class DoorPolicyController:
         actions = self.predict_action_chunks_from_windows(windows, noise=noise)
         gates = getattr(self.backend, "last_camera_gates", None)
         interaction = getattr(self.backend, "last_interaction_state", None)
+        interaction_chunk = getattr(self.backend, "last_interaction_state_chunk", None)
         self.last_camera_gates = None if gates is None else np.asarray(gates, dtype=np.float32).copy()
         self.last_interaction_state = (
             None if interaction is None else np.asarray(interaction, dtype=np.float32).copy()
+        )
+        self.last_interaction_state_chunk = (
+            None
+            if interaction_chunk is None
+            else np.asarray(interaction_chunk, dtype=np.float32).copy()
         )
         if gates is None:
             for env_id in env_ids:
@@ -2791,9 +3442,15 @@ class DoorPolicyController:
         actions = self.predict_action_chunks_from_batch(self._current_batch(), noise=noise)
         gates = getattr(self.backend, "last_camera_gates", None)
         interaction = getattr(self.backend, "last_interaction_state", None)
+        interaction_chunk = getattr(self.backend, "last_interaction_state_chunk", None)
         self.last_camera_gates = None if gates is None else np.asarray(gates, dtype=np.float32).copy()
         self.last_interaction_state = (
             None if interaction is None else np.asarray(interaction, dtype=np.float32).copy()
+        )
+        self.last_interaction_state_chunk = (
+            None
+            if interaction_chunk is None
+            else np.asarray(interaction_chunk, dtype=np.float32).copy()
         )
         actions_np = actions[0].detach().cpu().numpy().astype(np.float32)
         self.action_queue.clear()
@@ -2816,10 +3473,34 @@ class DoorPolicyController:
     def get_last_interaction_state_for_env(self, env_id: Optional[int] = None) -> Optional[np.ndarray]:
         """Return latest [contact, handle_progress, door_progress] predictions."""
         if env_id is None:
+            chunk = self.last_interaction_state_chunk
+            if chunk is not None and len(chunk) > 0:
+                executed_idx = int(np.clip(
+                    self.action_horizon - len(self.action_queue) - 1,
+                    0,
+                    chunk.shape[1] - 1,
+                ))
+                return np.asarray(chunk[0, executed_idx], dtype=np.float32).copy()
             if self.last_interaction_state is None or len(self.last_interaction_state) == 0:
                 return None
             return np.asarray(self.last_interaction_state[0], dtype=np.float32).copy()
+        chunk = self.multi_interaction_state_chunks.get(int(env_id))
+        if chunk is not None and len(chunk) > 0:
+            _obs_buffer, action_queue = self._ensure_env_buffers(int(env_id))
+            executed_idx = int(np.clip(
+                self.action_horizon - len(action_queue) - 1,
+                0,
+                chunk.shape[0] - 1,
+            ))
+            return np.asarray(chunk[executed_idx], dtype=np.float32).copy()
         value = self.multi_interaction_states.get(int(env_id))
+        return None if value is None else np.asarray(value, dtype=np.float32).copy()
+
+    def get_last_point_cloud_for_env(self, env_id: Optional[int] = None) -> Optional[np.ndarray]:
+        if env_id is None:
+            value = self.last_point_cloud
+        else:
+            value = self.multi_point_clouds.get(int(env_id))
         return None if value is None else np.asarray(value, dtype=np.float32).copy()
 
     def act(
@@ -2860,8 +3541,8 @@ class DoorPolicyController:
         if not env_ids:
             return np.zeros((0, self.action_dim), dtype=np.float32)
         states_seq = list(states)
-        mask_seq = list(mask_rgbs)
-        second_seq = list(masked_depth_rgbs)
+        mask_seq = [None] * len(env_ids) if mask_rgbs is None else list(mask_rgbs)
+        second_seq = [None] * len(env_ids) if masked_depth_rgbs is None else list(masked_depth_rgbs)
         if len(states_seq) != len(env_ids) or len(mask_seq) != len(env_ids) or len(second_seq) != len(env_ids):
             raise ValueError("act_batch inputs must have the same length as env_ids.")
         front_mask_seq = [None] * len(env_ids) if front_mask_rgbs is None else list(front_mask_rgbs)
@@ -2922,8 +3603,20 @@ def _read_pickle_message(stream: Any) -> Mapping[str, Any]:
     return pickle.loads(_read_exact(stream, size))
 
 
-def _worker_python_command() -> List[str]:
+def _worker_python_command(checkpoint: Optional[Union[str, Path]] = None) -> List[str]:
     worker = Path(__file__).resolve().parent / "door_policy_worker.py"
+    backend = None if checkpoint is None else checkpoint_backend_name(checkpoint)
+    if backend == BACKEND_DP3:
+        explicit = os.environ.get("DOOR_DP3_PYTHON")
+        if explicit:
+            return shlex.split(explicit) + [str(worker)]
+        env_name = os.environ.get("DOOR_DP3_CONDA_ENV", "dp3")
+        conda_exe = shutil.which("conda")
+        if conda_exe:
+            return [conda_exe, "run", "--no-capture-output", "-n", env_name, "python", str(worker)]
+        raise RuntimeError(
+            "Could not find the dedicated DP3 Python. Set DOOR_DP3_PYTHON or "
+            "DOOR_DP3_CONDA_ENV=dp3.")
     explicit = os.environ.get("DOOR_DP_LEROBOT_PYTHON")
     if explicit:
         return shlex.split(explicit) + [str(worker)]
@@ -2976,7 +3669,7 @@ class DoorPolicySubprocessController:
         self.checkpoint = str(Path(checkpoint).expanduser().resolve())
         self._startup_error = startup_error
         self._proc = subprocess.Popen(
-            _worker_python_command(),
+            _worker_python_command(self.checkpoint),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=None,
@@ -2997,6 +3690,8 @@ class DoorPolicySubprocessController:
             raise
         self.multi_camera_gates: Dict[int, np.ndarray] = {}
         self.last_camera_gates: Optional[np.ndarray] = None
+        self.multi_interaction_states: Dict[int, np.ndarray] = {}
+        self.last_interaction_state: Optional[np.ndarray] = None
         self._set_metadata(response["metadata"])
         self.obs_buffer = _RemoteObsBufferProxy(self)
         self.action_queue = _RemoteActionQueueProxy(self)
@@ -3013,6 +3708,7 @@ class DoorPolicySubprocessController:
         self.device = torch.device(str(meta.get("device", "cpu")))
         self.state_feature_names = list(self.config.get("state_feature_names", []))
         self.action_names = list(self.config.get("action_names", ACTION_NAMES))
+        self.pointcloud_conditioning = bool(self.config.get("pointcloud_conditioning", False))
 
     def _request(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
         if self._proc.stdin is None or self._proc.stdout is None:
@@ -3030,15 +3726,20 @@ class DoorPolicySubprocessController:
         self._request({"cmd": "reset"})
         self.multi_camera_gates.clear()
         self.last_camera_gates = None
+        self.multi_interaction_states.clear()
+        self.last_interaction_state = None
 
     def reset_envs(self, env_ids: Optional[Sequence[int]] = None) -> None:
         self._request({"cmd": "reset_envs", "env_ids": None if env_ids is None else [int(x) for x in env_ids]})
         if env_ids is None:
             self.multi_camera_gates.clear()
             self.last_camera_gates = None
+            self.multi_interaction_states.clear()
+            self.last_interaction_state = None
         else:
             for env_id in env_ids:
                 self.multi_camera_gates.pop(int(env_id), None)
+                self.multi_interaction_states.pop(int(env_id), None)
 
     def append_observation(
         self,
@@ -3054,8 +3755,8 @@ class DoorPolicySubprocessController:
             {
                 "cmd": "append_observation",
                 "state": np.asarray(state, dtype=np.float32),
-                "mask_rgb": np.asarray(mask_rgb),
-                "masked_depth_rgb": np.asarray(masked_depth_rgb),
+                "mask_rgb": None if mask_rgb is None else np.asarray(mask_rgb),
+                "masked_depth_rgb": None if masked_depth_rgb is None else np.asarray(masked_depth_rgb),
                 "front_mask_rgb": None if front_mask_rgb is None else np.asarray(front_mask_rgb),
                 "front_masked_depth_rgb": None
                 if front_masked_depth_rgb is None
@@ -3085,8 +3786,8 @@ class DoorPolicySubprocessController:
                 "cmd": "append_observation_for_env",
                 "env_id": int(env_id),
                 "state": np.asarray(state, dtype=np.float32),
-                "mask_rgb": np.asarray(mask_rgb),
-                "masked_depth_rgb": np.asarray(masked_depth_rgb),
+                "mask_rgb": None if mask_rgb is None else np.asarray(mask_rgb),
+                "masked_depth_rgb": None if masked_depth_rgb is None else np.asarray(masked_depth_rgb),
                 "front_mask_rgb": None if front_mask_rgb is None else np.asarray(front_mask_rgb),
                 "front_masked_depth_rgb": None
                 if front_masked_depth_rgb is None
@@ -3109,6 +3810,10 @@ class DoorPolicySubprocessController:
         )
         gates = response.get("camera_gates")
         self.last_camera_gates = None if gates is None else np.asarray(gates, dtype=np.float32)
+        interaction = response.get("interaction_state")
+        self.last_interaction_state = (
+            None if interaction is None else np.asarray(interaction, dtype=np.float32).reshape(1, -1)
+        )
 
     def act(
         self,
@@ -3124,8 +3829,8 @@ class DoorPolicySubprocessController:
             {
                 "cmd": "act",
                 "state": np.asarray(state, dtype=np.float32),
-                "mask_rgb": np.asarray(mask_rgb),
-                "masked_depth_rgb": np.asarray(masked_depth_rgb),
+                "mask_rgb": None if mask_rgb is None else np.asarray(mask_rgb),
+                "masked_depth_rgb": None if masked_depth_rgb is None else np.asarray(masked_depth_rgb),
                 "front_mask_rgb": None if front_mask_rgb is None else np.asarray(front_mask_rgb),
                 "front_masked_depth_rgb": None
                 if front_masked_depth_rgb is None
@@ -3140,6 +3845,10 @@ class DoorPolicySubprocessController:
         )
         gates = response.get("camera_gates")
         self.last_camera_gates = None if gates is None else np.asarray(gates, dtype=np.float32).reshape(1, -1)
+        interaction = response.get("interaction_state")
+        self.last_interaction_state = (
+            None if interaction is None else np.asarray(interaction, dtype=np.float32).reshape(1, -1)
+        )
         return np.asarray(response["action"], dtype=np.float32)
 
     def act_batch(
@@ -3158,8 +3867,8 @@ class DoorPolicySubprocessController:
                 "cmd": "act_batch",
                 "env_ids": [int(env_id) for env_id in env_ids],
                 "states": np.asarray(states, dtype=np.float32),
-                "mask_rgbs": np.asarray(mask_rgbs),
-                "masked_depth_rgbs": np.asarray(masked_depth_rgbs),
+                "mask_rgbs": None if mask_rgbs is None else np.asarray(mask_rgbs),
+                "masked_depth_rgbs": None if masked_depth_rgbs is None else np.asarray(masked_depth_rgbs),
                 "front_mask_rgbs": None if front_mask_rgbs is None else np.asarray(front_mask_rgbs),
                 "front_masked_depth_rgbs": None
                 if front_masked_depth_rgbs is None
@@ -3180,7 +3889,25 @@ class DoorPolicySubprocessController:
         else:
             for row_idx, env_id in enumerate(env_ids):
                 self.multi_camera_gates[int(env_id)] = np.asarray(gates[row_idx], dtype=np.float32).copy()
+        interaction = response.get("interaction_state")
+        self.last_interaction_state = (
+            None if interaction is None else np.asarray(interaction, dtype=np.float32)
+        )
+        if interaction is None:
+            for env_id in env_ids:
+                self.multi_interaction_states.pop(int(env_id), None)
+        else:
+            for row_idx, env_id in enumerate(env_ids):
+                self.multi_interaction_states[int(env_id)] = np.asarray(
+                    interaction[row_idx], dtype=np.float32
+                ).copy()
         return np.asarray(response["actions"], dtype=np.float32)
+
+    def get_last_point_cloud_for_env(self, env_id: Optional[int] = None) -> Optional[np.ndarray]:
+        response = self._request(
+            {"cmd": "get_last_point_cloud", "env_id": None if env_id is None else int(env_id)})
+        value = response.get("point_cloud")
+        return None if value is None else np.asarray(value, dtype=np.float32)
 
     def predict_action_chunks_for_envs(
         self,
@@ -3203,6 +3930,18 @@ class DoorPolicySubprocessController:
         else:
             for row_idx, env_id in enumerate(env_ids):
                 self.multi_camera_gates[int(env_id)] = np.asarray(gates[row_idx], dtype=np.float32).copy()
+        interaction = response.get("interaction_state")
+        self.last_interaction_state = (
+            None if interaction is None else np.asarray(interaction, dtype=np.float32)
+        )
+        if interaction is None:
+            for env_id in env_ids:
+                self.multi_interaction_states.pop(int(env_id), None)
+        else:
+            for row_idx, env_id in enumerate(env_ids):
+                self.multi_interaction_states[int(env_id)] = np.asarray(
+                    interaction[row_idx], dtype=np.float32
+                ).copy()
         return np.asarray(response["actions"], dtype=np.float32)
 
     def get_last_camera_gates_for_env(self, env_id: Optional[int] = None) -> Optional[np.ndarray]:
@@ -3211,6 +3950,14 @@ class DoorPolicySubprocessController:
                 return None
             return np.asarray(self.last_camera_gates[0], dtype=np.float32).copy()
         value = self.multi_camera_gates.get(int(env_id))
+        return None if value is None else np.asarray(value, dtype=np.float32).copy()
+
+    def get_last_interaction_state_for_env(self, env_id: Optional[int] = None) -> Optional[np.ndarray]:
+        if env_id is None:
+            if self.last_interaction_state is None or len(self.last_interaction_state) == 0:
+                return None
+            return np.asarray(self.last_interaction_state[0], dtype=np.float32).copy()
+        value = self.multi_interaction_states.get(int(env_id))
         return None if value is None else np.asarray(value, dtype=np.float32).copy()
 
     def close(self) -> None:

@@ -1,0 +1,221 @@
+schema_version: door_twin_agent_benchmark_v1
+name: door_twin_fresh10_ablation
+base_door_cfg: /home/sivan/whole_body/visual_whole_body/high-level/data/cfg/b1z1_opendoor.yaml
+runner_script: /home/sivan/whole_body/visual_whole_body/high-level/float_ik/isaacgym_float_ik_a2w_basearn_push_door_parallel.py
+output_root: /home/sivan/whole_body/visual_whole_body/high-level/float_ik/door_twin/experiments/runs/agent_ablation_codex
+python_executable: /home/sivan/miniconda3/envs/b1z1/bin/python
+candidate_repeats: 3
+max_repair_rounds: 5
+development_seeds:
+- 41001
+- 41002
+- 41003
+- 41004
+- 41005
+- 41006
+- 41007
+- 41008
+- 41009
+- 41010
+- 41011
+- 41012
+- 41013
+- 41014
+- 41015
+- 41016
+heldout_seeds:
+- 42001
+- 42002
+- 42003
+- 42004
+- 42005
+- 42006
+- 42007
+- 42008
+- 42009
+- 42010
+- 42011
+- 42012
+- 42013
+- 42014
+- 42015
+- 42016
+generation_success_min: 12
+asset_probe_seed: 43001
+asset_probe_steps: 100
+asset_probe_force: 20.0
+steps: 2405
+methods:
+- ours
+- without_visual_feedback
+- without_vlm_fix
+- validation_only
+- without_simulation_rollout
+vlm:
+  model: gpt-5
+  temperature: 0.0
+  api_key_env: OPENAI_API_KEY
+  timeout_s: 180
+  max_retries: 3
+common_runner_args:
+- --headless
+- --rl_device
+- cuda:0
+- --sim_device
+- cuda:0
+- --graphics_device_id
+- '0'
+- --no_enable_depth_noise
+- --no_enable_depth_gaussian_blur
+- --no_show_seg
+doors:
+- id: '99650069960021'
+  door_name: '99650069960021'
+  tags:
+  - fresh
+  - aigc
+  - hinged_lever_push
+  hidden_ground_truth:
+    door_body_name: link_1
+    handle_body_name: link_2
+    door_dof_name: joint_1
+    handle_dof_name: joint_2
+    handle_goal_pos:
+    - -0.05898629613213655
+    - -0.0
+    - 0.054355376871399005
+- id: '99655039960035'
+  door_name: '99655039960035'
+  tags:
+  - fresh
+  - aigc
+  - hinged_lever_push
+  hidden_ground_truth:
+    door_body_name: link_1
+    handle_body_name: link_2
+    door_dof_name: joint_1
+    handle_dof_name: joint_2
+    handle_goal_pos:
+    - -0.05792733785023411
+    - 0.0
+    - 0.052568476178351746
+- id: '99660039960021'
+  door_name: '99660039960021'
+  tags:
+  - fresh
+  - aigc
+  - hinged_lever_push
+  hidden_ground_truth:
+    door_body_name: link_1
+    handle_body_name: link_2
+    door_dof_name: joint_1
+    handle_dof_name: joint_2
+    handle_goal_pos:
+    - -0.053148727120594375
+    - -0.0
+    - 0.04897610601627738
+- id: '99660039960030'
+  door_name: '99660039960030'
+  tags:
+  - fresh
+  - aigc
+  - hinged_lever_push
+  hidden_ground_truth:
+    door_body_name: link_1
+    handle_body_name: link_2
+    door_dof_name: joint_1
+    handle_dof_name: joint_2
+    handle_goal_pos:
+    - -0.05583672447438565
+    - 0.0
+    - 0.05150682822981393
+- id: '99660079960017'
+  door_name: '99660079960017'
+  tags:
+  - fresh
+  - aigc
+  - hinged_lever_push
+  hidden_ground_truth:
+    door_body_name: link_1
+    handle_body_name: link_2
+    door_dof_name: joint_1
+    handle_dof_name: joint_2
+    handle_goal_pos:
+    - -0.07500351739853764
+    - -0.0015751043467112054
+    - 0.06547934420728066
+- id: '99689039960034'
+  door_name: '99689039960034'
+  tags:
+  - fresh
+  - aigc
+  - hinged_lever_push
+  hidden_ground_truth:
+    door_body_name: link_1
+    handle_body_name: link_2
+    door_dof_name: joint_1
+    handle_dof_name: joint_2
+    handle_goal_pos:
+    - -0.06512554525700412
+    - 0.0
+    - 0.0662049785861011
+- id: '99689669960011'
+  door_name: '99689669960011'
+  tags:
+  - fresh
+  - aigc
+  - hinged_lever_push
+  hidden_ground_truth:
+    door_body_name: link_1
+    handle_body_name: link_2
+    door_dof_name: joint_1
+    handle_dof_name: joint_2
+    handle_goal_pos:
+    - -0.03655055373080138
+    - 0.01058448494024793
+    - 0.06357289402576746
+- id: '99689949960025'
+  door_name: '99689949960025'
+  tags:
+  - fresh
+  - aigc
+  - hinged_lever_push
+  hidden_ground_truth:
+    door_body_name: link_1
+    handle_body_name: link_2
+    door_dof_name: joint_1
+    handle_dof_name: joint_2
+    handle_goal_pos:
+    - -0.067436724014634
+    - -0.0
+    - 0.039274452658718026
+- id: '99690329960019'
+  door_name: '99690329960019'
+  tags:
+  - fresh
+  - aigc
+  - hinged_lever_push
+  hidden_ground_truth:
+    door_body_name: link_1
+    handle_body_name: link_2
+    door_dof_name: joint_1
+    handle_dof_name: joint_2
+    handle_goal_pos:
+    - -0.05320285327333322
+    - 0.005233113443896223
+    - 0.049297813034858806
+- id: '99690329960022'
+  door_name: '99690329960022'
+  tags:
+  - fresh
+  - aigc
+  - hinged_lever_push
+  hidden_ground_truth:
+    door_body_name: link_1
+    handle_body_name: link_2
+    door_dof_name: joint_1
+    handle_dof_name: joint_2
+    handle_goal_pos:
+    - -0.05767260591463129
+    - -0.0
+    - 0.043013495987363135

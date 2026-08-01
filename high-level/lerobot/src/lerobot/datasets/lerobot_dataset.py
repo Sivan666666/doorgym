@@ -1421,7 +1421,18 @@ class LeRobotDataset(torch.utils.data.Dataset):
           or loads directly from pyarrow cache.
         """
         # Convert buffer into HF Dataset
-        ep_dict = {key: episode_buffer[key] for key in self.hf_features}
+        ep_dict = {}
+        for key in self.hf_features:
+            column = episode_buffer[key]
+            # LeRobot validates per-frame scalar features as arrays with
+            # shape (1,), while HuggingFace represents those same features
+            # as datasets.Value. Flatten only the final singleton dimension
+            # at serialization time so both contracts are satisfied.
+            if self.features.get(key, {}).get("shape") == (1,):
+                array = np.asarray(column)
+                if array.ndim > 1 and array.shape[-1] == 1:
+                    column = array.reshape(-1)
+            ep_dict[key] = column
         ep_dataset = datasets.Dataset.from_dict(ep_dict, features=self.hf_features, split="train")
         ep_dataset = embed_images(ep_dataset)
         ep_num_frames = len(ep_dataset)

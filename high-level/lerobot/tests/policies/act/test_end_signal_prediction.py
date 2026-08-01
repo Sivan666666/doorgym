@@ -104,6 +104,40 @@ def test_masked_bce_ignores_episode_padding():
     assert metrics["end_signal_loss"] == pytest.approx(expected, rel=1.0e-6)
 
 
+def test_end_signal_loss_only_updates_end_head_when_decoder_feature_is_detached():
+    model = ACT(make_config(True)).train()
+    assert model.config.end_signal_detach_decoder_feature
+    assert model.end_signal_head is not None
+    # Use non-zero weights so this test would send a gradient into the ACT
+    # decoder if the feature were not detached.
+    with torch.no_grad():
+        model.end_signal_head.weight.fill_(0.1)
+
+    batch = make_batch()
+    model({"observation.images": [batch[IMAGE_KEY]], OBS_STATE: batch[OBS_STATE]})
+    logits = model._last_end_signal_logits
+    assert logits is not None
+    end_loss = torch.nn.functional.binary_cross_entropy_with_logits(logits, batch[END_KEY])
+    end_loss.backward()
+
+    assert model.end_signal_head.weight.grad is not None
+    assert torch.count_nonzero(model.end_signal_head.weight.grad) > 0
+    assert model.end_signal_head.bias.grad is not None
+    for name, parameter in model.named_parameters():
+        if name.startswith("end_signal_head."):
+            continue
+        assert parameter.grad is None or torch.count_nonzero(parameter.grad) == 0, name
+
+
+def test_detached_end_head_preserves_from_scratch_motion_initialization():
+    torch.manual_seed(1000)
+    original = ACT(make_config(False))
+    torch.manual_seed(1000)
+    augmented = ACT(make_config(True))
+    for key, value in original.state_dict().items():
+        torch.testing.assert_close(augmented.state_dict()[key], value, rtol=0.0, atol=0.0)
+
+
 def test_inference_returns_separate_probability_chunk():
     policy = ACTPolicy(make_config(True))
     batch = make_batch()

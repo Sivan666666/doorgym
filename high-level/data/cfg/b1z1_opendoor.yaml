@@ -3439,6 +3439,9 @@ env:
           handle_body_name: "lever_handle"
           door_dof_name: "frame_to_fire_door"
           handle_dof_name: "door_to_lever_handle"
+          # Match WC4's 45-degree handle range. With the default 40/45
+          # unlock ratio, this makes the effective unlock angle 40 degrees.
+          handle_dof_upper_override: 0.7853981633974483
           controller_multipliers:
             door_joint_friction: 0.5
             door_joint_damping: 0.5
@@ -3476,6 +3479,78 @@ env:
             door_open_resistance: 0.08
             door_open_damping: 0.05
             door_auto_open_force: 0.0
+        "671":
+          bounding_box: "wc_articraft/bounding_box.json"
+          handle_bounding: "wc_articraft/handle_bounding.json"
+          name: "wc_articraft"
+          path: "wc_articraft/model.urdf"
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          bounds_yaw_offset_override: 0.0
+          actor_position_offset: [0.0, 0.0, 0.0]
+          robot_y_offset: 0.18
+          # Asset-local handle center after actor yaw. This places the mobile
+          # base on the handle side instead of on the opposite side of the panel.
+          robot_alignment_y_offset: 0.218
+          door_motion_sign_multiplier: -1.0
+          door_body_name: "door_panel"
+          handle_body_name: "door_handle"
+          door_dof_name: "door_frame_to_door_panel"
+          handle_dof_name: "door_panel_to_door_handle"
+          handle_rest_angle: 0.0
+          handle_unlock_direction_sign: -1.0
+          handle_unlock_angle: 0.55
+          generated_variant: "push_left"
+          handle_side: "left"
+          handle_was_behind: false
+          handle_rotate_direction: "negative_to_lower_limit"
+          runtime_mapping: "lever"
+        "672":
+          bounding_box: "wc_articraft2/bounding_box.json"
+          handle_bounding: "wc_articraft2/handle_bounding.json"
+          name: "wc_articraft2"
+          path: "wc_articraft2/model.urdf"
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          bounds_yaw_offset_override: 0.0
+          actor_position_offset: [0.0, 0.0, 0.0]
+          robot_y_offset: 0.18
+          # Match WC4's base-to-door Y alignment exactly. The shared runtime
+          # randomization then adds the same [-0.10, +0.04] m offset.
+          robot_alignment_y_offset: 0.18
+          door_motion_sign_multiplier: -1.0
+          door_body_name: "door_leaf"
+          handle_body_name: "lever_handle"
+          door_dof_name: "frame_to_door"
+          handle_dof_name: "handle_rotation"
+          handle_rest_angle: 0.0
+          handle_unlock_direction_sign: 1.0
+          handle_unlock_angle: 0.55
+          generated_variant: "push_left"
+          handle_side: "right"
+          handle_was_behind: false
+          handle_rotate_direction: "positive_to_upper_limit"
+          runtime_mapping: "lever"
+          # Match WC4's effective randomized joint resistance.
+          controller_multipliers:
+            door_joint_friction: 0.5
+            door_joint_damping: 0.5
+            handle_joint_friction: 0.5
+            handle_joint_damping: 0.5
+            handle_spring_stiffness: 0.5
+            handle_spring_damping: 0.5
+          # Isaac Gym derives these values from collision geometry. Match only
+          # the moving door panel to WC4. Keep Articraft2's native handle mass
+          # properties because its joint frame and collision geometry differ
+          # from WC4; copying WC4's handle COM/inertia causes a startup impulse.
+          rigid_body_property_overrides:
+            door_leaf:
+              mass: 114.10994720458984
+              center_of_mass: [0.47238337993621826, -0.02006930485367775, 1.1149605512619019]
+              inertia:
+                - [44.951148986816406, 0.0022575741168111563, 0.0022391199599951506]
+                - [0.0022575741168111563, 52.817657470703125, -0.00010123486572410911]
+                - [0.0022391199599951506, -0.00010123486572410911, 7.922125339508057]
 
     control:
       stiffness: {"joint": 80, "z1": 5}

@@ -24,6 +24,11 @@ PRIMITIVE_ORDER = (
     "ReleaseAndRetract",
 )
 
+# A complete push-door skill must move the base far enough to carry the whole
+# robot through the doorway.  The established WC4/fire/glass programs use
+# 1.20 m of push followed by 0.74 m of traverse.
+MIN_DOOR_TWIN_FORWARD_DISTANCE_M = 1.94
+
 
 def _as_float_list(value: Any, length: int, default: list[float]) -> list[float]:
     if value is None:
@@ -453,22 +458,32 @@ PATCH_BOUNDS = {
     "MoveTo:approach.vx": (0.02, 0.80),
     "MoveTo:approach.vyaw": (-1.20, 1.20),
     "MoveTo:approach.stop_distance": (0.05, 0.80),
+    "MoveTo:approach.duration_steps": (20, 1000),
     "MoveTo:push.vx": (0.0, 0.60),
     "MoveTo:push.vyaw": (-1.20, 1.20),
     "MoveTo:push.distance": (0.0, 1.50),
+    "MoveTo:push.duration_steps": (20, 1000),
     "MoveTo:traverse.vx": (0.0, 0.80),
     "MoveTo:traverse.vyaw": (-1.20, 1.20),
     "MoveTo:traverse.distance": (0.0, 2.50),
+    "MoveTo:traverse.duration_steps": (20, 1500),
     "ApproachDoor.base_offset": (0.05, 0.80),
     "MoveEEToHandle.pregrasp_offset": ([-0.30, -0.25, -0.20], [0.45, 0.25, 0.20]),
     "MoveEEToHandle.grasp_offset": ([-0.20, -0.20, -0.20], [0.25, 0.20, 0.20]),
     "MoveEEToHandle.handle_goal_bias_world": ([-0.08, -0.08, -0.08], [0.08, 0.08, 0.08]),
+    "MoveEEToHandle.ee_roll_offset": (-3.141593, 3.141593),
+    "MoveEEToHandle.duration_steps": (10, 500),
+    "CloseGripper.force": (0.0, 1.0),
+    "CloseGripper.duration_steps": (1, 300),
     "RotateHandle.angle": (0.05, 1.50),
     "RotateHandle.duration_steps": (20, 250),
+    "RotateHandle.local_delta": ([-0.20, -0.20, -0.20], [0.20, 0.20, 0.20]),
     "PushDoor.distance": (0.10, 2.00),
     "PushDoor.contact_bias": (0.0, 0.12),
     "PushDoor.duration_steps": (50, 600),
     "TraverseDoor.door_angle_target": (30.0, 100.0),
+    "TraverseDoor.duration_steps": (20, 1500),
+    "ReleaseAndRetract.duration_steps": (10, 1000),
 }
 
 
@@ -529,6 +544,27 @@ class ProgramPatch:
                 if stage is None:
                     by_name[primitive_name] = primitive
             primitive.params[param_name] = _clamp_value(value, PATCH_BOUNDS[path])
+        handle_offset_paths = {
+            "MoveEEToHandle.pregrasp_offset",
+            "MoveEEToHandle.grasp_offset",
+        }
+        if handle_offset_paths.intersection(str(path) for path in self.patch):
+            move = by_name.get("MoveEEToHandle")
+            if move is not None:
+                pregrasp = _as_float_list(move.params.get("pregrasp_offset"), 3, [0.15, 0.0, -0.03])
+                grasp = _as_float_list(move.params.get("grasp_offset"), 3, [0.0, 0.0, -0.03])
+                # DoorTwin's approach should move along the approach direction,
+                # not introduce an unintended vertical segment. Keep both
+                # waypoint heights tied. If both are supplied, grasp is the
+                # authoritative contact height; otherwise use the one patched.
+                if "MoveEEToHandle.grasp_offset" in self.patch:
+                    shared_z = float(grasp[2])
+                else:
+                    shared_z = float(pregrasp[2])
+                pregrasp[2] = shared_z
+                grasp[2] = shared_z
+                move.params["pregrasp_offset"] = pregrasp
+                move.params["grasp_offset"] = grasp
         if applied:
             result.metadata["execution_mode"] = "skill_interpreter"
         result.metadata["last_patch_diagnostics"] = self.diagnostics

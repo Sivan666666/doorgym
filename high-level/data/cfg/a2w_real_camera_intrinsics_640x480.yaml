@@ -1,0 +1,14 @@
+resolution: [640, 480]
+render_horizontal_fov_deg: 60.0
+
+front:
+  fx: 604.7375
+  fy: 603.8005
+  cx: 329.0904
+  cy: 240.8226
+
+wrist:
+  fx: 606.1074
+  fy: 605.9551
+  cx: 325.8074
+  cy: 259.1791

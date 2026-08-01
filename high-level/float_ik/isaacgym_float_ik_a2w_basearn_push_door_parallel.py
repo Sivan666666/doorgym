@@ -44,6 +44,7 @@ import door_common as dc
 import isaacgym_a2w_ik_push_door_parallel as a2w_ik
 from door_twin import (
     DoorTwinSpec,
+    MIN_DOOR_TWIN_FORWARD_DISTANCE_M,
     RolloutTracker,
     apply_program_to_args,
     compute_skill_waypoints,
@@ -121,6 +122,7 @@ A2W_FLOAT_IK_CONFIG_DERIVED_ATTRS = {
 DOOR_TWIN_DEFAULT_LOG_ROOT = SCRIPT_DIR / "door_twin" / "experiments" / "runs"
 DOOR_TWIN_KEYFRAME_PHASES = (
     "initial_hold",
+    "grasp",
     "close_gripper",
     "rotate_handle",
     "push_door",
@@ -139,6 +141,17 @@ DOOR_TWIN_CAMERA_VIEWS = (
     "handle_closeup",
 )
 DOOR_TWIN_DEFAULT_CAMERA_VIEWS = ("wrist", "front", "observer_left", "observer_right", "handle_closeup")
+DEFAULT_STAGE_SCREENSHOT_PHASES = (
+    "walk",
+    "initial_hold",
+    "grasp",
+    "close_gripper",
+    "rotate_handle",
+    "push_door",
+    "traverse_door",
+    "return_home",
+    "hold_home",
+)
 
 
 class SimOnlineQuinticTrajectory:
@@ -213,6 +226,7 @@ class TracIKTrajectoryController:
     """25 Hz TRAC-IK waypoint solver with 50 Hz online joint interpolation."""
 
     def __init__(self, solver, initial_q, lower, upper, sim_dt, args, seed):
+        self.args = args
         self.solver = solver
         self.lower = np.asarray(lower, dtype=np.float64).reshape(6)
         self.upper = np.asarray(upper, dtype=np.float64).reshape(6)
@@ -229,6 +243,26 @@ class TracIKTrajectoryController:
         self.velocity_alpha = float(args.tracik_waypoint_velocity_alpha)
         self.rng = np.random.default_rng(int(seed))
         initial_q = np.clip(np.asarray(initial_q, dtype=np.float64).reshape(6), self.lower, self.upper)
+        configured_initial_seed = getattr(args, "tracik_initial_seed_q", None)
+        self.initial_solve_seed = (
+            None
+            if configured_initial_seed is None
+            else np.clip(
+                np.asarray(configured_initial_seed, dtype=np.float64).reshape(6),
+                self.lower,
+                self.upper,
+            )
+        )
+        configured_fixed_seed = getattr(args, "tracik_fixed_seed_q", None)
+        self.fixed_solve_seed = (
+            None
+            if configured_fixed_seed is None
+            else np.clip(
+                np.asarray(configured_fixed_seed, dtype=np.float64).reshape(6),
+                self.lower,
+                self.upper,
+            )
+        )
         self.trajectory = SimOnlineQuinticTrajectory(
             initial_q,
             args.tracik_max_joint_speed,
@@ -236,6 +270,7 @@ class TracIKTrajectoryController:
             args.tracik_max_segment_duration,
         )
         self.last_solution = initial_q.copy()
+        self.branch_reference_q = initial_q.copy()
         self.last_reachable_pose = np.asarray(self.solver.fk(initial_q), dtype=np.float64).reshape(7)
         self.last_waypoint_velocity = np.zeros(6, dtype=np.float64)
         self.last_solve_step = None
@@ -246,10 +281,26 @@ class TracIKTrajectoryController:
         self.last_error = ""
         self.last_target_pose = None
         self.last_candidate = None
+        self.last_solve_seed = None
+        self.last_measured_q = initial_q.copy()
         self.last_waypoint_step = 0.0
         self.projection_count = 0
         self.projection_failure_count = 0
         self.nearest_position_count = 0
+        self.branch_guard_count = 0
+        self.branch_reject_count = 0
+        self.branch_recovery_count = 0
+        self.branch_position_fallback_count = 0
+        self.local_servo_count = 0
+        self.local_servo_reject_count = 0
+        self.local_servo_projection_count = 0
+        self.last_local_servo_alpha = 1.0
+        self.last_local_servo_reason = ""
+        self.last_branch_guard = None
+        self.last_branch_candidates = 0
+        self.last_branch_score = None
+        self.last_branch_recovered = False
+        self.last_branch_position_fallback = False
         self.last_projection_alpha = 1.0
         self.last_projection_ms = 0.0
         self.last_projection_target_pose = None
@@ -265,10 +316,14 @@ class TracIKTrajectoryController:
         )
         self.trajectory.start_time = float(sim_time)
         self.last_solution = q.copy()
+        self.branch_reference_q = q.copy()
         self.last_reachable_pose = np.asarray(self.solver.fk(q), dtype=np.float64).reshape(7)
         self.last_waypoint_velocity[:] = 0.0
         self.last_solve_step = None
         self.last_error = ""
+        self.last_measured_q = q.copy()
+        self.last_local_servo_alpha = 1.0
+        self.last_local_servo_reason = ""
         self.initial_plan_active = False
 
     @staticmethod
@@ -289,7 +344,517 @@ class TracIKTrajectoryController:
             quat /= quat_norm
         return np.concatenate([position, quat])
 
-    def _project_to_reachable_target(self, target_pose, position_only):
+    def _target_branch_guard_rule(self, target_pose, position_only=False):
+        """Return the lightweight geometric joint1 branch constraint.
+
+        For the A2W door trajectories, a target to the robot's negative lateral
+        side (the handle-approach side) must not be solved by folding joint1 to
+        the positive ~pi/2 branch.  The rule uses only the robot-base target, so
+        the exact same selection can be used in simulation and on hardware.
+        """
+        if bool(position_only):
+            return None
+        pose = np.asarray(target_pose, dtype=np.float64).reshape(-1)
+        if pose.size < 2:
+            return None
+        if (
+            float(pose[0]) >= float(self.args.tracik_branch_forward_min)
+            and float(pose[1]) <= -float(self.args.tracik_branch_lateral_deadband)
+        ):
+            return {
+                "side": "negative_lateral",
+                "joint1_upper": float(self.args.tracik_branch_joint1_upper),
+                "target_azimuth": float(math.atan2(float(pose[1]), float(pose[0]))),
+            }
+        return None
+
+    def _branch_guard_for_target(self, target_pose, position_only=False):
+        if not bool(getattr(self.args, "tracik_branch_continuity", True)):
+            return None
+        return self._target_branch_guard_rule(target_pose, position_only=position_only)
+
+    def _candidate_within_controller_limits(self, candidate):
+        candidate = np.asarray(candidate, dtype=np.float64).reshape(6)
+        tolerance = 1.0e-5
+        return bool(
+            np.all(np.isfinite(candidate))
+            and np.all(candidate >= self.lower - tolerance)
+            and np.all(candidate <= self.upper + tolerance)
+        )
+
+    @staticmethod
+    def _append_unique_seed(seeds, seed):
+        seed = np.asarray(seed, dtype=np.float64).reshape(6)
+        if not any(float(np.max(np.abs(seed - existing))) < 1.0e-6 for existing in seeds):
+            seeds.append(seed)
+
+    def _branch_seed_options(self, solve_seed, measured_q, branch_guard):
+        max_seeds = max(1, int(self.args.tracik_branch_candidate_seeds))
+        seeds = []
+        solve_seed = np.clip(np.asarray(solve_seed, dtype=np.float64).reshape(6), self.lower, self.upper)
+        measured_q = np.clip(np.asarray(measured_q, dtype=np.float64).reshape(6), self.lower, self.upper)
+        self._append_unique_seed(seeds, solve_seed)
+        self._append_unique_seed(seeds, measured_q)
+        self._append_unique_seed(seeds, self.last_solution)
+
+        azimuth = float(branch_guard["target_azimuth"])
+        upper = float(
+            branch_guard.get("effective_joint1_upper", branch_guard["joint1_upper"])
+        )
+        for offset in (0.25, 0.55, 0.85, 1.15):
+            if len(seeds) >= max_seeds:
+                break
+            candidate_seed = measured_q.copy()
+            desired_q1 = min(upper - 0.05, azimuth - offset)
+            desired_q1 = float(np.clip(desired_q1, self.lower[0], self.upper[0]))
+            q1_delta = desired_q1 - float(candidate_seed[0])
+            candidate_seed[0] = desired_q1
+            # joint1 and joint5 largely compensate one another for the forward
+            # gripper orientation.  Counter-rotating joint5 makes the alternate
+            # seed useful without imposing a fixed full-arm posture.
+            candidate_seed[4] = float(
+                np.clip(candidate_seed[4] - q1_delta, self.lower[4], self.upper[4])
+            )
+            self._append_unique_seed(seeds, candidate_seed)
+
+        if len(seeds) < max_seeds:
+            demonstrated_approach_seed = np.asarray(
+                [-1.0, 1.4, -0.7, -0.9, 1.0, 0.0],
+                dtype=np.float64,
+            )
+            self._append_unique_seed(
+                seeds,
+                np.clip(demonstrated_approach_seed, self.lower, self.upper),
+            )
+
+        while len(seeds) < max_seeds:
+            random_seed = self.rng.uniform(self.lower, self.upper)
+            random_seed[0] = self.rng.uniform(
+                self.lower[0],
+                min(self.upper[0], upper),
+            )
+            self._append_unique_seed(seeds, random_seed)
+        return seeds[:max_seeds]
+
+    def _branch_candidate_score(self, candidate, measured_q, branch_guard):
+        candidate = np.asarray(candidate, dtype=np.float64).reshape(6)
+        measured_q = np.asarray(measured_q, dtype=np.float64).reshape(6)
+        weights = np.ones(6, dtype=np.float64)
+        weights[0] = float(self.args.tracik_branch_joint1_weight)
+        measured_cost = float(np.sum(weights * np.square(candidate - measured_q)))
+        command_cost = float(np.sum(weights * np.square(candidate - self.last_solution)))
+        azimuth_cost = float(
+            np.square(candidate[0] - float(branch_guard["target_azimuth"]))
+        )
+        return measured_cost + 0.5 * command_cost + 0.25 * azimuth_cost
+
+    @staticmethod
+    def _quat_orientation_error_xyzw(desired, current):
+        desired = np.asarray(desired, dtype=np.float64).reshape(4)
+        current = np.asarray(current, dtype=np.float64).reshape(4)
+        desired /= max(float(np.linalg.norm(desired)), 1.0e-12)
+        current /= max(float(np.linalg.norm(current)), 1.0e-12)
+        x1, y1, z1, w1 = desired
+        x2, y2, z2, w2 = -current[0], -current[1], -current[2], current[3]
+        delta = np.asarray(
+            [
+                w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+                w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+                w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+                w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+            ],
+            dtype=np.float64,
+        )
+        return delta[:3] * (1.0 if delta[3] >= 0.0 else -1.0)
+
+    def _advance_branch_reference(self, target_pose, measured_q, branch_guard):
+        """Track a continuous posture branch with a portable FK-based local DLS.
+
+        This reference is not sent to the robot directly.  It supplies a
+        topology-stable full-pose target that TRAC-IK solves below.  Numerical
+        FK keeps this implementation independent of Isaac Gym's Jacobian and
+        therefore usable with the same URDF on hardware.
+        """
+        q = np.asarray(self.branch_reference_q, dtype=np.float64).reshape(6).copy()
+        measured_q = np.asarray(measured_q, dtype=np.float64).reshape(6)
+        # If the reference became stale (reset, external intervention, or a
+        # long unguarded phase), restart it from the actual arm configuration.
+        if float(np.max(np.abs(q - measured_q))) > float(
+            self.args.tracik_branch_reference_reset_distance
+        ):
+            q = measured_q.copy()
+
+        target_arr = np.asarray(target_pose, dtype=np.float64).reshape(7)
+        finite_difference = float(self.args.tracik_branch_reference_fd_epsilon)
+        damping = float(self.args.tracik_branch_reference_damping)
+        max_joint_step = float(self.args.tracik_branch_reference_joint_step)
+        iterations = max(1, int(self.args.tracik_branch_reference_iterations))
+        for _ in range(iterations):
+            current_pose = np.asarray(self.solver.fk(q), dtype=np.float64).reshape(7)
+            error = np.concatenate(
+                [
+                    target_arr[:3] - current_pose[:3],
+                    self._quat_orientation_error_xyzw(target_arr[3:7], current_pose[3:7]),
+                ]
+            )
+            jacobian = np.zeros((6, 6), dtype=np.float64)
+            for joint_index in range(6):
+                q_minus = q.copy()
+                q_plus = q.copy()
+                q_minus[joint_index] = max(
+                    self.lower[joint_index],
+                    q_minus[joint_index] - finite_difference,
+                )
+                q_plus[joint_index] = min(
+                    self.upper[joint_index],
+                    q_plus[joint_index] + finite_difference,
+                )
+                denominator = float(q_plus[joint_index] - q_minus[joint_index])
+                if denominator <= 1.0e-12:
+                    continue
+                pose_minus = np.asarray(self.solver.fk(q_minus), dtype=np.float64).reshape(7)
+                pose_plus = np.asarray(self.solver.fk(q_plus), dtype=np.float64).reshape(7)
+                jacobian[:3, joint_index] = (
+                    pose_plus[:3] - pose_minus[:3]
+                ) / denominator
+                jacobian[3:6, joint_index] = (
+                    2.0
+                    * self._quat_orientation_error_xyzw(
+                        pose_plus[3:7],
+                        pose_minus[3:7],
+                    )
+                    / denominator
+                )
+            rotation_weight = float(self.args.tracik_branch_reference_rotation_weight)
+            weights = np.asarray(
+                [1.0, 1.0, 1.0, rotation_weight, rotation_weight, rotation_weight],
+                dtype=np.float64,
+            )
+            weighted_jacobian = jacobian * weights[:, None]
+            weighted_error = error * weights
+            jacobian_t = weighted_jacobian.T
+            lhs = (
+                weighted_jacobian @ jacobian_t
+                + np.eye(6, dtype=np.float64) * (damping * damping)
+            )
+            try:
+                delta = jacobian_t @ np.linalg.solve(lhs, weighted_error)
+            except np.linalg.LinAlgError:
+                break
+            delta = np.clip(delta, -max_joint_step, max_joint_step)
+            q = np.clip(q + delta, self.lower, self.upper)
+            q[0] = min(q[0], float(branch_guard["joint1_upper"]))
+        self.branch_reference_q = q.copy()
+        return q
+
+    def _solve_with_branch_continuity(
+        self,
+        target_pose,
+        position_only,
+        solve_seed,
+        measured_q,
+        branch_guard=None,
+    ):
+        """Solve once normally, then recover only if it selects a guarded branch."""
+        if branch_guard is None:
+            branch_guard = self._branch_guard_for_target(target_pose, position_only=position_only)
+        self.last_branch_guard = branch_guard
+        self.last_branch_candidates = 0
+        self.last_branch_score = None
+        self.last_branch_recovered = False
+        self.last_branch_position_fallback = False
+
+        first = self.solver.ik(
+            target_pose,
+            seed_joints=solve_seed,
+            position_only=bool(position_only),
+            max_restarts=1,
+            strict_seed=True,
+        )
+        if branch_guard is None:
+            return first
+
+        self.branch_guard_count += 1
+        # Keep the demonstrated branch bound strict.  Letting the bound follow
+        # ``last_solution`` by even a small amount permits a sequence of locally
+        # continuous IK results to creep into the opposite branch over time.
+        # A recovered target may be far in joint space, but it is always handed
+        # to the velocity/acceleration-limited quintic trajectory below.
+        branch_guard = dict(branch_guard)
+        branch_guard["effective_joint1_upper"] = float(branch_guard["joint1_upper"])
+        self.last_branch_guard = branch_guard
+        upper = float(branch_guard["effective_joint1_upper"])
+        candidates = []
+        if first is not None:
+            first = np.asarray(first, dtype=np.float64).reshape(6)
+            if self._candidate_within_controller_limits(first) and float(first[0]) <= upper:
+                candidates.append(first)
+            else:
+                self.branch_reject_count += 1
+
+        seed_options = self._branch_seed_options(solve_seed, measured_q, branch_guard)
+        for seed in seed_options:
+            candidate = self.solver.ik(
+                target_pose,
+                seed_joints=seed,
+                position_only=bool(position_only),
+                max_restarts=1,
+                strict_seed=True,
+            )
+            if candidate is None:
+                continue
+            candidate = np.asarray(candidate, dtype=np.float64).reshape(6)
+            if not self._candidate_within_controller_limits(candidate):
+                continue
+            if float(candidate[0]) > upper:
+                self.branch_reject_count += 1
+                continue
+            if any(float(np.max(np.abs(candidate - saved))) < 1.0e-4 for saved in candidates):
+                continue
+            candidates.append(candidate)
+
+        full_pose_candidates = candidates
+        selected_full = None
+        selected_full_score = None
+        if full_pose_candidates:
+            scored_full = [
+                (self._branch_candidate_score(candidate, measured_q, branch_guard), candidate)
+                for candidate in full_pose_candidates
+            ]
+            selected_full_score, selected_full = min(scored_full, key=lambda item: item[0])
+            selected_full_step = float(
+                np.max(np.abs(selected_full - self.last_solution))
+            )
+            if (
+                not bool(getattr(self.args, "tracik_branch_position_fallback", True))
+                or self.max_waypoint_step <= 0.0
+                or selected_full_step <= self.max_waypoint_step
+            ):
+                self.last_branch_candidates = len(full_pose_candidates)
+                self.last_branch_score = float(selected_full_score)
+                self.last_branch_recovered = True
+                self.branch_recovery_count += 1
+                return selected_full.copy()
+
+        candidates = []
+        if bool(getattr(self.args, "tracik_branch_position_fallback", True)):
+            # Old Gym-Jacobian demonstrations used a soft orientation
+            # objective.  Around a Z1 wrist singularity, a strict 6D solve of
+            # their instantaneous EE target can therefore jump to a folded q1
+            # branch.  Advance a portable FK-based local reference on the
+            # continuous branch, then ask TRAC-IK to solve the reference's full
+            # pose.  The reference itself is never sent as a joint command:
+            # every accepted target still comes from full-pose TRAC-IK.
+            reference_q = np.asarray(self.branch_reference_q, dtype=np.float64).reshape(6)
+            reference_pose = np.asarray(self.solver.fk(reference_q), dtype=np.float64).reshape(7)
+            local_seed_options = [reference_q, measured_q, self.last_solution]
+            for seed in local_seed_options:
+                candidate = self.solver.ik(
+                    reference_pose,
+                    seed_joints=seed,
+                    position_only=False,
+                    max_restarts=1,
+                    strict_seed=True,
+                )
+                if candidate is None:
+                    continue
+                candidate = np.asarray(candidate, dtype=np.float64).reshape(6)
+                if not self._candidate_within_controller_limits(candidate):
+                    continue
+                if float(candidate[0]) > upper:
+                    self.branch_reject_count += 1
+                    continue
+                if any(float(np.max(np.abs(candidate - saved))) < 1.0e-4 for saved in candidates):
+                    continue
+                candidates.append(candidate)
+            if candidates:
+                self.last_branch_position_fallback = True
+                self.branch_position_fallback_count += 1
+
+        self.last_branch_candidates = len(candidates)
+        if not candidates:
+            if selected_full is None:
+                return None
+            self.last_branch_score = float(selected_full_score)
+            self.last_branch_recovered = False
+            return selected_full.copy()
+        scored = [
+            (self._branch_candidate_score(candidate, measured_q, branch_guard), candidate)
+            for candidate in candidates
+        ]
+        score, selected = min(scored, key=lambda item: item[0])
+        self.last_branch_score = float(score)
+        selected_step = float(np.max(np.abs(selected - self.last_solution)))
+        self.last_branch_recovered = bool(
+            self.max_waypoint_step <= 0.0
+            or selected_step <= self.max_waypoint_step
+        )
+        self.branch_recovery_count += 1
+        return selected.copy()
+
+    def _local_servo_accepts(
+        self,
+        candidate,
+        measured_q,
+        branch_guard=None,
+        allow_large_step=False,
+    ):
+        if candidate is None:
+            self.last_local_servo_reason = "ik_failed"
+            return False
+        candidate = np.asarray(candidate, dtype=np.float64).reshape(6)
+        measured_q = np.asarray(measured_q, dtype=np.float64).reshape(6)
+        if not self._candidate_within_controller_limits(candidate):
+            self.last_local_servo_reason = "joint_limits"
+            return False
+        if branch_guard is not None:
+            upper = float(
+                branch_guard.get("effective_joint1_upper", branch_guard["joint1_upper"])
+            )
+            if float(candidate[0]) > upper:
+                self.last_local_servo_reason = (
+                    f"branch_q1:{float(candidate[0]):.4f}>{upper:.4f}"
+                )
+                return False
+        if bool(allow_large_step):
+            self.last_local_servo_reason = ""
+            return True
+        delta = np.abs(candidate - measured_q)
+        max_joint_step = float(getattr(self.args, "tracik_local_servo_max_joint_step", 0.25))
+        max_q1_step = float(getattr(self.args, "tracik_local_servo_max_q1_step", 0.18))
+        if max_q1_step > 0.0 and float(delta[0]) > max_q1_step:
+            self.last_local_servo_reason = f"q1_step:{float(delta[0]):.4f}>{max_q1_step:.4f}"
+            return False
+        if max_joint_step > 0.0 and float(np.max(delta)) > max_joint_step:
+            self.last_local_servo_reason = (
+                f"joint_step:{float(np.max(delta)):.4f}>{max_joint_step:.4f}"
+            )
+            return False
+        self.last_local_servo_reason = ""
+        return True
+
+    def _solve_local_servo(
+        self,
+        target_pose,
+        position_only,
+        measured_q,
+        seed_q=None,
+        allow_large_step=False,
+    ):
+        """Single-seed local TRAC-IK servo around the measured arm posture.
+
+        This mode is intentionally small and portable: solve from q_current,
+        reject large joint jumps, and if needed shrink the EE target toward the
+        current FK pose.  It avoids task-specific branch search while keeping
+        TRAC-IK as the only IK backend.
+        """
+        measured_q = np.clip(
+            np.asarray(measured_q, dtype=np.float64).reshape(6),
+            self.lower,
+            self.upper,
+        )
+        seed_q = (
+            measured_q
+            if seed_q is None
+            else np.clip(
+                np.asarray(seed_q, dtype=np.float64).reshape(6),
+                self.lower,
+                self.upper,
+            )
+        )
+        self.local_servo_count += 1
+        self.last_local_servo_alpha = 1.0
+        self.last_local_servo_reason = ""
+        target_pose = np.asarray(target_pose, dtype=np.float64).reshape(-1)
+        branch_guard = (
+            self._target_branch_guard_rule(
+                target_pose,
+                position_only=bool(position_only),
+            )
+            if bool(getattr(self.args, "tracik_local_servo_branch_anchor", False))
+            else None
+        )
+        if branch_guard is not None:
+            upper = float(
+                branch_guard.get("effective_joint1_upper", branch_guard["joint1_upper"])
+            )
+            if float(seed_q[0]) > upper:
+                anchored_seed = seed_q.copy()
+                desired_q1 = float(np.clip(upper, self.lower[0], self.upper[0]))
+                q1_delta = desired_q1 - float(anchored_seed[0])
+                anchored_seed[0] = desired_q1
+                # Joint1 and joint5 compensate for gripper-forward poses.  Keep
+                # the seed on the same end-effector orientation family without
+                # doing a multi-seed branch search.
+                anchored_seed[4] = float(
+                    np.clip(anchored_seed[4] - q1_delta, self.lower[4], self.upper[4])
+                )
+                seed_q = anchored_seed
+        solution = self.solver.ik(
+            target_pose,
+            seed_joints=seed_q,
+            position_only=bool(position_only),
+            max_restarts=1,
+            strict_seed=True,
+        )
+        if self._local_servo_accepts(
+            solution,
+            measured_q,
+            branch_guard=branch_guard,
+            allow_large_step=allow_large_step,
+        ):
+            return np.clip(np.asarray(solution, dtype=np.float64).reshape(6), self.lower, self.upper)
+
+        self.local_servo_reject_count += 1
+        if not self.project_unreachable or self.projection_iterations <= 0:
+            return None
+
+        reject_reason = self.last_local_servo_reason
+        start_pose = np.asarray(self.solver.fk(measured_q), dtype=np.float64).reshape(7)
+        low = 0.0
+        high = 1.0
+        best_solution = None
+        for _ in range(self.projection_iterations):
+            alpha = 0.5 * (low + high)
+            candidate_target = self._interpolate_target(
+                start_pose,
+                target_pose,
+                alpha,
+                bool(position_only),
+            )
+            candidate = self.solver.ik(
+                candidate_target,
+                seed_joints=seed_q,
+                position_only=bool(position_only),
+                max_restarts=1,
+                strict_seed=True,
+            )
+            if self._local_servo_accepts(candidate, measured_q, branch_guard=branch_guard):
+                low = alpha
+                best_solution = np.clip(
+                    np.asarray(candidate, dtype=np.float64).reshape(6),
+                    self.lower,
+                    self.upper,
+                )
+            else:
+                high = alpha
+
+        self.last_local_servo_alpha = float(low)
+        if best_solution is not None and low >= self.projection_min_alpha:
+            self.local_servo_projection_count += 1
+            self.last_local_servo_reason = ""
+            return best_solution
+        self.last_local_servo_reason = reject_reason
+        return None
+
+    def _project_to_reachable_target(
+        self,
+        target_pose,
+        position_only,
+        solve_seed=None,
+        measured_q=None,
+        branch_guard=None,
+    ):
         if not self.project_unreachable or self.projection_iterations <= 0:
             return None, 0.0, None
         target_pose = np.asarray(target_pose, dtype=np.float64).reshape(-1)
@@ -306,12 +871,24 @@ class TracIKTrajectoryController:
                 alpha,
                 bool(position_only),
             )
-            candidate_solution = self.solver.ik(
+            candidate_solution = self._solve_with_branch_continuity(
                 candidate_target,
-                seed_joints=self.last_solution,
-                position_only=bool(position_only),
-                max_restarts=1,
-                strict_seed=True,
+                bool(position_only),
+                solve_seed=(
+                    np.asarray(solve_seed, dtype=np.float64).reshape(6)
+                    if solve_seed is not None
+                    else (
+                        self.fixed_solve_seed
+                        if self.fixed_solve_seed is not None
+                        else self.last_solution
+                    )
+                ),
+                measured_q=(
+                    self.last_solution
+                    if measured_q is None
+                    else np.asarray(measured_q, dtype=np.float64).reshape(6)
+                ),
+                branch_guard=branch_guard,
             )
             if candidate_solution is not None:
                 candidate_solution = np.clip(
@@ -339,6 +916,8 @@ class TracIKTrajectoryController:
         position_only=False,
         nearest_position_solution=None,
         nearest_position_solve_ms=0.0,
+        solve_seed_override=None,
+        measured_q=None,
         initial_move=False,
     ):
         step = int(step)
@@ -355,13 +934,46 @@ class TracIKTrajectoryController:
             solve_due = False
         if solve_due:
             first_solve_after_reset = self.last_solve_step is None
+            # Keep the online trajectory anchored at the current commanded joints, but
+            # optionally seed the first nonlinear IK solve from a known manipulation
+            # posture.  This selects the demonstrated IK branch without teleporting the
+            # arm to that posture before the first trajectory segment is generated.
+            solve_seed = (
+                np.asarray(solve_seed_override, dtype=np.float64).reshape(6)
+                if solve_seed_override is not None
+                else (
+                    self.fixed_solve_seed
+                    if self.fixed_solve_seed is not None
+                    else (
+                        self.initial_solve_seed
+                        if first_solve_after_reset and self.initial_solve_seed is not None
+                        else self.last_solution
+                    )
+                )
+            )
+            solve_seed = np.clip(solve_seed, self.lower, self.upper)
+            measured_q = (
+                self.last_solution.copy()
+                if measured_q is None
+                else np.clip(
+                    np.asarray(measured_q, dtype=np.float64).reshape(6),
+                    self.lower,
+                    self.upper,
+                )
+            )
+            self.last_measured_q = measured_q.copy()
+            self.last_solve_seed = solve_seed.copy()
             self.last_target_pose = np.asarray(target_pose, dtype=np.float64).copy()
             self.last_projection_alpha = 1.0
             self.last_projection_ms = 0.0
             self.last_projection_target_pose = None
             used_projection = False
             used_nearest_position = False
+            used_local_servo_projection = False
             projection_attempted = False
+            branch_guard = None
+            self.last_branch_recovered = False
+            local_servo_enabled = bool(getattr(self.args, "tracik_local_servo", False))
             start_ns = time.perf_counter_ns()
             if bool(position_only) and nearest_position_solution is not None:
                 solution = np.clip(
@@ -379,14 +991,42 @@ class TracIKTrajectoryController:
                 needs_projection = False
                 used_nearest_position = True
                 self.nearest_position_count += 1
-            else:
-                solution = self.solver.ik(
+            elif local_servo_enabled:
+                before_local_projections = self.local_servo_projection_count
+                solution = self._solve_local_servo(
                     target_pose,
-                    seed_joints=self.last_solution,
-                    position_only=bool(position_only),
-                    max_restarts=1,
-                    strict_seed=True,
+                    bool(position_only),
+                    measured_q,
+                    seed_q=solve_seed,
+                    allow_large_step=bool(first_solve_after_reset or initial_move),
                 )
+                strict_solution = solution
+                used_local_servo_projection = (
+                    self.local_servo_projection_count > before_local_projections
+                )
+                used_projection = used_local_servo_projection
+                needs_projection = False
+            else:
+                branch_guard = self._branch_guard_for_target(
+                    target_pose,
+                    position_only=bool(position_only),
+                )
+                if branch_guard is None:
+                    self.branch_reference_q = measured_q.copy()
+                else:
+                    self._advance_branch_reference(
+                        target_pose,
+                        measured_q,
+                        branch_guard,
+                    )
+                solution = self._solve_with_branch_continuity(
+                    target_pose,
+                    bool(position_only),
+                    solve_seed,
+                    measured_q,
+                    branch_guard=branch_guard,
+                )
+                strict_branch_recovered = bool(self.last_branch_recovered)
                 strict_solution = solution
                 strict_waypoint_jump = 0.0
                 if strict_solution is not None:
@@ -403,6 +1043,7 @@ class TracIKTrajectoryController:
                     or (
                         self.max_waypoint_step > 0.0
                         and strict_waypoint_jump > self.max_waypoint_step
+                        and not strict_branch_recovered
                     )
                 )
             if needs_projection and not first_solve_after_reset:
@@ -411,6 +1052,9 @@ class TracIKTrajectoryController:
                 projected_solution, projection_alpha, projection_target = self._project_to_reachable_target(
                     target_pose,
                     bool(position_only),
+                    solve_seed=solve_seed,
+                    measured_q=measured_q,
+                    branch_guard=branch_guard,
                 )
                 self.last_projection_ms = (time.perf_counter_ns() - projection_start_ns) * 1.0e-6
                 self.last_projection_alpha = float(projection_alpha)
@@ -423,14 +1067,15 @@ class TracIKTrajectoryController:
                     solution = strict_solution
                     self.projection_failure_count += 1
             if solution is None and self.max_restarts > 1 and not projection_attempted:
-                solution = self.solver.ik(
-                    target_pose,
-                    seed_joints=self.last_solution,
-                    position_only=bool(position_only),
-                    max_restarts=self.max_restarts,
-                    strict_seed=False,
-                    rng=self.rng,
-                )
+                if branch_guard is None:
+                    solution = self.solver.ik(
+                        target_pose,
+                        seed_joints=solve_seed,
+                        position_only=bool(position_only),
+                        max_restarts=self.max_restarts,
+                        strict_seed=False,
+                        rng=self.rng,
+                    )
             self.last_solve_ms = (
                 (time.perf_counter_ns() - start_ns) * 1.0e-6
                 + float(nearest_position_solve_ms)
@@ -447,8 +1092,10 @@ class TracIKTrajectoryController:
                 self.last_waypoint_step = waypoint_step
                 if (
                     not first_solve_after_reset
+                    and not local_servo_enabled
                     and self.max_waypoint_step > 0.0
                     and waypoint_step > self.max_waypoint_step
+                    and not bool(self.last_branch_recovered)
                 ):
                     self.failure_count += 1
                     self.last_error = (
@@ -485,6 +1132,12 @@ class TracIKTrajectoryController:
                     self.last_waypoint_velocity = waypoint_velocity.copy()
                     if used_nearest_position:
                         self.last_error = "nearest_position_target"
+                    elif local_servo_enabled and used_local_servo_projection:
+                        self.last_error = "local_servo_projected_target"
+                    elif local_servo_enabled:
+                        self.last_error = "local_servo_target"
+                    elif self.last_branch_recovered:
+                        self.last_error = "branch_recovered_target"
                     elif used_projection:
                         self.last_error = "projected_target"
                     else:
@@ -770,6 +1423,12 @@ def parse_args():
             {"name": "--base_push_time_scale", "type": float, "default": 1.35},
             {"name": "--door_pass_clearance", "type": float, "default": 0.55},
             {
+                "name": "--door_twin_min_forward_distance",
+                "type": float,
+                "default": MIN_DOOR_TWIN_FORWARD_DISTANCE_M,
+                "help": "Minimum total base progress from approach stop through push+traverse; values below 1.94 m are clamped.",
+            },
+            {
                 "name": "--no_pass_through_door",
                 "action": "store_true",
                 "default": False,
@@ -872,6 +1531,22 @@ def parse_args():
             {"name": "--rigid_contact_geom_gate", "type": float, "default": 0.16},
             {"name": "--collision_log_interval", "type": int, "default": 30},
             {
+                "name": "--allow_post_unlock_geom_contact",
+                "dest": "allow_post_unlock_geom_contact",
+                "action": "store_true",
+                "default": True,
+                "help": (
+                    "Treat geometry-only base/door proximity after handle unlock as "
+                    "a tolerated contact. PhysX rigid/frame contacts and pre-unlock collisions remain blocking."
+                ),
+            },
+            {
+                "name": "--no_allow_post_unlock_geom_contact",
+                "dest": "allow_post_unlock_geom_contact",
+                "action": "store_false",
+                "help": "Restore strict behavior where every geometric base/door proximity is blocking.",
+            },
+            {
                 "name": "--push_follow_orientation",
                 "action": "store_true",
                 "help": "After the door unlocks, also keep the end-effector orientation fixed relative to the handle. By default push contact is position-only.",
@@ -927,6 +1602,161 @@ def parse_args():
             {"name": "--tracik_epsilon", "type": float, "default": 3.0e-3},
             {"name": "--tracik_solver_type", "type": str, "default": "Speed"},
             {"name": "--tracik_max_restarts", "type": int, "default": 30},
+            {
+                "name": "--tracik_branch_continuity",
+                "dest": "tracik_branch_continuity",
+                "action": "store_true",
+                "default": True,
+                "help": (
+                    "Reject discontinuous TRAC-IK branches and search deterministic alternate seeds. "
+                    "This keeps EE-command policies on the demonstrated Z1 joint branch."
+                ),
+            },
+            {
+                "name": "--no_tracik_branch_continuity",
+                "dest": "tracik_branch_continuity",
+                "action": "store_false",
+            },
+            {
+                "name": "--tracik_branch_lateral_deadband",
+                "type": float,
+                "default": 0.0,
+                "help": "Enable the negative-lateral joint1 branch guard when target y is below -deadband.",
+            },
+            {
+                "name": "--tracik_branch_forward_min",
+                "type": float,
+                "default": 0.20,
+                "help": "Minimum base-frame target x for the handle-approach joint1 branch guard.",
+            },
+            {
+                "name": "--tracik_branch_joint1_upper",
+                "type": float,
+                "default": 0.05,
+                "help": "Maximum accepted joint1 angle while the negative-lateral branch guard is active.",
+            },
+            {
+                "name": "--tracik_branch_candidate_seeds",
+                "type": int,
+                "default": 8,
+                "help": "Maximum deterministic/random seed attempts after TRAC-IK returns a guarded branch.",
+            },
+            {
+                "name": "--tracik_branch_position_fallback",
+                "dest": "tracik_branch_position_fallback",
+                "action": "store_true",
+                "default": True,
+                "help": (
+                    "When the policy EE target only yields a guarded joint1 branch, advance a "
+                    "local FK reference and solve its full pose with TRAC-IK until direct "
+                    "full-pose continuity returns."
+                ),
+            },
+            {
+                "name": "--no_tracik_branch_position_fallback",
+                "dest": "tracik_branch_position_fallback",
+                "action": "store_false",
+            },
+            {
+                "name": "--tracik_branch_reference_iterations",
+                "type": int,
+                "default": 1,
+                "help": "FK-based local DLS updates per TRAC-IK command while tracking the guarded branch.",
+            },
+            {
+                "name": "--tracik_branch_reference_joint_step",
+                "type": float,
+                "default": 0.06,
+                "help": "Maximum per-joint branch-reference DLS update in radians.",
+            },
+            {
+                "name": "--tracik_branch_reference_damping",
+                "type": float,
+                "default": 0.08,
+            },
+            {
+                "name": "--tracik_branch_reference_rotation_weight",
+                "type": float,
+                "default": 0.04,
+                "help": "Soft orientation weight for the portable branch-reference DLS.",
+            },
+            {
+                "name": "--tracik_branch_reference_fd_epsilon",
+                "type": float,
+                "default": 1.0e-4,
+            },
+            {
+                "name": "--tracik_branch_reference_reset_distance",
+                "type": float,
+                "default": 1.5,
+                "help": "Reset branch reference to measured q if their max joint distance exceeds this value.",
+            },
+            {
+                "name": "--tracik_branch_joint1_weight",
+                "type": float,
+                "default": 6.0,
+                "help": "Joint1 weight when selecting the candidate nearest measured q and the last accepted q.",
+            },
+            {
+                "name": "--tracik_gym_guided_seed",
+                "action": "store_true",
+                "help": (
+                    "Use one full-pose Gym Jacobian DLS step from the measured current "
+                    "joints as every TRAC-IK seed. Forces solver_type=Distance and "
+                    "max_restarts=1."
+                ),
+            },
+            {
+                "name": "--tracik_local_servo",
+                "action": "store_true",
+                "help": (
+                    "Use a lightweight TRAC-IK local servo: seed from measured q_current, "
+                    "reject large joint jumps, and shrink the EE target if needed. "
+                    "Forces solver_type=Distance, max_restarts=1, and disables heavy "
+                    "branch-continuity candidate search."
+                ),
+            },
+            {
+                "name": "--tracik_local_servo_branch_anchor",
+                "action": "store_true",
+                "help": (
+                    "Also clamp local-servo seed/solution to the geometric joint1 "
+                    "handle-side branch. Experimental; off by default because it can "
+                    "over-constrain ACT targets."
+                ),
+            },
+            {
+                "name": "--tracik_local_servo_max_joint_step",
+                "type": float,
+                "default": 0.25,
+                "help": "Maximum accepted per-command joint delta from measured q_current in local-servo mode.",
+            },
+            {
+                "name": "--tracik_local_servo_max_q1_step",
+                "type": float,
+                "default": 0.18,
+                "help": "Maximum accepted joint1 delta from measured q_current in local-servo mode.",
+            },
+            {
+                "name": "--tracik_initial_seed_q",
+                "type": str,
+                "default": "",
+                "help": (
+                    "Optional comma-separated joint1..joint6 seed used only for the first "
+                    "TRAC-IK solve after controller reset. The trajectory still starts "
+                    "from the current commanded joints."
+                ),
+            },
+            {
+                "name": "--tracik_fixed_seed_q",
+                "type": str,
+                "default": "",
+                "help": (
+                    "Optional comma-separated joint1..joint6 seed used for every TRAC-IK "
+                    "solve, retry, and reachability-projection solve. This overrides "
+                    "--tracik_initial_seed_q."
+                ),
+            },
             {"name": "--tracik_initial_segment_duration", "type": float, "default": 2.0},
             {"name": "--tracik_projection_iterations", "type": int, "default": 6},
             {"name": "--tracik_projection_min_alpha", "type": float, "default": 1.0e-3},
@@ -985,6 +1815,19 @@ def parse_args():
             {"name": "--handle_seg_id", "type": int, "default": 2},
             {"name": "--camera_depth_clip_lower", "type": float, "default": 0.2},
             {"name": "--camera_depth_clip_far", "type": float, "default": 1.5},
+            {
+                "name": "--camera_intrinsics_mode",
+                "type": str,
+                "choices": ["legacy", "real_k_remap"],
+                "default": "legacy",
+                "help": "legacy keeps the original FOV pipeline; real_k_remap renders wide then remaps to calibrated K.",
+            },
+            {
+                "name": "--camera_intrinsics_config",
+                "type": str,
+                "default": str(dc.DEFAULT_REAL_CAMERA_INTRINSICS_CONFIG),
+            },
+            {"name": "--camera_render_horizontal_fov_deg", "type": float, "default": 60.0},
             {"name": "--camera_display_scale", "type": int, "default": 1},
             {"name": "--camera_display_interval", "type": int, "default": 1},
             {"name": "--dump_initial_depth_dir", "type": str, "default": ""},
@@ -1112,12 +1955,31 @@ def parse_args():
             {"name": "--camera_fps", "type": float, "default": 25.0},
             {"name": "--dp_record_state_mode", "type": str, "default": "full"},
             {"name": "--dp_policy_checkpoint", "type": str, "default": ""},
+            {
+                "name": "--expert_action_replay_raw_episode",
+                "type": str,
+                "default": "",
+                "help": (
+                    "Replace the scripted trajectory with the fixed action sequence from one raw episode. "
+                    "Only actions are replayed; simulator state is not restored, so normal environment/domain "
+                    "randomization remains active."
+                ),
+            },
             {"name": "--dp_control_env_id", "type": int, "default": 0},
             {"name": "--dp_control_all_envs", "action": "store_true"},
             {"name": "--no_dp_control_all_envs", "action": "store_true"},
             {"name": "--dp_inference_steps", "type": int, "default": 10},
             {"name": "--dp_noise_scheduler_type", "type": str, "default": "DDIM"},
             {"name": "--dp_action_horizon", "type": int, "default": -1},
+            {
+                "name": "--dp3_draw_point_cloud",
+                "action": "store_true",
+                "help": (
+                    "Draw the selected point-cloud policy observation. Dual-fused ACT uses green Front "
+                    "points and magenta Wrist points."
+                ),
+            },
+            {"name": "--dp3_point_cloud_env_id", "type": int, "default": 0},
             {"name": "--dp_temporal_ensemble", "action": "store_true"},
             {"name": "--dp_temporal_prefetch_actions", "type": int, "default": 3},
             {"name": "--dp_temporal_old_weight", "type": float, "default": 0.3},
@@ -1188,6 +2050,11 @@ def parse_args():
                 "help": "Comma-separated Door Twin keyframe views; observer_* and handle_closeup views are fixed in the world.",
             },
             {
+                "name": "--door_twin_asset_probe",
+                "action": "store_true",
+                "help": "Benchmark-only: bypass handle locking so a fixed torque can verify that the door hinge moves in PhysX.",
+            },
+            {
                 "name": "--door_twin_side_camera_yaw_deg",
                 "type": float,
                 "default": 30.0,
@@ -1199,6 +2066,40 @@ def parse_args():
             {"name": "--door_twin_handle_closeup_distance", "type": float, "default": 0.55},
             {"name": "--door_twin_handle_closeup_lateral", "type": float, "default": 0.25},
             {"name": "--door_twin_handle_closeup_height_offset", "type": float, "default": 0.16},
+            {
+                "name": "--capture_stage_screenshots",
+                "action": "store_true",
+                "help": (
+                    "Capture clean offscreen RGB screenshots from the legacy viewer viewpoint at several "
+                    "moments in each scripted phase. This is independent of policy cameras and keyframe dumps."
+                ),
+            },
+            {
+                "name": "--stage_screenshot_dir",
+                "type": str,
+                "default": str(REPO_ROOT / "figures" / "a2w_b1_stage_screenshots"),
+            },
+            {"name": "--stage_screenshot_width", "type": int, "default": 2560},
+            {"name": "--stage_screenshot_height", "type": int, "default": 1440},
+            {"name": "--stage_screenshot_horizontal_fov_deg", "type": float, "default": 60.0},
+            {"name": "--stage_screenshot_eye_x_offset", "type": float, "default": 1.9},
+            {"name": "--stage_screenshot_eye_y_offset", "type": float, "default": 3.2},
+            {"name": "--stage_screenshot_eye_z", "type": float, "default": 1.8},
+            {"name": "--stage_screenshot_target_x_offset", "type": float, "default": 0.3},
+            {"name": "--stage_screenshot_target_y_offset", "type": float, "default": 0.0},
+            {"name": "--stage_screenshot_target_z", "type": float, "default": 0.8},
+            {"name": "--stage_screenshot_frames_per_phase", "type": int, "default": 5},
+            {
+                "name": "--stage_screenshot_phases",
+                "type": str,
+                "default": ",".join(DEFAULT_STAGE_SCREENSHOT_PHASES),
+            },
+            {
+                "name": "--stage_screenshot_hold_steps",
+                "type": int,
+                "default": 100,
+                "help": "Expected hold_home duration used only to spread screenshot samples.",
+            },
         ],
     )
 
@@ -1234,6 +2135,22 @@ def parse_args():
     if bool(getattr(args, "rgb", False)):
         args.depth_only = False
     args.camera_seg = bool(args.camera_seg or not args.no_camera_seg)
+    if "--no_tracik_branch_continuity" in argv:
+        args.tracik_branch_continuity = False
+    elif "--tracik_branch_continuity" in argv:
+        args.tracik_branch_continuity = True
+    else:
+        args.tracik_branch_continuity = bool(
+            config_defaults.get("tracik_branch_continuity", True)
+        )
+    if "--no_tracik_branch_position_fallback" in argv:
+        args.tracik_branch_position_fallback = False
+    elif "--tracik_branch_position_fallback" in argv:
+        args.tracik_branch_position_fallback = True
+    else:
+        args.tracik_branch_position_fallback = bool(
+            config_defaults.get("tracik_branch_position_fallback", True)
+        )
     if "--no_dp_record_all_envs" in argv:
         args.dp_record_all_envs = False
     elif "--dp_record_all_envs" in argv:
@@ -1265,6 +2182,17 @@ def parse_args():
         args.enable_collision_geom_check = args.enable_base_door_collision_check or bool(
             config_defaults.get("enable_collision_geom_check", False)
         ) or "--enable_collision_geom_check" in argv
+    if "--no_allow_post_unlock_geom_contact" in argv:
+        args.allow_post_unlock_geom_contact = False
+    elif "--allow_post_unlock_geom_contact" in argv:
+        args.allow_post_unlock_geom_contact = True
+    else:
+        # gymutil's paired store_true/store_false custom parameters do not
+        # reliably preserve the first declaration's default. Resolve this
+        # default explicitly so DoorTwin uses the documented relaxed policy.
+        args.allow_post_unlock_geom_contact = bool(
+            config_defaults.get("allow_post_unlock_geom_contact", True)
+        )
     args.dp_action_horizon = None if int(args.dp_action_horizon) < 0 else int(args.dp_action_horizon)
     args.arm_ik_solver = str(args.arm_ik_solver).strip().lower()
     if args.arm_ik_solver not in ("gym_jacobian", "tracik"):
@@ -1281,6 +2209,74 @@ def parse_args():
         raise ValueError("--tracik_waypoint_velocity_alpha must be in [0, 1].")
     if int(args.tracik_max_restarts) <= 0:
         raise ValueError("--tracik_max_restarts must be positive.")
+    if float(args.tracik_branch_lateral_deadband) < 0.0:
+        raise ValueError("--tracik_branch_lateral_deadband must be non-negative.")
+    if float(args.tracik_branch_forward_min) < 0.0:
+        raise ValueError("--tracik_branch_forward_min must be non-negative.")
+    if int(args.tracik_branch_candidate_seeds) <= 0:
+        raise ValueError("--tracik_branch_candidate_seeds must be positive.")
+    if float(args.tracik_branch_joint1_weight) < 1.0:
+        raise ValueError("--tracik_branch_joint1_weight must be at least 1.")
+    if int(args.tracik_branch_reference_iterations) <= 0:
+        raise ValueError("--tracik_branch_reference_iterations must be positive.")
+    if float(args.tracik_branch_reference_joint_step) <= 0.0:
+        raise ValueError("--tracik_branch_reference_joint_step must be positive.")
+    if float(args.tracik_branch_reference_damping) <= 0.0:
+        raise ValueError("--tracik_branch_reference_damping must be positive.")
+    if float(args.tracik_branch_reference_rotation_weight) < 0.0:
+        raise ValueError("--tracik_branch_reference_rotation_weight must be non-negative.")
+    if float(args.tracik_branch_reference_fd_epsilon) <= 0.0:
+        raise ValueError("--tracik_branch_reference_fd_epsilon must be positive.")
+    raw_initial_seed = getattr(args, "tracik_initial_seed_q", "")
+    if isinstance(raw_initial_seed, (list, tuple, np.ndarray)):
+        initial_seed_values = [float(value) for value in raw_initial_seed]
+    else:
+        initial_seed_text = str(raw_initial_seed or "").strip()
+        initial_seed_values = (
+            [float(value) for value in initial_seed_text.replace(",", " ").split()]
+            if initial_seed_text
+            else []
+        )
+    if initial_seed_values and len(initial_seed_values) != 6:
+        raise ValueError("--tracik_initial_seed_q must contain exactly 6 joint values.")
+    args.tracik_initial_seed_q = initial_seed_values or None
+    if args.tracik_initial_seed_q is not None and args.arm_ik_solver != "tracik":
+        raise ValueError("--tracik_initial_seed_q requires --arm_ik_solver tracik.")
+    raw_fixed_seed = getattr(args, "tracik_fixed_seed_q", "")
+    if isinstance(raw_fixed_seed, (list, tuple, np.ndarray)):
+        fixed_seed_values = [float(value) for value in raw_fixed_seed]
+    else:
+        fixed_seed_text = str(raw_fixed_seed or "").strip()
+        fixed_seed_values = (
+            [float(value) for value in fixed_seed_text.replace(",", " ").split()]
+            if fixed_seed_text
+            else []
+        )
+    if fixed_seed_values and len(fixed_seed_values) != 6:
+        raise ValueError("--tracik_fixed_seed_q must contain exactly 6 joint values.")
+    args.tracik_fixed_seed_q = fixed_seed_values or None
+    if args.tracik_fixed_seed_q is not None and args.arm_ik_solver != "tracik":
+        raise ValueError("--tracik_fixed_seed_q requires --arm_ik_solver tracik.")
+    if bool(args.tracik_gym_guided_seed):
+        if args.arm_ik_solver != "tracik":
+            raise ValueError("--tracik_gym_guided_seed requires --arm_ik_solver tracik.")
+        if args.tracik_initial_seed_q is not None or args.tracik_fixed_seed_q is not None:
+            raise ValueError(
+                "--tracik_gym_guided_seed cannot be combined with "
+                "--tracik_initial_seed_q or --tracik_fixed_seed_q."
+            )
+        args.tracik_solver_type = "Distance"
+        args.tracik_max_restarts = 1
+    if bool(getattr(args, "tracik_local_servo", False)):
+        if args.arm_ik_solver != "tracik":
+            raise ValueError("--tracik_local_servo requires --arm_ik_solver tracik.")
+        if float(args.tracik_local_servo_max_joint_step) <= 0.0:
+            raise ValueError("--tracik_local_servo_max_joint_step must be positive.")
+        if float(args.tracik_local_servo_max_q1_step) <= 0.0:
+            raise ValueError("--tracik_local_servo_max_q1_step must be positive.")
+        args.tracik_solver_type = "Distance"
+        args.tracik_max_restarts = 1
+        args.tracik_branch_continuity = False
     if float(args.tracik_initial_segment_duration) <= 0.0:
         raise ValueError("--tracik_initial_segment_duration must be positive.")
     if int(args.tracik_projection_iterations) < 0:
@@ -1293,12 +2289,22 @@ def parse_args():
         raise ValueError("--num_envs must be positive.")
     if not args.dp_record_all_envs and (args.dp_record_env_id < 0 or args.dp_record_env_id >= args.num_envs):
         raise ValueError("--dp_record_env_id must be in [0, num_envs - 1].")
-    if args.dp_policy_checkpoint and (args.dp_control_env_id < 0 or args.dp_control_env_id >= args.num_envs):
+    external_action_source = bool(args.dp_policy_checkpoint or args.expert_action_replay_raw_episode)
+    if external_action_source and (args.dp_control_env_id < 0 or args.dp_control_env_id >= args.num_envs):
         raise ValueError("--dp_control_env_id must be in [0, num_envs - 1].")
     if args.dp_policy_checkpoint and args.dp_warmstart and args.dp_control_all_envs and args.num_envs > 1:
         raise ValueError("--dp_warmstart currently supports a single controlled env; add --no_dp_control_all_envs.")
     if args.record_dp_dataset and args.dp_policy_checkpoint:
         raise ValueError("--record_dp_dataset and --dp_policy_checkpoint are separate modes; run recording or policy play, not both.")
+    if args.record_dp_dataset and args.expert_action_replay_raw_episode:
+        raise ValueError(
+            "--record_dp_dataset and --expert_action_replay_raw_episode are separate modes; "
+            "run recording or expert replay, not both."
+        )
+    if args.dp_policy_checkpoint and args.expert_action_replay_raw_episode:
+        raise ValueError(
+            "--dp_policy_checkpoint and --expert_action_replay_raw_episode are mutually exclusive."
+        )
     warmstart_params = [
         bool(args.dp_warmstart_raw_episode),
         int(args.dp_warmstart_step) >= 0,
@@ -1360,10 +2366,24 @@ def create_tracik_solver_if_requested(args):
     args._tracik_solver = solver
     print(
         "Arm IK backend: tracik + online quintic "
+        f"solver_type={str(args.tracik_solver_type)} "
+        f"max_restarts={int(args.tracik_max_restarts)} "
         f"command_hz={float(args.tracik_command_hz):.1f} "
         f"max_speed={float(args.tracik_max_joint_speed):.2f}rad/s "
         f"max_acceleration={float(args.tracik_max_joint_acceleration):.2f}rad/s^2 "
         f"initial_segment={float(args.tracik_initial_segment_duration):.2f}s "
+        f"initial_seed_q={getattr(args, 'tracik_initial_seed_q', None)} "
+        f"fixed_seed_q={getattr(args, 'tracik_fixed_seed_q', None)} "
+        f"gym_guided_seed={bool(getattr(args, 'tracik_gym_guided_seed', False))} "
+        f"local_servo={bool(getattr(args, 'tracik_local_servo', False))} "
+        f"local_servo_joint_step={float(getattr(args, 'tracik_local_servo_max_joint_step', 0.0)):.3f}rad "
+        f"local_servo_q1_step={float(getattr(args, 'tracik_local_servo_max_q1_step', 0.0)):.3f}rad "
+        f"branch_continuity={bool(getattr(args, 'tracik_branch_continuity', True))} "
+        f"branch_y_deadband={float(args.tracik_branch_lateral_deadband):.3f}m "
+        f"branch_q1_upper={float(args.tracik_branch_joint1_upper):.3f}rad "
+        f"branch_candidate_seeds={int(args.tracik_branch_candidate_seeds)} "
+        f"branch_position_fallback={bool(args.tracik_branch_position_fallback)} "
+        f"branch_reference_iterations={int(args.tracik_branch_reference_iterations)} "
         f"waypoint_velocity_alpha={float(args.tracik_waypoint_velocity_alpha):.2f} "
         f"unreachable_projection={not bool(args.no_tracik_unreachable_projection)} "
         f"projection_iterations={int(args.tracik_projection_iterations)} "
@@ -1515,6 +2535,132 @@ class ParallelEnvState:
     dp_door_angle_at_end_trigger: object = None
     dp_phase_at_end_trigger: object = None
     last_dp_interaction_state: object = None
+    stage_screenshot_camera: object = None
+    stage_screenshot_phase: str = ""
+    stage_screenshot_phase_step: int = -1
+    stage_screenshot_next_index: int = 0
+    stage_screenshot_pending: object = None
+
+
+@dataclass
+class ExpertActionReplay:
+    path: Path
+    actions: np.ndarray
+    states: np.ndarray
+    action_names: tuple[str, ...]
+    action_frame: str
+    fps: float
+    door_asset_name: str
+    warned_end: bool = False
+
+
+def _npz_scalar_text(data, key, default=""):
+    if key not in data:
+        return str(default)
+    value = np.asarray(data[key])
+    if value.size == 0:
+        return str(default)
+    return str(value.reshape(-1)[0])
+
+
+def load_expert_action_replay(args):
+    path = Path(args.expert_action_replay_raw_episode).expanduser()
+    if not path.is_absolute():
+        path = (Path.cwd() / path).resolve()
+    if not path.is_file():
+        raise FileNotFoundError(f"Expert action replay episode does not exist: {path}")
+    with np.load(path, allow_pickle=True) as data:
+        if "action" not in data:
+            raise KeyError(f"Expert action replay episode has no 'action' array: {path}")
+        actions = np.asarray(data["action"], dtype=np.float32)
+        if actions.ndim != 2 or actions.shape[0] < 1 or actions.shape[1] != 10:
+            raise ValueError(
+                f"Expert action replay requires action shape [T, 10], got {actions.shape} from {path}."
+            )
+        if not np.isfinite(actions).all():
+            raise ValueError(f"Expert action replay contains non-finite actions: {path}")
+        states = np.asarray(data["state"], dtype=np.float32) if "state" in data else np.empty((0, 0), np.float32)
+        if "action_names" in data:
+            action_names = tuple(str(name) for name in np.asarray(data["action_names"]).reshape(-1).tolist())
+        else:
+            action_names = tuple(ACTION_NAMES or ())
+        if len(action_names) != actions.shape[1]:
+            raise ValueError(
+                f"Expert action replay action_names has {len(action_names)} entries but action has "
+                f"{actions.shape[1]} dimensions: {path}"
+            )
+        action_frame = dc.normalize_float_dp_pose_frame(_npz_scalar_text(data, "action_frame", "base"))
+        if action_frame not in ("world", "base") and not dc.is_full_base_pose_frame(action_frame):
+            raise ValueError(
+                f"Unsupported expert action_frame={action_frame!r}; expected world, base, or robot_base_full."
+            )
+        fps = float(np.asarray(data["fps"]).reshape(-1)[0]) if "fps" in data else float(args.dp_fps)
+        door_asset_name = _npz_scalar_text(data, "door_asset_name", "unknown")
+    if fps <= 0.0:
+        raise ValueError(f"Expert action replay fps must be positive, got {fps} from {path}.")
+    rounded_fps = int(round(fps))
+    if not math.isclose(fps, float(rounded_fps), rel_tol=0.0, abs_tol=1.0e-6):
+        raise ValueError(f"This play path currently requires integer replay fps, got {fps} from {path}.")
+    if int(args.dp_fps) != rounded_fps:
+        print(
+            f"Expert replay overrides --dp_fps {args.dp_fps} with source episode fps={rounded_fps}.",
+            flush=True,
+        )
+        args.dp_fps = rounded_fps
+    requested_door = str(getattr(args, "door_name", "") or "")
+    if requested_door and door_asset_name not in ("", "unknown", requested_door):
+        print(
+            f"Warning: replay source door={door_asset_name!r}, current environment door={requested_door!r}.",
+            flush=True,
+        )
+    return ExpertActionReplay(
+        path=path,
+        actions=actions.copy(),
+        states=states.copy(),
+        action_names=action_names,
+        action_frame=action_frame,
+        fps=fps,
+        door_asset_name=door_asset_name,
+    )
+
+
+def collect_expert_replay_actions(gym, env_states, replay, controlled_env_ids, step, args, dt):
+    stride = dc.float_dp_policy_sample_stride(args, dt)
+    frame_index = int(step) // int(stride)
+    if frame_index >= len(replay.actions):
+        frame_index = len(replay.actions) - 1
+        if not replay.warned_end:
+            print(
+                f"Expert action replay reached its final frame at sim step {step}; holding frame {frame_index}.",
+                flush=True,
+            )
+            replay.warned_end = True
+    action = replay.actions[frame_index]
+    source_state = (
+        replay.states[frame_index]
+        if replay.states.ndim == 2 and frame_index < len(replay.states)
+        else np.empty((0,), dtype=np.float32)
+    )
+    inputs_by_env = {}
+    actions_by_env = {}
+    for st in env_states:
+        if st.index not in controlled_env_ids:
+            continue
+        base_xy_current = np.asarray(st.traj.get("base_xy", st.base_start), dtype=np.float32)
+        yaw_current = float(st.traj.get("yaw", st.yaw_start))
+        handle_pos, handle_quat = get_body_pose(gym, st.env, st.door_actor, st.door.handle_body_index)
+        handle_goal = quat_apply(handle_quat, st.door.handle_goal_offset) + handle_pos
+        ee_pos, ee_quat = current_ee_pose_from_refreshed_tensors(st.ik_state)
+        inputs_by_env[st.index] = {
+            "base_xy_current": base_xy_current,
+            "yaw_current": yaw_current,
+            "handle_goal": np.asarray(handle_goal, dtype=np.float32),
+            "ee_pos": np.asarray(ee_pos, dtype=np.float32),
+            "ee_quat": np.asarray(ee_quat, dtype=np.float32),
+            "dp_state": np.asarray(source_state, dtype=np.float32),
+        }
+        actions_by_env[st.index] = np.asarray(action, dtype=np.float32).copy()
+    return inputs_by_env, actions_by_env
 
 
 def door_twin_profile_for_args(args):
@@ -1584,6 +2730,15 @@ def compute_base_push_and_traverse_targets(args, base_stop, heading):
         base_traverse = dc.compute_base_pass_target(args, heading)
     else:
         base_traverse = base_push + heading * max(0.0, float(traverse_distance))
+    requested_progress = float(np.dot(np.asarray(base_traverse, dtype=np.float32) - base_stop, heading))
+    physical_pass_target = dc.compute_base_pass_target(args, heading)
+    physical_progress = float(np.dot(np.asarray(physical_pass_target, dtype=np.float32) - base_stop, heading))
+    minimum_progress = max(
+        MIN_DOOR_TWIN_FORWARD_DISTANCE_M,
+        float(getattr(args, "door_twin_min_forward_distance", MIN_DOOR_TWIN_FORWARD_DISTANCE_M)),
+    )
+    final_progress = max(requested_progress, physical_progress, minimum_progress)
+    base_traverse = np.asarray(base_stop, dtype=np.float32) + heading * final_progress
     return base_push.astype(np.float32), np.asarray(base_traverse, dtype=np.float32)
 
 
@@ -1598,6 +2753,12 @@ def init_door_twin_tracker(st):
         or getattr(st.args, "dump_keyframe_images", False)
     )
     handle_lower = float(st.door.dof_lower[1]) if len(st.door.dof_lower) > 1 else 0.0
+    configured_handle_rest = getattr(st.door, "handle_rest_angle", None)
+    handle_rest = (
+        handle_lower
+        if configured_handle_rest is None
+        else float(configured_handle_rest)
+    )
     tracker = RolloutTracker(
         st.index,
         st.door.spec.get("name", f"door_{st.index}"),
@@ -1607,11 +2768,19 @@ def init_door_twin_tracker(st):
         door_motion_sign=float(getattr(st.args, "door_motion_sign", -1.0)),
         handle_lower=handle_lower,
         handle_unlock_threshold=float(getattr(st.door, "handle_unlock_threshold", 0.0)),
+        handle_rest_angle=handle_rest,
+        handle_unlock_direction_sign=float(
+            getattr(st.door, "handle_unlock_direction_sign", 1.0)
+        ),
         require_traverse=require_traverse,
         camera_required=camera_required,
         save_trace=bool(getattr(st.args, "save_failed_rollouts", False)),
         base_start=st.base_start,
         base_push=st.base_traverse if require_traverse else st.base_push,
+        pass_plane_point=[float(st.args.door_x), float(st.args.door_y)],
+        pass_direction=(st.base_traverse - st.base_stop) if require_traverse else None,
+        robot_rear_offset=float(getattr(st.args, "robot_rear_offset", 0.65)),
+        sim_dt=float(getattr(st.args, "sim_dt", 0.02)),
     )
     st.door_twin_tracker = tracker
     tracker.add_artifact(
@@ -1646,6 +2815,18 @@ def update_door_twin_tracker(st, step, door_pos_record):
         st.prev_yaw,
         float(getattr(st.args, "sim_dt", 0.02)),
     )
+    # DoorTwin's arm-limit diagnostic must only inspect the six Z1 arm joints.
+    # ``st.dof_positions`` also contains jointGripper, whose open command is
+    # intentionally equal to its upper limit and would otherwise make every
+    # pre-grasp frame look like an arm joint-limit violation.
+    all_dof_positions = np.asarray(st.dof_positions)
+    all_lower = door_twin_tensor_to_numpy(getattr(st.ik_state, "lower", None))
+    all_upper = door_twin_tensor_to_numpy(getattr(st.ik_state, "upper", None))
+    arm_indices = getattr(st, "tracik_joint_indices", None)
+    if arm_indices is None:
+        arm_indices = np.arange(min(6, all_dof_positions.size), dtype=np.int64)
+    else:
+        arm_indices = np.asarray(arm_indices, dtype=np.int64)
     tracker.update(
         step=int(step),
         phase=str(st.last_phase),
@@ -1659,9 +2840,9 @@ def update_door_twin_tracker(st, step, door_pos_record):
         base_vyaw=base_vyaw,
         base_collision=bool(getattr(st, "base_door_collision_detected", False)),
         camera_available=camera_available,
-        dof_positions=st.dof_positions,
-        lower=door_twin_tensor_to_numpy(getattr(st.ik_state, "lower", None)),
-        upper=door_twin_tensor_to_numpy(getattr(st.ik_state, "upper", None)),
+        dof_positions=all_dof_positions[arm_indices],
+        lower=None if all_lower is None else np.asarray(all_lower)[arm_indices],
+        upper=None if all_upper is None else np.asarray(all_upper)[arm_indices],
     )
 
 
@@ -1790,6 +2971,202 @@ def maybe_dump_door_twin_keyframe_images(gym, sim, st, step):
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
         return True
     return False
+
+
+def stage_screenshot_phase_names(args):
+    names = tuple(
+        name.strip()
+        for name in str(getattr(args, "stage_screenshot_phases", "") or "").split(",")
+        if name.strip()
+    )
+    unknown = sorted(set(names) - set(DP_PHASE_NAMES))
+    if unknown:
+        raise ValueError(
+            f"Unsupported --stage_screenshot_phases value(s): {unknown}; "
+            f"expected a subset of {DP_PHASE_NAMES}."
+        )
+    return names
+
+
+def create_stage_screenshot_camera(gym, env, args):
+    width = int(getattr(args, "stage_screenshot_width", 2560))
+    height = int(getattr(args, "stage_screenshot_height", 1440))
+    horizontal_fov = float(getattr(args, "stage_screenshot_horizontal_fov_deg", 60.0))
+    if width <= 0 or height <= 0:
+        raise ValueError("Stage screenshot width and height must be positive.")
+    if not 1.0 <= horizontal_fov < 179.0:
+        raise ValueError("--stage_screenshot_horizontal_fov_deg must be in [1, 179).")
+
+    props = gymapi.CameraProperties()
+    props.width = width
+    props.height = height
+    props.horizontal_fov = horizontal_fov
+    camera = gym.create_camera_sensor(env, props)
+    if camera < 0:
+        raise RuntimeError("Failed to create the offscreen stage screenshot camera.")
+
+    # Keep this exactly aligned with dc.setup_viewer(), which is the long-standing
+    # A2W+B1 door-play viewpoint used by the interactive viewer. The offsets are
+    # configurable so paper screenshots can pull back toward the robot spawn side.
+    eye = (
+        float(args.door_x + float(getattr(args, "stage_screenshot_eye_x_offset", 1.9))),
+        float(args.door_y + float(getattr(args, "stage_screenshot_eye_y_offset", 3.2))),
+        float(getattr(args, "stage_screenshot_eye_z", 1.8)),
+    )
+    target = (
+        float(args.door_x + float(getattr(args, "stage_screenshot_target_x_offset", 0.3))),
+        float(args.door_y + float(getattr(args, "stage_screenshot_target_y_offset", 0.0))),
+        float(getattr(args, "stage_screenshot_target_z", 0.8)),
+    )
+    gym.set_camera_location(
+        camera,
+        env,
+        gymapi.Vec3(*eye),
+        gymapi.Vec3(*target),
+    )
+    print(
+        "Stage screenshot camera enabled: "
+        f"{width}x{height} fov={horizontal_fov:.1f} "
+        f"eye={tuple(round(value, 4) for value in eye)} "
+        f"target={tuple(round(value, 4) for value in target)}",
+        flush=True,
+    )
+    return camera
+
+
+def stage_screenshot_expected_phase_steps(st, phase):
+    attr_by_phase = {
+        "walk": "walk_steps",
+        "initial_hold": "initial_hold_steps",
+        "grasp": "grasp_steps",
+        "grasp_hold": "grasp_hold_steps",
+        "close_gripper": "gripper_close_steps",
+        "rotate_handle": "handle_rotate_steps",
+        "push_door": "door_push_steps",
+        "traverse_door": "traverse_steps",
+        "return_home": "return_home_steps",
+        "hold_home": "stage_screenshot_hold_steps",
+    }
+    attr = attr_by_phase.get(str(phase))
+    return max(1, int(getattr(st.args, attr, 1))) if attr else 1
+
+
+def stage_screenshot_target_steps(st, phase):
+    count = max(1, int(getattr(st.args, "stage_screenshot_frames_per_phase", 5)))
+    duration = stage_screenshot_expected_phase_steps(st, phase)
+    fractions = (
+        np.asarray([0.5], dtype=np.float64)
+        if count == 1
+        else np.linspace(0.08, 0.92, count, dtype=np.float64)
+    )
+    targets = [int(round(float(fraction) * max(0, duration - 1))) for fraction in fractions]
+    return tuple(sorted(set(targets)))
+
+
+def update_stage_screenshot_due(st):
+    if getattr(st, "stage_screenshot_camera", None) is None:
+        return False
+    phase = str(getattr(st, "last_phase", ""))
+    if phase != st.stage_screenshot_phase:
+        st.stage_screenshot_phase = phase
+        st.stage_screenshot_phase_step = 0
+        st.stage_screenshot_next_index = 0
+        st.stage_screenshot_pending = None
+    else:
+        st.stage_screenshot_phase_step += 1
+
+    if phase not in stage_screenshot_phase_names(st.args):
+        return False
+    targets = stage_screenshot_target_steps(st, phase)
+    index = int(st.stage_screenshot_next_index)
+    if index >= len(targets) or st.stage_screenshot_phase_step < targets[index]:
+        return False
+    st.stage_screenshot_pending = {
+        "phase": phase,
+        "phase_index": index,
+        "phase_step": int(st.stage_screenshot_phase_step),
+        "target_phase_step": int(targets[index]),
+    }
+    st.stage_screenshot_next_index = index + 1
+    return True
+
+
+def save_stage_screenshot(gym, sim, st, global_step):
+    pending = getattr(st, "stage_screenshot_pending", None)
+    camera = getattr(st, "stage_screenshot_camera", None)
+    if pending is None or camera is None:
+        return None
+    st.stage_screenshot_pending = None
+
+    width = int(getattr(st.args, "stage_screenshot_width", 2560))
+    height = int(getattr(st.args, "stage_screenshot_height", 1440))
+    raw = gym.get_camera_image(sim, st.env, camera, gymapi.IMAGE_COLOR)
+    if raw is None:
+        print(f"Stage screenshot unavailable at step {global_step}.", flush=True)
+        return None
+    rgb = np.ascontiguousarray(camera_color_to_rgb(raw, height, width))
+    if rgb.shape[:2] != (height, width):
+        raise RuntimeError(
+            f"Unexpected stage screenshot shape {rgb.shape}; expected ({height}, {width}, 3)."
+        )
+
+    door_name = str(st.door.spec.get("name", getattr(st.args, "door_name", "door")))
+    phase = str(pending["phase"])
+    out_dir = Path(st.args.stage_screenshot_dir).expanduser().resolve() / door_name / phase
+    out_dir.mkdir(parents=True, exist_ok=True)
+    filename = (
+        f"{door_name}_{phase}_{int(pending['phase_index']):02d}_"
+        f"phase{int(pending['phase_step']):04d}_global{int(global_step):05d}_"
+        f"{width}x{height}.png"
+    )
+    path = out_dir / filename
+    if cv2 is None:
+        raise RuntimeError("--capture_stage_screenshots requires OpenCV (cv2).")
+    if not cv2.imwrite(str(path), rgb[..., ::-1]):
+        raise RuntimeError(f"Failed to write stage screenshot: {path}")
+
+    record = {
+        "door": door_name,
+        "phase": phase,
+        "phase_index": int(pending["phase_index"]),
+        "phase_step": int(pending["phase_step"]),
+        "target_phase_step": int(pending["target_phase_step"]),
+        "global_step": int(global_step),
+        "width": width,
+        "height": height,
+        "horizontal_fov_deg": float(
+            getattr(st.args, "stage_screenshot_horizontal_fov_deg", 60.0)
+        ),
+        "viewer_eye": [
+            float(
+                st.args.door_x
+                + float(getattr(st.args, "stage_screenshot_eye_x_offset", 1.9))
+            ),
+            float(
+                st.args.door_y
+                + float(getattr(st.args, "stage_screenshot_eye_y_offset", 3.2))
+            ),
+            float(getattr(st.args, "stage_screenshot_eye_z", 1.8)),
+        ],
+        "viewer_target": [
+            float(
+                st.args.door_x
+                + float(getattr(st.args, "stage_screenshot_target_x_offset", 0.3))
+            ),
+            float(
+                st.args.door_y
+                + float(getattr(st.args, "stage_screenshot_target_y_offset", 0.0))
+            ),
+            float(getattr(st.args, "stage_screenshot_target_z", 0.8)),
+        ],
+        "path": str(path),
+    }
+    manifest_path = Path(st.args.stage_screenshot_dir).expanduser().resolve() / door_name / "manifest.jsonl"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    with manifest_path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    print(f"Saved stage screenshot: {path}", flush=True)
+    return path
 
 
 def snapshot_raw_dp_episodes(env_states):
@@ -2058,6 +3435,77 @@ draw_local_camera_axes = dc.draw_local_camera_axes
 make_camera_properties = dc.make_camera_properties
 
 
+def draw_dp3_point_cloud(gym, viewer, st, point_cloud_base, pointcloud_mode="single_front"):
+    """Draw base-frame XYZ; dual-fused Front/Wrist halves use different colors."""
+    points = np.asarray(point_cloud_base, dtype=np.float32).reshape(-1, 3)
+    if points.size == 0:
+        return
+    base_actor = st.actor_handles[0] if len(st.actor_handles) > 1 else st.arm_actor
+    base_pos, base_quat = get_body_pose(gym, st.env, base_actor, 0)
+    qx, qy, qz, qw = base_ik.normalize_quat(np.asarray(base_quat, dtype=np.float32))
+    rotation = np.asarray(
+        [
+            [1 - 2 * (qy * qy + qz * qz), 2 * (qx * qy - qz * qw), 2 * (qx * qz + qy * qw)],
+            [2 * (qx * qy + qz * qw), 1 - 2 * (qx * qx + qz * qz), 2 * (qy * qz - qx * qw)],
+            [2 * (qx * qz - qy * qw), 2 * (qy * qz + qx * qw), 1 - 2 * (qx * qx + qy * qy)],
+        ],
+        dtype=np.float32,
+    )
+    world = points @ rotation.T + np.asarray(base_pos, dtype=np.float32).reshape(1, 3)
+    vertices = np.stack((world, world + np.asarray([0.0, 0.0, 0.006], dtype=np.float32)), axis=1)
+    colors = np.broadcast_to(np.asarray([0.1, 0.9, 1.0], dtype=np.float32), (len(world), 3)).copy()
+    if str(pointcloud_mode) == "dual_fused":
+        split = len(world) // 2
+        colors[:split] = np.asarray([0.1, 1.0, 0.25], dtype=np.float32)  # Front: green.
+        colors[split:] = np.asarray([1.0, 0.2, 0.9], dtype=np.float32)   # Wrist: magenta.
+    gym.add_lines(viewer, st.env, len(world), vertices, colors)
+
+
+def auto_enable_pointcloud_checkpoint_cameras(args):
+    """Enable the depth sensors declared by a packaged point-cloud Door checkpoint."""
+    checkpoint_text = str(getattr(args, "dp_policy_checkpoint", "") or "").strip()
+    if not checkpoint_text:
+        return
+    checkpoint = Path(checkpoint_text).expanduser()
+    metadata_candidates = []
+    if checkpoint.is_dir():
+        metadata_candidates.append(checkpoint / "door_policy_meta.json")
+    else:
+        metadata_candidates.append(checkpoint.with_suffix("") / "door_policy_meta.json")
+        metadata_candidates.append(checkpoint.parent / "door_policy_meta.json")
+    metadata_path = next((path for path in metadata_candidates if path.is_file()), None)
+    if metadata_path is None:
+        return
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise RuntimeError(f"Cannot read Door checkpoint metadata {metadata_path}: {exc}") from exc
+    config = metadata.get("policy_config", metadata.get("config", {}))
+    if not bool(config.get("pointcloud_conditioning", config.get("point_cloud_conditioning", False))):
+        return
+    mode = str(config.get("pointcloud_mode", "") or "").strip()
+    if not mode:
+        mode = {
+            "front": "single_front",
+            "wrist": "single_wrist",
+            "front,wrist": "dual_fused",
+        }.get(str(config.get("point_cloud_views", "front")), "single_front")
+    needs_front = mode in ("single_front", "dual_view", "dual_fused")
+    needs_wrist = mode in ("single_wrist", "dual_view", "dual_fused")
+    changed = []
+    if needs_front and not bool(getattr(args, "enable_front_camera", False)):
+        args.enable_front_camera = True
+        changed.append("Front")
+    if needs_wrist and not bool(getattr(args, "enable_wrist_camera", False)):
+        args.enable_wrist_camera = True
+        changed.append("Wrist")
+    if changed:
+        print(
+            f"Point-cloud checkpoint automatically enabled {' + '.join(changed)} depth camera(s): mode={mode}",
+            flush=True,
+        )
+
+
 def tracik_target_pose_in_standalone_base(gym, st):
     root_pos, root_quat = get_body_pose(gym, st.env, st.arm_actor, 0)
     target_pos_world = np.asarray(st.ik_state.target_pos_np, dtype=np.float32).reshape(3)
@@ -2119,7 +3567,13 @@ def reset_tracik_controller_to_targets(gym, st, step, dt):
     )
 
 
-def gym_position_dls_candidate_for_tracik(gym, st):
+def gym_dls_candidate_for_tracik(gym, st, position_only=False):
+    """Return one Gym-Jacobian DLS step from the measured arm joints.
+
+    This intentionally mirrors door_common.update_arm_ik_targets_for_env(),
+    including its orientation weighting, but returns a seed candidate instead
+    of directly commanding the simulated arm.
+    """
     ik_state = st.ik_state
     torch = ik_state.torch
     eef_state = ik_state.rb_states[ik_state.eef_body_sim_index]
@@ -2130,17 +3584,48 @@ def gym_position_dls_candidate_for_tracik(gym, st):
         else 0
     )
     j_eef = ik_state.jacobian[jacobian_env_idx, ik_state.eef_jacobian_index, :, :]
-    task_j = j_eef[:3, ik_state.control_indices]
+    j_control = j_eef[:, ik_state.control_indices]
+    if bool(position_only) or ik_state.target_quat is None:
+        task_j = j_control[:3, :]
+        task_err = float(st.args.ik_pos_gain) * pos_err
+    else:
+        eef_quat = eef_state[3:7]
+        orn_err = base_ik.torch_orientation_error(
+            torch,
+            ik_state.target_quat,
+            eef_quat,
+        )
+        dpose = torch.cat(
+            (
+                float(st.args.ik_pos_gain) * pos_err,
+                float(st.args.ik_rot_gain) * orn_err,
+            ),
+            dim=0,
+        )
+        weights = torch.tensor(
+            [
+                1.0,
+                1.0,
+                1.0,
+                float(st.args.ik_rot_weight),
+                float(st.args.ik_rot_weight),
+                float(st.args.ik_rot_weight),
+            ],
+            dtype=torch.float32,
+            device=j_control.device,
+        )
+        task_j = j_control * weights.view(6, 1)
+        task_err = dpose * weights
     j_t = torch.transpose(task_j, 0, 1)
     damping = max(1.0e-6, float(st.args.ik_damping))
     lhs = task_j @ j_t + torch.eye(
-        3,
+        task_j.shape[0],
         dtype=torch.float32,
         device=task_j.device,
     ) * (damping * damping)
     delta = j_t @ torch.linalg.solve(
         lhs,
-        (float(st.args.ik_pos_gain) * pos_err).unsqueeze(-1),
+        task_err.unsqueeze(-1),
     ).squeeze(-1)
     max_step = float(st.args.ik_max_step) * float(st.tracik_controller.command_stride)
     delta = torch.clamp(delta, -max_step, max_step)
@@ -2170,14 +3655,42 @@ def update_tracik_arm_targets_for_env(gym, st, step, dt):
     )
     if position_only and solve_due:
         nearest_start_ns = time.perf_counter_ns()
-        nearest_position_solution = gym_position_dls_candidate_for_tracik(gym, st)
+        nearest_position_solution = gym_dls_candidate_for_tracik(
+            gym,
+            st,
+            position_only=True,
+        )
         nearest_position_solve_ms = (time.perf_counter_ns() - nearest_start_ns) * 1.0e-6
+    gym_guided_seed = None
+    if (
+        bool(getattr(st.args, "tracik_gym_guided_seed", False))
+        or bool(getattr(st.args, "tracik_local_servo", False))
+    ) and solve_due:
+        guided_start_ns = time.perf_counter_ns()
+        gym_guided_seed = gym_dls_candidate_for_tracik(
+            gym,
+            st,
+            position_only=position_only,
+        )
+        nearest_position_solve_ms += (time.perf_counter_ns() - guided_start_ns) * 1.0e-6
+    measured_q = None
+    if solve_due and (
+        bool(getattr(st.args, "tracik_branch_continuity", True))
+        or bool(getattr(st.args, "tracik_local_servo", False))
+    ):
+        actor_states = gym.get_actor_dof_states(st.env, st.arm_actor, gymapi.STATE_ALL)
+        measured_q = np.asarray(
+            actor_states["pos"][st.tracik_joint_indices],
+            dtype=np.float64,
+        ).reshape(6)
     q_command, _qd_command, _qdd_command = controller.update(
         step,
         target_pose,
         position_only=position_only,
         nearest_position_solution=nearest_position_solution,
         nearest_position_solve_ms=nearest_position_solve_ms,
+        solve_seed_override=gym_guided_seed,
+        measured_q=measured_q,
         initial_move=st.last_phase == "initial_hold",
     )
     st.dof_positions[st.tracik_joint_indices] = np.asarray(q_command, dtype=np.float32)
@@ -2460,12 +3973,13 @@ def create_low_level_cameras(gym, env, arm_actor, actor_handles, door, args):
     )
     if args.enable_wrist_camera and (regular_camera_use or "wrist" in door_twin_views):
         wrist_rot = dc.wrist_camera_rotation_radians_from_args(args)
+        wrist_camera_cfg = dc.camera_cfg_for_args("wrist", args)
         wrist_camera = attach_camera_to_actor_body_cached(
             gym,
             env,
             arm_actor,
             "link06",
-            dc.DEFAULT_WRIST_CAMERA_CFG,
+            wrist_camera_cfg,
             wrist_rot,
             args=args,
             camera_name="wrist",
@@ -2483,11 +3997,12 @@ def create_low_level_cameras(gym, env, arm_actor, actor_handles, door, args):
             math.radians(float(args.front_camera_roll_deg)),
         ]
         base_actor = actor_handles[0] if len(actor_handles) > 1 else arm_actor
+        front_camera_cfg = dc.camera_cfg_for_args("front", args)
         front_camera = attach_camera_to_actor_root_body(
             gym,
             env,
             base_actor,
-            dc.DEFAULT_FRONT_CAMERA_CFG,
+            front_camera_cfg,
             front_rot,
             args=args,
             camera_name="front",
@@ -2774,10 +4289,9 @@ def apply_warmstart_state(gym, sim, st, data, step, dof_names):
         # conservatively: tiny PhysX hinge drift must not unlock the door.
         closed_angle = dc.closed_hinge_angle(st.door, st.args)
         hinge_departure = abs(float(door_pos[0]) - float(closed_angle)) if n >= 1 else 0.0
-        handle_from_lower = float(door_pos[1] - st.door.dof_lower[1]) if n >= 2 else 0.0
         st.door.open_stage = bool(
             hinge_departure >= math.radians(2.0)
-            or handle_from_lower >= float(st.door.handle_unlock_threshold)
+            or (n >= 2 and dc.handle_is_unlocked(st.door, float(door_pos[1])))
         )
     if not st.door.open_stage:
         # Remove the small numerical hinge displacement stored in a locked
@@ -3551,7 +5065,10 @@ def run_demo(
 
         need_camera_render = bool(camera_handles and (args.show_camera_images or args.record_dp_dataset))
         if viewer is not None and need_camera_render and (
-            args.draw_ik_target or args.draw_camera_axes or args.draw_scripted_trajectory
+            args.draw_ik_target
+            or args.draw_camera_axes
+            or args.draw_scripted_trajectory
+            or bool(getattr(args, "dp3_draw_point_cloud", False))
         ):
             # Clear viewer-only debug lines before camera rendering so depth/RGB tensors stay clean.
             gym.clear_lines(viewer)
@@ -3804,8 +5321,7 @@ def create_parallel_env_states(
                 make_state_feature_names,
                 randomization_metadata_key="ikpush_randomization",
             )
-        env_states.append(
-            initialize_parallel_env_state(
+        state = initialize_parallel_env_state(
                 env_index,
                 env,
                 arm_actor,
@@ -3820,7 +5336,9 @@ def create_parallel_env_states(
                 defaults,
                 dp_recorder,
             )
-        )
+        if env_index == 0 and bool(getattr(env_args, "capture_stage_screenshots", False)):
+            state.stage_screenshot_camera = create_stage_screenshot_camera(gym, env, env_args)
+        env_states.append(state)
     if args.record_dp_dataset:
         dc.print_float_dp_recording_start(args, record_env_ids, vision_mode)
     shown_randomization = [json.loads(st.args.ikpush_randomization_json) for st in env_states[: min(4, len(env_states))]]
@@ -4191,7 +5709,9 @@ def run_parallel_recovery_batch(gym, sim, env_states, viewer, args, dt, dof_name
                 st.recovery_first_unlock_step = int(step)
                 st.recovery_unlock_phase = str(st.last_phase)
                 st.recovery_handle_deg_at_unlock = (
-                    abs(math.degrees(float(door_pos[1] - st.door.dof_lower[1]))) if len(door_pos) > 1 else 0.0
+                    math.degrees(max(0.0, dc.handle_unlock_progress(st.door, float(door_pos[1]))))
+                    if len(door_pos) > 1
+                    else 0.0
                 )
                 if (
                     st.recovery_first_contact_any_step < 0
@@ -4337,7 +5857,37 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
         "ikpush",
         IKPUSH_STATE_VERSION,
     )
-    if dp_controller is not None:
+    expert_replay = load_expert_action_replay(args) if args.expert_action_replay_raw_episode else None
+    if expert_replay is not None:
+        if dp_controller is not None:
+            raise RuntimeError("Expert action replay and a learned policy cannot control the same run.")
+        dp_control_env_ids = (
+            list(range(args.num_envs)) if args.dp_control_all_envs else [int(args.dp_control_env_id)]
+        )
+        dp_control_env_id_set = set(dp_control_env_ids)
+        for env_id in dp_control_env_ids:
+            env_states[env_id].dp_action_frame = expert_replay.action_frame
+        if args.dp_log_path:
+            if DoorDPJsonlLogger is None:
+                raise RuntimeError("Expert action replay logging requires high-level/dp/door_dp_common.py.")
+            dp_logger = DoorDPJsonlLogger(args.dp_log_path)
+            print(f"Expert action replay log: {args.dp_log_path}", flush=True)
+        print(
+            f"Loaded expert action replay from {expert_replay.path}: "
+            f"frames={len(expert_replay.actions)} fps={expert_replay.fps:g} "
+            f"action_frame={expert_replay.action_frame} source_door={expert_replay.door_asset_name!r}. "
+            "Recorded simulator state will not be restored; current randomized env state is used.",
+            flush=True,
+        )
+        if args.dp_control_all_envs:
+            print(f"Expert action replay controls all {len(dp_control_env_ids)} envs.", flush=True)
+        else:
+            print(
+                f"Expert action replay controls only env {args.dp_control_env_id}; other envs remain scripted.",
+                flush=True,
+            )
+    external_action_control = bool(dp_controller is not None or expert_replay is not None)
+    if external_action_control:
         apply_dp_warmstart_if_requested(gym, sim, args, dp_controller, dp_control_state, dof_names)
         dp_policy_stride = dc.float_dp_policy_sample_stride(args, dt)
         dp_policy_dt = float(dt) * float(dp_policy_stride)
@@ -4349,11 +5899,15 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
             f"sim_dt={dt:.4f}s stride={dp_policy_stride} policy_dt={dp_policy_dt:.4f}s",
             flush=True,
         )
-    dp_policy_action_names = (
-        list(getattr(dp_controller, "action_names", ACTION_NAMES or []))
-        if dp_controller is not None
-        else []
-    )
+    if expert_replay is not None:
+        dp_policy_action_names = list(expert_replay.action_names)
+        external_action_frame = expert_replay.action_frame
+    elif dp_controller is not None:
+        dp_policy_action_names = list(getattr(dp_controller, "action_names", ACTION_NAMES or []))
+        external_action_frame = getattr(dp_controller, "action_frame", "world")
+    else:
+        dp_policy_action_names = []
+        external_action_frame = "world"
     dp_policy_uses_joint_action = bool(float_dp_action_is_a2w_joint9(dp_policy_action_names))
     if dp_policy_uses_joint_action:
         print("Door DP policy action mode: A2W joint9 (vx, yaw, joint1..joint6, jointGripper).", flush=True)
@@ -4367,21 +5921,25 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
             current_ee_pose_from_refreshed_tensors(st.ik_state)
 
         dp_policy_update_due = bool(
-            dp_controller is not None and dc.float_dp_policy_update_due(step, args, dt)
+            external_action_control and dc.float_dp_policy_update_due(step, args, dt)
         )
         if dp_policy_update_due:
             if viewer is not None and (
-                args.draw_ik_target or args.draw_camera_axes or args.draw_scripted_trajectory
+                args.draw_ik_target
+                or args.draw_camera_axes
+                or args.draw_scripted_trajectory
+                or bool(getattr(args, "dp3_draw_point_cloud", False))
             ):
                 # Clear viewer-only debug lines before camera rendering so policy observations stay clean.
                 gym.clear_lines(viewer)
-            gym.step_graphics(sim)
-            gym.render_all_camera_sensors(sim)
+            if dp_controller is not None:
+                gym.step_graphics(sim)
+                gym.render_all_camera_sensors(sim)
             gym.refresh_rigid_body_state_tensor(sim)
             gym.refresh_dof_state_tensor(sim)
             gym.refresh_jacobian_tensors(sim)
 
-        if dp_policy_update_due:
+        if dp_policy_update_due and dp_controller is not None:
             dp_policy_inputs_by_env, dp_actions_by_env = dc.collect_float_dp_policy_actions(
                 gym,
                 sim,
@@ -4393,12 +5951,32 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                 dp_control_env_id_set,
                 "ikpush",
             )
+            if bool(getattr(args, "dp3_draw_point_cloud", False)) and hasattr(
+                dp_controller, "get_last_point_cloud_for_env"
+            ):
+                selected_env = int(getattr(args, "dp3_point_cloud_env_id", 0))
+                point_cloud = dp_controller.get_last_point_cloud_for_env(selected_env)
+                if 0 <= selected_env < len(env_states):
+                    env_states[selected_env].dp3_debug_point_cloud = point_cloud
+                    env_states[selected_env].dp3_debug_point_cloud_mode = str(
+                        getattr(dp_controller, "config", {}).get("pointcloud_mode", "single_front")
+                    )
+        elif dp_policy_update_due and expert_replay is not None:
+            dp_policy_inputs_by_env, dp_actions_by_env = collect_expert_replay_actions(
+                gym,
+                env_states,
+                expert_replay,
+                dp_control_env_id_set,
+                step,
+                args,
+                dt,
+            )
         else:
             dp_policy_inputs_by_env, dp_actions_by_env = {}, {}
 
         for st in env_states:
-            if dp_controller is not None and (st.index in dp_actions_by_env or st.last_dp_action is not None):
-                phase = "dp_policy"
+            if external_action_control and (st.index in dp_actions_by_env or st.last_dp_action is not None):
+                phase = "expert_action_replay" if expert_replay is not None else "dp_policy"
                 if st.index in dp_actions_by_env:
                     dp_policy_input = dp_policy_inputs_by_env[st.index]
                     base_xy_current = dp_policy_input["base_xy_current"]
@@ -4463,7 +6041,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                         st.args.robot_z,
                         yaw_current,
                         dt,
-                        action_frame=getattr(dp_controller, "action_frame", "world"),
+                        action_frame=external_action_frame,
                         base_pitch=float(getattr(st.args, "robot_pitch", 0.0)),
                     )
                 st.traj["base_xy"] = np.asarray(base_xy, dtype=np.float32).copy()
@@ -4606,6 +6184,19 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
             door_pos, door_vel = get_actor_dof_state(gym, st.env, st.door_actor)
             st.last_door_pos = door_pos
             door_efforts = compute_door_efforts(st.door, door_pos, door_vel, st.args)
+            if step == 0 and bool(getattr(st.args, "door_twin_asset_probe", False)):
+                probe_props = gym.get_actor_dof_properties(st.env, st.door_actor)
+                print(
+                    "door_twin_asset_probe_effort "
+                    f"env={st.index} pos={np.asarray(door_pos).round(6).tolist()} "
+                    f"effort={np.asarray(door_efforts).round(6).tolist()} "
+                    f"limits={np.asarray(probe_props['effort']).round(6).tolist()} "
+                    f"drive={np.asarray(probe_props['driveMode']).tolist()} "
+                    f"force={float(getattr(st.args, 'door_auto_open_force', 0.0)):.3f} "
+                    f"motion_sign={float(getattr(st.args, 'door_motion_sign', 0.0)):.1f} "
+                    f"auto_sign={float(getattr(st.args, 'door_auto_open_sign', 0.0)):.1f}",
+                    flush=True,
+                )
             if len(door_efforts) > 0:
                 gym.apply_actor_dof_efforts(st.env, st.door_actor, door_efforts)
 
@@ -4617,10 +6208,12 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
             and any(st.camera_handles and dc.float_dp_record_frame_due(st, dt) for st in env_states)
         )
         door_twin_dump_due = bool(any(door_twin_keyframe_dump_due(st) for st in env_states))
-        need_camera_render = bool(
+        stage_screenshot_due = bool(any(update_stage_screenshot_due(st) for st in env_states))
+        regular_camera_render = bool(
             any(st.camera_handles for st in env_states)
             and (args.show_camera_images or record_camera_due or door_twin_dump_due)
         )
+        need_camera_render = bool(regular_camera_render or stage_screenshot_due)
         if viewer is not None and need_camera_render and (
             args.draw_ik_target or args.draw_camera_axes or args.draw_scripted_trajectory
         ):
@@ -4643,6 +6236,8 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
             dc.monitor_base_door_collision(gym, step, st)
             if door_twin_dump_due:
                 maybe_dump_door_twin_keyframe_images(gym, sim, st, step)
+            if stage_screenshot_due:
+                save_stage_screenshot(gym, sim, st, step)
             if st.dp_recorder is not None:
                 frame_recorded = dc.record_float_dp_frame(
                     gym,
@@ -4663,7 +6258,12 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
             st.prev_yaw = float(st.traj.get("yaw", st.yaw_start))
 
         if viewer is not None:
-            if args.draw_ik_target or args.draw_camera_axes or args.draw_scripted_trajectory:
+            if (
+                args.draw_ik_target
+                or args.draw_camera_axes
+                or args.draw_scripted_trajectory
+                or bool(getattr(args, "dp3_draw_point_cloud", False))
+            ):
                 gym.clear_lines(viewer)
             for st in env_states[: min(4, len(env_states))]:
                 if args.draw_camera_axes:
@@ -4697,6 +6297,22 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                             color2=(0.0, 0.7, 0.2),
                         )
                         gymutil.draw_lines(goal_sphere, gym, viewer, st.env, target_pose)
+            if bool(getattr(args, "dp3_draw_point_cloud", False)):
+                selected_env = int(getattr(args, "dp3_point_cloud_env_id", 0))
+                if 0 <= selected_env < len(env_states):
+                    point_cloud = getattr(env_states[selected_env], "dp3_debug_point_cloud", None)
+                    if point_cloud is not None:
+                        draw_dp3_point_cloud(
+                            gym,
+                            viewer,
+                            env_states[selected_env],
+                            point_cloud,
+                            getattr(
+                                env_states[selected_env],
+                                "dp3_debug_point_cloud_mode",
+                                "single_front",
+                            ),
+                        )
             gym.draw_viewer(viewer, sim, True)
             gym.sync_frame_time(sim)
 
@@ -4706,6 +6322,13 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                 round(math.degrees(float(st.last_door_pos[0])), 1) if st.last_door_pos is not None and len(st.last_door_pos) else 0.0
                 for st in shown
             ]
+            handle_deg = [
+                round(math.degrees(float(st.last_door_pos[1])), 1)
+                if st.last_door_pos is not None and len(st.last_door_pos) > 1
+                else None
+                for st in shown
+            ]
+            handle_unlocked = [bool(st.door.open_stage) for st in shown]
             phases = [st.last_phase for st in shown]
             successes = sum(st.dp_record_success for st in env_states if st.dp_recorder is not None)
             tracik_note = ""
@@ -4716,10 +6339,22 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                     f" failures={controller.failure_count}"
                     f" projections={controller.projection_count}"
                     f" nearest_position={controller.nearest_position_count}"
+                    f" branch_guards={controller.branch_guard_count}"
+                    f" branch_rejects={controller.branch_reject_count}"
+                    f" branch_recoveries={controller.branch_recovery_count}"
+                    f" branch_position_fallbacks={controller.branch_position_fallback_count}"
+                    f" branch_position_active={controller.last_branch_position_fallback}"
+                    f" branch_candidates={controller.last_branch_candidates}"
+                    f" local_servo={controller.local_servo_count}"
+                    f" local_rejects={controller.local_servo_reject_count}"
+                    f" local_projections={controller.local_servo_projection_count}"
+                    f" local_alpha={controller.last_local_servo_alpha:.3f}"
                     f" projection_alpha={controller.last_projection_alpha:.3f}"
                     f" projection_ms={controller.last_projection_ms:.3f}"
                     f" initial_plan={controller.initial_plan_active}"
                     f" segment={controller.last_segment_duration * 1000.0:.1f}ms"
+                    f" q1_measured={controller.last_measured_q[0]:.3f}"
+                    f" q1_command={controller.last_solution[0]:.3f}"
                     f" ik_pos_err={first.ik_state.last_pos_error:.4f}"
                     f" tracik_error={controller.last_error or 'none'}"
                 )
@@ -4730,13 +6365,18 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                     )
                     if controller.last_candidate is not None:
                         tracik_note += (
+                            " tracik_seed_q="
+                            f"{np.round(controller.last_solve_seed, 3).tolist()}"
                             " tracik_last_q="
                             f"{np.round(controller.last_solution, 3).tolist()}"
                             " tracik_candidate_q="
                             f"{np.round(controller.last_candidate, 3).tolist()}"
                         )
+                    if controller.last_local_servo_reason:
+                        tracik_note += f" local_servo_reason={controller.last_local_servo_reason}"
             print(
                 f"[{step:04d}] phases={phases} door_deg={door_deg} "
+                f"handle_deg={handle_deg} handle_unlocked={handle_unlocked} "
                 f"record_success={successes}/{sum(st.dp_recorder is not None for st in env_states)}"
                 f"{tracik_note}",
                 flush=True,
@@ -4793,6 +6433,7 @@ def main():
             f"candidates={args.num_envs}",
             flush=True,
         )
+    auto_enable_pointcloud_checkpoint_cameras(args)
     create_tracik_solver_if_requested(args)
     seed = resolve_seed(args)
     print(f"ikpush seed={seed}", flush=True)

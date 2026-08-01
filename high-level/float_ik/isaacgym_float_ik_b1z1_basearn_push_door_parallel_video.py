@@ -42,6 +42,11 @@ try:
 except ImportError:
     a2w_ik = None
 
+try:
+    import isaacgym_float_ik_a2w_basearn_push_door_parallel as a2w_scripted
+except ImportError:
+    a2w_scripted = None
+
 base_ik = dc.base_ik
 gymapi = dc.gymapi
 gymutil = dc.gymutil
@@ -832,6 +837,12 @@ def parse_args():
                 "help": "Comma-separated extra door asset names to skip during bulk door selection.",
             },
             {
+                "name": "--door_include_names",
+                "type": str,
+                "default": "",
+                "help": "Optional comma-separated allowlist used only by this video script.",
+            },
+            {
                 "name": "--allow_unsafe_door_assets",
                 "action": "store_true",
                 "help": "Allow known unsafe door assets that may crash Isaac Gym mesh cooking.",
@@ -858,7 +869,7 @@ def parse_args():
             {
                 "name": "--robot_y_alignment",
                 "type": str,
-                "default": "auto",
+                "default": "handle",
                 "help": "How to place the robot in Y relative to each door: auto, handle, door_center, or door_y. Auto uses an asset's explicit handle alignment when available, otherwise centers generated rec_ doors and keeps legacy doors on door_y.",
             },
             {"name": "--robot_z", "type": float, "default": 0.60},
@@ -877,7 +888,7 @@ def parse_args():
             {
                 "name": "--a2w_robot_z",
                 "type": float,
-                "default": 0.60,
+                "default": 0.50,
                 "help": "Default base height for --robot_body a2w_z1 when --robot_z is not explicitly set.",
             },
             {
@@ -901,7 +912,7 @@ def parse_args():
             {"name": "--robot_yaw", "type": float, "default": math.pi},
             {"name": "--robot_front_offset", "type": float, "default": 0.55},
             {"name": "--robot_rear_offset", "type": float, "default": 0.65},
-            {"name": "--stop_distance", "type": float, "default": 0.25},
+            {"name": "--stop_distance", "type": float, "default": 0.15},
             {"name": "--entrance_robot_start_clearance", "type": float, "default": 1.0},
             {"name": "--entrance_robot_stop_clearance", "type": float, "default": 0.20},
             {"name": "--push_base_distance", "type": float, "default": 0.35},
@@ -935,11 +946,14 @@ def parse_args():
             },
             {"name": "--pregrasp_offset", "type": float, "default": 0.15},
             {"name": "--grasp_offset", "type": float, "default": 0.0},
-            {"name": "--grasp_x_offset", "type": float, "default": -0.03},
+            {"name": "--grasp_x_offset", "type": float, "default": -0.015},
             {"name": "--grasp_z_offset", "type": float, "default": -0.03},
+            {"name": "--wc4_pregrasp_z_offset", "type": float, "default": 0.0},
+            {"name": "--wc4_grasp_z_offset", "type": float, "default": 0.0},
             {"name": "--handle_rotate_right_distance", "type": float, "default": 0.03},
             {"name": "--handle_rotate_down_distance", "type": float, "default": 0.03},
             {"name": "--handle_rotate_angle", "type": float, "default": 1.05},
+            {"name": "--handle_rotate_direction_sign", "type": float, "default": -1.0},
             {"name": "--door_push_distance", "type": float, "default": 1.10},
             {"name": "--no_ikpush_env_randomization", "action": "store_true"},
             {"name": "--ikpush_door_x_rand", "type": float, "default": 0.03},
@@ -985,7 +999,7 @@ def parse_args():
             {
                 "name": "--unidoor_style_push",
                 "action": "store_true",
-                "default": True,
+                "default": False,
                 "help": "During push, step from current EE along the handle push direction.",
             },
             {"name": "--no_unidoor_style_push", "dest": "unidoor_style_push", "action": "store_false"},
@@ -1108,6 +1122,12 @@ def parse_args():
             {"name": "--no_overview_video", "action": "store_true"},
             {"name": "--video_fps", "type": float, "default": 25.0},
             {"name": "--video_capture_stride", "type": int, "default": 2},
+            {
+                "name": "--video_capture_start_step",
+                "type": int,
+                "default": 0,
+                "help": "Do not encode viewer frames before this simulation step.",
+            },
             {"name": "--video_max_frames", "type": int, "default": -1},
             {"name": "--video_output_width", "type": int, "default": 0},
             {"name": "--video_output_height", "type": int, "default": 0},
@@ -1129,6 +1149,18 @@ def parse_args():
             {"name": "--no_video_colorful_walls", "action": "store_true"},
             {"name": "--video_wall_color_saturation", "type": float, "default": 0.62},
             {"name": "--video_wall_color_value", "type": float, "default": 0.88},
+            {
+                "name": "--video_randomize_asset_colors",
+                "action": "store_true",
+                "help": (
+                    "Assign one random shared color to the A2W base and Z1 arm in every environment. "
+                    "Door assets retain their original materials."
+                ),
+            },
+            {"name": "--video_asset_color_saturation_min", "type": float, "default": 0.42},
+            {"name": "--video_asset_color_saturation_max", "type": float, "default": 0.78},
+            {"name": "--video_asset_color_value_min", "type": float, "default": 0.68},
+            {"name": "--video_asset_color_value_max", "type": float, "default": 0.96},
             {"name": "--video_keep_debug", "action": "store_true"},
             {"name": "--video_keep_low_level_cameras", "action": "store_true"},
         ],
@@ -1148,7 +1180,7 @@ def parse_args():
     elif is_scout_robot_body_name(robot_body) and not robot_z_was_set:
         args.robot_z = float(getattr(args, "scout_robot_z", 0.22))
     elif is_a2w_robot_body_name(robot_body) and not robot_z_was_set:
-        args.robot_z = float(getattr(args, "a2w_robot_z", 0.60))
+        args.robot_z = float(getattr(args, "a2w_robot_z", 0.50))
     elif is_g1_robot_body(args) and not robot_z_was_set:
         args.robot_z = float(getattr(args, "g1_robot_z", 0.80))
     door_prefer_was_set = any(
@@ -1239,6 +1271,10 @@ def parse_args():
         args.enable_front_camera = False
     if args.num_envs <= 0:
         raise ValueError("--num_envs must be positive.")
+    if not 0.0 <= args.video_asset_color_saturation_min <= args.video_asset_color_saturation_max <= 1.0:
+        raise ValueError("--video_asset_color_saturation_min/max must satisfy 0 <= min <= max <= 1.")
+    if not 0.0 <= args.video_asset_color_value_min <= args.video_asset_color_value_max <= 1.0:
+        raise ValueError("--video_asset_color_value_min/max must satisfy 0 <= min <= max <= 1.")
     if not args.dp_record_all_envs and (args.dp_record_env_id < 0 or args.dp_record_env_id >= args.num_envs):
         raise ValueError("--dp_record_env_id must be in [0, num_envs - 1].")
     if args.dp_policy_checkpoint and (args.dp_control_env_id < 0 or args.dp_control_env_id >= args.num_envs):
@@ -1403,6 +1439,52 @@ def colorful_wall_rgb(env_index, args):
     return colorsys.hsv_to_rgb(hue, saturation, value)
 
 
+def sample_video_asset_colors(args, env_index):
+    """Sample one reproducible robot color shared by the A2W base and Z1 arm."""
+    env_seed = seed_for_env(args, env_index)
+    rng = np.random.default_rng(np.random.SeedSequence([int(env_seed), 0xC010A]))
+    hue = float(rng.uniform(0.0, 1.0))
+    saturation_min = float(args.video_asset_color_saturation_min)
+    saturation_max = float(args.video_asset_color_saturation_max)
+    value_min = float(args.video_asset_color_value_min)
+    value_max = float(args.video_asset_color_value_max)
+
+    saturation = float(rng.uniform(saturation_min, saturation_max))
+    value = float(rng.uniform(value_min, value_max))
+    robot_rgb = tuple(float(channel) for channel in colorsys.hsv_to_rgb(hue, saturation, value))
+    return {"robot": robot_rgb}
+
+
+def set_actor_visual_color(gym, env, actor, rgb, body_indices=None):
+    if actor is None:
+        return
+    if body_indices is None:
+        body_indices = range(int(gym.get_actor_rigid_body_count(env, actor)))
+    color = gymapi.Vec3(float(rgb[0]), float(rgb[1]), float(rgb[2]))
+    for body_index in body_indices:
+        gym.set_rigid_body_color(env, actor, int(body_index), gymapi.MESH_VISUAL, color)
+
+
+def apply_video_asset_colors(gym, env, actor_handles, arm_actor, door_actor, door, env_args, env_index):
+    if not bool(getattr(env_args, "video_randomize_asset_colors", False)):
+        return
+    colors = getattr(env_args, "video_asset_colors", None)
+    if not colors:
+        colors = sample_video_asset_colors(env_args, env_index)
+
+    base_actor = next((actor for actor in actor_handles if actor != arm_actor), None)
+    robot_rgb = colors["robot"]
+    set_actor_visual_color(gym, env, base_actor, robot_rgb)
+    set_actor_visual_color(gym, env, arm_actor, robot_rgb)
+    if int(env_index) < 4:
+        rounded = [round(float(channel), 3) for channel in robot_rgb]
+        print(
+            f"video_robot_color env={env_index} door={door.spec.get('name')} "
+            f"shared_a2w_z1_rgb={rounded} door_material=original",
+            flush=True,
+        )
+
+
 def make_env_args(args, env_index):
     env_args = SimpleNamespace(**vars(args))
     env_seed = seed_for_env(args, env_index)
@@ -1488,6 +1570,13 @@ def make_env_args(args, env_index):
         env_args.door_wall_color_b = float(wall_b)
         sampled["door_wall_color_rgb"] = [float(wall_r), float(wall_g), float(wall_b)]
 
+    if bool(getattr(args, "video_randomize_asset_colors", False)):
+        env_args.video_asset_colors = sample_video_asset_colors(args, env_index)
+        sampled["video_asset_colors"] = {
+            name: [float(channel) for channel in rgb]
+            for name, rgb in env_args.video_asset_colors.items()
+        }
+
     depth_noise_selected = dc.configure_depth_noise_for_env(env_args)
     sampled["depth_noise_selection_mode"] = str(env_args.depth_noise_selection_mode)
     sampled["depth_noise_env_probability"] = float(env_args.depth_noise_env_probability)
@@ -1528,6 +1617,45 @@ def normalize_video_door_layout(door, args, env_index=0):
             flush=True,
         )
     return door
+
+
+def apply_video_door_allowlist(args):
+    include_text = str(getattr(args, "door_include_names", "") or "").strip()
+    if not include_text:
+        return
+    include_names = [name.strip() for name in include_text.split(",") if name.strip()]
+    include_set = set(include_names)
+
+    cfg_path = Path(args.door_cfg).expanduser()
+    if not cfg_path.is_absolute():
+        cfg_path = (REPO_ROOT / cfg_path).resolve()
+    with cfg_path.open("r", encoding="utf-8") as stream:
+        cfg = dc.yaml.safe_load(stream)
+    asset_cfg = cfg["env"]["asset"]
+    train_assets = asset_cfg["trainAssets"]
+    load_block = asset_cfg.get("load_block") or next(iter(train_assets))
+    configured_names = {
+        str(spec.get("name", ""))
+        for spec in train_assets[load_block].values()
+    }
+    missing = [name for name in include_names if name not in configured_names]
+    if missing:
+        raise ValueError(f"--door_include_names contains names absent from {cfg_path}: {missing}")
+
+    existing_excludes = {
+        name.strip()
+        for name in str(getattr(args, "door_exclude_names", "") or "").split(",")
+        if name.strip()
+    }
+    excluded = (configured_names - include_set) | existing_excludes
+    args.door_exclude_names = ",".join(sorted(excluded))
+    args.door_selection = "all"
+    args.door_max_unique_assets = len(include_names)
+    print(
+        f"Video door allowlist: {len(include_names)} validated assets; "
+        f"env0 preferred={getattr(args, 'door_prefer_name', '')!r}",
+        flush=True,
+    )
 
 
 set_robot_base_pose = dc.set_robot_base_pose
@@ -1878,7 +2006,7 @@ update_arm_ik_targets = dc.update_arm_ik_targets
 refresh_current_ee_pose = dc.refresh_current_ee_pose
 
 
-def trajectory_targets(
+def _legacy_video_trajectory_targets(
     step,
     args,
     door,
@@ -2169,6 +2297,48 @@ def trajectory_targets(
         else base_ik.normalize_quat(np.asarray(target_quat, dtype=np.float32)).astype(np.float32)
     )
     return phase, base_xy, yaw, target_pos, target_quat, gripper, handle_goal
+
+
+def trajectory_targets(
+    step,
+    args,
+    door,
+    gym,
+    env,
+    door_actor,
+    ik_state,
+    base_start,
+    base_stop,
+    base_push,
+    yaw_start,
+    yaw_push,
+    traj,
+):
+    """Use the current A2W scripted trajectory instead of a video-local copy."""
+    if a2w_scripted is None:
+        raise RuntimeError(
+            "The video recorder requires "
+            "isaacgym_float_ik_a2w_basearn_push_door_parallel.py so both scripts use the same trajectory."
+        )
+    # The overview recorder does not run a DoorTwin skill program with a
+    # separate traverse phase, so the push target is also the final base target.
+    return a2w_scripted.trajectory_targets(
+        step,
+        args,
+        door,
+        gym,
+        env,
+        door_actor,
+        ik_state,
+        base_start,
+        base_stop,
+        base_push,
+        base_push,
+        yaw_start,
+        yaw_push,
+        yaw_push,
+        traj,
+    )
 
 
 setup_viewer = dc.setup_viewer
@@ -2480,7 +2650,6 @@ def create_parallel_env_states(
         door = clone_door_runtime(door_template)
         env_args = make_env_args(args, env_index)
         normalize_video_door_layout(door, env_args, env_index=env_index)
-        configure_visual_entrance_placement(env_args, door, env_index)
         env, arm_actor, actor_handles, door_actor, _ = create_parallel_env_actors(
             gym,
             sim,
@@ -2492,6 +2661,16 @@ def create_parallel_env_states(
             env_args,
             env_index,
             envs_per_row,
+        )
+        apply_video_asset_colors(
+            gym,
+            env,
+            actor_handles,
+            arm_actor,
+            door_actor,
+            door,
+            env_args,
+            env_index,
         )
         created.append((env_index, env_args, env, arm_actor, actor_handles, door, door_actor))
 
@@ -2710,6 +2889,8 @@ class OverviewVideoRecorder:
 
     def capture(self, step):
         if not self.enabled:
+            return
+        if int(step) < max(0, int(getattr(self.args, "video_capture_start_step", 0))):
             return
         max_frames = int(getattr(self.args, "video_max_frames", -1))
         if max_frames >= 0 and self.frame_count >= max_frames:
@@ -3068,6 +3249,7 @@ def main():
 
     with tempfile.TemporaryDirectory(prefix="float_ik_video_assets_") as temp_dir:
         base_asset, arm_asset = load_video_robot_assets(gym, sim, args, Path(temp_dir))
+        apply_video_door_allowlist(args)
         door_templates = load_door_assets(gym, sim, args)
         if base_asset is not None:
             base_ik.print_collision_summary(gym, base_asset, "base visual actor", verbose=args.print_collision_summary)

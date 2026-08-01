@@ -75,6 +75,11 @@ The current convention is:
 The examples avoid duplicated fields such as `PushDoor.base_distance` and
 `TraverseDoor.base_v`, so the base command has one source of truth.
 
+For a complete push-and-traverse program, `MoveTo(stage="push").distance` plus
+`MoveTo(stage="traverse").distance` must be at least `1.94 m`. Runtime target
+generation also enforces this floor and may extend it further to satisfy
+`door plane + robot_rear_offset + door_pass_clearance`.
+
 `ProgramPatch` restricts what the optimizer/Agent may edit. It clamps changes to
 an allowlist of continuous parameters, such as grasp offsets, rotate angle,
 push distance, and base distances. The first version intentionally does not let
@@ -98,6 +103,12 @@ Important metrics include:
 - `camera_available`
 - `handle_unlocked`
 - keyframe artifact paths
+
+`body_passed` is a geometric result, not a check that the base reached the
+authored traverse target. It becomes true only after the robot center has
+crossed the closed-door plane by at least `robot_rear_offset`, so the tail has
+actually cleared the plane. Reports expose `pass_plane_progress_m` and
+`pass_plane_tail_margin_m` for auditing.
 
 Failure categories include:
 
@@ -389,7 +400,9 @@ Implemented so far:
 - Some door metadata is still hand-authored when generated assets do not provide
   reliable bounding boxes or handle goals.
 - VLM/Agent repair has been validated manually through Codex-in-the-loop
-  debugging, but it is not yet a fully automated service.
+  debugging. The reproducible benchmark observer under `benchmark/` now
+  automates bounded JSON repair through a fixed OpenAI Responses API model;
+  the lightweight core `orchestrator.py` remains heuristic-only.
 - Collision success semantics need task-aware policy: strict geometry checks are
   useful diagnostics, but can reject valid traversal behavior.
 - The Agent should inspect `handle_closeup` images for grasp quality; scalar
@@ -418,23 +431,14 @@ Concrete examples:
   grasp z by 1 cm after visual inspection, and added `handle_closeup` for grasp
   quality checks.
 
-This is the intended DoorTwin repair behavior; it is currently executed manually
-by Codex rather than by a persistent automated service.
+This is the intended DoorTwin repair behavior. It was first validated manually
+with Codex; the runtime below now codifies its retrieval, tools, rollback and
+memory protocol while retaining a no-API-key Codex file bridge.
 
-## Automation Next
+## Tool-driven Agent Runtime
 
-The next engineering step is to turn the proven manual loop into a repeatable
-orchestrator:
-
-1. Automatically parse generated-door metadata from URDF and asset exports.
-2. Produce an initial skill program by matching against existing examples.
-3. Run N rollouts.
-4. Summarize logs and keyframes for the Agent/VLM observer.
-5. Ask the Agent/VLM for a bounded JSON patch and diagnosis.
-6. Run a small local optimizer over continuous parameters.
-7. Stop when success rate or expert trajectory count reaches the target.
-
-The automated Agent should treat the examples and debug docs as prior experience:
+The production runtime is now implemented in `agent_runtime.py` and launched by
+`run_agent.py`. It treats the examples and debug docs as explicit prior experience:
 
 - wc4: scripted reference and smooth-command baseline.
 - 99692809960048: generated-door adaptation and frame-collision repair.
@@ -443,3 +447,111 @@ The automated Agent should treat the examples and debug docs as prior experience
   user visual feedback.
 - glass_door: fixed-handle vertical grasp, push/pull sign correction, and
   realistic hinge resistance tuning.
+
+The deterministic catalog is `experience/catalog.yaml`. Retrieval combines
+mechanism, push/pull, hinge, handle mobility/orientation, dimensions, tags, and
+failure text. A formal benchmark freezes `prior_snapshot.json`, excludes the
+target door, and prevents run-local memories from entering retrieval.
+
+For paired ablations, candidate initialization is shared and ordered as follows:
+
+```text
+public URDF + handle bbox
+→ deterministic rule_based_candidate()
+→ one retrieval-augmented bounded residual patch
+→ shared immutable Ours initial candidate
+```
+
+`Rule-based` evaluates the deterministic base directly. `Ours w/o Simulation
+Rollout` evaluates the shared residual candidate directly. Log and Full agents
+continue from that exact same residual-candidate hash and may repair it using
+development rollout feedback. The initial VLM is not allowed to independently
+regenerate the complete candidate or overwrite uncertain Rule-based fields.
+
+Each session exposes bounded tools rather than forcing one patch per round:
+
+```text
+read_guidance, find_experiences, read_experience, inspect_candidate,
+run_static_validation, run_physics_probe, run_rollout, inspect_rollout,
+inspect_images, apply_candidate_patch, compare_candidates, select_best, finish
+```
+
+`apply_candidate_patch` may use a previously retrieved `base_experience_id` to
+copy a validated SkillProgram, then apply allowlisted asset/skill changes. It
+cannot edit Python, URDF, mesh files, or arbitrary config fields.
+
+Validation is gated in three levels:
+
+1. `static_validation.json`: files, URDF semantics, joint ranges, handle goal,
+   ground clearance, primitive order and parameter bounds.
+2. `probe_summary.json`: 100-step load stability, hinge torque probe, handle
+   unlock behavior and pre-push grasp/EE tracking reachability.
+3. `rollout_summary.json`: four fixed development seeds with phase metrics and,
+   for visual sessions, fixed-view montages.
+
+For visual sessions, `inspect_images` now returns both deterministic montage
+paths and `structured_visual_diagnostics`. The diagnostic block converts the
+montage-aligned rollout trace into bounded signals such as gripper above/below
+the handle, lateral gripper offset, pre-unlock versus post-unlock base
+collision, blocking versus non-blocking collision, and candidate patch hints for
+grasp `z`, grasp `y`/handle bias, pregrasp direction, base push speed, and
+rotate-handle timing. These hints are not applied automatically; the Agent must
+still choose an allowlisted `apply_candidate_patch` action, so rollback and
+candidate comparison remain the source of truth.
+
+Every evaluated candidate is stored in `candidate_graph.json`. The comparison
+order is task success, traverse, open, unlock, grasp, collision safety, shared
+grasp-z magnitude, door and handle motion, EE tracking error, then process
+failures. A regression is marked
+`rejected_regression`, the current pointer rolls back immediately, and future
+patches branch from the historical best. Hidden evaluation always uses
+`best_candidate/`, never the final attempted patch.
+
+### Grasp-height invariant and real-robot preference
+
+`MoveEEToHandle.pregrasp_offset.z` and `grasp_offset.z` must be equal. This
+prevents the approach segment from introducing an unintended vertical motion
+immediately before contact. `ProgramPatch` synchronizes the two values and
+static validation rejects a mismatched candidate.
+
+Candidate selection is lexicographic: task success, traversal, opening,
+unlocking, grasping, and collision safety remain higher priority. When those
+discrete outcomes are equal, the Agent prefers the shared z offset with the
+smallest absolute value (closest to zero). The intent is to keep the gripper
+centered on the handle instead of unnecessarily low, reducing loose grasps when
+transferring the skill to the real robot. For example, if `-0.04`, `-0.02`, and
+`-0.01` have the same validated success, select `-0.01`.
+
+Normal runs write accepted and rejected repair records. A candidate is promoted
+to `experience/learned/` only after static/asset validation and the configured
+hidden threshold. Benchmark runs keep memory pending until the full experiment
+ends.
+
+### Run with the current Codex session (no API key)
+
+```bash
+cd /home/sivan/whole_body/visual_whole_body
+
+python high-level/float_ik/door_twin/run_agent.py \
+  --manifest high-level/float_ik/door_twin/experiments/fresh1_codex_agent_smoke.yaml \
+  --door DOOR_ID_FROM_MANIFEST \
+  --candidate_index 0 \
+  --run_root high-level/float_ik/door_twin/experiments/runs/tool_agent_smoke \
+  --manual_exchange_dir high-level/float_ik/door_twin/experiments/runs/tool_agent_smoke/exchange \
+  --stream_output
+```
+
+The process atomically creates `request_NNNN.json` and waits for the matching
+`response_NNNN.json`. The response is exactly one tool action:
+
+```json
+{
+  "action": "find_experiences",
+  "arguments": {"query": "movable horizontal lever push door", "limit": 3},
+  "diagnostics": "Retrieve a validated skill before generating the candidate."
+}
+```
+
+Session state, candidate files and request fingerprints are resumable. Restarting
+the same command reuses the persisted turn rather than repeating simulator or
+Agent calls.

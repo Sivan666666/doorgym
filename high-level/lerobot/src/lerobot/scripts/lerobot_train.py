@@ -14,9 +14,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import dataclasses
+import json
 import logging
+import os
 import time
 from contextlib import nullcontext
+from pathlib import Path
 from pprint import pformat
 from typing import Any
 
@@ -56,6 +59,57 @@ from lerobot.utils.utils import (
 )
 
 
+def validate_plucker_dataset_intrinsics(policy_cfg, dataset_cfg) -> None:
+    """Fail fast when calibrated images and Plücker rays use different intrinsics."""
+    if not bool(getattr(policy_cfg, "plucker_conditioning", False)):
+        return
+    root = getattr(dataset_cfg, "root", None)
+    repo_id = getattr(dataset_cfg, "repo_id", None)
+    if not root or not isinstance(repo_id, str):
+        if getattr(policy_cfg, "plucker_intrinsics_mode", "legacy_shared_fov") == "per_camera":
+            raise ValueError("Per-camera Plücker training requires a local dataset sidecar with calibrated K.")
+        return
+    root_path = Path(root).expanduser()
+    candidates = [root_path / repo_id / "door_dp_feature_names.json", root_path / "door_dp_feature_names.json"]
+    sidecar_path = next((path for path in candidates if path.is_file()), None)
+    if sidecar_path is None:
+        if getattr(policy_cfg, "plucker_intrinsics_mode", "legacy_shared_fov") == "per_camera":
+            raise FileNotFoundError(
+                "Per-camera Plücker training could not find door_dp_feature_names.json; checked "
+                + ", ".join(str(path) for path in candidates)
+            )
+        return
+    with sidecar_path.open("r", encoding="utf-8") as stream:
+        sidecar = json.load(stream)
+    data_mode = str(sidecar.get("camera_intrinsics_mode", "legacy"))
+    policy_mode = str(getattr(policy_cfg, "plucker_intrinsics_mode", "legacy_shared_fov"))
+    if data_mode == "real_k_remap" and policy_mode != "per_camera":
+        raise ValueError(
+            "Dataset images use camera_intrinsics_mode=real_k_remap, but Plücker rays use "
+            f"{policy_mode!r}. Set --policy.plucker_intrinsics_mode=per_camera and provide both K matrices."
+        )
+    if policy_mode != "per_camera":
+        return
+    if data_mode != "real_k_remap":
+        raise ValueError(
+            f"Per-camera Plücker was requested, but dataset camera_intrinsics_mode={data_mode!r}."
+        )
+    camera_intrinsics = sidecar.get("camera_intrinsics") or {}
+    mismatches = []
+    for camera_name in ("front", "wrist"):
+        actual = camera_intrinsics.get(camera_name) or {}
+        for field in ("fx", "fy", "cx", "cy"):
+            expected = float(getattr(policy_cfg, f"plucker_{camera_name}_{field}"))
+            observed = actual.get(field)
+            if observed is None or abs(float(observed) - expected) > 1.0e-6:
+                mismatches.append(
+                    f"{camera_name}.{field}: policy={expected}, dataset={observed}"
+                )
+    if mismatches:
+        raise ValueError("Plücker/data camera intrinsics mismatch: " + "; ".join(mismatches))
+    logging.info("Validated per-camera Plücker K against %s: %s", sidecar_path, camera_intrinsics)
+
+
 def update_policy(
     train_metrics: MetricsTracker,
     policy: PreTrainedPolicy,
@@ -63,6 +117,7 @@ def update_policy(
     optimizer: Optimizer,
     grad_clip_norm: float,
     accelerator: Accelerator,
+    separate_auxiliary_grad_clip: bool = False,
     lr_scheduler=None,
     lock=None,
     rabc_weights_provider=None,
@@ -119,10 +174,41 @@ def update_policy(
         # TODO(rcadene): policy.unnormalize_outputs(out_dict)
 
     # Use accelerator's backward method
-    accelerator.backward(loss)
+    if loss.requires_grad:
+        accelerator.backward(loss)
+    unwrapped_policy = accelerator.unwrap_model(policy, keep_fp32_wrapper=True)
+    separate_auxiliary_loss = getattr(unwrapped_policy, "_last_separate_auxiliary_loss", None)
+    if separate_auxiliary_loss is not None:
+        accelerator.backward(separate_auxiliary_loss)
 
     # Clip gradients if specified
-    if grad_clip_norm > 0:
+    if grad_clip_norm > 0 and separate_auxiliary_grad_clip:
+        auxiliary_name_fragments = (
+            "interaction_state_head.",
+            "interaction_state_chunk_head.",
+            "end_signal_head.",
+        )
+        main_parameters = []
+        auxiliary_parameters = []
+        for name, parameter in policy.named_parameters():
+            if not parameter.requires_grad or parameter.grad is None:
+                continue
+            target = (
+                auxiliary_parameters
+                if any(fragment in name for fragment in auxiliary_name_fragments)
+                else main_parameters
+            )
+            target.append(parameter)
+        accelerator.unscale_gradients(optimizer)
+        grad_norm = torch.nn.utils.clip_grad_norm_(
+            main_parameters, grad_clip_norm, error_if_nonfinite=False
+        )
+        auxiliary_grad_norm = torch.nn.utils.clip_grad_norm_(
+            auxiliary_parameters, grad_clip_norm, error_if_nonfinite=False
+        )
+        output_dict["main_grad_norm"] = float(grad_norm.detach().cpu())
+        output_dict["auxiliary_grad_norm"] = float(auxiliary_grad_norm.detach().cpu())
+    elif grad_clip_norm > 0:
         grad_norm = accelerator.clip_grad_norm_(policy.parameters(), grad_clip_norm)
     else:
         grad_norm = torch.nn.utils.clip_grad_norm_(
@@ -169,6 +255,15 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
     """
     cfg.validate()
 
+    if cfg.strict_determinism:
+        # Must be configured before the first CUDA BLAS operation.
+        os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+        torch.use_deterministic_algorithms(True)
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cudnn.allow_tf32 = False
+
     # Create Accelerator if not provided
     # It will automatically detect if running in distributed mode or single-process mode
     # We set step_scheduler_with_optimizer=False to prevent accelerate from adjusting the lr_scheduler steps based on the num_processes
@@ -209,8 +304,11 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
 
     # Use accelerator's device
     device = accelerator.device
-    torch.backends.cudnn.benchmark = True
-    torch.backends.cuda.matmul.allow_tf32 = True
+    if not cfg.strict_determinism:
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cuda.matmul.allow_tf32 = True
+    else:
+        logging.info("Strict deterministic training is enabled.")
 
     # Dataset loading synchronization: main process downloads first to avoid race conditions
     if is_main_process:
@@ -238,6 +336,7 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
         ds_meta=dataset.meta,
         rename_map=cfg.rename_map,
     )
+    validate_plucker_dataset_intrinsics(policy.config, cfg.dataset)
 
     if cfg.peft is not None:
         logging.info("Using PEFT! Wrapping model.")
@@ -289,6 +388,13 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
     if is_main_process:
         logging.info("Creating optimizer and scheduler")
     optimizer, lr_scheduler = make_optimizer_and_scheduler(cfg, policy)
+    if cfg.optimizer_foreach is not None:
+        if isinstance(optimizer, dict):
+            raise ValueError("optimizer_foreach does not support dictionary optimizers.")
+        optimizer.defaults["foreach"] = bool(cfg.optimizer_foreach)
+        for parameter_group in optimizer.param_groups:
+            parameter_group["foreach"] = bool(cfg.optimizer_foreach)
+        logging.info("Using optimizer foreach=%s", bool(cfg.optimizer_foreach))
 
     # Load precomputed SARM progress for RA-BC if enabled
     # Generate progress using: src/lerobot/policies/sarm/compute_rabc_weights.py
@@ -339,6 +445,11 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
         logging.info(f"{num_total_params=} ({format_big_number(num_total_params)})")
 
     # create dataloader for offline training
+    dataloader_generator = None
+    if cfg.dataloader_seed is not None:
+        dataloader_generator = torch.Generator()
+        dataloader_generator.manual_seed(int(cfg.dataloader_seed))
+        logging.info("Using isolated DataLoader RNG seed=%d", int(cfg.dataloader_seed))
     sampler = None
     shuffle = True
     drop_n_first_frames = 0
@@ -354,7 +465,7 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
                 recovery_threshold=cfg.recovery_sampling_threshold,
                 drop_n_first_frames=drop_n_first_frames,
                 drop_n_last_frames=drop_n_last_frames,
-                seed=cfg.seed,
+                seed=cfg.dataloader_seed if cfg.dataloader_seed is not None else cfg.seed,
             )
             if sampler is None:
                 logging.warning("Recovery sampler disabled: %s", recovery_sampler_stats)
@@ -372,7 +483,7 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
                 keyframe_threshold=cfg.keyframe_sampling_threshold,
                 drop_n_first_frames=drop_n_first_frames,
                 drop_n_last_frames=drop_n_last_frames,
-                seed=cfg.seed,
+                seed=cfg.dataloader_seed if cfg.dataloader_seed is not None else cfg.seed,
             )
             if sampler is None:
                 logging.warning("Keyframe-window sampler disabled: %s", keyframe_sampler_stats)
@@ -388,6 +499,7 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
             episode_indices_to_use=dataset.episodes,
             drop_n_last_frames=cfg.policy.drop_n_last_frames,
             shuffle=True,
+            generator=dataloader_generator,
         )
 
     dataloader = torch.utils.data.DataLoader(
@@ -399,6 +511,7 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
         pin_memory=device.type == "cuda",
         drop_last=False,
         prefetch_factor=2 if cfg.num_workers > 0 else None,
+        generator=dataloader_generator,
     )
 
     # Prepare everything with accelerator
@@ -407,6 +520,15 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
         policy, optimizer, dataloader, lr_scheduler
     )
     dl_iter = cycle(dataloader)
+
+    # In strict ablations, model construction, Accelerate wrapping and worker
+    # setup may consume different amounts of global RNG when an auxiliary head
+    # is present. The sampler/workers already own the isolated generator above,
+    # so reset only the model stochastic stream here. This gives matched ACT
+    # dropout masks without changing sample order.
+    if cfg.dataloader_seed is not None and cfg.seed is not None:
+        set_seed(cfg.seed, accelerator=accelerator)
+        logging.info("Reset model-training RNG after DataLoader/Accelerate setup: seed=%d", int(cfg.seed))
 
     policy.train()
 
@@ -445,6 +567,9 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
     for _ in range(step, cfg.steps):
         start_time = time.perf_counter()
         batch = next(dl_iter)
+        if cfg.dataloader_seed is not None and step < 2 and "index" in batch:
+            batch_indices = batch["index"].reshape(-1).tolist()
+            logging.info("Determinism audit step=%d batch_indices=%s", step + 1, batch_indices)
         batch = preprocessor(batch)
         train_tracker.dataloading_s = time.perf_counter() - start_time
 
@@ -454,10 +579,19 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
             batch,
             optimizer,
             cfg.optimizer.grad_clip_norm,
+            separate_auxiliary_grad_clip=cfg.separate_auxiliary_grad_clip,
             accelerator=accelerator,
             lr_scheduler=lr_scheduler,
             rabc_weights_provider=rabc_weights,
         )
+        if cfg.dataloader_seed is not None and step < 2:
+            logging.info(
+                "Determinism audit step=%d motion_l1=%.12f main_grad_norm=%.12f aux_grad_norm=%s",
+                step + 1,
+                float(output_dict.get("l1_loss", float("nan"))),
+                float(output_dict.get("main_grad_norm", float("nan"))),
+                output_dict.get("auxiliary_grad_norm"),
+            )
 
         # Note: eval and checkpoint happens *after* the `step`th training update has completed, so we
         # increment `step` here.

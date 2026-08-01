@@ -29,6 +29,7 @@ class EpisodeAwareSampler:
         drop_n_first_frames: int = 0,
         drop_n_last_frames: int = 0,
         shuffle: bool = False,
+        generator: torch.Generator | None = None,
     ):
         """Sampler that optionally incorporates episode boundary information.
 
@@ -50,10 +51,11 @@ class EpisodeAwareSampler:
 
         self.indices = indices
         self.shuffle = shuffle
+        self.generator = generator
 
     def __iter__(self) -> Iterator[int]:
         if self.shuffle:
-            for i in torch.randperm(len(self.indices)):
+            for i in torch.randperm(len(self.indices), generator=self.generator):
                 yield self.indices[i]
         else:
             for i in self.indices:

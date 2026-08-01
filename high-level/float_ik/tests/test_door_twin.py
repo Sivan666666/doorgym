@@ -265,6 +265,87 @@ def test_rollout_summary_indexes_expert_trajectory(tmp_path):
     ]
 
 
+def test_rollout_tracker_supports_zero_rest_negative_handle_unlock():
+    tracker = RolloutTracker(
+        env_id=0,
+        door_name="negative_handle_door",
+        handle_lower=-0.55,
+        handle_rest_angle=0.0,
+        handle_unlock_direction_sign=-1.0,
+        handle_unlock_threshold=0.55,
+        save_trace=True,
+    )
+    common = {
+        "phase": "rotate_handle",
+        "handle_goal": None,
+        "target_pos": None,
+        "ee_pos": None,
+        "ee_tracking_error": 0.0,
+        "base_xy": [0.0, 0.0],
+        "base_collision": False,
+        "camera_available": True,
+    }
+
+    tracker.update(step=0, door_pos=[0.0, 0.0], **common)
+    assert tracker.handle_unlocked is False
+    assert tracker.trace[-1]["handle_unlock_progress_rad"] == pytest.approx(0.0)
+
+    tracker.update(step=25, door_pos=[0.0, -0.55], **common)
+    assert tracker.handle_unlocked is True
+    assert tracker.first_handle_unlock_step == 25
+    assert tracker.trace[-1]["handle_angle_rad"] == pytest.approx(-0.55)
+    assert tracker.trace[-1]["handle_unlock_progress_rad"] == pytest.approx(0.55)
+
+
+def test_rollout_tracker_reports_reset_to_open_and_traverse_times(tmp_path):
+    tracker = RolloutTracker(
+        env_id=0,
+        door_name="timed_door",
+        pass_open_angle_deg=80.0,
+        door_motion_sign=-1.0,
+        require_traverse=True,
+        pass_plane_point=[1.0, 0.0],
+        pass_direction=[1.0, 0.0],
+        robot_rear_offset=0.2,
+        sim_dt=0.1,
+    )
+
+    def update(step, phase, door_deg, base_x):
+        tracker.update(
+            step=step,
+            phase=phase,
+            door_pos=[-np.deg2rad(door_deg), 0.0],
+            handle_goal=None,
+            target_pos=None,
+            ee_pos=None,
+            ee_tracking_error=0.0,
+            base_xy=[base_x, 0.0],
+            base_collision=False,
+            camera_available=True,
+        )
+
+    update(0, "walk", 0.0, 0.0)
+    update(9, "walk", 0.0, 0.8)
+    update(10, "initial_hold", 0.0, 0.8)
+    update(20, "push_door", 81.0, 1.0)
+    update(25, "traverse_door", 85.0, 1.2)
+
+    report = tracker.finalize()
+    timing = report.metrics["timing_s"]
+    assert report.success is True
+    assert timing["approach"] == pytest.approx(1.0)
+    assert timing["door_target_exceeded"] == pytest.approx(2.1)
+    assert timing["body_passed"] == pytest.approx(2.6)
+    assert timing["manipulation_to_door_target"] == pytest.approx(1.1)
+    assert timing["door_target_to_body_pass"] == pytest.approx(0.5)
+    assert timing["total_reset_to_body_pass"] == pytest.approx(2.6)
+
+    summary = write_rollout_reports([tracker], tmp_path)
+    total = summary["successful_timing_summary_s"]["total_reset_to_body_pass"]
+    assert total["count"] == 1
+    assert total["mean"] == pytest.approx(2.6)
+
+
 def test_failure_classification_keeps_late_collision_secondary():
     tracker = RolloutTracker(
         env_id=0,

@@ -1,0 +1,240 @@
+schema_version: door_twin_agent_benchmark_v1
+name: door_twin_random10_20260723_rulebase_residual_v1
+base_door_cfg: /home/ps/workspace/txc/doorgym/high-level/data/cfg/b1z1_opendoor.yaml
+runner_script: /home/ps/workspace/txc/doorgym/high-level/float_ik/isaacgym_float_ik_a2w_basearn_push_door_parallel.py
+output_root: /home/ps/workspace/txc/doorgym/high-level/float_ik/door_twin/experiments/runs/random10_20260723
+python_executable: /home/ps/miniconda3/envs/txc_vbc/bin/python
+candidate_repeats: 1
+max_repair_rounds: 5
+development_seeds:
+- 41001
+- 41002
+- 41003
+- 41004
+- 41005
+- 41006
+- 41007
+- 41008
+- 41009
+- 41010
+- 41011
+- 41012
+- 41013
+- 41014
+- 41015
+- 41016
+heldout_seeds:
+- 42001
+- 42002
+- 42003
+- 42004
+- 42005
+- 42006
+- 42007
+- 42008
+- 42009
+- 42010
+- 42011
+- 42012
+- 42013
+- 42014
+- 42015
+- 42016
+generation_success_min: 12
+asset_probe_seed: 43001
+asset_probe_steps: 300
+asset_probe_force: 20.0
+steps: 2405
+methods:
+- rule_based
+- without_simulation_rollout
+- without_visual_feedback
+- ours
+vlm:
+  model: gpt-5
+  temperature: 0.0
+  api_key_env: OPENAI_API_KEY
+  timeout_s: 180
+  max_retries: 3
+common_runner_args:
+- --headless
+- --rl_device
+- cuda:1
+- --sim_device
+- cuda:1
+- --graphics_device_id
+- '1'
+- --no_enable_depth_noise
+- --no_enable_depth_gaussian_blur
+- --no_show_seg
+doors:
+- id: '99655039960030'
+  door_name: '99655039960030'
+  tags:
+  - fresh
+  - aigc
+  - hinged_lever_push
+  hidden_ground_truth:
+    door_body_name: link_1
+    handle_body_name: link_2
+    door_dof_name: joint_1
+    handle_dof_name: joint_2
+    handle_goal_pos:
+    - -0.06329343615657625
+    - 0.0
+    - 0.05838530420399156
+    handle_goal_reference_type: generated_initial_candidate
+    handle_goal_verified: false
+- id: '99655049960018'
+  door_name: '99655049960018'
+  tags:
+  - fresh
+  - aigc
+  - hinged_lever_push
+  hidden_ground_truth:
+    door_body_name: link_1
+    handle_body_name: link_2
+    door_dof_name: joint_1
+    handle_dof_name: joint_2
+    handle_goal_pos:
+    - -0.06999266951045435
+    - 0.0
+    - 0.06336862409916227
+    handle_goal_reference_type: generated_initial_candidate
+    handle_goal_verified: false
+- id: '99655049960046'
+  door_name: '99655049960046'
+  tags:
+  - fresh
+  - aigc
+  - hinged_lever_push
+  hidden_ground_truth:
+    door_body_name: link_1
+    handle_body_name: link_2
+    door_dof_name: joint_1
+    handle_dof_name: joint_2
+    handle_goal_pos:
+    - -0.06095527472809188
+    - -0.0
+    - 0.05019322591787715
+    handle_goal_reference_type: generated_initial_candidate
+    handle_goal_verified: false
+- id: '99660019960022'
+  door_name: '99660019960022'
+  tags:
+  - fresh
+  - aigc
+  - hinged_lever_push
+  hidden_ground_truth:
+    door_body_name: link_1
+    handle_body_name: link_2
+    door_dof_name: joint_1
+    handle_dof_name: joint_2
+    handle_goal_pos:
+    - -0.05329850819056612
+    - -0.0
+    - 0.03975119784912902
+    handle_goal_reference_type: generated_initial_candidate
+    handle_goal_verified: false
+- id: '99665019960030'
+  door_name: '99665019960030'
+  tags:
+  - fresh
+  - aigc
+  - hinged_lever_push
+  hidden_ground_truth:
+    door_body_name: link_1
+    handle_body_name: link_2
+    door_dof_name: joint_1
+    handle_dof_name: joint_2
+    handle_goal_pos:
+    - -0.05522643463943244
+    - 0.0
+    - 0.050943863729384524
+    handle_goal_reference_type: generated_initial_candidate
+    handle_goal_verified: false
+- id: '99665049960019'
+  door_name: '99665049960019'
+  tags:
+  - fresh
+  - aigc
+  - hinged_lever_push
+  hidden_ground_truth:
+    door_body_name: link_1
+    handle_body_name: link_2
+    door_dof_name: joint_1
+    handle_dof_name: joint_2
+    handle_goal_pos:
+    - -0.06617939449351821
+    - 0.006509505744995999
+    - 0.06132188812769715
+    handle_goal_reference_type: generated_initial_candidate
+    handle_goal_verified: false
+- id: '99688979960014'
+  door_name: '99688979960014'
+  tags:
+  - fresh
+  - aigc
+  - hinged_lever_push
+  hidden_ground_truth:
+    door_body_name: link_1
+    handle_body_name: link_2
+    door_dof_name: joint_1
+    handle_dof_name: joint_2
+    handle_goal_pos:
+    - -0.06298945318705404
+    - -0.0010864677706913246
+    - 0.044416069456234684
+    handle_goal_reference_type: generated_initial_candidate
+    handle_goal_verified: false
+- id: '99689669960028'
+  door_name: '99689669960028'
+  tags:
+  - fresh
+  - aigc
+  - hinged_lever_push
+  hidden_ground_truth:
+    door_body_name: link_1
+    handle_body_name: link_2
+    door_dof_name: joint_1
+    handle_dof_name: joint_2
+    handle_goal_pos:
+    - -0.05091758621479876
+    - 0.0016035776548455822
+    - 0.034910440184573066
+    handle_goal_reference_type: generated_initial_candidate
+    handle_goal_verified: false
+- id: '99690659960035'
+  door_name: '99690659960035'
+  tags:
+  - fresh
+  - aigc
+  - hinged_lever_push
+  hidden_ground_truth:
+    door_body_name: link_1
+    handle_body_name: link_2
+    door_dof_name: joint_1
+    handle_dof_name: joint_2
+    handle_goal_pos:
+    - -0.05960034304607716
+    - 0.0
+    - 0.05408671155818767
+    handle_goal_reference_type: generated_initial_candidate
+    handle_goal_verified: false
+- id: '99692809960025'
+  door_name: '99692809960025'
+  tags:
+  - fresh
+  - aigc
+  - hinged_lever_push
+  hidden_ground_truth:
+    door_body_name: link_1
+    handle_body_name: link_2
+    door_dof_name: joint_1
+    handle_dof_name: joint_2
+    handle_goal_pos:
+    - -0.07429235272762397
+    - -0.0
+    - 0.04326710012592957
+    handle_goal_reference_type: generated_initial_candidate
+    handle_goal_verified: false

@@ -95,3 +95,30 @@ Thumbs.db
 *.wmv
 
 AGENTS.md
+
+# Local paper/media/QA artifacts (generated or copied; do not version).
+/videos/
+/figures/
+/archived_qa_outputs/
+/assets_compare_table/
+/docs/
+/high-level/dp/checkpoints/
+/high-level/dp/pdf/
+/high-level/dp/result/baseline/
+/high-level/dp/result/dp3/
+/high-level/dp/result/figures/
+/high-level/dp/result/offline_expert_diagnostics_*/
+/high-level/dp/result/offline_expert_obs_*/
+/high-level/dp/result/paper/
+/high-level/dp/result/*_offline_*.json
+/high-level/dp/result/pull_50_200_push_comparison_*/**/*.json
+/high-level/real_deploy/nx_runs/*.tar
+/high-level/real_deploy/nx_runs/door_act_joint9_runs_*/
+/high-level/real_deploy/nx_runs/joint9_*/
+/high-level/float_ik/door_twin/experiments/responses/
+/high-level/float_ik/door_twin/experiments/manual_variants/
+/high-level/float_ik/door_twin/experiments/*_selection_audit.json
+
+# External/local worktrees kept beside the project sources.
+/high-level/float_ik/real_kinematics/
+/high-level/float_ik/z1_sdk/

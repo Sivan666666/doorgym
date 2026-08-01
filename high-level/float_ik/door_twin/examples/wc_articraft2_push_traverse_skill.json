@@ -1,0 +1,81 @@
+{
+  "version": "door_skill_program_v1",
+  "metadata": {
+    "name": "wc_articraft2_push_traverse",
+    "asset_name": "wc_articraft2",
+    "purpose": "Open the WC Articraft 2 horizontal-lever door by pushing, then traverse through.",
+    "execution_mode": "skill_interpreter",
+    "source": "DoorTwin Ours Full, retrieval initialized from the WC4/WC Articraft experience",
+    "notes": {
+      "handle_rest_angle_rad": 0.0,
+      "handle_unlock_angle_rad": 0.55,
+      "grasp_orientation": "default forward EE orientation without additional roll",
+      "shared_grasp_z_offset_m": -0.01,
+      "total_forward_distance_m": 1.94
+    }
+  },
+  "skill_program": [
+    {
+      "name": "MoveTo",
+      "stage": "approach",
+      "vx": 0.2,
+      "vyaw": 0.0,
+      "stop_distance": 0.18
+    },
+    {
+      "name": "ApproachDoor",
+      "base_offset": 0.18,
+      "yaw_align": true
+    },
+    {
+      "name": "MoveEEToHandle",
+      "pregrasp_offset": [0.15, 0.0, -0.01],
+      "grasp_offset": [0.005, 0.0, -0.01],
+      "handle_goal_bias_world": [0.0, 0.0, 0.0],
+      "ee_roll_offset": 0.0,
+      "duration_steps": 120
+    },
+    {
+      "name": "CloseGripper",
+      "force": 0.8,
+      "duration_steps": 50
+    },
+    {
+      "name": "RotateHandle",
+      "angle": 1.0,
+      "duration_steps": 220,
+      "direction_sign": -1.0,
+      "local_delta": [0.0, 0.03, -0.065]
+    },
+    {
+      "name": "PushDoor",
+      "distance": 1.1,
+      "duration_steps": 300,
+      "contact_bias": 0.025
+    },
+    {
+      "name": "MoveTo",
+      "stage": "push",
+      "vx": 0.2,
+      "vyaw": 0.0,
+      "distance": 1.2,
+      "duration_steps": 300
+    },
+    {
+      "name": "TraverseDoor",
+      "door_angle_target": 80
+    },
+    {
+      "name": "MoveTo",
+      "stage": "traverse",
+      "vx": 0.2,
+      "vyaw": 0.0,
+      "distance": 0.74,
+      "duration_steps": 185
+    },
+    {
+      "name": "ReleaseAndRetract",
+      "duration_steps": 150
+    }
+  ]
+}

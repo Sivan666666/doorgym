@@ -17,6 +17,16 @@ from pathlib import Path
 import numpy as np
 import yaml
 
+from camera_intrinsics import (
+    LEGACY_MODE as CAMERA_INTRINSICS_LEGACY_MODE,
+    REAL_K_REMAP_MODE as CAMERA_INTRINSICS_REAL_K_REMAP_MODE,
+    REMAP_VERSION as CAMERA_INTRINSICS_REMAP_VERSION,
+    load_real_camera_intrinsics_config,
+    remap_coverage,
+    remap_image,
+    reverse_remap_coordinates,
+)
+
 try:
     import cv2
 except ImportError:
@@ -148,6 +158,9 @@ DEFAULT_FRONT_CAMERA_CFG = {
     "position": [0.29, 0.031, 0.165],
     "rotation_deg": [0.0, -45.0, 0.0],
 }
+DEFAULT_REAL_CAMERA_INTRINSICS_CONFIG = (
+    HIGH_LEVEL_ROOT / "data" / "cfg" / "a2w_real_camera_intrinsics_640x480.yaml"
+)
 _DOOR_SIDE_WALL_ASSET_CACHE = {}
 
 DP_NUM_DOFS = 19
@@ -351,6 +364,8 @@ class DoorRuntime:
     door_body_index: int
     handle_goal_offset: np.ndarray
     handle_unlock_threshold: float
+    handle_rest_angle: float | None = None
+    handle_unlock_direction_sign: float = 1.0
     actor_scale: float = 1.0
     actor_yaw: float = math.pi
     actor_position_offset: tuple[float, float, float] = (0.0, 0.0, 0.0)
@@ -653,6 +668,67 @@ def apply_door_urdf_rgba_colors(gym, env, door_actor, door, args):
             pass
 
 
+def apply_door_rigid_body_property_overrides(gym, env, door_actor, door):
+    """Apply per-body mass properties after actor scaling.
+
+    Isaac Gym recomputes mass properties from collision geometry when
+    ``override_com``/``override_inertia`` are enabled.  Generated doors can
+    therefore feel substantially heavier than a reference door even when their
+    joint friction and damping are identical.  Door specs may use this bounded
+    override to make selected moving bodies match a validated reference asset.
+    """
+
+    overrides = door.spec.get("rigid_body_property_overrides", {})
+    if not overrides:
+        return
+    if not isinstance(overrides, dict):
+        raise ValueError(
+            f"Door {door.spec.get('name', '')!r} rigid_body_property_overrides must be a mapping"
+        )
+
+    body_names = list(gym.get_actor_rigid_body_names(env, door_actor))
+    properties = gym.get_actor_rigid_body_properties(env, door_actor)
+    for body_name, override in overrides.items():
+        if body_name not in body_names:
+            raise ValueError(
+                f"Door {door.spec.get('name', '')!r} cannot override unknown rigid body "
+                f"{body_name!r}; loaded bodies: {body_names}"
+            )
+        if not isinstance(override, dict):
+            raise ValueError(f"Rigid-body override for {body_name!r} must be a mapping")
+        prop = properties[body_names.index(body_name)]
+
+        if "mass" in override:
+            mass = float(override["mass"])
+            if not math.isfinite(mass) or mass <= 0.0:
+                raise ValueError(f"Rigid-body override mass for {body_name!r} must be positive and finite")
+            prop.mass = mass
+
+        if "center_of_mass" in override:
+            center = [float(value) for value in override["center_of_mass"]]
+            if len(center) != 3 or not all(math.isfinite(value) for value in center):
+                raise ValueError(
+                    f"Rigid-body override center_of_mass for {body_name!r} must contain 3 finite values"
+                )
+            prop.com.x, prop.com.y, prop.com.z = center
+
+        if "inertia" in override:
+            inertia = np.asarray(override["inertia"], dtype=np.float64)
+            if inertia.shape != (3, 3) or not np.all(np.isfinite(inertia)):
+                raise ValueError(f"Rigid-body override inertia for {body_name!r} must be a finite 3x3 matrix")
+            if not np.allclose(inertia, inertia.T, atol=1.0e-7):
+                raise ValueError(f"Rigid-body override inertia for {body_name!r} must be symmetric")
+            if np.min(np.linalg.eigvalsh(inertia)) <= 0.0:
+                raise ValueError(f"Rigid-body override inertia for {body_name!r} must be positive definite")
+            rows = (prop.inertia.x, prop.inertia.y, prop.inertia.z)
+            for row_index, row in enumerate(rows):
+                row.x = float(inertia[row_index, 0])
+                row.y = float(inertia[row_index, 1])
+                row.z = float(inertia[row_index, 2])
+
+    gym.set_actor_rigid_body_properties(env, door_actor, properties, False)
+
+
 def load_door_assets(gym, sim, args):
     asset_root, asset_file_door, specs = load_door_specs(args)
     door_opts = gymapi.AssetOptions()
@@ -749,6 +825,14 @@ def load_door_assets(gym, sim, args):
             if handle_unlock_angle is not None
             else (args.handle_unlock_ratio * handle_range if len(upper) >= 2 else 0.0)
         )
+        handle_rest_angle = (
+            float(spec["handle_rest_angle"])
+            if spec.get("handle_rest_angle") is not None
+            else (float(lower[1]) if len(lower) >= 2 else 0.0)
+        )
+        handle_unlock_direction_sign = (
+            -1.0 if float(spec.get("handle_unlock_direction_sign", 1.0)) < 0.0 else 1.0
+        )
         print("door_dofs:", dof_names)
         print("door_bodies:", body_names)
 
@@ -769,6 +853,8 @@ def load_door_assets(gym, sim, args):
                 door_body_index=door_body_index,
                 handle_goal_offset=handle_goal_offset,
                 handle_unlock_threshold=handle_unlock_threshold,
+                handle_rest_angle=handle_rest_angle,
+                handle_unlock_direction_sign=handle_unlock_direction_sign,
                 actor_scale=actor_scale,
                 actor_yaw=actor_yaw,
                 actor_position_offset=actor_position_offset,
@@ -926,6 +1012,14 @@ def configure_door_actor_dofs(gym, env, door_actor, door, args):
         float(handle_unlock_angle)
         if handle_unlock_angle is not None
         else (args.handle_unlock_ratio * handle_range if len(door.dof_upper) >= 2 else 0.0)
+    )
+    door.handle_rest_angle = (
+        float(door.spec["handle_rest_angle"])
+        if door.spec.get("handle_rest_angle") is not None
+        else (float(door.dof_lower[1]) if len(door.dof_lower) >= 2 else 0.0)
+    )
+    door.handle_unlock_direction_sign = (
+        -1.0 if float(door.spec.get("handle_unlock_direction_sign", 1.0)) < 0.0 else 1.0
     )
 
 
@@ -1114,6 +1208,7 @@ def create_env_actors(gym, sim, base_asset, arm_asset, door, dof_props, dof_stat
     door_actor = gym.create_actor(env, door.asset, door_pose, "door", 0, 0, 1)
     if abs(door.actor_scale - 1.0) > 1.0e-6:
         gym.set_actor_scale(env, door_actor, door.actor_scale)
+    apply_door_rigid_body_property_overrides(gym, env, door_actor, door)
     try:
         gym.set_rigid_body_segmentation_id(env, door_actor, door.handle_body_index, int(args.handle_seg_id))
     except AttributeError:
@@ -1175,6 +1270,7 @@ def create_parallel_env_actors(
     door_actor = gym.create_actor(env, door.asset, door_pose, f"door_{env_index}", env_index, 0, 1)
     if abs(door.actor_scale - 1.0) > 1.0e-6:
         gym.set_actor_scale(env, door_actor, door.actor_scale)
+    apply_door_rigid_body_property_overrides(gym, env, door_actor, door)
     try:
         gym.set_rigid_body_segmentation_id(env, door_actor, door.handle_body_index, int(args.handle_seg_id))
     except AttributeError:
@@ -2095,13 +2191,40 @@ def monitor_base_door_collision(gym, step, st):
     rigid_gate = float(getattr(args, "rigid_contact_geom_gate", max(0.15, threshold)))
     gated_rigid_contact = bool(physx_check and rigid_contact and geom_distance <= rigid_gate)
     frame_contact = bool(physx_check and frame_contact)
-    collision = bool(frame_contact or gated_rigid_contact or geom_collision)
+
+    # A scripted push-through task must move the base toward the door immediately
+    # after the handle unlocks. The cheap rectangle/segment test can report a
+    # collision before the panel has accumulated a visible opening angle even
+    # though PhysX reports no contact. Keep such proximity visible in diagnostics,
+    # but do not let a geometry-only post-unlock near miss overwrite an otherwise
+    # valid task. Actual rigid/frame contact and every pre-unlock collision remain
+    # blocking.
+    tracker = getattr(st, "door_twin_tracker", None)
+    handle_unlocked_before_contact = bool(
+        tracker is not None and bool(getattr(tracker, "handle_unlocked", False))
+    )
+    door_opened_before_contact = bool(
+        tracker is not None and float(getattr(tracker, "max_door_open_deg", 0.0)) >= 5.0
+    )
+    post_unlock = handle_unlocked_before_contact
+    tolerated_post_unlock_geom_contact = bool(
+        getattr(args, "allow_post_unlock_geom_contact", True)
+        and post_unlock
+        and geom_collision
+        and not gated_rigid_contact
+        and not frame_contact
+    )
+    contact_candidate = bool(frame_contact or gated_rigid_contact or geom_collision)
+    collision = bool(contact_candidate and not tolerated_post_unlock_geom_contact)
+    if contact_candidate:
+        st.base_door_contact_detected = True
     if collision:
         st.base_door_collision_detected = True
         if hasattr(st, "success"):
             st.success = False
         if hasattr(st, "dp_record_success"):
             st.dp_record_success = False
+    if contact_candidate:
         interval = max(1, int(getattr(args, "collision_log_interval", 30)))
         if int(step) - int(getattr(st, "base_door_collision_log_step", -10**9)) >= interval:
             st.base_door_collision_log_step = int(step)
@@ -2113,7 +2236,6 @@ def monitor_base_door_collision(gym, step, st):
                     json_contact_pair[key] = float(value)
                 else:
                     json_contact_pair[key] = str(value)
-            tracker = getattr(st, "door_twin_tracker", None)
             if tracker is not None:
                 tracker.add_artifact(
                     "base_collision_event",
@@ -2126,6 +2248,10 @@ def monitor_base_door_collision(gym, step, st):
                         "frame_contact": bool(frame_contact),
                         "gated_rigid_contact": bool(gated_rigid_contact),
                         "geom_collision": bool(geom_collision),
+                        "blocking": bool(collision),
+                        "tolerated_post_unlock_geom_contact": bool(tolerated_post_unlock_geom_contact),
+                        "handle_unlocked_before_contact": bool(handle_unlocked_before_contact),
+                        "door_opened_before_contact": bool(door_opened_before_contact),
                         "geom_distance": float(geom_distance),
                         "threshold": float(threshold),
                         "gate": float(rigid_gate),
@@ -2138,8 +2264,9 @@ def monitor_base_door_collision(gym, step, st):
                         "open_deg": float(open_deg),
                     },
                 )
+            event_label = "BaseDoorCollision" if collision else "BaseDoorContactTolerated"
             print(
-                "[BaseDoorCollision]"
+                f"[{event_label}]"
                 f" step={int(step)} env={int(st.index)} phase={phase}"
                 f" physx_check={bool(physx_check)} geom_check={bool(geom_check)}"
                 f" rigid_contact={bool(rigid_contact)} frame_contact={bool(frame_contact)}"
@@ -2148,7 +2275,7 @@ def monitor_base_door_collision(gym, step, st):
                 f" contact_pair={contact_pair}"
                 f" base_xy={np.round(base_xy, 4).tolist()}"
                 f" door_local=({np.round(hinge_local, 4).tolist()}, {np.round(handle_local, 4).tolist()})"
-                f" open_deg={open_deg:.1f}",
+                f" open_deg={open_deg:.1f} post_unlock={post_unlock}",
                 flush=True,
             )
     elif physx_check and rigid_contact:
@@ -2217,11 +2344,121 @@ def camera_intrinsics_from_cfg(camera_cfg):
     }
 
 
-def depth_camera_intrinsics_metadata():
-    return {
-        "front": camera_intrinsics_from_cfg(DEFAULT_FRONT_CAMERA_CFG),
-        "wrist": camera_intrinsics_from_cfg(DEFAULT_WRIST_CAMERA_CFG),
+def camera_intrinsics_mode_from_args(args=None):
+    mode = str(getattr(args, "camera_intrinsics_mode", CAMERA_INTRINSICS_LEGACY_MODE) or "legacy")
+    if mode not in (CAMERA_INTRINSICS_LEGACY_MODE, CAMERA_INTRINSICS_REAL_K_REMAP_MODE):
+        raise ValueError(
+            f"Unsupported --camera_intrinsics_mode={mode!r}; expected 'legacy' or 'real_k_remap'."
+        )
+    return mode
+
+
+def camera_intrinsics_profile_from_args(args):
+    if camera_intrinsics_mode_from_args(args) == CAMERA_INTRINSICS_LEGACY_MODE:
+        return None
+    cached = getattr(args, "_camera_intrinsics_profile", None)
+    if cached is not None:
+        return cached
+    config_path = str(
+        getattr(args, "camera_intrinsics_config", str(DEFAULT_REAL_CAMERA_INTRINSICS_CONFIG))
+        or DEFAULT_REAL_CAMERA_INTRINSICS_CONFIG
+    )
+    profile = load_real_camera_intrinsics_config(config_path)
+    requested_fov = float(
+        getattr(args, "camera_render_horizontal_fov_deg", profile["render_horizontal_fov_deg"])
+    )
+    configured_fov = float(profile["render_horizontal_fov_deg"])
+    if not math.isclose(requested_fov, configured_fov, rel_tol=0.0, abs_tol=1.0e-9):
+        # The public override is authoritative, while the target K remains loaded from YAML.
+        width, height = profile["resolution"]
+        render_cfg = {
+            "resolution": [width, height],
+            "horizontal_fov": requested_fov,
+        }
+        profile["render_horizontal_fov_deg"] = requested_fov
+        profile["render_intrinsics"] = camera_intrinsics_from_cfg(render_cfg)
+    maps = {}
+    for camera_name in ("front", "wrist"):
+        map_x, map_y = reverse_remap_coordinates(
+            profile["render_intrinsics"], profile["camera_intrinsics"][camera_name]
+        )
+        coverage = remap_coverage(map_x, map_y, profile["render_intrinsics"])
+        if coverage < 1.0:
+            raise ValueError(
+                f"{camera_name} target intrinsics are not fully covered by the render camera: "
+                f"coverage={coverage:.6f}. Increase --camera_render_horizontal_fov_deg."
+            )
+        maps[camera_name] = (map_x, map_y)
+    profile["remap_maps"] = maps
+    profile["coverage"] = {
+        name: remap_coverage(*maps[name], profile["render_intrinsics"])
+        for name in ("front", "wrist")
     }
+    setattr(args, "_camera_intrinsics_profile", profile)
+    print(
+        "Camera intrinsics real_k_remap enabled: "
+        f"render={profile['resolution'][0]}x{profile['resolution'][1]} "
+        f"FOV={profile['render_horizontal_fov_deg']:.6g}deg "
+        f"front_coverage={profile['coverage']['front']:.6f} "
+        f"wrist_coverage={profile['coverage']['wrist']:.6f}",
+        flush=True,
+    )
+    return profile
+
+
+def camera_cfg_for_args(camera_name, args):
+    source = DEFAULT_WRIST_CAMERA_CFG if camera_name == "wrist" else DEFAULT_FRONT_CAMERA_CFG
+    cfg = dict(source)
+    if camera_intrinsics_mode_from_args(args) == CAMERA_INTRINSICS_REAL_K_REMAP_MODE:
+        profile = camera_intrinsics_profile_from_args(args)
+        cfg["resolution"] = list(profile["resolution"])
+        cfg["horizontal_fov"] = float(profile["render_horizontal_fov_deg"])
+    return cfg
+
+
+def remap_camera_image_for_args(image, camera_name, args, *, interpolation):
+    if camera_intrinsics_mode_from_args(args) == CAMERA_INTRINSICS_LEGACY_MODE:
+        return image
+    if camera_name not in ("front", "wrist"):
+        return image
+    profile = camera_intrinsics_profile_from_args(args)
+    map_x, map_y = profile["remap_maps"][camera_name]
+    return remap_image(image, map_x, map_y, interpolation=interpolation)
+
+
+def depth_camera_intrinsics_metadata(args=None):
+    if args is None or camera_intrinsics_mode_from_args(args) == CAMERA_INTRINSICS_LEGACY_MODE:
+        return {
+            "front": camera_intrinsics_from_cfg(DEFAULT_FRONT_CAMERA_CFG),
+            "wrist": camera_intrinsics_from_cfg(DEFAULT_WRIST_CAMERA_CFG),
+        }
+    return {
+        name: dict(camera_intrinsics_profile_from_args(args)["camera_intrinsics"][name])
+        for name in ("front", "wrist")
+    }
+
+
+def camera_intrinsics_recording_metadata(args):
+    mode = camera_intrinsics_mode_from_args(args)
+    if mode == CAMERA_INTRINSICS_LEGACY_MODE:
+        # Keep legacy sidecars byte-compatible: the absence of a mode field means legacy.
+        return {"camera_intrinsics": depth_camera_intrinsics_metadata()}
+    profile = camera_intrinsics_profile_from_args(args)
+    metadata = {
+        "camera_intrinsics_mode": mode,
+    }
+    metadata.update(
+        {
+            "camera_intrinsics": depth_camera_intrinsics_metadata(args),
+            "camera_render_intrinsics": dict(profile["render_intrinsics"]),
+            "camera_intrinsics_remap_version": CAMERA_INTRINSICS_REMAP_VERSION,
+            "camera_intrinsics_config": str(profile["config_path"]),
+            "camera_intrinsics_remap_coverage": dict(profile["coverage"]),
+            "render_resolution": list(profile["resolution"]),
+            "output_resolution": list(profile["resolution"]),
+        }
+    )
+    return metadata
 
 
 def _cached_or_default_local_camera_pose(args, camera_name, camera_cfg, local_rot_override=None):
@@ -2445,8 +2682,9 @@ def create_low_level_cameras(gym, env, arm_actor, actor_handles, args):
     cameras = {}
     if args.enable_wrist_camera:
         wrist_rot = wrist_camera_rotation_radians_from_args(args)
+        wrist_camera_cfg = camera_cfg_for_args("wrist", args)
         wrist_camera = attach_camera_to_actor_body(
-            gym, env, arm_actor, "link06", DEFAULT_WRIST_CAMERA_CFG, wrist_rot, args=args
+            gym, env, arm_actor, "link06", wrist_camera_cfg, wrist_rot, args=args
         )
         if wrist_camera is None:
             print("⚠️📷 Wrist camera sensor creation failed; wrist camera image display is disabled.", flush=True)
@@ -2456,13 +2694,14 @@ def create_low_level_cameras(gym, env, arm_actor, actor_handles, args):
 
     if args.enable_front_camera:
         front_rot = front_camera_rotation_radians_from_args(args)
+        front_camera_cfg = camera_cfg_for_args("front", args)
         base_actor = actor_handles[0] if len(actor_handles) > 1 else arm_actor
         front_camera = attach_camera_to_actor_body(
-            gym, env, base_actor, "trunk", DEFAULT_FRONT_CAMERA_CFG, front_rot, args=args
+            gym, env, base_actor, "trunk", front_camera_cfg, front_rot, args=args
         )
         if front_camera is None:
             front_camera = attach_camera_to_actor_body(
-                gym, env, base_actor, "base", DEFAULT_FRONT_CAMERA_CFG, front_rot, args=args
+                gym, env, base_actor, "base", front_camera_cfg, front_rot, args=args
             )
         if front_camera is None:
             print("⚠️📷 Front camera sensor creation failed; front camera image display is disabled.", flush=True)
@@ -2533,7 +2772,7 @@ def show_camera_handle_images(gym, sim, env, camera_handles, args):
     display_scale = max(1, int(args.camera_display_scale))
     show_camera_masks = bool(getattr(args, "show_camera_masks", False)) and not bool(getattr(args, "depth_only", False))
     for prefix, camera_handle in camera_handles.items():
-        camera_cfg = DEFAULT_WRIST_CAMERA_CFG if prefix == "wrist" else DEFAULT_FRONT_CAMERA_CFG
+        camera_cfg = camera_cfg_for_args(prefix, args)
         width = int(camera_cfg.get("resolution", DEPTH_CAMERA_RESOLUTION)[0])
         height = int(camera_cfg.get("resolution", DEPTH_CAMERA_RESOLUTION)[1])
         handle_mask = None
@@ -2543,6 +2782,7 @@ def show_camera_handle_images(gym, sim, env, camera_handles, args):
             if seg_raw is None:
                 continue
             seg_image = camera_image_to_array(seg_raw, height, width).astype(np.int32)
+            seg_image = remap_camera_image_for_args(seg_image, prefix, args, interpolation="nearest")
             handle_mask = (seg_image == int(args.handle_seg_id)).astype(np.float32)
             mask_vis = (255.0 * handle_mask).astype(np.uint8)
 
@@ -2551,6 +2791,7 @@ def show_camera_handle_images(gym, sim, env, camera_handles, args):
             if rgb_raw is None:
                 continue
             rgb_image = camera_color_to_rgb(rgb_raw, height, width)
+            rgb_image = remap_camera_image_for_args(rgb_image, prefix, args, interpolation="linear")
             rgb_nonzero = int(np.count_nonzero(rgb_image))
             printed = getattr(args, "_camera_image_stats_printed", set())
             if prefix not in printed:
@@ -2602,16 +2843,7 @@ def show_camera_handle_images(gym, sim, env, camera_handles, args):
             posinf=float(args.camera_depth_clip_far),
             neginf=float(args.camera_depth_clip_far),
         )
-        depth_image[depth_image < float(args.camera_depth_clip_lower)] = 0.0
-        depth_image = np.clip(depth_image, 0.0, float(args.camera_depth_clip_far))
-        depth_image = apply_depth_noise(
-            depth_image,
-            None,
-            depth_camera_noise_config_for_args(args),
-            valid_mask=depth_image >= float(args.camera_depth_clip_lower),
-        )
-        depth_image[depth_image < float(args.camera_depth_clip_lower)] = 0.0
-        depth_image = np.clip(depth_image, 0.0, float(args.camera_depth_clip_far))
+        depth_image = process_metric_depth_for_args(depth_image, prefix, args)
 
         depth_vis = np.zeros_like(depth_image, dtype=np.uint8)
         valid_depth = depth_image[np.isfinite(depth_image) & (depth_image > 0.0)]
@@ -2691,6 +2923,33 @@ def depth_to_rgb(depth_image, depth_lower, depth_far):
     return np.repeat(depth_u8[..., None], 3, axis=-1), int(valid.size)
 
 
+def process_metric_depth_for_args(depth_image, camera_name, args):
+    """Apply the legacy pipeline exactly, or remap metric depth before augmentation."""
+    depth_image = np.asarray(depth_image, dtype=np.float32)
+    if camera_intrinsics_mode_from_args(args) == CAMERA_INTRINSICS_REAL_K_REMAP_MODE:
+        depth_image = remap_camera_image_for_args(depth_image, camera_name, args, interpolation="nearest")
+        depth_image = apply_depth_noise(
+            depth_image,
+            None,
+            depth_camera_noise_config_for_args(args),
+            valid_mask=np.isfinite(depth_image) & (depth_image > 0.0),
+        )
+        depth_image[depth_image < float(args.camera_depth_clip_lower)] = 0.0
+        return np.clip(depth_image, 0.0, float(args.camera_depth_clip_far))
+
+    # Preserve the original ordering and values in legacy mode.
+    depth_image[depth_image < float(args.camera_depth_clip_lower)] = 0.0
+    depth_image = np.clip(depth_image, 0.0, float(args.camera_depth_clip_far))
+    depth_image = apply_depth_noise(
+        depth_image,
+        None,
+        depth_camera_noise_config_for_args(args),
+        valid_mask=depth_image >= float(args.camera_depth_clip_lower),
+    )
+    depth_image[depth_image < float(args.camera_depth_clip_lower)] = 0.0
+    return np.clip(depth_image, 0.0, float(args.camera_depth_clip_far))
+
+
 def capture_dp_camera_images(gym, sim, env, camera_handles, args):
     if not camera_handles:
         return {}
@@ -2706,10 +2965,11 @@ def capture_dp_camera_images_from_rendered(gym, sim, env, camera_handles, args):
         seg_raw = gym.get_camera_image(sim, env, camera_handle, gymapi.IMAGE_SEGMENTATION)
         if seg_raw is None:
             continue
-        camera_cfg = DEFAULT_WRIST_CAMERA_CFG if prefix == "wrist" else DEFAULT_FRONT_CAMERA_CFG
+        camera_cfg = camera_cfg_for_args(prefix, args)
         width = int(camera_cfg.get("resolution", DEPTH_CAMERA_RESOLUTION)[0])
         height = int(camera_cfg.get("resolution", DEPTH_CAMERA_RESOLUTION)[1])
         seg_image = camera_image_to_array(seg_raw, height, width).astype(np.int32)
+        seg_image = remap_camera_image_for_args(seg_image, prefix, args, interpolation="nearest")
         handle_mask = (seg_image == int(args.handle_seg_id)).astype(np.float32)
         images[f"{prefix}_handle_mask"] = mask_to_rgb(handle_mask)
 
@@ -2718,6 +2978,7 @@ def capture_dp_camera_images_from_rendered(gym, sim, env, camera_handles, args):
             if rgb_raw is None:
                 continue
             rgb_image = camera_color_to_rgb(rgb_raw, height, width)
+            rgb_image = remap_camera_image_for_args(rgb_image, prefix, args, interpolation="linear")
             images[f"{prefix}_rgb"] = rgb_image
             if args.headless and not getattr(args, f"_{prefix}_headless_rgb_checked", False):
                 if int(np.count_nonzero(rgb_image)) == 0:
@@ -2740,16 +3001,7 @@ def capture_dp_camera_images_from_rendered(gym, sim, env, camera_handles, args):
             posinf=float(args.camera_depth_clip_far),
             neginf=float(args.camera_depth_clip_far),
         )
-        depth_image[depth_image < float(args.camera_depth_clip_lower)] = 0.0
-        depth_image = np.clip(depth_image, 0.0, float(args.camera_depth_clip_far))
-        depth_image = apply_depth_noise(
-            depth_image,
-            None,
-            depth_camera_noise_config_for_args(args),
-            valid_mask=depth_image >= float(args.camera_depth_clip_lower),
-        )
-        depth_image[depth_image < float(args.camera_depth_clip_lower)] = 0.0
-        depth_image = np.clip(depth_image, 0.0, float(args.camera_depth_clip_far))
+        depth_image = process_metric_depth_for_args(depth_image, prefix, args)
         depth_rgb, _valid_depth_count = depth_to_rgb(
             depth_image,
             args.camera_depth_clip_lower,
@@ -4018,9 +4270,9 @@ def make_float_dp_recorder(
             }
         )
     if bool(getattr(args, "record_camera_pose", False)):
+        metadata.update(camera_intrinsics_recording_metadata(args))
         metadata.update(
             {
-                "camera_intrinsics": depth_camera_intrinsics_metadata(),
                 "camera_pose_frame": "robot_base",
                 "camera_pose_convention": "optical_frame",
                 "camera_pose_features": [
@@ -4327,6 +4579,28 @@ def setup_float_dp_policy_controller(
         action_horizon=args.dp_action_horizon,
         noise_scheduler_type=args.dp_noise_scheduler_type,
     )
+    checkpoint_config = getattr(dp_controller, "config", {}) or {}
+    if (
+        bool(checkpoint_config.get("plucker_conditioning", False))
+        and checkpoint_config.get("plucker_intrinsics_mode", "legacy_shared_fov") == "per_camera"
+    ):
+        if camera_intrinsics_mode_from_args(args) != CAMERA_INTRINSICS_REAL_K_REMAP_MODE:
+            raise ValueError(
+                "This checkpoint uses calibrated per-camera Plücker rays. Run play/eval with "
+                "--camera_intrinsics_mode real_k_remap and the matching intrinsics config."
+            )
+        runtime_intrinsics = depth_camera_intrinsics_metadata(args)
+        mismatches = []
+        for camera_name in ("front", "wrist"):
+            for field in ("fx", "fy", "cx", "cy"):
+                expected = float(checkpoint_config.get(f"plucker_{camera_name}_{field}", float("nan")))
+                actual = float(runtime_intrinsics[camera_name][field])
+                if not math.isfinite(expected) or abs(expected - actual) > 1.0e-6:
+                    mismatches.append(
+                        f"{camera_name}.{field}: checkpoint={expected}, runtime={actual}"
+                    )
+        if mismatches:
+            raise ValueError("Checkpoint/runtime camera intrinsics mismatch: " + "; ".join(mismatches))
     if bool(getattr(args, "dp_end_signal_monitor", False)) and not bool(
         getattr(dp_controller, "end_signal_prediction", False)
     ):
@@ -4342,13 +4616,23 @@ def setup_float_dp_policy_controller(
             f"but {mode_name} play was run with {expected_vision_mode!r}."
         )
     controller_action_frame = normalize_float_dp_pose_frame(getattr(dp_controller, "action_frame", "world"))
-    if controller_action_frame not in ("world", "base") and not is_full_base_pose_frame(controller_action_frame):
+    if (
+        controller_action_frame not in ("world", "base", "joint_command")
+        and not is_full_base_pose_frame(controller_action_frame)
+    ):
         raise ValueError(
             f"DP checkpoint action_frame={getattr(dp_controller, 'action_frame', None)!r}; "
-            "expected 'world', 'base', or 'robot_base_full'."
+            "expected 'world', 'base', 'robot_base_full', or 'joint_command'."
         )
     checkpoint_state_version = str(dp_controller.config.get("ikpush_state_version", "legacy"))
-    if checkpoint_state_version != str(state_version):
+    controller_state_mode = float_dp_state_mode_from_feature_names(
+        getattr(dp_controller, "state_feature_names", [])
+    )
+    joint_state_checkpoint = bool(
+        checkpoint_state_version == FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE9
+        and controller_state_mode == FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE9
+    )
+    if checkpoint_state_version != str(state_version) and not joint_state_checkpoint:
         raise ValueError(
             f"DP checkpoint ikpush_state_version={checkpoint_state_version!r}, "
             f"but this {mode_name} play script emits {state_version!r}. "
@@ -4374,7 +4658,19 @@ def setup_float_dp_policy_controller(
             controlled_state.dp_temporal_timestep = 0
             controlled_state.dp_temporal_warned_fallback = False
         if not controlled_state.camera_handles:
-            raise RuntimeError(f"{mode_name} DP policy execution requires camera sensors; do not disable wrist/front cameras.")
+            raise RuntimeError(f"{mode_name} DP policy execution requires camera sensors.")
+        if bool(getattr(dp_controller, "pointcloud_conditioning", False)):
+            pointcloud_mode = str(
+                getattr(dp_controller, "config", {}).get("pointcloud_mode", "single_front")
+            )
+            needs_front = pointcloud_mode in ("single_front", "dual_view", "dual_fused")
+            needs_wrist = pointcloud_mode in ("single_wrist", "dual_view", "dual_fused")
+            if needs_front and "front" not in controlled_state.camera_handles:
+                raise RuntimeError(
+                    "This point-cloud policy requires the front depth camera; enable --enable_front_camera.")
+            if needs_wrist and "wrist" not in controlled_state.camera_handles:
+                raise RuntimeError(
+                    "This point-cloud policy requires the wrist depth camera; enable --enable_wrist_camera.")
     print(
         f"Loaded Door DP policy from {args.dp_policy_checkpoint} "
         f"action_frame={getattr(dp_controller, 'action_frame', 'world')}",
@@ -4552,7 +4848,18 @@ def collect_float_dp_policy_actions(gym, sim, env_states, dof_names, gripper_idx
         wrist_mask_rgb, wrist_second_rgb, front_mask_rgb, front_second_rgb = dp_image_inputs_from_cpu_cameras(
             camera_images, st.args
         )
-        if getattr(dp_controller, "vision_mode", "depth") == "rgb":
+        pointcloud_conditioning = bool(getattr(dp_controller, "pointcloud_conditioning", False))
+        if pointcloud_conditioning:
+            pointcloud_mode = str(
+                getattr(dp_controller, "config", {}).get("pointcloud_mode", "single_front")
+            )
+            needs_front = pointcloud_mode in ("single_front", "dual_view", "dual_fused")
+            needs_wrist = pointcloud_mode in ("single_wrist", "dual_view", "dual_fused")
+            missing_required_camera = (
+                (needs_front and front_second_rgb is None)
+                or (needs_wrist and wrist_second_rgb is None)
+            )
+        elif getattr(dp_controller, "vision_mode", "depth") == "rgb":
             missing_required_camera = (
                 wrist_mask_rgb is None
                 or wrist_second_rgb is None
@@ -4574,10 +4881,26 @@ def collect_float_dp_policy_actions(gym, sim, env_states, dof_names, gripper_idx
             "ee_quat": ee_quat,
             "dp_state": dp_state,
         }
-        if bool(getattr(dp_controller, "config", {}).get("plucker_conditioning", False)):
+        if (
+            bool(getattr(dp_controller, "config", {}).get("plucker_conditioning", False))
+            or pointcloud_conditioning
+        ):
             front_pose_base, wrist_pose_base = float_camera_pose_base(gym, st)
-            dp_policy_inputs_by_env[st.index]["front_camera_pose_base"] = front_pose_base
-            dp_policy_inputs_by_env[st.index]["wrist_camera_pose_base"] = wrist_pose_base
+            pointcloud_mode = str(
+                getattr(dp_controller, "config", {}).get("pointcloud_mode", "single_front")
+            )
+            if bool(getattr(dp_controller, "config", {}).get("plucker_conditioning", False)) or pointcloud_mode in (
+                "single_front", "dual_view", "dual_fused"
+            ):
+                dp_policy_inputs_by_env[st.index]["front_camera_pose_base"] = front_pose_base
+            else:
+                front_pose_base = None
+            if bool(getattr(dp_controller, "config", {}).get("plucker_conditioning", False)) or pointcloud_mode in (
+                "single_wrist", "dual_view", "dual_fused"
+            ):
+                dp_policy_inputs_by_env[st.index]["wrist_camera_pose_base"] = wrist_pose_base
+            else:
+                wrist_pose_base = None
         else:
             front_pose_base = None
             wrist_pose_base = None
@@ -4952,12 +5275,30 @@ def door_success(door_pos, args):
     return door_open_degrees(door_pos, args) >= float(args.pass_open_angle_deg)
 
 
+def handle_unlock_progress(door, handle_angle):
+    """Return signed handle travel from its configured neutral/rest angle."""
+    direction = -1.0 if float(getattr(door, "handle_unlock_direction_sign", 1.0)) < 0.0 else 1.0
+    configured_rest = getattr(door, "handle_rest_angle", None)
+    rest = (
+        float(configured_rest)
+        if configured_rest is not None
+        else (float(door.dof_lower[1]) if len(door.dof_lower) >= 2 else 0.0)
+    )
+    return direction * (float(handle_angle) - rest)
+
+
+def handle_is_unlocked(door, handle_angle):
+    return handle_unlock_progress(door, handle_angle) >= float(door.handle_unlock_threshold)
+
+
 def compute_door_efforts(door, dof_pos, dof_vel, args):
     efforts = np.zeros(len(dof_pos), dtype=np.float32)
     if len(dof_pos) == 0:
         return efforts
 
     door_angle = float(dof_pos[0])
+    if bool(getattr(args, "door_twin_asset_probe", False)):
+        door.open_stage = True
     if len(dof_pos) < 2:
         door.open_stage = True
         hinge_range = max(abs(float(door.dof_upper[0])), abs(float(door.dof_lower[0])), 1.0e-3)
@@ -4968,8 +5309,8 @@ def compute_door_efforts(door, dof_pos, dof_vel, args):
         efforts[0] = auto_torque - args.door_open_resistance * door_angle - args.door_open_damping * float(dof_vel[0])
         return efforts
 
-    handle_angle_from_lower = float(dof_pos[1] - door.dof_lower[1])
-    if handle_angle_from_lower >= door.handle_unlock_threshold:
+    handle_angle = float(dof_pos[1])
+    if handle_is_unlocked(door, handle_angle):
         door.open_stage = True
 
     hinge_range = max(abs(float(door.dof_upper[0])), abs(float(door.dof_lower[0])), 1.0e-3)
@@ -4983,7 +5324,17 @@ def compute_door_efforts(door, dof_pos, dof_vel, args):
     elif args.door_lock_force > 0.0:
         efforts[0] = -args.door_motion_sign * args.door_lock_force
 
-    efforts[1] = -args.handle_spring_stiffness * handle_angle_from_lower - args.handle_spring_damping * float(dof_vel[1])
+    configured_rest = getattr(door, "handle_rest_angle", None)
+    handle_rest = (
+        float(configured_rest)
+        if configured_rest is not None
+        else float(door.dof_lower[1])
+    )
+    handle_displacement_from_rest = handle_angle - handle_rest
+    efforts[1] = (
+        -args.handle_spring_stiffness * handle_displacement_from_rest
+        - args.handle_spring_damping * float(dof_vel[1])
+    )
     return efforts
 
 

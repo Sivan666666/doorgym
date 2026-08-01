@@ -723,6 +723,12 @@ def dataset_to_policy_features(features: dict[str, dict]) -> dict[str, PolicyFea
             # Backward compatibility for "channel" which is an error introduced in LeRobotDataset v2.0 for ported datasets.
             if names[2] in ["channel", "channels"]:  # (h, w, c) -> (c, h, w)
                 shape = (shape[2], shape[0], shape[1])
+        elif key == "observation.point_cloud":
+            type = FeatureType.POINT_CLOUD
+            if len(shape) != 2 or int(shape[-1]) != 3:
+                raise ValueError(
+                    f"Point-cloud feature {key!r} must have shape (N, 3), got {tuple(shape)}."
+                )
         elif key == OBS_ENV_STATE:
             type = FeatureType.ENV
         elif key.startswith(OBS_STR):

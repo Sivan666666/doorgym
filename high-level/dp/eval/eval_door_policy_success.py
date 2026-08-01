@@ -113,7 +113,16 @@ def safe_print(message: str, *, end: str = "\n") -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate Door policy success rate by repeatedly running play.")
-    parser.add_argument("--checkpoint", required=True, type=str, help="Door policy checkpoint (.pt manifest or directory).")
+    parser.add_argument("--checkpoint", default=None, type=str, help="Door policy checkpoint (.pt manifest or directory).")
+    parser.add_argument(
+        "--expert_action_replay_raw_episode",
+        default=None,
+        type=str,
+        help=(
+            "Evaluate a fixed raw expert action sequence instead of a learned policy. "
+            "Every trial keeps its newly randomized simulator state."
+        ),
+    )
     parser.add_argument("--yaml", "--door_cfg", dest="door_cfg", required=True, type=str, help="Door YAML config.")
     parser.add_argument("--mode", choices=["ikpush", "ikpull", "push", "pull"], default="ikpush")
     parser.add_argument(
@@ -122,7 +131,7 @@ def parse_args() -> argparse.Namespace:
         dest="robot_body",
         choices=["b1z1", "a2wz1"],
         default="b1z1",
-        help="Robot play script to evaluate. a2wz1 currently supports --mode ikpush.",
+        help="Robot play script to evaluate. a2wz1 supports --mode ikpush and --mode ikpull.",
     )
     parser.add_argument("--num_envs", type=int, default=16, help="Number of envs per play run.")
     parser.add_argument("--total_trials", type=int, default=64, help="Total policy-controlled attempts to run.")
@@ -134,6 +143,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--steps", type=int, default=None)
     parser.add_argument("--pass_open_angle_deg", type=float, default=80.0)
+    parser.add_argument(
+        "--pull_traversal_distance_m",
+        type=float,
+        default=0.8,
+        help=(
+            "For --mode ikpull/pull, require the robot base to move this far beyond the randomized "
+            "door plane along the traversal direction. Push modes ignore this option."
+        ),
+    )
     parser.add_argument("--success_metric", choices=["auto", "signed", "abs"], default="auto")
     parser.add_argument("--door_motion_sign", type=float, default=-1.0)
     parser.add_argument("--base_seed", type=int, default=None, help="If set, run seed is base_seed + batch_index.")
@@ -281,18 +299,46 @@ def door_open_deg(record: dict[str, Any], metric: str, door_motion_sign: float) 
     return float(door_motion_sign) * hinge_deg
 
 
+def pull_traversal_progress_m(record: dict[str, Any]) -> float | None:
+    """Return signed base progress beyond the door plane for A2W pull evaluation."""
+    base_xy = (record.get("base") or {}).get("xy")
+    geometry = record.get("pull_task_geometry") or {}
+    door_xy = geometry.get("door_plane_xy")
+    direction_xy = geometry.get("traversal_direction_xy")
+    if base_xy is None or door_xy is None or direction_xy is None:
+        return None
+    base = np.asarray(base_xy, dtype=np.float64).reshape(-1)
+    door = np.asarray(door_xy, dtype=np.float64).reshape(-1)
+    direction = np.asarray(direction_xy, dtype=np.float64).reshape(-1)
+    if base.size < 2 or door.size < 2 or direction.size < 2:
+        return None
+    direction = direction[:2]
+    norm = float(np.linalg.norm(direction))
+    if not math.isfinite(norm) or norm <= 1.0e-8:
+        return None
+    return float(np.dot(base[:2] - door[:2], direction / norm))
+
+
+def is_pull_mode(mode: str) -> bool:
+    return str(mode) in {"ikpull", "pull"}
+
+
 def scan_log_progress(
     log_path: Path,
     threshold_deg: float,
     metric: str,
     door_motion_sign: float,
+    mode: str = "ikpush",
+    pull_traversal_distance_m: float = 0.8,
 ) -> dict[str, Any]:
+    require_pull_traversal = is_pull_mode(mode)
     progress: dict[str, Any] = {
         "records": 0,
         "max_step": None,
         "env_ids": set(),
         "success_env_ids": set(),
         "max_open_deg_by_env": {},
+        "max_pull_traversal_m_by_env": {},
     }
     if not log_path.exists():
         return progress
@@ -324,7 +370,21 @@ def scan_log_progress(
                 continue
             max_by_env = progress["max_open_deg_by_env"]
             max_by_env[env_id] = max(float(max_by_env.get(env_id, float("-inf"))), float(open_deg))
-            if open_deg >= threshold_deg:
+            traversal_m = pull_traversal_progress_m(record) if require_pull_traversal else None
+            if traversal_m is not None:
+                traversal_by_env = progress["max_pull_traversal_m_by_env"]
+                traversal_by_env[env_id] = max(
+                    float(traversal_by_env.get(env_id, float("-inf"))),
+                    float(traversal_m),
+                )
+            traversal_ok = (
+                not require_pull_traversal
+                or (
+                    traversal_m is not None
+                    and float(traversal_m) >= float(pull_traversal_distance_m)
+                )
+            )
+            if open_deg >= threshold_deg and traversal_ok:
                 progress["success_env_ids"].add(env_id)
     return progress
 
@@ -343,8 +403,12 @@ def format_batch_progress(spec: BatchSpec, steps: int, progress: dict[str, Any],
     state = "D" if done else ("L" if max_step is None else "R")
     max_open = progress.get("max_open_deg_by_env") or {}
     best_open = None if not max_open else max(float(v) for v in max_open.values())
+    max_traversal = progress.get("max_pull_traversal_m_by_env") or {}
+    best_traversal = None if not max_traversal else max(float(v) for v in max_traversal.values())
     elapsed = "" if elapsed_s is None else f" {elapsed_s:.0f}s"
     best = "" if best_open is None else f" best={best_open:.1f}deg"
+    if best_traversal is not None:
+        best += f"/{best_traversal:.2f}m"
     return (
         f"b{spec.batch_idx:04d} {state} {bar} "
         f"{current_step}/{int(steps)} "
@@ -385,13 +449,21 @@ def summarize_log(
     threshold_deg: float,
     metric: str,
     door_motion_sign: float,
+    mode: str = "ikpush",
+    pull_traversal_distance_m: float = 0.8,
 ) -> list[dict[str, Any]]:
+    require_pull_traversal = is_pull_mode(mode)
     stats = {
         env_id: {
             "env_id": env_id,
             "records": 0,
             "max_open_deg": float("-inf"),
+            "max_pull_traversal_m": float("-inf"),
+            "first_door_open_step": None,
+            "first_traversal_step": None,
             "first_success_step": None,
+            "door_open_success": False,
+            "traversal_success": False,
             "success": False,
             "end_triggered": False,
             "first_end_trigger_step": None,
@@ -445,7 +517,27 @@ def summarize_log(
         if open_deg is None:
             continue
         item["max_open_deg"] = max(float(item["max_open_deg"]), float(open_deg))
-        if open_deg >= threshold_deg and item["first_success_step"] is None:
+        door_open_ok = bool(open_deg >= threshold_deg)
+        if door_open_ok and item["first_door_open_step"] is None:
+            item["first_door_open_step"] = int(record.get("step", -1))
+            item["door_open_success"] = True
+        traversal_m = pull_traversal_progress_m(record) if require_pull_traversal else None
+        if traversal_m is not None:
+            item["max_pull_traversal_m"] = max(
+                float(item["max_pull_traversal_m"]),
+                float(traversal_m),
+            )
+        traversal_ok = bool(
+            not require_pull_traversal
+            or (
+                traversal_m is not None
+                and float(traversal_m) >= float(pull_traversal_distance_m)
+            )
+        )
+        if require_pull_traversal and traversal_ok and item["first_traversal_step"] is None:
+            item["first_traversal_step"] = int(record.get("step", -1))
+            item["traversal_success"] = True
+        if door_open_ok and traversal_ok and item["first_success_step"] is None:
             item["first_success_step"] = int(record.get("step", -1))
             item["success"] = True
     out = []
@@ -453,6 +545,8 @@ def summarize_log(
         item = dict(stats[env_id])
         if item["max_open_deg"] == float("-inf"):
             item["max_open_deg"] = None
+        if item["max_pull_traversal_m"] == float("-inf"):
+            item["max_pull_traversal_m"] = None
         success_step = item.get("first_success_step")
         trigger_step = item.get("first_end_trigger_step")
         item["end_trigger_delay_after_first_task_success"] = (
@@ -470,7 +564,6 @@ def summarize_log(
 
 
 def build_play_command(args: argparse.Namespace, batch_envs: int, batch_idx: int, log_path: Path) -> list[str]:
-    checkpoint = resolve_path(args.checkpoint)
     door_cfg = resolve_path(args.door_cfg)
     cmd = [
         sys.executable,
@@ -479,8 +572,6 @@ def build_play_command(args: argparse.Namespace, batch_envs: int, batch_idx: int
         args.mode,
         "--robot_body",
         args.robot_body,
-        "--checkpoint",
-        str(checkpoint),
         "--num_envs",
         str(batch_envs),
         "--steps",
@@ -500,6 +591,13 @@ def build_play_command(args: argparse.Namespace, batch_envs: int, batch_idx: int
         str(args.dp_log_interval),
         "--no_show_seg",
     ]
+    if args.checkpoint:
+        cmd += ["--checkpoint", str(resolve_path(args.checkpoint))]
+    else:
+        cmd += [
+            "--expert_action_replay_raw_episode",
+            str(resolve_path(args.expert_action_replay_raw_episode)),
+        ]
     if args.dp_action_horizon is not None:
         cmd += ["--dp_action_horizon", str(args.dp_action_horizon)]
     if args.dp_temporal_ensemble:
@@ -827,7 +925,12 @@ def export_failure_rollout_bundle(
             "global_trial": int(trial.get("global_trial", -1)),
         },
         "eval": {
-            "checkpoint": str(resolve_path(args.checkpoint)),
+            "checkpoint": None if not args.checkpoint else str(resolve_path(args.checkpoint)),
+            "expert_action_replay_raw_episode": (
+                None
+                if not args.expert_action_replay_raw_episode
+                else str(resolve_path(args.expert_action_replay_raw_episode))
+            ),
             "door_cfg": str(resolve_path(args.door_cfg)),
             "mode": args.mode,
             "robot_body": args.robot_body,
@@ -977,6 +1080,8 @@ def run_batch_job(args: argparse.Namespace, spec: BatchSpec, metric: str) -> Bat
                 threshold_deg=float(args.pass_open_angle_deg),
                 metric=metric,
                 door_motion_sign=float(args.door_motion_sign),
+                mode=args.mode,
+                pull_traversal_distance_m=float(args.pull_traversal_distance_m),
             )
             update_progress_line(spec, int(args.steps), progress, done=False, elapsed_s=now - start)
             last_progress_time = now
@@ -992,6 +1097,8 @@ def run_batch_job(args: argparse.Namespace, spec: BatchSpec, metric: str) -> Bat
             threshold_deg=float(args.pass_open_angle_deg),
             metric=metric,
             door_motion_sign=float(args.door_motion_sign),
+            mode=args.mode,
+            pull_traversal_distance_m=float(args.pull_traversal_distance_m),
         )
         update_progress_line(spec, int(args.steps), progress, done=True, elapsed_s=elapsed)
         remove_progress_line(spec)
@@ -1017,8 +1124,18 @@ def main() -> None:
         args.dp_log_interval = min(int(args.dp_log_interval), int(args.failure_snapshot_interval))
     if args.rgb:
         args.depth_only = False
+    if bool(args.checkpoint) == bool(args.expert_action_replay_raw_episode):
+        raise ValueError(
+            "Specify exactly one action source: --checkpoint or --expert_action_replay_raw_episode."
+        )
+    if args.expert_action_replay_raw_episode and (args.robot_body != "a2wz1" or args.mode != "ikpush"):
+        raise ValueError(
+            "--expert_action_replay_raw_episode currently supports only --robot_body a2wz1 --mode ikpush."
+        )
     if args.dp_fps <= 0:
         raise ValueError("--dp_fps must be positive.")
+    if args.pull_traversal_distance_m < 0:
+        raise ValueError("--pull_traversal_distance_m must be non-negative.")
     if args.steps is None:
         args.steps = 4300 if args.mode == "ikpull" else (2405 if args.mode == "ikpush" else 2500)
     PROGRESS_RENDERER = InlineProgress(enabled=not args.no_progress)
@@ -1046,10 +1163,21 @@ def main() -> None:
         remaining -= batch_envs
         batch_idx += 1
 
+    source_description = (
+        f"checkpoint={resolve_path(args.checkpoint)}"
+        if args.checkpoint
+        else f"expert_action_replay={resolve_path(args.expert_action_replay_raw_episode)}"
+    )
+    pull_criterion_description = (
+        f"pull_traversal_distance={args.pull_traversal_distance_m:g}m "
+        if is_pull_mode(args.mode)
+        else ""
+    )
     safe_print(
-        f"Door policy success eval: checkpoint={resolve_path(args.checkpoint)} door_cfg={resolve_path(args.door_cfg)}\n"
+        f"Door policy success eval: {source_description} door_cfg={resolve_path(args.door_cfg)}\n"
         f"mode={args.mode} robot_body={args.robot_body} num_envs={args.num_envs} total_trials={args.total_trials} "
         f"steps={args.steps} threshold={args.pass_open_angle_deg}deg metric={metric} "
+        f"{pull_criterion_description}"
         f"vision_mode={'rgb' if args.rgb else ('depth_only' if args.depth_only else 'depth')} "
         f"dp_action_horizon={args.dp_action_horizon} dp_temporal_ensemble={args.dp_temporal_ensemble} "
         f"dp_fps={args.dp_fps:g} dp_log_interval={args.dp_log_interval} "
@@ -1075,6 +1203,8 @@ def main() -> None:
                     threshold_deg=float(args.pass_open_angle_deg),
                     metric=metric,
                     door_motion_sign=float(args.door_motion_sign),
+                    mode=args.mode,
+                    pull_traversal_distance_m=float(args.pull_traversal_distance_m),
                 )
                 max_step = progress.get("max_step")
                 completed_steps = max_step is not None and int(max_step) >= max(0, int(args.steps) - 1)
@@ -1102,6 +1232,8 @@ def main() -> None:
                 threshold_deg=float(args.pass_open_angle_deg),
                 metric=metric,
                 door_motion_sign=float(args.door_motion_sign),
+                mode=args.mode,
+                pull_traversal_distance_m=float(args.pull_traversal_distance_m),
             )
             for item in batch_stats:
                 item["batch"] = spec.batch_idx
@@ -1110,6 +1242,8 @@ def main() -> None:
                 item["stdout_path"] = str(spec.stdout_path)
             batch_trials[spec.batch_idx] = batch_stats
             successes = sum(1 for item in batch_stats if item["success"])
+            opening_successes = sum(1 for item in batch_stats if item["door_open_success"])
+            traversal_successes = sum(1 for item in batch_stats if item["traversal_success"])
             batch_logs[spec.batch_idx] = {
                 "batch": spec.batch_idx,
                 "envs": spec.batch_envs,
@@ -1117,13 +1251,25 @@ def main() -> None:
                 "stdout_path": str(spec.stdout_path),
                 "elapsed_s": result.elapsed_s,
                 "successes": successes,
+                "door_open_successes": opening_successes,
+                "traversal_successes": traversal_successes if is_pull_mode(args.mode) else None,
                 "command": result.cmd,
             }
-            safe_print(
-                f"[batch {spec.batch_idx:04d}] success={successes}/{spec.batch_envs} "
-                f"elapsed={result.elapsed_s:.1f}s "
-                f"max_open_deg={[None if x['max_open_deg'] is None else round(float(x['max_open_deg']), 1) for x in batch_stats]}"
-            )
+            if is_pull_mode(args.mode):
+                safe_print(
+                    f"[batch {spec.batch_idx:04d}] joint_success={successes}/{spec.batch_envs} "
+                    f"door_open={opening_successes}/{spec.batch_envs} "
+                    f"traversal={traversal_successes}/{spec.batch_envs} "
+                    f"elapsed={result.elapsed_s:.1f}s "
+                    f"max_open_deg={[None if x['max_open_deg'] is None else round(float(x['max_open_deg']), 1) for x in batch_stats]} "
+                    f"max_traversal_m={[None if x['max_pull_traversal_m'] is None else round(float(x['max_pull_traversal_m']), 2) for x in batch_stats]}"
+                )
+            else:
+                safe_print(
+                    f"[batch {spec.batch_idx:04d}] success={successes}/{spec.batch_envs} "
+                    f"elapsed={result.elapsed_s:.1f}s "
+                    f"max_open_deg={[None if x['max_open_deg'] is None else round(float(x['max_open_deg']), 1) for x in batch_stats]}"
+                )
 
     all_trials: list[dict[str, Any]] = []
     for idx in sorted(batch_trials):
@@ -1132,8 +1278,12 @@ def main() -> None:
             all_trials.append(item)
 
     total_successes = sum(1 for item in all_trials if item["success"])
+    total_open_successes = sum(1 for item in all_trials if item["door_open_success"])
+    total_traversal_successes = sum(1 for item in all_trials if item["traversal_success"])
     total = len(all_trials)
     success_rate = total_successes / max(1, total)
+    door_open_success_rate = total_open_successes / max(1, total)
+    traversal_success_rate = total_traversal_successes / max(1, total)
     end_triggered_trials = [item for item in all_trials if item.get("end_triggered")]
     end_false_trigger_count = sum(
         1
@@ -1159,7 +1309,12 @@ def main() -> None:
         metric=metric,
     )
     summary = {
-        "checkpoint": str(resolve_path(args.checkpoint)),
+        "checkpoint": None if not args.checkpoint else str(resolve_path(args.checkpoint)),
+        "expert_action_replay_raw_episode": (
+            None
+            if not args.expert_action_replay_raw_episode
+            else str(resolve_path(args.expert_action_replay_raw_episode))
+        ),
         "door_cfg": str(resolve_path(args.door_cfg)),
         "mode": args.mode,
         "robot_body": args.robot_body,
@@ -1168,6 +1323,12 @@ def main() -> None:
         "parallel_batches": int(args.parallel_batches),
         "steps": int(args.steps),
         "pass_open_angle_deg": float(args.pass_open_angle_deg),
+        "success_criterion": (
+            "door_open_and_pull_traversal" if is_pull_mode(args.mode) else "door_open"
+        ),
+        "pull_traversal_distance_m": (
+            float(args.pull_traversal_distance_m) if is_pull_mode(args.mode) else None
+        ),
         "success_metric": metric,
         "door_motion_sign": float(args.door_motion_sign),
         "base_seed": args.base_seed,
@@ -1199,6 +1360,14 @@ def main() -> None:
         "successes": total_successes,
         "trials": total,
         "success_rate": success_rate,
+        "door_open_successes": total_open_successes,
+        "door_open_success_rate": door_open_success_rate,
+        "traversal_successes": (
+            total_traversal_successes if is_pull_mode(args.mode) else None
+        ),
+        "traversal_success_rate": (
+            traversal_success_rate if is_pull_mode(args.mode) else None
+        ),
         "end_trigger_rate": len(end_triggered_trials) / max(1, total),
         "end_false_trigger_count": int(end_false_trigger_count),
         "end_missing_trigger_count": int(end_missing_trigger_count),
@@ -1234,6 +1403,13 @@ def main() -> None:
     summary_path = run_root / "summary.json"
     with summary_path.open("w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2, sort_keys=True)
+    if is_pull_mode(args.mode):
+        safe_print(
+            f"DOOR_OPEN_SUCCESS {total_open_successes}/{total} = {door_open_success_rate:.4f}"
+        )
+        safe_print(
+            f"TRAVERSAL_SUCCESS {total_traversal_successes}/{total} = {traversal_success_rate:.4f}"
+        )
     safe_print(f"SUCCESS_RATE {total_successes}/{total} = {success_rate:.4f}")
     safe_print(f"Summary: {summary_path}")
 

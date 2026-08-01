@@ -13,6 +13,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import math
 from dataclasses import dataclass, field
 
 from lerobot.configs.policies import PreTrainedConfig
@@ -112,6 +113,7 @@ class ACTConfig(PreTrainedConfig):
     normalization_mapping: dict[str, NormalizationMode] = field(
         default_factory=lambda: {
             "VISUAL": NormalizationMode.MEAN_STD,
+            "POINT_CLOUD": NormalizationMode.IDENTITY,
             "STATE": NormalizationMode.MEAN_STD,
             "ACTION": NormalizationMode.MEAN_STD,
         }
@@ -133,6 +135,22 @@ class ACTConfig(PreTrainedConfig):
     defm_depth_far: float = 2.0
     defm_pretrained: bool = True
     defm_pretrained_path: str | None = None
+    # Optional metric point-cloud input. When disabled, no point-cloud module
+    # is constructed and the legacy image ACT state dict/forward path is unchanged.
+    point_cloud_conditioning: bool = False
+    point_cloud_key: str = "observation.point_cloud"
+    point_cloud_views: str = "front"
+    # dp3_global: exact DP3 XYZ PointNet plus an ACT token adapter.
+    # obsbench_local: OBSBench PointNet post-sampling. The *_legacy modes only
+    # exist to load early PointCloud ACT prototypes.
+    point_cloud_encoder_mode: str = "obsbench_local"
+    point_cloud_num_points: int = 1024
+    point_cloud_num_tokens: int = 256
+    point_cloud_knn_k: int = 16
+    point_cloud_global_dim: int = 64
+    point_cloud_frame: str = "robot_base"
+    point_cloud_workspace_min: str = "0.20,-1.00,0.00"
+    point_cloud_workspace_max: str = "2.00,1.00,1.80"
     # Optional learned front/wrist input gating. The gate is initialized to
     # [1, 1], so enabling it starts from the original ACT visual-token path.
     camera_input_gating: bool = False
@@ -147,9 +165,26 @@ class ACTConfig(PreTrainedConfig):
     plucker_front_pose_key: str = "observation.camera_pose.front"
     plucker_wrist_pose_key: str = "observation.camera_pose.wrist"
     plucker_encoder_channels: str = "32,64"
+    # Use exact integer avg-pooling instead of adaptive pooling when the
+    # geometry grid is evenly divisible by the ResNet feature grid. The
+    # default preserves legacy checkpoint numerics; strict CUDA ablations can
+    # opt in because adaptive_avg_pool2d backward is nondeterministic.
+    plucker_deterministic_pooling: bool = False
     plucker_image_width: int = 640
     plucker_image_height: int = 480
     plucker_horizontal_fov_deg: float = 69.0
+    # legacy_shared_fov preserves the original shared-FOV ray construction,
+    # including its pixel-center convention. per_camera uses calibrated
+    # OpenCV pinhole intrinsics independently for front and wrist.
+    plucker_intrinsics_mode: str = "legacy_shared_fov"
+    plucker_front_fx: float = 0.0
+    plucker_front_fy: float = 0.0
+    plucker_front_cx: float = 0.0
+    plucker_front_cy: float = 0.0
+    plucker_wrist_fx: float = 0.0
+    plucker_wrist_fy: float = 0.0
+    plucker_wrist_cx: float = 0.0
+    plucker_wrist_cy: float = 0.0
     # Optional training-only DINOv2 handle-latent reconstruction auxiliary task.
     handle_latent_aux: bool = False
     handle_latent_dim: int = 384
@@ -162,10 +197,45 @@ class ACTConfig(PreTrainedConfig):
     # unchanged; a separate sigmoid head predicts this future-aligned scalar.
     end_signal_prediction: bool = False
     end_signal_target_key: str = "aux.end_signal"
-    end_signal_loss_weight: float = 1.0
+    end_signal_loss_weight: float = 0.1
     end_signal_init_probability: float = 0.01
-    # Optional current-frame privileged interaction supervision and decoder conditioning.
+    # Treat the ACT decoder feature as read-only for autonomous termination.
+    # This lets the end head learn from L_end without sending its gradients
+    # into the motion decoder, transformer, or visual encoder.
+    end_signal_detach_decoder_feature: bool = True
+    # Keep optional auxiliary-head construction from advancing the global RNG.
+    # This is required for strict from-scratch ablations: enabling a detached
+    # head must not silently change the ACT encoder/decoder initialization or
+    # the later DataLoader random stream.
+    auxiliary_head_rng_isolation: bool = True
+    # Optional privileged interaction supervision. The legacy mode predicts the
+    # current state from encoder tokens; decoder_chunk predicts the full future
+    # state sequence aligned with the action chunk.
     interaction_state_conditioning: bool = False
+    # Where interaction states are predicted:
+    # - encoder_current: legacy Bx3 current-frame prediction from encoder tokens.
+    # - decoder_chunk: BxHx3 future prediction aligned with the H-step action chunk.
+    # The legacy value remains the default so old configs/checkpoints keep their
+    # original architecture and numerics.
+    interaction_state_prediction_mode: str = "encoder_current"
+    # Probe-only keeps the interaction prediction task for diagnostics while
+    # treating encoder features as read-only and disabling decoder feedback.
+    # It preserves the original ACT motion path exactly.
+    interaction_state_probe_only: bool = False
+    # Train interaction supervision into the encoder, but do not feed the
+    # predicted state back to the action decoder. This isolates representation
+    # shaping from the decoder-conditioning mechanism.
+    interaction_state_auxiliary_only: bool = False
+    # A diagnostic probe should not consume RNG before the motion decoder. A
+    # non-zero value is retained as an explicit research override only.
+    interaction_state_probe_dropout: float = 0.0
+    # Backpropagate the detached probe loss only after the motion backward has
+    # completed. This avoids CUDA scheduling/numerical coupling between two
+    # disconnected graphs in strict ablations.
+    interaction_state_probe_separate_backward: bool = True
+    # Freeze every ACT parameter except the interaction-state probe. This is
+    # intended for fitting a read-only probe on an already-trained checkpoint.
+    interaction_state_probe_freeze_main: bool = False
     interaction_contact_target_key: str = "aux.interaction_contact"
     interaction_handle_target_key: str = "aux.interaction_handle_progress"
     interaction_door_target_key: str = "aux.interaction_door_progress"
@@ -212,6 +282,47 @@ class ACTConfig(PreTrainedConfig):
         is_defm = vision_backbone in {"defm-vit-l14", "defm_vit_l14", "defm-vit-l/14"}
         if self.freeze_vision_backbone is None:
             self.freeze_vision_backbone = bool(is_defm)
+        self.point_cloud_views = ",".join(
+            part.strip().lower() for part in str(self.point_cloud_views).split(",") if part.strip()
+        )
+        if self.point_cloud_views not in {"front", "wrist", "front,wrist"}:
+            raise ValueError(
+                "point_cloud_views must be 'front', 'wrist', or 'front,wrist', got "
+                f"{self.point_cloud_views!r}."
+            )
+        self.point_cloud_encoder_mode = str(self.point_cloud_encoder_mode).strip().lower()
+        if self.point_cloud_encoder_mode not in {
+            "dp3_global",
+            "dp3_global_legacy",
+            "obsbench_local",
+            "obsbench_post_pointnet",
+            "obsbench_local_legacy",
+        }:
+            raise ValueError(
+                "point_cloud_encoder_mode must be 'dp3_global', 'dp3_global_legacy', 'obsbench_local' "
+                "('obsbench_post_pointnet' is an explicit alias), or "
+                "'obsbench_local_legacy', got "
+                f"{self.point_cloud_encoder_mode!r}."
+            )
+        if self.point_cloud_conditioning:
+            if self.image_features:
+                raise ValueError("ACT v1 image and point-cloud inputs are mutually exclusive.")
+            if self.plucker_conditioning or self.camera_input_gating or self.handle_latent_aux:
+                raise ValueError(
+                    "Point-cloud ACT is incompatible with Plucker conditioning, camera gating, and image handle latent."
+                )
+            if not str(self.point_cloud_key):
+                raise ValueError("point_cloud_key must be non-empty.")
+            if self.point_cloud_num_points <= 0:
+                raise ValueError("point_cloud_num_points must be positive.")
+            if self.point_cloud_num_tokens <= 0 or self.point_cloud_num_tokens > self.point_cloud_num_points:
+                raise ValueError("point_cloud_num_tokens must be in [1, point_cloud_num_points].")
+            if self.point_cloud_knn_k <= 0 or self.point_cloud_knn_k > self.point_cloud_num_points:
+                raise ValueError("point_cloud_knn_k must be in [1, point_cloud_num_points].")
+            if self.point_cloud_global_dim <= 0:
+                raise ValueError("point_cloud_global_dim must be positive.")
+            if self.point_cloud_frame != "robot_base":
+                raise ValueError("Point-cloud ACT v1 only supports point_cloud_frame='robot_base'.")
         if not (is_resnet or is_dinov2 or is_defm):
             raise ValueError(
                 "`vision_backbone` must be one of the ResNet, DINOv2, or DeFM variants "
@@ -284,11 +395,38 @@ class ACTConfig(PreTrainedConfig):
                     "`plucker_image_width` and `plucker_image_height` must be positive. "
                     f"Got {self.plucker_image_width}x{self.plucker_image_height}."
                 )
-            if self.plucker_horizontal_fov_deg <= 0.0 or self.plucker_horizontal_fov_deg >= 180.0:
+            if self.plucker_intrinsics_mode not in ("legacy_shared_fov", "per_camera"):
                 raise ValueError(
-                    "`plucker_horizontal_fov_deg` must be in (0, 180). "
-                    f"Got {self.plucker_horizontal_fov_deg}."
+                    "`plucker_intrinsics_mode` must be 'legacy_shared_fov' or 'per_camera'. "
+                    f"Got {self.plucker_intrinsics_mode!r}."
                 )
+            if self.plucker_intrinsics_mode == "legacy_shared_fov":
+                if self.plucker_horizontal_fov_deg <= 0.0 or self.plucker_horizontal_fov_deg >= 180.0:
+                    raise ValueError(
+                        "`plucker_horizontal_fov_deg` must be in (0, 180). "
+                        f"Got {self.plucker_horizontal_fov_deg}."
+                    )
+            else:
+                calibrated = {
+                    "front_fx": self.plucker_front_fx,
+                    "front_fy": self.plucker_front_fy,
+                    "front_cx": self.plucker_front_cx,
+                    "front_cy": self.plucker_front_cy,
+                    "wrist_fx": self.plucker_wrist_fx,
+                    "wrist_fy": self.plucker_wrist_fy,
+                    "wrist_cx": self.plucker_wrist_cx,
+                    "wrist_cy": self.plucker_wrist_cy,
+                }
+                if not all(math.isfinite(float(value)) for value in calibrated.values()):
+                    raise ValueError(f"Per-camera Plücker intrinsics must be finite: {calibrated}.")
+                if self.plucker_front_fx <= 0.0 or self.plucker_front_fy <= 0.0:
+                    raise ValueError(f"Front Plücker focal lengths must be positive: {calibrated}.")
+                if self.plucker_wrist_fx <= 0.0 or self.plucker_wrist_fy <= 0.0:
+                    raise ValueError(f"Wrist Plücker focal lengths must be positive: {calibrated}.")
+                if not 0.0 <= self.plucker_front_cx < self.plucker_image_width or not 0.0 <= self.plucker_front_cy < self.plucker_image_height:
+                    raise ValueError(f"Front Plücker principal point is outside the image: {calibrated}.")
+                if not 0.0 <= self.plucker_wrist_cx < self.plucker_image_width or not 0.0 <= self.plucker_wrist_cy < self.plucker_image_height:
+                    raise ValueError(f"Wrist Plücker principal point is outside the image: {calibrated}.")
             try:
                 channels = [int(x.strip()) for x in str(self.plucker_encoder_channels).split(",") if x.strip()]
             except ValueError as exc:
@@ -324,6 +462,34 @@ class ACTConfig(PreTrainedConfig):
                 raise ValueError("`end_signal_loss_weight` must be non-negative.")
             if not 0.0 < self.end_signal_init_probability < 1.0:
                 raise ValueError("`end_signal_init_probability` must be in (0, 1).")
+        if self.interaction_state_probe_only and not self.interaction_state_conditioning:
+            raise ValueError(
+                "`interaction_state_probe_only` requires `interaction_state_conditioning=true`."
+            )
+        if self.interaction_state_auxiliary_only and not self.interaction_state_conditioning:
+            raise ValueError(
+                "`interaction_state_auxiliary_only` requires `interaction_state_conditioning=true`."
+            )
+        if self.interaction_state_probe_only and self.interaction_state_auxiliary_only:
+            raise ValueError(
+                "`interaction_state_probe_only` and `interaction_state_auxiliary_only` are mutually exclusive."
+            )
+        if self.interaction_state_probe_freeze_main and not self.interaction_state_probe_only:
+            raise ValueError(
+                "`interaction_state_probe_freeze_main` requires `interaction_state_probe_only=true`."
+            )
+        if not 0.0 <= float(self.interaction_state_probe_dropout) < 1.0:
+            raise ValueError(
+                "interaction_state_probe_dropout must be in [0, 1), got "
+                f"{self.interaction_state_probe_dropout}."
+            )
+        interaction_prediction_mode = str(self.interaction_state_prediction_mode).strip().lower()
+        if interaction_prediction_mode not in {"encoder_current", "decoder_chunk"}:
+            raise ValueError(
+                "interaction_state_prediction_mode must be 'encoder_current' or 'decoder_chunk', got "
+                f"{self.interaction_state_prediction_mode!r}."
+            )
+        self.interaction_state_prediction_mode = interaction_prediction_mode
         if self.interaction_state_conditioning:
             for key_name in (
                 "interaction_contact_target_key",
@@ -364,8 +530,19 @@ class ACTConfig(PreTrainedConfig):
         return None
 
     def validate_features(self) -> None:
-        if not self.image_features and not self.env_state_feature:
-            raise ValueError("You must provide at least one image or the environment state among the inputs.")
+        if not self.image_features and not self.env_state_feature and not self.point_cloud_features:
+            raise ValueError("You must provide an image, point cloud, or environment state among the inputs.")
+        if self.point_cloud_conditioning:
+            point_cloud_features = self.point_cloud_features
+            if list(point_cloud_features) != [self.point_cloud_key]:
+                raise ValueError(
+                    f"Point-cloud ACT requires exactly {self.point_cloud_key!r}; got {list(point_cloud_features)}."
+                )
+            if tuple(point_cloud_features[self.point_cloud_key].shape) != (self.point_cloud_num_points, 3):
+                raise ValueError(
+                    f"{self.point_cloud_key!r} must have shape ({self.point_cloud_num_points}, 3), got "
+                    f"{point_cloud_features[self.point_cloud_key].shape}."
+                )
         if self.plucker_conditioning:
             image_keys = list(self.image_features)
             if len(image_keys) != 2:

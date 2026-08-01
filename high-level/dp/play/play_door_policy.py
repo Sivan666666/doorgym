@@ -107,11 +107,21 @@ def auto_wrap_official_lerobot_checkpoint(checkpoint_path, args):
         requested_end = bool(policy_config.get("end_signal_prediction", False))
         cached_interaction = bool(cached_policy.get("interaction_state_conditioning", False))
         requested_interaction = bool(policy_config.get("interaction_state_conditioning", False))
-        if cached_end == requested_end and cached_interaction == requested_interaction:
+        cached_interaction_mode = str(
+            cached_policy.get("interaction_state_prediction_mode", "encoder_current")
+        )
+        requested_interaction_mode = str(
+            policy_config.get("interaction_state_prediction_mode", "encoder_current")
+        )
+        if (
+            cached_end == requested_end
+            and cached_interaction == requested_interaction
+            and cached_interaction_mode == requested_interaction_mode
+        ):
             print(f"Using cached Door-wrapped checkpoint: {manifest_path}", flush=True)
             return manifest_path.resolve()
         print(
-            "Cached Door wrapper has stale end-signal metadata; rebuilding it from the official checkpoint.",
+            "Cached Door wrapper has stale auxiliary-head metadata; rebuilding it from the official checkpoint.",
             flush=True,
         )
 
@@ -170,7 +180,16 @@ def auto_wrap_official_lerobot_checkpoint(checkpoint_path, args):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Play a trained Door LeRobot policy in the door asset scene.")
-    parser.add_argument("--checkpoint", type=str, required=True)
+    parser.add_argument("--checkpoint", type=str, default=None)
+    parser.add_argument(
+        "--expert_action_replay_raw_episode",
+        type=str,
+        default=None,
+        help=(
+            "Use one raw episode's fixed action sequence instead of a learned checkpoint. "
+            "The current randomized simulator state is retained."
+        ),
+    )
     parser.add_argument("--mode", choices=["ikpush", "ikpull", "pull", "push"], default="ikpush")
     parser.add_argument(
         "--robot_body",
@@ -178,7 +197,7 @@ def parse_args():
         dest="robot_body",
         choices=["b1z1", "a2wz1"],
         default="b1z1",
-        help="Robot play script to run. a2wz1 currently supports --mode ikpush.",
+        help="Robot play script to run. a2wz1 supports --mode ikpush and --mode ikpull.",
     )
     parser.add_argument("--num_envs", type=int, default=1)
     parser.add_argument("--steps", type=int, default=None)
@@ -249,16 +268,33 @@ def parse_args():
 
 def main():
     args = parse_args()
-    checkpoint_path = Path(args.checkpoint).expanduser()
-    if not checkpoint_path.is_absolute():
-        checkpoint_path = (Path.cwd() / checkpoint_path).resolve()
-    checkpoint_path = auto_wrap_official_lerobot_checkpoint(checkpoint_path, args)
+    if bool(args.checkpoint) == bool(args.expert_action_replay_raw_episode):
+        raise ValueError(
+            "Specify exactly one action source: --checkpoint or --expert_action_replay_raw_episode."
+        )
+    if args.checkpoint:
+        checkpoint_path = Path(args.checkpoint).expanduser()
+        if not checkpoint_path.is_absolute():
+            checkpoint_path = (Path.cwd() / checkpoint_path).resolve()
+        checkpoint_path = auto_wrap_official_lerobot_checkpoint(checkpoint_path, args)
+        replay_path = None
+    else:
+        checkpoint_path = None
+        replay_path = Path(args.expert_action_replay_raw_episode).expanduser()
+        if not replay_path.is_absolute():
+            replay_path = (Path.cwd() / replay_path).resolve()
+        if not replay_path.is_file():
+            raise FileNotFoundError(f"Expert action replay episode not found: {replay_path}")
     if args.steps is None:
         args.steps = 4300 if args.mode == "ikpull" else (2405 if args.mode == "ikpush" else 2500)
     if args.rgb:
         args.depth_only = False
     if args.rgb and args.mode not in ("push", "ikpush", "ikpull"):
         raise ValueError("--rgb Door policy play is only wired for push/ikpush/ikpull mode.")
+    if args.expert_action_replay_raw_episode and (args.robot_body != "a2wz1" or args.mode != "ikpush"):
+        raise ValueError(
+            "--expert_action_replay_raw_episode currently supports only --robot_body a2wz1 --mode ikpush."
+        )
     warmstart_params = [
         args.dp_warmstart_raw_episode is not None,
         args.dp_warmstart_step is not None,
@@ -283,9 +319,12 @@ def main():
     else:
         warmstart_raw_path = None
     if args.robot_body == "a2wz1":
-        if args.mode != "ikpush":
-            raise ValueError("--robot_body a2wz1 currently supports only --mode ikpush.")
-        script = HIGH_LEVEL_ROOT / "float_ik" / "isaacgym_float_ik_a2w_basearn_push_door_parallel.py"
+        if args.mode == "ikpush":
+            script = HIGH_LEVEL_ROOT / "float_ik" / "isaacgym_float_ik_a2w_basearn_push_door_parallel.py"
+        elif args.mode == "ikpull":
+            script = HIGH_LEVEL_ROOT / "float_ik" / "isaacgym_float_ik_a2w_basearn_pull_door_parallel.py"
+        else:
+            raise ValueError("--robot_body a2wz1 supports only --mode ikpush or --mode ikpull.")
     elif args.mode == "ikpush":
         script = HIGH_LEVEL_ROOT / "float_ik" / "isaacgym_float_ik_b1z1_basearn_push_door_parallel.py"
     elif args.mode == "ikpull":
@@ -316,12 +355,6 @@ def main():
         "--camera_seg",
         "--camera_display_scale",
         str(args.camera_display_scale),
-        "--dp_policy_checkpoint",
-        str(checkpoint_path),
-        "--dp_inference_steps",
-        str(args.dp_inference_steps),
-        "--dp_noise_scheduler_type",
-        args.dp_noise_scheduler_type,
         "--dp_control_env_id",
         str(args.dp_control_env_id),
         "--dp_log_path",
@@ -330,6 +363,17 @@ def main():
         str(args.dp_log_interval),
         "--no_preview_trajectory_at_spawn",
     ]
+    if checkpoint_path is not None:
+        cmd += [
+            "--dp_policy_checkpoint",
+            str(checkpoint_path),
+            "--dp_inference_steps",
+            str(args.dp_inference_steps),
+            "--dp_noise_scheduler_type",
+            args.dp_noise_scheduler_type,
+        ]
+    else:
+        cmd += ["--expert_action_replay_raw_episode", str(replay_path)]
     if args.dp_log_replay_snapshot:
         cmd.append("--dp_log_replay_snapshot")
     if args.mode in ("ikpush", "ikpull"):
@@ -382,13 +426,18 @@ def main():
     add_depth_aug_command_args(cmd, args)
     extra = args.play_args[1:] if args.play_args[:1] == ["--"] else args.play_args
     cmd += extra
-    print(f"Running Door policy: {' '.join(cmd)}", flush=True)
+    source_description = (
+        f"policy checkpoint {checkpoint_path}"
+        if checkpoint_path is not None
+        else f"expert action replay {replay_path}"
+    )
+    print(f"Running Door control source ({source_description}): {' '.join(cmd)}", flush=True)
     print(
         f"Door policy log will be saved to: {dp_log_path}\n"
         + (
-            "All envs are controlled by the learned policy."
+            "All envs are controlled by the selected action source."
             if args.dp_control_all_envs
-            else f"Only env {args.dp_control_env_id} is controlled by the learned policy; other envs keep scripted targets."
+            else f"Only env {args.dp_control_env_id} is externally controlled; other envs keep scripted targets."
         ),
         flush=True,
     )

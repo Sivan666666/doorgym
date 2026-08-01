@@ -22,6 +22,7 @@ FLOAT_IK_SOURCE_SCRIPTS = (
     "isaacgym_float_ik_b1z1_basearn_push_door_parallel.py",
     "isaacgym_float_ik_b1z1_basearn_pull_door_parallel.py",
     "isaacgym_float_ik_a2w_basearn_push_door_parallel.py",
+    "isaacgym_float_ik_a2w_basearn_pull_door_parallel.py",
 )
 REPLAY_STATE_KEYS = (
     "state",
@@ -368,8 +369,11 @@ def is_float_ik_episode(data):
 
 
 def is_a2w_float_ik_episode(data):
-    return source_script_from_episode(data).endswith(
+    source_script = source_script_from_episode(data)
+    return source_script.endswith(
         "isaacgym_float_ik_a2w_basearn_push_door_parallel.py"
+    ) or source_script.endswith(
+        "isaacgym_float_ik_a2w_basearn_pull_door_parallel.py"
     ) or is_a2w_failure_rollout(data)
 
 
@@ -428,7 +432,10 @@ def load_play_module(mode):
 
 def load_float_ik_module(mode, data=None):
     if mode == "ikpull":
-        module_path = HIGH_LEVEL_ROOT / "float_ik" / "isaacgym_float_ik_b1z1_basearn_pull_door_parallel.py"
+        if data is not None and is_a2w_float_ik_episode(data):
+            module_path = HIGH_LEVEL_ROOT / "float_ik" / "isaacgym_float_ik_a2w_basearn_pull_door_parallel.py"
+        else:
+            module_path = HIGH_LEVEL_ROOT / "float_ik" / "isaacgym_float_ik_b1z1_basearn_pull_door_parallel.py"
     elif mode == "ikpush":
         if data is not None and is_a2w_float_ik_episode(data):
             module_path = HIGH_LEVEL_ROOT / "float_ik" / "isaacgym_float_ik_a2w_basearn_push_door_parallel.py"
@@ -918,6 +925,39 @@ def frame_indices(args, total_frames):
     return available
 
 
+def replay_action_is_joint_command(data, action):
+    """Return whether a saved action uses the 9D base-command + arm-joint schema."""
+    values = np.asarray(action).reshape(-1)
+    if "action_names" in data.files:
+        names = [str(name) for name in np.asarray(data["action_names"]).reshape(-1).tolist()]
+        if any(name.startswith("joint") for name in names):
+            return True
+    return values.size == 9
+
+
+def format_replay_action(data, action, include_frame=False):
+    """Format either the legacy 10D EE action or the 9D joint-command action."""
+    values = np.asarray(action, dtype=np.float32).reshape(-1)
+    is_joint_command = replay_action_is_joint_command(data, values)
+    action_frame = "joint_command" if is_joint_command else action_frame_from_data(data)
+    prefix = f"frame:{action_frame} " if include_frame else ""
+    if is_joint_command:
+        if values.size < 9:
+            return f"{prefix}joint_command:{np.round(values, 4).tolist()}"
+        joints = ",".join(f"{float(value):.3f}" for value in values[2:8])
+        return (
+            f"{prefix}vx:{float(values[0]):.3f} yaw:{float(values[1]):.3f} "
+            f"joints:[{joints}] grip:{float(values[8]):.3f}"
+        )
+    if values.size >= 10:
+        return (
+            f"{prefix}vx:{float(values[0]):.3f} yaw:{float(values[1]):.3f} "
+            f"ee:[{float(values[2]):.3f},{float(values[3]):.3f},{float(values[4]):.3f}] "
+            f"grip:{float(values[9]):.3f}"
+        )
+    return f"{prefix}values:{np.round(values, 4).tolist()}"
+
+
 def print_replay_log(data, frame_idx, replay_step, replay_mode, env, env_id, action=None, has_snapshot=False):
     pieces = [
         f"[DoorDPReplay] mode={replay_mode}",
@@ -928,12 +968,7 @@ def print_replay_log(data, frame_idx, replay_step, replay_mode, env, env_id, act
     if "subtask_index" in data.files:
         pieces.append(f"subtask={int(np.asarray(data['subtask_index'][frame_idx]).reshape(-1)[0])}")
     if action is not None:
-        pieces.append(
-            "action="
-            f"vx:{float(action[0]):.3f} yaw:{float(action[1]):.3f} "
-            f"ee:[{float(action[2]):.3f},{float(action[3]):.3f},{float(action[4]):.3f}] "
-            f"grip:{float(action[9]):.3f}"
-        )
+        pieces.append("action=" + format_replay_action(data, action))
     if hasattr(env, "_door_dof_pos"):
         door = env._door_dof_pos[env_id].detach().cpu().numpy()
         pieces.append(f"door_dof={np.round(door, 4).tolist()}")
@@ -1401,7 +1436,10 @@ def draw_float_ik_replay_markers(float_mod, gym, viewer, env, data, frame_idx, a
         )
         float_mod.gymutil.draw_lines(current_geom, gym, viewer, env, ee_pose)
         float_mod.gymutil.draw_lines(float_mod.ThickAxesGeometry(scale=0.12, thickness=0.004), gym, viewer, env, ee_pose)
-    if action is None:
+    # Joint-command recordings do not contain an EE target pose in action[2:9].
+    # Keep drawing the recorded actual EE marker, but do not reinterpret joints
+    # as a target position/quaternion.
+    if action is None or replay_action_is_joint_command(data, action):
         return
     target, target_quat = float_ik_action_target_world(float_mod, data, frame_idx, action)
     target_pose = float_mod.gymapi.Transform(
@@ -2102,13 +2140,7 @@ def print_float_ik_replay_log(
     elif "replay_door_dof_pos" in data.files:
         pieces.append(f"door_dof={np.round(np.asarray(data['replay_door_dof_pos'][frame_idx]), 4).tolist()}")
     if action is not None:
-        action_frame = action_frame_from_data(data)
-        pieces.append(
-            "action="
-            f"frame:{action_frame} vx:{float(action[0]):.3f} yaw:{float(action[1]):.3f} "
-            f"ee:[{float(action[2]):.3f},{float(action[3]):.3f},{float(action[4]):.3f}] "
-            f"grip:{float(action[9]):.3f}"
-        )
+        pieces.append("action=" + format_replay_action(data, action, include_frame=True))
     if base_xy is not None and yaw is not None:
         base_xy = np.asarray(base_xy, dtype=np.float32).reshape(2)
         pieces.append(f"base:[{float(base_xy[0]):.3f},{float(base_xy[1]):.3f},{float(yaw):.3f}]")

@@ -97,6 +97,24 @@ def camera_gates_payload(controller: DoorPolicyController, env_ids=None):
     return values if any_gate else None
 
 
+def interaction_state_payload(controller: DoorPolicyController, env_ids=None):
+    if not hasattr(controller, "get_last_interaction_state_for_env"):
+        return None
+    if env_ids is None:
+        state = controller.get_last_interaction_state_for_env()
+        return None if state is None else np.asarray(state, dtype=np.float32).tolist()
+    values = []
+    any_state = False
+    for env_id in env_ids:
+        state = controller.get_last_interaction_state_for_env(int(env_id))
+        if state is None:
+            values.append([float("nan")] * 3)
+        else:
+            any_state = True
+            values.append(np.asarray(state, dtype=np.float32).tolist())
+    return values if any_state else None
+
+
 def main() -> None:
     controller = None
     while True:
@@ -151,7 +169,10 @@ def main() -> None:
                 if noise is not None and not isinstance(noise, torch.Tensor):
                     noise = torch.as_tensor(noise, dtype=torch.float32)
                 controller.sample_action_chunk(noise=noise)
-                ok(camera_gates=camera_gates_payload(controller))
+                ok(
+                    camera_gates=camera_gates_payload(controller),
+                    interaction_state=interaction_state_payload(controller),
+                )
             elif cmd == "act":
                 action = controller.act(
                     np.asarray(request["state"], dtype=np.float32),
@@ -165,6 +186,7 @@ def main() -> None:
                 ok(
                     action=np.asarray(action, dtype=np.float32).tolist(),
                     camera_gates=camera_gates_payload(controller),
+                    interaction_state=interaction_state_payload(controller),
                 )
             elif cmd == "act_batch":
                 env_ids = [int(x) for x in request["env_ids"]]
@@ -181,6 +203,7 @@ def main() -> None:
                 ok(
                     actions=np.asarray(actions, dtype=np.float32).tolist(),
                     camera_gates=camera_gates_payload(controller, env_ids),
+                    interaction_state=interaction_state_payload(controller, env_ids),
                 )
             elif cmd == "predict_action_chunks_for_envs":
                 env_ids = [int(x) for x in request["env_ids"]]
@@ -191,7 +214,17 @@ def main() -> None:
                 ok(
                     actions=np.asarray(actions, dtype=np.float32).tolist(),
                     camera_gates=camera_gates_payload(controller, env_ids),
+                    interaction_state=interaction_state_payload(controller, env_ids),
                 )
+            elif cmd == "get_last_point_cloud":
+                if not hasattr(controller, "get_last_point_cloud_for_env"):
+                    ok(point_cloud=None)
+                else:
+                    point_cloud = controller.get_last_point_cloud_for_env(request.get("env_id"))
+                    ok(
+                        point_cloud=None
+                        if point_cloud is None
+                        else np.asarray(point_cloud, dtype=np.float32).tolist())
             elif cmd == "close":
                 ok()
                 return

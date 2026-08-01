@@ -20,6 +20,12 @@ def make_action(value: float, quat: np.ndarray, gripper: float) -> np.ndarray:
     return action
 
 
+def make_joint_action(value: float, gripper: float) -> np.ndarray:
+    action = np.full(9, float(value), dtype=np.float32)
+    action[8] = float(gripper)
+    return action
+
+
 def test_step6_observation_aligns_new_action0_to_step6():
     old_quat = np.asarray([0.0, 0.0, 0.0, 1.0], dtype=np.float32)
     new_quat = np.asarray([0.0, 0.0, np.sin(np.pi / 4), np.cos(np.pi / 4)], dtype=np.float32)
@@ -69,3 +75,89 @@ def test_late_chunk_skips_expired_prefix_and_blends_current_step():
     action8 = buffer.pop(expected_timestep=8)
     np.testing.assert_allclose(action8.action[:5], 0.3 * 8.0 + 0.7 * 102.0, atol=1.0e-6)
     np.testing.assert_allclose(action8.action[9], -0.5, atol=1.0e-6)
+
+
+def test_joint9_overlap_blends_base_and_six_joints_but_not_gripper():
+    old_chunk = np.stack([make_joint_action(i, -1.2) for i in range(10)])
+    new_chunk = np.stack([make_joint_action(100 + i, -0.2) for i in range(10)])
+    buffer = MODULE.EEActionOverlapBuffer(
+        old_weight=0.3,
+        new_weight=0.7,
+        state_action_mode="joint9",
+    )
+    buffer.ingest(old_chunk, start_timestep=0, current_timestep=0)
+    for step in range(7):
+        buffer.pop(expected_timestep=step)
+
+    merged = buffer.ingest(new_chunk, start_timestep=6, current_timestep=7)
+    assert merged["stale_skipped"] == 1
+    action7 = buffer.pop(expected_timestep=7).action
+    np.testing.assert_allclose(action7[:8], 0.3 * 7.0 + 0.7 * 101.0, atol=1.0e-6)
+    assert action7[8] == np.float32(-0.2)
+
+
+def test_interaction_chunk_is_aligned_with_executed_action_timestep():
+    actions = np.stack([make_joint_action(i, -1.0) for i in range(5)])
+    interaction = np.asarray(
+        [[0.1 * i, 0.2 * i, 0.05 * i] for i in range(5)], dtype=np.float32
+    )
+    buffer = MODULE.EEActionOverlapBuffer(state_action_mode="joint9")
+
+    meta = buffer.ingest(
+        actions,
+        start_timestep=10,
+        current_timestep=12,
+        interaction_states=interaction,
+        chunk_id="chunk_a",
+    )
+    assert meta["stale_skipped"] == 2
+    assert meta["interaction_rows_available"] == 5
+
+    item = buffer.pop(expected_timestep=12)
+    np.testing.assert_allclose(item.interaction_state, interaction[2], atol=1.0e-7)
+    assert item.interaction_chunk_ids == ("chunk_a",)
+
+
+def test_overlapping_interaction_predictions_use_action_blend_weights():
+    old_actions = np.stack([make_joint_action(i, -1.0) for i in range(3)])
+    new_actions = np.stack([make_joint_action(100 + i, -0.5) for i in range(3)])
+    old_interaction = np.asarray(
+        [[0.1, 0.2, 0.3], [0.2, 0.3, 0.4], [0.3, 0.4, 0.5]], dtype=np.float32
+    )
+    new_interaction = np.asarray(
+        [[0.8, 0.7, 0.6], [0.7, 0.6, 0.5], [0.6, 0.5, 0.4]], dtype=np.float32
+    )
+    buffer = MODULE.EEActionOverlapBuffer(state_action_mode="joint9")
+    buffer.ingest(
+        old_actions,
+        start_timestep=0,
+        current_timestep=0,
+        interaction_states=old_interaction,
+        chunk_id="old",
+    )
+    merged = buffer.ingest(
+        new_actions,
+        start_timestep=0,
+        current_timestep=0,
+        interaction_states=new_interaction,
+        chunk_id="new",
+    )
+    assert merged["overlap_blended"] == 3
+
+    item = buffer.pop(expected_timestep=0)
+    np.testing.assert_allclose(
+        item.interaction_state,
+        0.3 * old_interaction[0] + 0.7 * new_interaction[0],
+        atol=1.0e-7,
+    )
+    assert item.interaction_chunk_ids == ("old", "new")
+    assert item.blend_count == 2
+
+
+def test_action_buffer_remains_backward_compatible_without_interaction_state():
+    actions = np.stack([make_joint_action(i, -1.0) for i in range(2)])
+    buffer = MODULE.EEActionOverlapBuffer(state_action_mode="joint9")
+    buffer.ingest(actions, start_timestep=0, current_timestep=0)
+    item = buffer.pop(expected_timestep=0)
+    assert item.interaction_state is None
+    assert item.interaction_chunk_ids == ()

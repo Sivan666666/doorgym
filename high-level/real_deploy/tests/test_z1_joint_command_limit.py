@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import threading
 from pathlib import Path
@@ -15,6 +16,72 @@ assert SPEC is not None and SPEC.loader is not None
 bridge = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = bridge
 SPEC.loader.exec_module(bridge)
+
+
+def test_joint9_packet_and_state_bypass_ee_layout() -> None:
+    action = np.asarray([0.2, -0.1, 0.1, 0.2, -0.3, 0.4, -0.5, 0.6, -1.2], dtype=np.float32)
+    packet = json.dumps({"action": action.tolist()}).encode("utf-8")
+    parsed, mode, q_target = bridge.parse_action_command(packet, "joint9")
+
+    np.testing.assert_allclose(parsed, action)
+    assert mode == "joint"
+    np.testing.assert_allclose(q_target, action[2:8])
+
+    state = bridge.make_act_state(
+        np.asarray([0.3, 0.05]),
+        np.zeros(3),
+        np.asarray([0.0, 0.0, 0.0, 1.0]),
+        -0.7,
+        state_action_mode="joint9",
+        q=action[2:8],
+    )
+    assert state.shape == (9,)
+    np.testing.assert_allclose(state, [0.3, 0.05, *action[2:8], -0.7], atol=1.0e-6)
+
+
+def test_joint9_bridge_cli_is_explicit_and_legacy_default_remains_ee10(monkeypatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["z1_act_ee_bridge.py"])
+    assert bridge.parse_args().act_state_action_mode == "ee10"
+    monkeypatch.setattr(sys, "argv", ["z1_act_ee_bridge.py", "--act_state_action_mode", "joint9"])
+    assert bridge.parse_args().act_state_action_mode == "joint9"
+
+
+def test_simulated_camera_poses_match_front_and_ee_mounts() -> None:
+    front, wrist = bridge.simulated_camera_pose_transforms(
+        np.eye(4, dtype=np.float64),
+        np.eye(4, dtype=np.float64),
+        bridge.make_transform([0.086, 0.0, 0.0], [0.0, 0.0, 0.0]),
+    )
+    front_pos, front_quat = bridge.transform_to_pose(front)
+    wrist_pos, wrist_quat = bridge.transform_to_pose(wrist)
+
+    np.testing.assert_allclose(front_pos, [0.29, 0.031, 0.165], atol=1.0e-7)
+    np.testing.assert_allclose(
+        front_quat,
+        [0.0, -np.sin(np.deg2rad(22.5)), 0.0, np.cos(np.deg2rad(22.5))],
+        atol=1.0e-7,
+    )
+    np.testing.assert_allclose(wrist_pos, [-0.007, 0.031, 0.22], atol=1.0e-7)
+    np.testing.assert_allclose(
+        wrist_quat,
+        [0.0, np.sin(np.deg2rad(30.0)), 0.0, np.cos(np.deg2rad(30.0))],
+        atol=1.0e-7,
+    )
+
+
+def test_wrist_camera_translation_rotates_with_fk_and_ee() -> None:
+    sdk_ee = bridge.make_transform([0.4, -0.2, 0.3], [0.0, 0.0, np.pi / 2.0])
+    act_ee_from_sdk_ee = bridge.make_transform([0.086, 0.0, 0.0], [0.0, 0.0, 0.0])
+    _, wrist = bridge.simulated_camera_pose_transforms(
+        sdk_ee,
+        np.eye(4),
+        act_ee_from_sdk_ee,
+    )
+    np.testing.assert_allclose(
+        wrist[:3, 3],
+        [0.4 - 0.031, -0.2 - 0.007, 0.3 + 0.22],
+        atol=1.0e-7,
+    )
 
 
 def test_joint_command_is_limited_once_before_send() -> None:
@@ -55,10 +122,10 @@ def test_cli_disallows_direct_hold_and_defaults_to_back_to_start(monkeypatch) ->
     assert args.joint_command_mode == "online_quintic"
     assert args.back_to_start_on_exit
     assert args.max_joint_speed == 3.0
-    assert args.max_gripper_speed == 2.5
-    assert args.max_gripper_acceleration == 20.0
+    assert args.max_gripper_speed == 3.14
+    assert args.max_gripper_acceleration == 120.0
     assert args.max_joint_acceleration == 15.0
-    assert args.joint_trajectory_duration_s == 0.04
+    assert args.joint_trajectory_duration_s == 0.02
     assert args.ik_max_joint_delta == 1.5
     assert args.soft_ik_fallback
     assert args.soft_ik_max_iterations == 10

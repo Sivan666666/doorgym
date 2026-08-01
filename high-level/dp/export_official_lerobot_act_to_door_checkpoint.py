@@ -128,6 +128,19 @@ def main():
         action_dim=action_dim,
         pretrained_path=str(policy_dir),
         normalization_mapping=policy_config.get("normalization_mapping"),
+        point_cloud_conditioning=bool(policy_config.get("point_cloud_conditioning", False)),
+        point_cloud_key=policy_config.get("point_cloud_key", "observation.point_cloud"),
+        point_cloud_views=policy_config.get(
+            "point_cloud_views", sidecar_data.get("point_cloud_views", "front")
+        ),
+        point_cloud_encoder_mode=policy_config.get("point_cloud_encoder_mode", "obsbench_local"),
+        point_cloud_num_points=int(policy_config.get("point_cloud_num_points", 1024)),
+        point_cloud_num_tokens=int(policy_config.get("point_cloud_num_tokens", 256)),
+        point_cloud_knn_k=int(policy_config.get("point_cloud_knn_k", 16)),
+        point_cloud_global_dim=int(policy_config.get("point_cloud_global_dim", 64)),
+        point_cloud_frame=policy_config.get("point_cloud_frame", "robot_base"),
+        point_cloud_workspace_min=policy_config.get("point_cloud_workspace_min", "0.20,-1.00,0.00"),
+        point_cloud_workspace_max=policy_config.get("point_cloud_workspace_max", "2.00,1.00,1.80"),
         vision_backbone=policy_config.get("vision_backbone", "resnet18"),
         pretrained_backbone_weights=policy_config.get("pretrained_backbone_weights"),
         replace_final_stride_with_dilation=bool(policy_config.get("replace_final_stride_with_dilation", False)),
@@ -154,6 +167,18 @@ def main():
         plucker_image_width=int(policy_config.get("plucker_image_width", 640)),
         plucker_image_height=int(policy_config.get("plucker_image_height", 480)),
         plucker_horizontal_fov_deg=float(policy_config.get("plucker_horizontal_fov_deg", 69.0)),
+        plucker_intrinsics_mode=policy_config.get("plucker_intrinsics_mode", "legacy_shared_fov"),
+        plucker_front_fx=float(policy_config.get("plucker_front_fx", 0.0)),
+        plucker_front_fy=float(policy_config.get("plucker_front_fy", 0.0)),
+        plucker_front_cx=float(policy_config.get("plucker_front_cx", 0.0)),
+        plucker_front_cy=float(policy_config.get("plucker_front_cy", 0.0)),
+        plucker_wrist_fx=float(policy_config.get("plucker_wrist_fx", 0.0)),
+        plucker_wrist_fy=float(policy_config.get("plucker_wrist_fy", 0.0)),
+        plucker_wrist_cx=float(policy_config.get("plucker_wrist_cx", 0.0)),
+        plucker_wrist_cy=float(policy_config.get("plucker_wrist_cy", 0.0)),
+        plucker_deterministic_pooling=bool(
+            policy_config.get("plucker_deterministic_pooling", False)
+        ),
         handle_latent_aux=bool(policy_config.get("handle_latent_aux", False)),
         handle_latent_dim=int(policy_config.get("handle_latent_dim", 384)),
         handle_latent_loss_weight=float(policy_config.get("handle_latent_loss_weight", 0.1)),
@@ -169,9 +194,27 @@ def main():
         ),
         end_signal_prediction=bool(policy_config.get("end_signal_prediction", False)),
         end_signal_target_key=policy_config.get("end_signal_target_key", "aux.end_signal"),
-        end_signal_loss_weight=float(policy_config.get("end_signal_loss_weight", 1.0)),
+        end_signal_loss_weight=float(policy_config.get("end_signal_loss_weight", 0.1)),
         end_signal_init_probability=float(policy_config.get("end_signal_init_probability", 0.01)),
+        end_signal_detach_decoder_feature=bool(
+            policy_config.get("end_signal_detach_decoder_feature", True)
+        ),
+        auxiliary_head_rng_isolation=bool(policy_config.get("auxiliary_head_rng_isolation", True)),
         interaction_state_conditioning=bool(policy_config.get("interaction_state_conditioning", False)),
+        interaction_state_prediction_mode=str(
+            policy_config.get("interaction_state_prediction_mode", "encoder_current")
+        ),
+        interaction_state_probe_only=bool(policy_config.get("interaction_state_probe_only", False)),
+        interaction_state_auxiliary_only=bool(
+            policy_config.get("interaction_state_auxiliary_only", False)
+        ),
+        interaction_state_probe_dropout=float(policy_config.get("interaction_state_probe_dropout", 0.0)),
+        interaction_state_probe_separate_backward=bool(
+            policy_config.get("interaction_state_probe_separate_backward", True)
+        ),
+        interaction_state_probe_freeze_main=bool(
+            policy_config.get("interaction_state_probe_freeze_main", False)
+        ),
         interaction_contact_target_key=policy_config.get(
             "interaction_contact_target_key", "aux.interaction_contact"
         ),
@@ -213,7 +256,33 @@ def main():
         "policy_output_dim": action_dim + int(bool(policy_config.get("end_signal_prediction", False))),
         "end_signal_prediction": bool(policy_config.get("end_signal_prediction", False)),
         "end_signal_index": action_dim if bool(policy_config.get("end_signal_prediction", False)) else None,
+        "end_signal_detach_decoder_feature": bool(
+            policy_config.get("end_signal_detach_decoder_feature", True)
+        ),
+        "auxiliary_head_rng_isolation": bool(policy_config.get("auxiliary_head_rng_isolation", True)),
+        "plucker_deterministic_pooling": bool(
+            policy_config.get("plucker_deterministic_pooling", False)
+        ),
+        "point_cloud_conditioning": bool(policy_config.get("point_cloud_conditioning", False)),
+        "point_cloud_views": str(policy_config.get("point_cloud_views", "front")),
+        "point_cloud_encoder_mode": str(
+            policy_config.get("point_cloud_encoder_mode", "obsbench_local")
+        ),
         "interaction_state_conditioning": bool(policy_config.get("interaction_state_conditioning", False)),
+        "interaction_state_prediction_mode": str(
+            policy_config.get("interaction_state_prediction_mode", "encoder_current")
+        ),
+        "interaction_state_probe_only": bool(policy_config.get("interaction_state_probe_only", False)),
+        "interaction_state_auxiliary_only": bool(
+            policy_config.get("interaction_state_auxiliary_only", False)
+        ),
+        "interaction_state_probe_dropout": float(policy_config.get("interaction_state_probe_dropout", 0.0)),
+        "interaction_state_probe_separate_backward": bool(
+            policy_config.get("interaction_state_probe_separate_backward", True)
+        ),
+        "interaction_state_probe_freeze_main": bool(
+            policy_config.get("interaction_state_probe_freeze_main", False)
+        ),
         "action_names": action_names,
         "vision_mode": vision_mode,
         "action_frame": action_frame,

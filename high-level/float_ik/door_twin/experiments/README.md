@@ -2,6 +2,16 @@
 
 DoorTwin agent run artifacts live under `runs/`.
 
+The reproducible paired Agent ablation runner and protocol are documented in
+`../benchmark/README.md`. Formal fresh-door manifests should be generated at run
+time so test-door identities do not leak into examples or repair history.
+
+Tool-driven Codex sessions additionally contain `session.json`,
+`tool_trace.jsonl`, `prior_snapshot.json`, `candidate_graph.json`,
+`best_candidate/`, per-candidate static/probe/rollout reports, append-only repair
+records, and `final_report.md`. Re-run the same `run_agent.py` command to resume
+an interrupted session.
+
 Use this directory for rollout logs, keyframe images, repair histories, and local
 optimization/debug outputs. Reusable skill programs should stay in
 `../examples/`, and writeups or debug notes should stay in `../doc/`.

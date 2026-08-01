@@ -1,0 +1,72 @@
+schema_version: door_twin_agent_benchmark_v1
+name: door_twin_fresh3_single_candidate_table
+base_door_cfg: /home/sivan/whole_body/visual_whole_body/high-level/data/cfg/b1z1_opendoor.yaml
+runner_script: /home/sivan/whole_body/visual_whole_body/high-level/float_ik/isaacgym_float_ik_a2w_basearn_push_door_parallel.py
+output_root: /home/sivan/whole_body/visual_whole_body/high-level/float_ik/door_twin/experiments/runs/fresh3_agent_table
+python_executable: /home/sivan/miniconda3/envs/b1z1/bin/python
+candidate_repeats: 1
+max_repair_rounds: 5
+development_seeds: [41001, 41002, 41003, 41004]
+heldout_seeds: [42001, 42002, 42003, 42004, 42005, 42006, 42007, 42008,
+                42009, 42010, 42011, 42012, 42013, 42014, 42015, 42016]
+generation_success_min: 12
+asset_probe_seed: 43001
+# The simulator spends the first ~100 steps settling/walking. Keep the separate
+# load-stability check at 100 steps, but allow the hinge torque probe enough time
+# to observe at least 30 degrees of motion.
+asset_probe_steps: 300
+asset_probe_force: 20.0
+steps: 2405
+methods:
+  - rule_based
+  - without_simulation_rollout
+  - without_visual_feedback
+  - ours
+vlm:
+  model: gpt-5
+  temperature: 0.0
+common_runner_args:
+  - --headless
+  - --rl_device
+  - cuda:0
+  - --sim_device
+  - cuda:0
+  - --graphics_device_id
+  - "0"
+  - --no_enable_depth_noise
+  - --no_enable_depth_gaussian_blur
+  - --no_show_seg
+doors:
+  - id: "99650069960021"
+    door_name: "99650069960021"
+    tags: [fresh, aigc, hinged_lever_push]
+    hidden_ground_truth:
+      door_body_name: link_1
+      handle_body_name: link_2
+      door_dof_name: joint_1
+      handle_dof_name: joint_2
+      handle_goal_pos: [-0.05898629613213655, 0.0, 0.054355376871399005]
+      handle_goal_reference_type: generated_initial_candidate
+      handle_goal_verified: false
+  - id: "99655039960035"
+    door_name: "99655039960035"
+    tags: [fresh, aigc, hinged_lever_push]
+    hidden_ground_truth:
+      door_body_name: link_1
+      handle_body_name: link_2
+      door_dof_name: joint_1
+      handle_dof_name: joint_2
+      handle_goal_pos: [-0.05792733785023411, 0.0, 0.052568476178351746]
+      handle_goal_reference_type: generated_initial_candidate
+      handle_goal_verified: false
+  - id: "99660039960021"
+    door_name: "99660039960021"
+    tags: [fresh, aigc, hinged_lever_push]
+    hidden_ground_truth:
+      door_body_name: link_1
+      handle_body_name: link_2
+      door_dof_name: joint_1
+      handle_dof_name: joint_2
+      handle_goal_pos: [-0.053148727120594375, 0.0, 0.04897610601627738]
+      handle_goal_reference_type: generated_initial_candidate
+      handle_goal_verified: false

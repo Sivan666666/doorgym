@@ -1,0 +1,96 @@
+schema_version: door_twin_experience_catalog_v1
+experiences:
+  - experience_id: wc4_reference
+    door_name: wc4
+    skill_path: ../examples/wc4_smoke_skill.json
+    debug_doc_path: ../doc/wc4_skill_alignment_notes.md
+    door_signature:
+      mechanism_type: hinged_lever_door
+      push_or_pull: push
+      hinge_axis: "0 0 1"
+      hinge_side: left
+      handle_mobility: movable
+      handle_orientation: horizontal_x
+      door_dimensions: [1.05, 0.1915, 2.25]
+      handle_dimensions: [0.12, 0.01, 0.04]
+      tags: [wc4, smooth_command, push_traverse]
+    initial_failures: [command_discontinuity, speed_mismatch]
+    accepted_repairs: [continuous_handle_follow, matched_push_traverse_speed]
+    rejected_repairs: []
+    final_validation: {documented_success: true}
+
+  - experience_id: partnet_99692809960048
+    door_name: "99692809960048"
+    skill_path: ../examples/99692809960048_traverse_scripted_speed_skill.json
+    debug_doc_path: ../doc/99692809960048_debug_to_final.md
+    door_signature:
+      mechanism_type: hinged_lever_door
+      push_or_pull: push
+      hinge_side: unknown
+      hinge_axis: unknown
+      handle_mobility: movable
+      handle_orientation: horizontal_x
+      door_dimensions: [0.828563, 0.104951, 1.896489]
+      handle_dimensions: [0.146018, 0.053961, 0.02704]
+      tags: [partnet, generated, frame_collision, push_traverse]
+    initial_failures: [base_collision, body_blocked, speed_mismatch]
+    accepted_repairs: [no_frame_collision_variant, matched_push_traverse_speed]
+    rejected_repairs: [large_negative_door_z_offset]
+    final_validation: {documented_success: true}
+
+  - experience_id: button_door_reference
+    door_name: button_door
+    skill_path: ../examples/button_door_push_traverse_skill.json
+    debug_doc_path: ../doc/button_door_debug_to_final.md
+    door_signature:
+      mechanism_type: hinged_lever_door
+      push_or_pull: push
+      hinge_axis: "0 0 1"
+      hinge_side: left
+      handle_mobility: movable
+      handle_orientation: horizontal_x
+      door_dimensions: [1.53, 0.155, 2.155]
+      handle_dimensions: [0.205, 0.068, 0.036]
+      tags: [button_door, wall_alignment, visual_grasp]
+    initial_failures: [wall_alignment, grasp_quality]
+    accepted_repairs: [bounds_yaw_override, grasp_z_minus_1cm]
+    rejected_repairs: []
+    final_validation: {documented_success: true}
+
+  - experience_id: fire_door_reference
+    door_name: fire_door
+    skill_path: ../examples/fire_door_push_traverse_skill.json
+    debug_doc_path: ../doc/fire_door_debug_to_video.md
+    door_signature:
+      mechanism_type: hinged_lever_door
+      push_or_pull: push
+      hinge_axis: "0 0 -1"
+      hinge_side: right
+      handle_mobility: movable
+      handle_orientation: horizontal_x
+      door_dimensions: [1.07, 0.155, 2.25]
+      handle_dimensions: [0.135, 0.065, 0.024]
+      tags: [fire_door, low_handle, stance_alignment]
+    initial_failures: [bad_stance_alignment, grasp_quality]
+    accepted_repairs: [wc4_like_stance, grasp_z_minus_1cm]
+    rejected_repairs: [full_handle_y_alignment]
+    final_validation: {documented_success: true}
+
+  - experience_id: glass_door_reference
+    door_name: glass_door
+    skill_path: ../examples/glass_door_push_traverse_skill.json
+    debug_doc_path: ../doc/glass_door_debug_to_final.md
+    door_signature:
+      mechanism_type: hinged_fixed_handle_door
+      push_or_pull: push
+      hinge_axis: "0 0 1"
+      hinge_side: unknown
+      handle_mobility: fixed
+      handle_orientation: vertical
+      door_dimensions: [1.225, 0.25, 2.63]
+      handle_dimensions: [0.04, 0.04, 0.26]
+      tags: [glass_door, fixed_handle, vertical_handle, roll_90deg]
+    initial_failures: [wrong_grasp_orientation, wrong_push_direction, excessive_hinge_resistance]
+    accepted_repairs: [ee_roll_90deg, motion_sign_fix, resistance_tuning]
+    rejected_repairs: [high_hinge_resistance]
+    final_validation: {documented_success: true}

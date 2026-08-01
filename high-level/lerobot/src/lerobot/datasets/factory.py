@@ -82,6 +82,21 @@ def resolve_delta_timestamps(
             and cfg.action_delta_indices is not None
         ):
             delta_timestamps[key] = [i / ds_meta.fps for i in cfg.action_delta_indices]
+        interaction_target_keys = {
+            str(getattr(cfg, "interaction_contact_target_key", "aux.interaction_contact")),
+            str(getattr(cfg, "interaction_handle_target_key", "aux.interaction_handle_progress")),
+            str(getattr(cfg, "interaction_door_target_key", "aux.interaction_door_progress")),
+        }
+        if (
+            key in interaction_target_keys
+            and bool(getattr(cfg, "interaction_state_conditioning", False))
+            and str(getattr(cfg, "interaction_state_prediction_mode", "encoder_current"))
+            == "decoder_chunk"
+            and cfg.action_delta_indices is not None
+        ):
+            # Decoder-side interaction predictions are aligned one-to-one with
+            # action[t:t+H], including the same episode-boundary padding.
+            delta_timestamps[key] = [i / ds_meta.fps for i in cfg.action_delta_indices]
         if key.startswith(OBS_PREFIX) and cfg.observation_delta_indices is not None:
             delta_timestamps[key] = [i / ds_meta.fps for i in cfg.observation_delta_indices]
 

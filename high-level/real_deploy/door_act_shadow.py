@@ -65,6 +65,56 @@ DEFAULT_DEPTH_GAUSSIAN_BLUR_KSIZE = 0
 DEFAULT_DEPTH_GAUSSIAN_BLUR_SIGMA = 0.0
 DEFAULT_WRIST_REALSENSE_SERIAL = "261222075130"
 DEFAULT_FRONT_REALSENSE_SERIAL = "261222075566"
+EE_STATE_ACTION_DIM = 10
+JOINT_STATE_ACTION_DIM = 9
+STATE_ACTION_MODES = ("ee10", "joint9")
+INTERACTION_STATE_NAMES = (
+    "contact_probability",
+    "handle_progress",
+    "door_progress",
+)
+
+
+def normalize_state_action_mode(value: str) -> str:
+    mode = str(value).strip().lower()
+    mode = {"ee": "ee10", "joint": "joint9", "joint_state9": "joint9"}.get(mode, mode)
+    if mode not in STATE_ACTION_MODES:
+        raise ValueError(f"Unsupported state/action mode {value!r}; expected {STATE_ACTION_MODES}.")
+    return mode
+
+
+def state_action_dim(mode: str) -> int:
+    return JOINT_STATE_ACTION_DIM if normalize_state_action_mode(mode) == "joint9" else EE_STATE_ACTION_DIM
+
+
+def infer_state_action_mode(controller, requested: str = "auto") -> str:
+    requested = str(requested).strip().lower()
+    if requested != "auto":
+        mode = normalize_state_action_mode(requested)
+    else:
+        state_dim = int(controller.config.get("state_dim", len(controller.state_feature_names)))
+        action_dim = int(controller.action_dim)
+        action_frame = str(getattr(controller, "action_frame", "")).lower()
+        if state_dim == JOINT_STATE_ACTION_DIM and action_dim == JOINT_STATE_ACTION_DIM:
+            mode = "joint9"
+        elif state_dim == EE_STATE_ACTION_DIM and action_dim == EE_STATE_ACTION_DIM:
+            mode = "ee10"
+        elif "joint" in action_frame and action_dim == JOINT_STATE_ACTION_DIM:
+            mode = "joint9"
+        else:
+            raise ValueError(
+                "Cannot infer real-deployment state/action schema from checkpoint: "
+                f"state_dim={state_dim}, action_dim={action_dim}, action_frame={action_frame!r}. "
+                "Pass --z1_state_action_mode explicitly."
+            )
+    expected = state_action_dim(mode)
+    state_dim = int(controller.config.get("state_dim", len(controller.state_feature_names)))
+    if int(controller.action_dim) != expected or state_dim != expected:
+        raise ValueError(
+            f"Checkpoint is incompatible with {mode}: state_dim={state_dim}, "
+            f"action_dim={controller.action_dim}, expected both {expected}."
+        )
+    return mode
 
 
 def add_repo_paths(repo_root: Path) -> None:
@@ -2133,13 +2183,15 @@ class RealSenseDepthPair:
             cam.stop()
 
 
-def zero_state() -> np.ndarray:
-    state = np.zeros(10, dtype=np.float32)
+def zero_state(state_action_mode: str = "ee10") -> np.ndarray:
+    mode = normalize_state_action_mode(state_action_mode)
+    state = np.zeros(state_action_dim(mode), dtype=np.float32)
     # State convention: [last_vx, last_vyaw, ee_xyz, ee_quat_xyzw, gripper].
     # If the Z1 state stream is not available yet, an identity quaternion is a
     # safer fallback than an all-zero quaternion.  Runtime should normally
     # overwrite state[2:10] from Z1ActStateReceiver before inference.
-    state[8] = 1.0
+    if mode == "ee10":
+        state[8] = 1.0
     return state
 
 
@@ -2172,7 +2224,10 @@ def compute_arm_tracking_error(
     position_tolerance_m: float,
     orientation_tolerance_deg: float,
     gripper_tolerance_rad: float,
+    state_action_mode: str = "ee10",
+    joint_tolerance_rad: float = 0.10,
 ) -> dict:
+    mode = normalize_state_action_mode(state_action_mode)
     meta = z1_state_meta or {}
     valid_feedback = bool(
         target_action is not None
@@ -2191,6 +2246,8 @@ def compute_arm_tracking_error(
         "position_tolerance_m": float(position_tolerance_m),
         "orientation_tolerance_deg": float(orientation_tolerance_deg),
         "gripper_tolerance_rad": float(gripper_tolerance_rad),
+        "state_action_mode": mode,
+        "joint_tolerance_rad": float(joint_tolerance_rad),
         "reached": False,
     }
     if not valid_feedback:
@@ -2198,7 +2255,39 @@ def compute_arm_tracking_error(
 
     actual = np.asarray(actual_state, dtype=np.float64).reshape(-1)
     target = np.asarray(target_action, dtype=np.float64).reshape(-1)
-    if actual.shape[0] < 10 or target.shape[0] < 10:
+    expected_dim = state_action_dim(mode)
+    if actual.shape[0] < expected_dim or target.shape[0] < expected_dim:
+        return result
+    if mode == "joint9":
+        actual_values = actual[:JOINT_STATE_ACTION_DIM]
+        target_values = target[:JOINT_STATE_ACTION_DIM]
+        if not (np.isfinite(actual_values).all() and np.isfinite(target_values).all()):
+            return result
+        joint_error = target[2:8] - actual[2:8]
+        joint_abs_error = np.abs(joint_error)
+        joint_max_abs_error_rad = float(np.max(joint_abs_error))
+        joint_rmse_rad = float(np.sqrt(np.mean(np.square(joint_error))))
+        gripper_error_rad = float(target[8] - actual[8])
+        gripper_abs_error_rad = abs(gripper_error_rad)
+        result.update(
+            {
+                "valid": True,
+                "actual_q": np.round(actual[2:8], 6).tolist(),
+                "target_q": np.round(target[2:8], 6).tolist(),
+                "joint_error_rad": np.round(joint_error, 6).tolist(),
+                "joint_abs_error_rad": np.round(joint_abs_error, 6).tolist(),
+                "joint_max_abs_error_rad": joint_max_abs_error_rad,
+                "joint_rmse_rad": joint_rmse_rad,
+                "actual_gripper": round(float(actual[8]), 6),
+                "target_gripper": round(float(target[8]), 6),
+                "gripper_error_rad": gripper_error_rad,
+                "gripper_abs_error_rad": gripper_abs_error_rad,
+                "reached": bool(
+                    joint_max_abs_error_rad <= float(joint_tolerance_rad)
+                    and gripper_abs_error_rad <= float(gripper_tolerance_rad)
+                ),
+            }
+        )
         return result
     actual_pose = actual[2:10]
     target_pose = target[2:10]
@@ -2304,20 +2393,65 @@ def blend_ee_actions(
     return blended
 
 
+def blend_joint_actions(
+    old_action: np.ndarray,
+    new_action: np.ndarray,
+    *,
+    old_weight: float = 0.3,
+    new_weight: float = 0.7,
+) -> np.ndarray:
+    """Blend vx/vyaw/q1..q6 and keep the newest gripper command."""
+    old = np.asarray(old_action, dtype=np.float32).reshape(-1)
+    new = np.asarray(new_action, dtype=np.float32).reshape(-1)
+    if old.shape[0] < 9 or new.shape[0] < 9:
+        raise ValueError(f"Joint action blending requires 9D actions, got {old.shape} and {new.shape}.")
+    total = float(old_weight) + float(new_weight)
+    if total <= 0.0:
+        raise ValueError("Joint action blend weights must have a positive sum.")
+    old_alpha = float(old_weight) / total
+    new_alpha = float(new_weight) / total
+    blended = new[:9].copy()
+    blended[0:8] = old_alpha * old[0:8] + new_alpha * new[0:8]
+    blended[8] = new[8]
+    return blended
+
+
+def blend_actions(
+    old_action: np.ndarray,
+    new_action: np.ndarray,
+    *,
+    state_action_mode: str,
+    old_weight: float = 0.3,
+    new_weight: float = 0.7,
+) -> np.ndarray:
+    if normalize_state_action_mode(state_action_mode) == "joint9":
+        return blend_joint_actions(old_action, new_action, old_weight=old_weight, new_weight=new_weight)
+    return blend_ee_actions(old_action, new_action, old_weight=old_weight, new_weight=new_weight)
+
+
 @dataclass
 class TimedEEAction:
     timestep: int
     action: np.ndarray
     source: str = "chunk"
     blend_count: int = 1
+    interaction_state: np.ndarray | None = None
+    interaction_chunk_ids: tuple[str, ...] = ()
 
 
 class EEActionOverlapBuffer:
-    """Timestamped action buffer with EE-aware old/new chunk aggregation."""
+    """Timestamped action buffer with schema-aware old/new chunk aggregation."""
 
-    def __init__(self, old_weight: float = 0.3, new_weight: float = 0.7) -> None:
+    def __init__(
+        self,
+        old_weight: float = 0.3,
+        new_weight: float = 0.7,
+        state_action_mode: str = "ee10",
+    ) -> None:
         self.old_weight = float(old_weight)
         self.new_weight = float(new_weight)
+        self.state_action_mode = normalize_state_action_mode(state_action_mode)
+        self.action_dim = state_action_dim(self.state_action_mode)
         self._queue: deque[TimedEEAction] = deque()
         self.last_popped_timestep = -1
 
@@ -2343,10 +2477,31 @@ class EEActionOverlapBuffer:
         *,
         start_timestep: int,
         current_timestep: int,
+        interaction_states: np.ndarray | list[np.ndarray] | None = None,
+        chunk_id: str | None = None,
     ) -> dict:
         rows = np.asarray(actions, dtype=np.float32)
-        if rows.ndim != 2 or rows.shape[1] < 10:
-            raise ValueError(f"Expected action chunk with shape (T, >=10), got {rows.shape}.")
+        if rows.ndim != 2 or rows.shape[1] < self.action_dim:
+            raise ValueError(
+                f"Expected {self.state_action_mode} action chunk with shape "
+                f"(T, >={self.action_dim}), got {rows.shape}."
+            )
+        interaction_rows = None
+        if interaction_states is not None:
+            interaction_rows = np.asarray(interaction_states, dtype=np.float32)
+            if (
+                interaction_rows.ndim != 2
+                or interaction_rows.shape[1] != len(INTERACTION_STATE_NAMES)
+                or interaction_rows.shape[0] < rows.shape[0]
+            ):
+                raise ValueError(
+                    "Expected interaction states with shape "
+                    f"(T, {len(INTERACTION_STATE_NAMES)}) and T >= {rows.shape[0]}, "
+                    f"got {interaction_rows.shape}."
+                )
+            if not np.isfinite(interaction_rows[: rows.shape[0]]).all():
+                raise ValueError("Interaction-state chunk contains non-finite values.")
+        normalized_chunk_id = None if chunk_id is None else str(chunk_id)
 
         future = {
             int(item.timestep): item
@@ -2358,29 +2513,55 @@ class EEActionOverlapBuffer:
         appended = 0
         for offset, row in enumerate(rows):
             timestep = int(start_timestep) + int(offset)
+            new_interaction = (
+                None
+                if interaction_rows is None
+                else np.asarray(interaction_rows[offset], dtype=np.float32).copy()
+            )
+            new_chunk_ids = () if normalized_chunk_id is None else (normalized_chunk_id,)
             if timestep < int(current_timestep) or timestep <= self.last_popped_timestep:
                 stale_skipped += 1
                 continue
             if timestep in future:
                 old_item = future[timestep]
+                if old_item.interaction_state is not None and new_interaction is not None:
+                    total_weight = self.old_weight + self.new_weight
+                    blended_interaction = (
+                        (self.old_weight / total_weight) * old_item.interaction_state
+                        + (self.new_weight / total_weight) * new_interaction
+                    ).astype(np.float32)
+                elif new_interaction is not None:
+                    blended_interaction = new_interaction
+                elif old_item.interaction_state is not None:
+                    blended_interaction = old_item.interaction_state.copy()
+                else:
+                    blended_interaction = None
+                blended_chunk_ids = tuple(
+                    dict.fromkeys((*old_item.interaction_chunk_ids, *new_chunk_ids))
+                )
                 future[timestep] = TimedEEAction(
                     timestep=timestep,
-                    action=blend_ee_actions(
+                    action=blend_actions(
                         old_item.action,
                         row,
+                        state_action_mode=self.state_action_mode,
                         old_weight=self.old_weight,
                         new_weight=self.new_weight,
                     ),
                     source="overlap_0.3_old_0.7_new",
                     blend_count=int(old_item.blend_count) + 1,
+                    interaction_state=blended_interaction,
+                    interaction_chunk_ids=blended_chunk_ids,
                 )
                 overlap_blended += 1
             else:
                 future[timestep] = TimedEEAction(
                     timestep=timestep,
-                    action=np.asarray(row[:10], dtype=np.float32).copy(),
+                    action=np.asarray(row[: self.action_dim], dtype=np.float32).copy(),
                     source="new_chunk",
                     blend_count=1,
+                    interaction_state=new_interaction,
+                    interaction_chunk_ids=new_chunk_ids,
                 )
                 appended += 1
 
@@ -2396,6 +2577,10 @@ class EEActionOverlapBuffer:
             "queue_last_timestep": self.last_timestep,
             "old_weight": self.old_weight,
             "new_weight": self.new_weight,
+            "chunk_id": normalized_chunk_id,
+            "interaction_rows_available": (
+                0 if interaction_rows is None else int(interaction_rows.shape[0])
+            ),
         }
 
     def pop(self, expected_timestep: int) -> TimedEEAction:
@@ -2543,19 +2728,31 @@ class RosBaseVelocityBridge:
 
 
 class UdpActionPublisher:
-    """Send full ACT action[10] packets to the Z1 bridge."""
+    """Send full EE10 or joint9 ACT packets to the Z1 bridge."""
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 15011) -> None:
+    def __init__(
+        self,
+        host: str = "127.0.0.1",
+        port: int = 15011,
+        state_action_mode: str = "ee10",
+    ) -> None:
         self.host = str(host)
         self.port = int(port)
+        self.state_action_mode = normalize_state_action_mode(state_action_mode)
+        self.action_dim = state_action_dim(self.state_action_mode)
         self.addr = (self.host, self.port)
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     def publish_action(self, action: np.ndarray) -> dict:
         values = np.asarray(action, dtype=np.float32).reshape(-1)
-        if values.shape[0] < 10:
-            raise ValueError(f"ACT action needs 10 values for Z1 bridge, got {values.shape}.")
-        payload = {"action": [float(x) for x in values[:10]]}
+        if values.shape[0] < self.action_dim:
+            raise ValueError(
+                f"{self.state_action_mode} ACT action needs {self.action_dim} values, got {values.shape}."
+            )
+        payload = {
+            "state_action_mode": self.state_action_mode,
+            "action": [float(x) for x in values[: self.action_dim]],
+        }
         self.sock.sendto(json.dumps(payload, ensure_ascii=False).encode("utf-8"), self.addr)
         return {
             "host": self.host,
@@ -2564,12 +2761,11 @@ class UdpActionPublisher:
         }
 
     def publish_hold_zero_base(self, action_template: np.ndarray | None = None) -> None:
-        action = np.zeros(10, dtype=np.float32)
-        action[8] = 1.0
+        action = zero_state(self.state_action_mode)
         if action_template is not None:
             values = np.asarray(action_template, dtype=np.float32).reshape(-1)
-            if values.shape[0] >= 10:
-                action[:] = values[:10]
+            if values.shape[0] >= self.action_dim:
+                action[:] = values[: self.action_dim]
                 action[0:2] = 0.0
         self.publish_action(action)
 
@@ -2593,23 +2789,26 @@ class UdpActionPublisher:
 
 
 class Z1ActStateReceiver:
-    """Receive assembled ACT state JSON from z1_act_ee_bridge over UDP."""
+    """Receive assembled EE10 or joint9 ACT state JSON from the Z1 bridge."""
 
     def __init__(
         self,
         bind_host: str = "0.0.0.0",
         port: int = 15013,
         timeout_s: float = 0.5,
+        state_action_mode: str = "ee10",
     ) -> None:
         self.bind_host = str(bind_host)
         self.port = int(port)
         self.timeout_s = float(timeout_s)
+        self.state_action_mode = normalize_state_action_mode(state_action_mode)
+        self.state_dim = state_action_dim(self.state_action_mode)
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.bind((self.bind_host, self.port))
         self.sock.settimeout(0.1)
         self._lock = threading.Lock()
-        self._state = zero_state()
+        self._state = zero_state(self.state_action_mode)
         self._stamp_mono = 0.0
         self._count = 0
         self._source = ""
@@ -2619,12 +2818,13 @@ class Z1ActStateReceiver:
         self.thread = threading.Thread(target=self._loop, name="z1-act-state", daemon=True)
         self.thread.start()
 
-    @staticmethod
-    def _state_from_payload(payload: dict) -> np.ndarray:
+    def _state_from_payload(self, payload: dict) -> np.ndarray:
         if "state" in payload:
             values = np.asarray(payload["state"], dtype=np.float32).reshape(-1)
-            if values.shape[0] >= 10:
-                state = values[:10].astype(np.float32, copy=True)
+            if values.shape[0] >= self.state_dim:
+                state = values[: self.state_dim].astype(np.float32, copy=True)
+                if self.state_action_mode == "joint9":
+                    return state
                 quat = state[5:9]
                 norm = float(np.linalg.norm(quat))
                 if np.isfinite(norm) and norm > 1.0e-6:
@@ -2632,7 +2832,14 @@ class Z1ActStateReceiver:
                 else:
                     state[5:9] = np.asarray([0.0, 0.0, 0.0, 1.0], dtype=np.float32)
                 return state
-        state = zero_state()
+        state = zero_state(self.state_action_mode)
+        if self.state_action_mode == "joint9":
+            q_value = payload.get("q", payload.get("joint_state", None))
+            if q_value is not None:
+                state[2:8] = np.asarray(q_value, dtype=np.float32).reshape(-1)[:6]
+            if "gripper" in payload:
+                state[8] = float(payload["gripper"])
+            return state
         if "ee_pos" in payload:
             state[2:5] = np.asarray(payload["ee_pos"], dtype=np.float32).reshape(-1)[:3]
         quat_value = payload.get("ee_quat_xyzw", payload.get("ee_quat", None))
@@ -2666,6 +2873,9 @@ class Z1ActStateReceiver:
                         "action_age_s",
                         "q",
                         "qd",
+                        "front_camera_pose_base",
+                        "wrist_camera_pose_base",
+                        "has_camera_pose",
                         "startup_zero_requested",
                         "startup_zero_active",
                         "startup_zero_done",
@@ -2716,9 +2926,9 @@ class Z1ActStateReceiver:
                 and age_s > self.timeout_s
             )
         )
-        tail = zero_state()[2:10]
+        tail = zero_state(self.state_action_mode)[2 : self.state_dim]
         if not stale:
-            tail = state[2:10].astype(np.float32, copy=True)
+            tail = state[2 : self.state_dim].astype(np.float32, copy=True)
         return tail, {
             "bind": f"{self.bind_host}:{self.port}",
             "count": count,
@@ -2865,6 +3075,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=float,
         default=0.10,
         help="Absolute gripper-error threshold used to mark a Z1 target as reached.",
+    )
+    parser.add_argument(
+        "--arm_tracking_joint_tolerance_rad",
+        type=float,
+        default=0.10,
+        help="Maximum per-joint absolute error used to mark a joint9 target as reached.",
     )
     parser.add_argument("--camera_mode", choices=["dummy", "realsense"], default="dummy")
     parser.add_argument("--dummy_depth_m", type=float, default=0.0)
@@ -3015,7 +3231,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser,
         "--enable_z1_action_bridge",
         default=True,
-        help_text="Send full ACT action[10] to the local z1_act_ee_bridge UDP action port.",
+        help_text="Send the full checkpoint action to the local Z1 bridge UDP action port.",
+    )
+    parser.add_argument(
+        "--z1_state_action_mode",
+        choices=("auto",) + STATE_ACTION_MODES,
+        default="auto",
+        help=(
+            "Z1 state/action schema. auto selects joint9 for 9D joint checkpoints and ee10 for "
+            "legacy 10D EE checkpoints."
+        ),
     )
     parser.add_argument("--z1_action_udp_host", type=str, default="127.0.0.1")
     parser.add_argument("--z1_action_udp_port", type=int, default=15011)
@@ -3023,7 +3248,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser,
         "--enable_z1_state_receiver",
         default=True,
-        help_text="Receive Z1 bridge ACT state JSON and fill observation.state[2:10] asynchronously.",
+        help_text="Receive Z1 bridge state JSON and fill the arm/gripper state asynchronously.",
     )
     parser.add_argument("--z1_state_udp_bind_host", type=str, default="0.0.0.0")
     parser.add_argument("--z1_state_udp_port", type=int, default=15013)
@@ -3031,7 +3256,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--z1_state_timeout_s",
         type=float,
         default=0.5,
-        help="If no Z1 ACT state arrives for this long, use identity-quat zero EE fallback. Set 0 to never time out.",
+        help="If no Z1 ACT state arrives for this long, use the schema-specific zero fallback. Set 0 to never time out.",
     )
     add_bool_argument(
         parser,
@@ -3075,6 +3300,8 @@ def validate_runtime_args(args: argparse.Namespace) -> None:
         raise ValueError("--arm_tracking_orientation_tolerance_deg must be non-negative.")
     if args.arm_tracking_gripper_tolerance_rad < 0:
         raise ValueError("--arm_tracking_gripper_tolerance_rad must be non-negative.")
+    if args.arm_tracking_joint_tolerance_rad < 0:
+        raise ValueError("--arm_tracking_joint_tolerance_rad must be non-negative.")
     args.depth_inpaint_mode = validate_depth_inpaint_mode(args.depth_inpaint_mode)
     if args.rs_filters is None:
         args.rs_filters = args.depth_inpaint_mode != "opencv_k_no_rs"
@@ -3247,11 +3474,14 @@ def main() -> None:
 
     args.log_path.parent.mkdir(parents=True, exist_ok=True)
     controller = DoorPolicyController(args.checkpoint, device=args.device, action_horizon=args.action_horizon)
+    state_action_mode = infer_state_action_mode(controller, args.z1_state_action_mode)
+    runtime_state_dim = state_action_dim(state_action_mode)
     period = 1.0 / max(float(args.hz), 1.0e-6)
 
     print(
         f"shadow_start checkpoint={args.checkpoint} device={args.device} "
         f"vision={controller.vision_mode} steps={args.steps} camera={args.camera_mode} "
+        f"state_action_mode={state_action_mode} state_dim={runtime_state_dim} action_dim={controller.action_dim} "
         f"action_horizon={controller.action_horizon} "
         f"warmup_policy_iters={args.warmup_policy_iters} "
         f"policy_amp={args.policy_amp} "
@@ -3293,7 +3523,11 @@ def main() -> None:
                 flush=True,
             )
         if args.enable_z1_action_bridge:
-            z1_action_pub = UdpActionPublisher(args.z1_action_udp_host, args.z1_action_udp_port)
+            z1_action_pub = UdpActionPublisher(
+                args.z1_action_udp_host,
+                args.z1_action_udp_port,
+                state_action_mode=state_action_mode,
+            )
             print(
                 f"z1_action_bridge_start udp={args.z1_action_udp_host}:{args.z1_action_udp_port}",
                 flush=True,
@@ -3303,6 +3537,7 @@ def main() -> None:
                 bind_host=args.z1_state_udp_bind_host,
                 port=args.z1_state_udp_port,
                 timeout_s=args.z1_state_timeout_s,
+                state_action_mode=state_action_mode,
             )
             print(
                 f"z1_state_receiver_start bind={args.z1_state_udp_bind_host}:{args.z1_state_udp_port}",
@@ -3369,12 +3604,12 @@ def main() -> None:
             def read_policy_observation(capture_debug: bool = False):
                 wrist_depth, front_depth, cam_meta = camera.read(capture_debug=capture_debug)
                 wrist_raw_unfiltered, front_raw_unfiltered = camera.raw_unfiltered_depth_u8()
-                state = zero_state()
+                state = zero_state(state_action_mode)
                 vel_state_meta = None
                 z1_state_meta = None
                 if z1_state_receiver is not None:
                     state_tail, z1_state_meta = z1_state_receiver.get_state_tail()
-                    state[2:10] = state_tail
+                    state[2:runtime_state_dim] = state_tail
                 if base_bridge is not None:
                     vel_state, vel_state_meta = base_bridge.get_vel_state()
                     state[0:2] = vel_state
@@ -3395,11 +3630,21 @@ def main() -> None:
                 state: np.ndarray,
                 wrist_depth: np.ndarray,
                 front_depth: np.ndarray,
+                front_camera_pose_base: np.ndarray | None,
+                wrist_camera_pose_base: np.ndarray | None,
                 observation_timestep: int,
                 start_timestep: int,
             ) -> dict:
                 prep_t0 = time.perf_counter()
-                controller.append_observation(state, wrist_depth, wrist_depth, front_depth, front_depth)
+                controller.append_observation(
+                    state,
+                    wrist_depth,
+                    wrist_depth,
+                    front_depth,
+                    front_depth,
+                    front_camera_pose_base,
+                    wrist_camera_pose_base,
+                )
                 policy_prep_s = time.perf_counter() - prep_t0
                 forward_t0 = time.perf_counter()
                 with torch.inference_mode():
@@ -3412,14 +3657,88 @@ def main() -> None:
                 policy_forward_s = time.perf_counter() - forward_t0
                 actions = [np.asarray(row, dtype=np.float32).copy() for row in controller.action_queue]
                 controller.action_queue.clear()
+                interaction_state_chunk = getattr(
+                    controller, "last_interaction_state_chunk", None
+                )
+                if interaction_state_chunk is not None:
+                    interaction_state_chunk = np.asarray(
+                        interaction_state_chunk, dtype=np.float32
+                    )
+                    if interaction_state_chunk.ndim == 3:
+                        if interaction_state_chunk.shape[0] != 1:
+                            raise RuntimeError(
+                                "Real deployment expects one interaction chunk, got "
+                                f"{interaction_state_chunk.shape}."
+                            )
+                        interaction_state_chunk = interaction_state_chunk[0]
+                    if (
+                        interaction_state_chunk.ndim != 2
+                        or interaction_state_chunk.shape[1] != len(INTERACTION_STATE_NAMES)
+                    ):
+                        raise RuntimeError(
+                            "Interaction-state prediction must have shape Hx3, got "
+                            f"{interaction_state_chunk.shape}."
+                        )
+                    if not np.isfinite(interaction_state_chunk).all():
+                        raise RuntimeError("Interaction-state prediction contains non-finite values.")
+                    interaction_state_chunk = interaction_state_chunk.copy()
+                interaction_states_for_actions = None
+                if interaction_state_chunk is not None and actions:
+                    if interaction_state_chunk.shape[0] >= len(actions):
+                        interaction_states_for_actions = interaction_state_chunk[: len(actions)].copy()
+                    elif interaction_state_chunk.shape[0] == 1:
+                        # encoder_current predicts one current interaction
+                        # state rather than an H-step decoder chunk.
+                        interaction_states_for_actions = np.repeat(
+                            interaction_state_chunk, len(actions), axis=0
+                        )
+                    else:
+                        raise RuntimeError(
+                            "Interaction-state horizon is shorter than the executable action horizon: "
+                            f"interaction={interaction_state_chunk.shape[0]}, actions={len(actions)}."
+                        )
+                chunk_id = (
+                    f"obs{int(observation_timestep):06d}_start{int(start_timestep):06d}_"
+                    f"{time.monotonic_ns()}"
+                )
                 return {
                     "actions": actions,
+                    "chunk_id": chunk_id,
+                    "interaction_state_chunk": interaction_state_chunk,
+                    "interaction_states_for_actions": interaction_states_for_actions,
                     "policy_prep_s": policy_prep_s,
                     "policy_forward_s": policy_forward_s,
                     "observation_timestep": int(observation_timestep),
                     "start_timestep": int(start_timestep),
                     "completed_monotonic": time.monotonic(),
                 }
+
+            def enrich_chunk_ingest_log(ingest_meta: dict, policy_result: dict) -> dict:
+                interaction_chunk = policy_result.get("interaction_state_chunk")
+                interaction_shape = None
+                interaction_values = None
+                if interaction_chunk is not None:
+                    interaction_array = np.asarray(interaction_chunk, dtype=np.float32)
+                    interaction_shape = [int(value) for value in interaction_array.shape]
+                    interaction_values = np.round(interaction_array, 6).tolist()
+                ingest_meta.update(
+                    {
+                        "chunk_id": str(policy_result["chunk_id"]),
+                        "interaction_state_names": list(INTERACTION_STATE_NAMES),
+                        "interaction_state_chunk_shape": interaction_shape,
+                        "interaction_state_chunk": interaction_values,
+                        "interaction_state_action_aligned_count": (
+                            0
+                            if policy_result.get("interaction_states_for_actions") is None
+                            else int(
+                                np.asarray(
+                                    policy_result["interaction_states_for_actions"]
+                                ).shape[0]
+                            )
+                        ),
+                    }
+                )
+                return ingest_meta
 
             if args.async_policy_inference:
                 policy_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="act-policy")
@@ -3428,14 +3747,37 @@ def main() -> None:
                 state: np.ndarray,
                 wrist_depth: np.ndarray,
                 front_depth: np.ndarray,
+                z1_state_meta: dict | None,
                 *,
                 observation_timestep: int,
                 start_timestep: int,
             ) -> Future | dict:
+                front_camera_pose_base = None
+                wrist_camera_pose_base = None
+                if controller.plucker_conditioning:
+                    meta = z1_state_meta or {}
+                    if not bool(meta.get("has_camera_pose", False)):
+                        raise RuntimeError(
+                            "Plücker checkpoint requires live camera poses, but the Z1 bridge has not "
+                            "published a valid FK-derived wrist pose yet."
+                        )
+                    front_camera_pose_base = np.asarray(
+                        meta.get("front_camera_pose_base"), dtype=np.float32
+                    ).reshape(7)
+                    wrist_camera_pose_base = np.asarray(
+                        meta.get("wrist_camera_pose_base"), dtype=np.float32
+                    ).reshape(7)
+                    if not (
+                        np.isfinite(front_camera_pose_base).all()
+                        and np.isfinite(wrist_camera_pose_base).all()
+                    ):
+                        raise RuntimeError("Z1 bridge returned a non-finite Plücker camera pose.")
                 inputs = (
                     np.asarray(state, dtype=np.float32).copy(),
                     np.asarray(wrist_depth).copy(),
                     np.asarray(front_depth).copy(),
+                    None if front_camera_pose_base is None else front_camera_pose_base.copy(),
+                    None if wrist_camera_pose_base is None else wrist_camera_pose_base.copy(),
                     int(observation_timestep),
                     int(start_timestep),
                 )
@@ -3460,6 +3802,7 @@ def main() -> None:
                     state,
                     wrist_depth,
                     front_depth,
+                    z1_state_meta,
                     observation_timestep=-(warmup_idx + 1),
                     start_timestep=0,
                 )
@@ -3468,10 +3811,12 @@ def main() -> None:
                 policy_prep_s = float(warmup_result["policy_prep_s"])
                 policy_forward_s = float(warmup_result["policy_forward_s"])
                 warmup_action_count = len(warmup_result["actions"])
+                warmup_interaction_chunk = warmup_result.get("interaction_state_chunk")
                 infer_s = policy_prep_s + policy_forward_s
                 record_wall_time = time.time()
                 record = {
                     "phase": "warmup",
+                    "state_action_mode": state_action_mode,
                     "warmup_iter": warmup_idx,
                     "wall_time": record_wall_time,
                     "obs_s": camera_read_s,
@@ -3485,6 +3830,23 @@ def main() -> None:
                     "vel_state": vel_state_meta,
                     "z1_state": z1_state_meta,
                     "warmup_action_count": int(warmup_action_count),
+                    "chunk_id": str(warmup_result["chunk_id"]),
+                    "interaction_state_names": list(INTERACTION_STATE_NAMES),
+                    "interaction_state_chunk_shape": (
+                        None
+                        if warmup_interaction_chunk is None
+                        else [
+                            int(value)
+                            for value in np.asarray(warmup_interaction_chunk).shape
+                        ]
+                    ),
+                    "interaction_state_chunk": (
+                        None
+                        if warmup_interaction_chunk is None
+                        else np.round(
+                            np.asarray(warmup_interaction_chunk, dtype=np.float32), 6
+                        ).tolist()
+                    ),
                     "base_cmd": None,
                     "z1_action": None,
                     "published": False,
@@ -3502,7 +3864,11 @@ def main() -> None:
                     flush=True,
                 )
             controller.reset()
-            action_buffer = EEActionOverlapBuffer(old_weight=0.3, new_weight=0.7)
+            action_buffer = EEActionOverlapBuffer(
+                old_weight=0.3,
+                new_weight=0.7,
+                state_action_mode=state_action_mode,
+            )
             pending_policy_future: Future | None = None
             pending_policy_result: dict | None = None
             previous_z1_target: np.ndarray | None = None
@@ -3510,6 +3876,8 @@ def main() -> None:
             previous_z1_target_stamp_mono: float | None = None
             tracking_position_errors_m: list[float] = []
             tracking_orientation_errors_deg: list[float] = []
+            tracking_joint_max_errors_rad: list[float] = []
+            tracking_joint_rmse_errors_rad: list[float] = []
             tracking_gripper_errors_rad: list[float] = []
             tracking_reached_count = 0
             tracking_valid_count = 0
@@ -3544,6 +3912,7 @@ def main() -> None:
                 policy_wait_s = 0.0
                 policy_result_age_s = None
                 policy_chunk_ingest = None
+                policy_chunk_ingests = []
                 policy_prefetch_start_timestep = None
                 policy_prefetch_observation_timestep = None
 
@@ -3561,6 +3930,10 @@ def main() -> None:
                         pending_policy_result["actions"],
                         start_timestep=int(pending_policy_result["start_timestep"]),
                         current_timestep=step,
+                        interaction_states=pending_policy_result.get(
+                            "interaction_states_for_actions"
+                        ),
+                        chunk_id=pending_policy_result.get("chunk_id"),
                     )
                     policy_chunk_ingest.update(
                         {
@@ -3574,6 +3947,10 @@ def main() -> None:
                             "policy_forward_s": policy_forward_s,
                         }
                     )
+                    policy_chunk_ingest = enrich_chunk_ingest_log(
+                        policy_chunk_ingest, pending_policy_result
+                    )
+                    policy_chunk_ingests.append(policy_chunk_ingest)
                     pending_policy_result = None
 
                 if action_buffer.queue_size == 0:
@@ -3583,6 +3960,7 @@ def main() -> None:
                             state,
                             wrist_depth,
                             front_depth,
+                            z1_state_meta,
                             observation_timestep=step,
                             start_timestep=step,
                         )
@@ -3606,6 +3984,10 @@ def main() -> None:
                         pending_policy_result["actions"],
                         start_timestep=int(pending_policy_result["start_timestep"]),
                         current_timestep=step,
+                        interaction_states=pending_policy_result.get(
+                            "interaction_states_for_actions"
+                        ),
+                        chunk_id=pending_policy_result.get("chunk_id"),
                     )
                     policy_chunk_ingest.update(
                         {
@@ -3617,6 +3999,10 @@ def main() -> None:
                             "policy_forward_s": policy_forward_s,
                         }
                     )
+                    policy_chunk_ingest = enrich_chunk_ingest_log(
+                        policy_chunk_ingest, pending_policy_result
+                    )
+                    policy_chunk_ingests.append(policy_chunk_ingest)
                     pending_policy_result = None
 
                 if action_buffer.queue_size == 0:
@@ -3624,6 +4010,22 @@ def main() -> None:
                 action_pop_t0 = time.perf_counter()
                 timed_action = action_buffer.pop(expected_timestep=step)
                 action = timed_action.action
+                executed_interaction_state = None
+                if timed_action.interaction_state is not None:
+                    interaction_values = np.asarray(
+                        timed_action.interaction_state, dtype=np.float32
+                    )
+                    executed_interaction_state = {
+                        "names": list(INTERACTION_STATE_NAMES),
+                        "values": np.round(interaction_values, 6).tolist(),
+                        "contact_probability": round(float(interaction_values[0]), 6),
+                        "handle_progress": round(float(interaction_values[1]), 6),
+                        "door_progress": round(float(interaction_values[2]), 6),
+                        "action_timestep": int(timed_action.timestep),
+                        "action_source": timed_action.source,
+                        "blend_count": int(timed_action.blend_count),
+                        "chunk_ids": list(timed_action.interaction_chunk_ids),
+                    }
                 action_pop_s = time.perf_counter() - action_pop_t0
                 infer_s = policy_prep_s + policy_forward_s
 
@@ -3642,6 +4044,8 @@ def main() -> None:
                     position_tolerance_m=args.arm_tracking_position_tolerance_m,
                     orientation_tolerance_deg=args.arm_tracking_orientation_tolerance_deg,
                     gripper_tolerance_rad=args.arm_tracking_gripper_tolerance_rad,
+                    state_action_mode=state_action_mode,
+                    joint_tolerance_rad=args.arm_tracking_joint_tolerance_rad,
                 )
                 current_target_pre_send_error = compute_arm_tracking_error(
                     state,
@@ -3653,14 +4057,24 @@ def main() -> None:
                     position_tolerance_m=args.arm_tracking_position_tolerance_m,
                     orientation_tolerance_deg=args.arm_tracking_orientation_tolerance_deg,
                     gripper_tolerance_rad=args.arm_tracking_gripper_tolerance_rad,
+                    state_action_mode=state_action_mode,
+                    joint_tolerance_rad=args.arm_tracking_joint_tolerance_rad,
                 )
                 if previous_target_tracking["valid"]:
                     tracking_valid_count += 1
                     tracking_reached_count += int(previous_target_tracking["reached"])
-                    tracking_position_errors_m.append(float(previous_target_tracking["position_error_m"]))
-                    tracking_orientation_errors_deg.append(
-                        float(previous_target_tracking["orientation_error_deg"])
-                    )
+                    if state_action_mode == "joint9":
+                        tracking_joint_max_errors_rad.append(
+                            float(previous_target_tracking["joint_max_abs_error_rad"])
+                        )
+                        tracking_joint_rmse_errors_rad.append(
+                            float(previous_target_tracking["joint_rmse_rad"])
+                        )
+                    else:
+                        tracking_position_errors_m.append(float(previous_target_tracking["position_error_m"]))
+                        tracking_orientation_errors_deg.append(
+                            float(previous_target_tracking["orientation_error_deg"])
+                        )
                     tracking_gripper_errors_rad.append(
                         float(previous_target_tracking["gripper_abs_error_rad"])
                     )
@@ -3683,6 +4097,7 @@ def main() -> None:
                         state,
                         wrist_depth,
                         front_depth,
+                        z1_state_meta,
                         observation_timestep=policy_prefetch_observation_timestep,
                         start_timestep=policy_prefetch_start_timestep,
                     )
@@ -3723,6 +4138,7 @@ def main() -> None:
                     )
                 record = {
                     "step": step,
+                    "state_action_mode": state_action_mode,
                     "wall_time": record_wall_time,
                     "obs_s": camera_read_s,
                     "camera_read_s": camera_read_s,
@@ -3735,6 +4151,7 @@ def main() -> None:
                     "policy_wait_s": policy_wait_s,
                     "policy_result_age_s": policy_result_age_s,
                     "policy_chunk_ingest": policy_chunk_ingest,
+                    "policy_chunk_ingests": policy_chunk_ingests,
                     "policy_prefetch_observation_timestep": policy_prefetch_observation_timestep,
                     "policy_prefetch_start_timestep": policy_prefetch_start_timestep,
                     "policy_amp": policy_amp_enabled,
@@ -3743,6 +4160,7 @@ def main() -> None:
                     "action_timestep": int(timed_action.timestep),
                     "action_source": timed_action.source,
                     "action_blend_count": int(timed_action.blend_count),
+                    "executed_interaction_state": executed_interaction_state,
                     "actions_remaining": action_buffer.queue_size,
                     "action_queue_first_timestep": action_buffer.first_timestep,
                     "action_queue_last_timestep": action_buffer.last_timestep,
@@ -3768,15 +4186,23 @@ def main() -> None:
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
                 if (step + 1) % int(args.log_flush_interval) == 0:
                     f.flush()
+                tracking_text = (
+                    f"arm_track_joint_max_rad={float(previous_target_tracking.get('joint_max_abs_error_rad', float('nan'))):.4f} "
+                    f"arm_track_joint_rmse_rad={float(previous_target_tracking.get('joint_rmse_rad', float('nan'))):.4f} "
+                    if state_action_mode == "joint9"
+                    else (
+                        f"arm_track_mm={float(previous_target_tracking.get('position_error_mm', float('nan'))):.1f} "
+                        f"arm_track_deg={float(previous_target_tracking.get('orientation_error_deg', float('nan'))):.1f} "
+                    )
+                )
                 print(
-                    f"step={step:04d} replan={str(policy_replan).lower()} "
+                    f"step={step:04d} mode={state_action_mode} replan={str(policy_replan).lower()} "
                     f"prep_ms={policy_prep_s * 1000.0:.1f} "
                     f"forward_ms={policy_forward_s * 1000.0:.1f} "
                     f"wait_ms={policy_wait_s * 1000.0:.1f} "
                     f"state_vx={float(state[0]):+.4f} state_vyaw={float(state[1]):+.4f} "
                     f"action0={float(action[0]):+.4f} action1={float(action[1]):+.4f} "
-                    f"arm_track_mm={float(previous_target_tracking.get('position_error_mm', float('nan'))):.1f} "
-                    f"arm_track_deg={float(previous_target_tracking.get('orientation_error_deg', float('nan'))):.1f} "
+                    f"{tracking_text}"
                     f"arm_reached={str(bool(previous_target_tracking.get('reached', False))).lower()} "
                     f"cam_dt_ms={float(cam_meta['dt_ms']):.1f} "
                     f"inpaint_ms={float((cam_meta.get('inpaint') or {}).get('total_ms', 0.0)):.1f}",
@@ -3799,6 +4225,7 @@ def main() -> None:
 
             tracking_summary = {
                 "phase": "arm_tracking_summary",
+                "state_action_mode": state_action_mode,
                 "wall_time": time.time(),
                 "comparison": "feedback_at_step_k_vs_command_sent_at_step_k_minus_1",
                 "valid_samples": tracking_valid_count,
@@ -3830,6 +4257,16 @@ def main() -> None:
                     "p95": tracking_percentile(tracking_orientation_errors_deg, 95.0),
                     "max": max(tracking_orientation_errors_deg) if tracking_orientation_errors_deg else None,
                 },
+                "joint_max_abs_error_rad": {
+                    "p50": tracking_percentile(tracking_joint_max_errors_rad, 50.0),
+                    "p95": tracking_percentile(tracking_joint_max_errors_rad, 95.0),
+                    "max": max(tracking_joint_max_errors_rad) if tracking_joint_max_errors_rad else None,
+                },
+                "joint_rmse_rad": {
+                    "p50": tracking_percentile(tracking_joint_rmse_errors_rad, 50.0),
+                    "p95": tracking_percentile(tracking_joint_rmse_errors_rad, 95.0),
+                    "max": max(tracking_joint_rmse_errors_rad) if tracking_joint_rmse_errors_rad else None,
+                },
                 "gripper_abs_error_rad": {
                     "p50": tracking_percentile(tracking_gripper_errors_rad, 50.0),
                     "p95": tracking_percentile(tracking_gripper_errors_rad, 95.0),
@@ -3838,6 +4275,7 @@ def main() -> None:
                 "thresholds": {
                     "position_m": float(args.arm_tracking_position_tolerance_m),
                     "orientation_deg": float(args.arm_tracking_orientation_tolerance_deg),
+                    "joint_rad": float(args.arm_tracking_joint_tolerance_rad),
                     "gripper_rad": float(args.arm_tracking_gripper_tolerance_rad),
                 },
             }
