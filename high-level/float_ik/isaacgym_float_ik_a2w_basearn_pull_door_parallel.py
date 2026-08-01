@@ -2444,7 +2444,16 @@ def parse_args():
             {"name": "--recovery_result_json", "type": str, "default": ""},
             {"name": "--recovery_raw_root", "type": str, "default": ""},
             {"name": "--recovery_contact_min_frames", "type": int, "default": 5},
-            {"name": "--pass_open_angle_deg", "type": float, "default": 80.0},
+            {"name": "--pass_open_angle_deg", "type": float, "default": 60.0},
+            {
+                "name": "--pull_record_traversal_distance_m",
+                "type": float,
+                "default": 0.8,
+                "help": (
+                    "Pull-only raw-recording success threshold: signed base distance beyond "
+                    "the door plane. This does not affect the push-door recorder."
+                ),
+            },
             {"name": "--no_preview_trajectory_at_spawn", "action": "store_true"},
             {
                 "name": "--skill_program_json",
@@ -6815,6 +6824,77 @@ def run_parallel_recovery_batch(gym, sim, env_states, viewer, args, dt, dof_name
     )
 
 
+def update_pull_raw_record_success(st, door_pos):
+    """Apply the pull-only open-plus-traversal success rule to a raw recorder.
+
+    The shared recorder historically marks success from the instantaneous door
+    angle used by push-door tasks.  Pulling is different: the door may swing
+    back after a valid release, so we require the *maximum* opening angle and
+    signed base traversal beyond the door plane.  Keeping this override in the
+    pull entrypoint leaves every push-door rule unchanged.
+    """
+    if st.dp_recorder is None:
+        return
+
+    open_deg = dc.door_open_degrees(door_pos, st.args) if len(door_pos) else 0.0
+    st.traj["pull_record_max_open_deg"] = max(
+        float(st.traj.get("pull_record_max_open_deg", 0.0)),
+        float(open_deg),
+    )
+
+    direction = np.asarray(st.base_traverse, dtype=np.float32) - np.asarray(
+        st.base_stop, dtype=np.float32
+    )
+    direction_norm = float(np.linalg.norm(direction))
+    traversal_m = float("-inf")
+    if direction_norm > 1.0e-8:
+        direction = direction / direction_norm
+        actor_offset = np.asarray(
+            getattr(st.door, "actor_position_offset", (0.0, 0.0, 0.0)),
+            dtype=np.float32,
+        )
+        door_xy = np.array(
+            [
+                float(st.args.door_x) + float(actor_offset[0]),
+                float(st.args.door_y) + float(actor_offset[1]),
+            ],
+            dtype=np.float32,
+        )
+        base_xy = np.asarray(st.traj.get("base_xy", st.base_start), dtype=np.float32)
+        traversal_m = float(np.dot(base_xy[:2] - door_xy, direction[:2]))
+        st.traj["pull_record_max_traversal_m"] = max(
+            float(st.traj.get("pull_record_max_traversal_m", float("-inf"))),
+            traversal_m,
+        )
+
+    release_angle = float(st.traj.get("pull_release_angle_observed_deg", 0.0))
+    max_open = float(st.traj.get("pull_record_max_open_deg", 0.0))
+    max_traversal = float(
+        st.traj.get("pull_record_max_traversal_m", float("-inf"))
+    )
+    release_ok = release_angle >= float(st.args.pull_release_angle_deg)
+    open_ok = max_open >= float(st.args.pass_open_angle_deg)
+    traversal_ok = max_traversal >= float(st.args.pull_record_traversal_distance_m)
+    st.dp_record_success = bool(
+        release_ok
+        and open_ok
+        and traversal_ok
+        and not bool(getattr(st, "base_door_collision_detected", False))
+    )
+    st.dp_recorder.metadata.update(
+        {
+            "pull_success_metric": "max_open_and_signed_base_traversal",
+            "pull_release_angle_observed_deg": release_angle,
+            "pull_max_open_deg": max_open,
+            "pull_max_traversal_m": max_traversal,
+            "pull_open_threshold_deg": float(st.args.pass_open_angle_deg),
+            "pull_traversal_threshold_m": float(
+                st.args.pull_record_traversal_distance_m
+            ),
+        }
+    )
+
+
 def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
     if not env_states:
         raise RuntimeError("No parallel envs were created.")
@@ -7301,6 +7381,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                     door_pos_record,
                     door_vel_record,
                 )
+                update_pull_raw_record_success(st, door_pos_record)
                 tracker = getattr(st, "door_twin_tracker", None)
                 if tracker is not None and frame_recorded:
                     tracker.mark_camera_available(True)
