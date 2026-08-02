@@ -1507,7 +1507,7 @@ def parse_args():
             {
                 "name": "--pull_late_retreat_start_angle_deg",
                 "type": float,
-                "default": 38.0,
+                "default": 32.0,
                 "help": (
                     "Measured door angle that starts the additional slow base retreat "
                     "used to continue the physical pull from about 40 degrees to the "
@@ -1538,18 +1538,17 @@ def parse_args():
                 "type": float,
                 "default": 1.0,
                 "help": (
-                    "Fraction of the high-angle handle-arc lateral sweep followed smoothly by "
-                    "the base. This preserves tangential pulling geometry after about 40 deg."
+                    "Fraction of the high-angle handle-arc sweep used as a geometric target "
+                    "for the nonholonomic base follower. The base never strafes."
                 ),
             },
             {
                 "name": "--pull_late_base_lateral_follow_ratio",
                 "type": float,
-                "default": 1.80,
+                "default": 3.0,
                 "help": (
-                    "Late-pull lateral follow ratio reached smoothly at large door angles. "
-                    "Keeping the early ratio near 1 avoids tearing the fingers off the handle, "
-                    "while a small late over-travel maintains tangential pulling force."
+                    "Late-pull geometric arc-follow ratio. It is reached with a unicycle "
+                    "controller using only vx and vyaw; no body-frame vy is applied."
                 ),
             },
             {
@@ -1567,7 +1566,7 @@ def parse_args():
             {
                 "name": "--pull_high_angle_base_lateral_max_distance",
                 "type": float,
-                "default": 0.40,
+                "default": 0.65,
                 "help": (
                     "Maximum lateral base displacement used for smooth high-angle arc following."
                 ),
@@ -1580,6 +1579,36 @@ def parse_args():
                     "Total retreat from base_stop reached while releasing/retracting the arm, "
                     "placing the A2W body outside the opening door's sweep."
                 ),
+            },
+            {
+                "name": "--pull_base_follow_max_speed",
+                "type": float,
+                "default": 0.32,
+                "help": "Maximum absolute vx of the nonholonomic late-pull base follower.",
+            },
+            {
+                "name": "--pull_base_follow_max_yaw_rate",
+                "type": float,
+                "default": 0.30,
+                "help": "Maximum absolute vyaw of the nonholonomic late-pull base follower.",
+            },
+            {
+                "name": "--pull_base_follow_position_gain",
+                "type": float,
+                "default": 2.0,
+                "help": "Position gain used to approach the late-pull geometric base target.",
+            },
+            {
+                "name": "--pass_base_follow_max_speed",
+                "type": float,
+                "default": 0.55,
+                "help": "Maximum vx used by the nonholonomic pass-through controller.",
+            },
+            {
+                "name": "--pass_base_follow_max_yaw_rate",
+                "type": float,
+                "default": 0.80,
+                "help": "Maximum vyaw used by the nonholonomic pass-through controller.",
             },
             {
                 "name": "--pull_target_max_distance",
@@ -5300,13 +5329,8 @@ def trajectory_targets(
                     planned_yaw,
                 )
                 target_pos = desired_handle + desired_ee_offset
-                # Keep an unclipped geometric reference for the base.  The EE
-                # target below is intentionally bounded relative to the
-                # measured EE for stable Jacobian IK, but using that bounded
-                # target to drive the base creates a feedback dead-zone: once
-                # the arm reaches its lateral workspace limit, the reference
-                # itself stops moving and the base never catches up.  The base
-                # should instead follow the true hinge-centred handle arc.
+                # Geometric target used by the base follower.  It must be
+                # captured before the per-frame EE lead clamp below.
                 base_arc_target_pos = np.asarray(target_pos, dtype=np.float32).copy()
                 max_target_lead = float(args.pull_target_max_distance)
                 current_ee = ik_state.current_pos_np
@@ -5384,15 +5408,33 @@ def trajectory_targets(
             lateral_norm = float(np.linalg.norm(lateral_dir))
             if lateral_norm > 1.0e-9:
                 lateral_dir /= lateral_norm
-            if "pull_late_retreat_start_step" in traj:
+            yaw = float(yaw_stop)
+            if door.open_stage and "pull_late_retreat_start_step" in traj:
                 if "pull_lateral_follow_target_start" not in traj:
                     traj["pull_lateral_follow_target_start"] = np.asarray(
                         base_arc_target_pos,
                         dtype=np.float32,
                     ).copy()
-                target_sweep = float(
+                release_geometry_yaw = (
+                    float(args.door_motion_sign)
+                    * math.radians(
+                        float(args.pull_release_angle_deg)
+                        + float(args.pull_late_arc_lead_angle_deg)
+                    )
+                )
+                release_handle = hinge_pos.copy()
+                release_handle[:2] += dc.rotate_xy(
+                    radial[:2], release_geometry_yaw
+                )
+                release_handle[2] += radial[2]
+                release_ee_offset = ee_offset.copy()
+                release_ee_offset[:2] = dc.rotate_xy(
+                    ee_offset[:2], release_geometry_yaw
+                )
+                release_arc_target_pos = release_handle + release_ee_offset
+                final_target_sweep = float(
                     np.dot(
-                        np.asarray(base_arc_target_pos, dtype=np.float32)[:2]
+                        np.asarray(release_arc_target_pos, dtype=np.float32)[:2]
                         - np.asarray(
                             traj["pull_lateral_follow_target_start"],
                             dtype=np.float32,
@@ -5400,23 +5442,32 @@ def trajectory_targets(
                         lateral_dir,
                     )
                 )
-                late_lateral_start = float(
-                    args.pull_late_base_lateral_boost_start_deg
+                time_lateral_t = smoothstep(
+                    (
+                        int(step)
+                        - int(traj["pull_late_retreat_start_step"])
+                        + 1
+                    )
+                    / max(1, int(args.pull_late_retreat_steps))
                 )
-                late_lateral_full = max(
-                    late_lateral_start + 1.0e-6,
-                    float(args.pull_late_base_lateral_boost_full_deg),
-                )
-                late_lateral_t = smoothstep(
+                measured_lateral_t = smoothstep(
                     float(
                         np.clip(
-                            (float(door_open_deg) - late_lateral_start)
-                            / (late_lateral_full - late_lateral_start),
+                            (
+                                float(traj.get("pull_max_open_deg", actual_open_deg))
+                                - float(args.pull_late_retreat_start_angle_deg)
+                            )
+                            / max(
+                                1.0e-6,
+                                float(args.pull_release_angle_deg)
+                                - float(args.pull_late_retreat_start_angle_deg),
+                            ),
                             0.0,
                             1.0,
                         )
                     )
                 )
+                lateral_progress = max(measured_lateral_t, 0.10 * time_lateral_t)
                 lateral_follow_ratio = float(
                     lerp(
                         np.array(
@@ -5427,22 +5478,120 @@ def trajectory_targets(
                             [float(args.pull_late_base_lateral_follow_ratio)],
                             dtype=np.float32,
                         ),
-                        late_lateral_t,
+                        lateral_progress,
                     )[0]
                 )
                 lateral_follow = float(
                     np.clip(
-                        target_sweep
-                        * lateral_follow_ratio,
+                        final_target_sweep
+                        * lateral_follow_ratio
+                        * lateral_progress,
                         -float(args.pull_high_angle_base_lateral_max_distance),
                         float(args.pull_high_angle_base_lateral_max_distance),
                     )
                 )
-                base_xy = (
+                # Follow a monotonic measured-angle path.  Using the maximum
+                # observed angle prevents the base target from reversing when
+                # the compliant door briefly rebounds.
+                geometric_base_target = (
                     np.asarray(base_xy, dtype=np.float32)
                     + lateral_dir * lateral_follow
                 )
-            yaw = float(yaw_stop)
+                previous_xy = np.asarray(
+                    traj.get("base_xy", base_xy), dtype=np.float32
+                )
+                previous_yaw = float(traj.get("yaw", yaw_stop))
+                target_delta = geometric_base_target - previous_xy
+                target_distance = float(np.linalg.norm(target_delta))
+                if target_distance > 1.0e-7:
+                    motion_heading = math.atan2(
+                        float(target_delta[1]), float(target_delta[0])
+                    )
+                    forward_error = wrap_to_pi(motion_heading - previous_yaw)
+                    reverse_error = wrap_to_pi(motion_heading + math.pi - previous_yaw)
+                    if abs(reverse_error) < abs(forward_error):
+                        heading_error = reverse_error
+                        drive_sign = -1.0
+                    else:
+                        heading_error = forward_error
+                        drive_sign = 1.0
+                    dt_base = max(1.0e-6, float(args.sim_dt))
+                    yaw_step = float(
+                        np.clip(
+                            heading_error,
+                            -float(args.pull_base_follow_max_yaw_rate) * dt_base,
+                            float(args.pull_base_follow_max_yaw_rate) * dt_base,
+                        )
+                    )
+                    # Position is integrated along the *previous* body forward
+                    # axis.  Therefore the displacement has exactly zero
+                    # body-frame lateral component and is representable by
+                    # Joint9 [vx, vyaw, arm joints].
+                    alignment = max(0.0, math.cos(heading_error))
+                    speed = (
+                        drive_sign
+                        * min(
+                            float(args.pull_base_follow_max_speed),
+                            float(args.pull_base_follow_position_gain) * target_distance,
+                        )
+                        * alignment
+                    )
+                    body_forward = np.array(
+                        [math.cos(previous_yaw), math.sin(previous_yaw)],
+                        dtype=np.float32,
+                    )
+                    base_xy = (
+                        previous_xy + body_forward * speed * dt_base
+                    ).astype(np.float32)
+                    yaw = float(previous_yaw + yaw_step)
+            elif door.open_stage:
+                # The early straight retreat also goes through a unicycle
+                # integration.  Randomized spawn geometry can make pull_dir
+                # differ slightly from yaw_stop; direct interpolation would
+                # otherwise hide a small body-frame vy in the Joint9 data.
+                geometric_base_target = np.asarray(base_xy, dtype=np.float32)
+                previous_xy = np.asarray(
+                    traj.get("base_xy", base_xy), dtype=np.float32
+                )
+                previous_yaw = float(traj.get("yaw", yaw_stop))
+                target_delta = geometric_base_target - previous_xy
+                target_distance = float(np.linalg.norm(target_delta))
+                if target_distance > 1.0e-7:
+                    motion_heading = math.atan2(
+                        float(target_delta[1]), float(target_delta[0])
+                    )
+                    forward_error = wrap_to_pi(motion_heading - previous_yaw)
+                    reverse_error = wrap_to_pi(motion_heading + math.pi - previous_yaw)
+                    if abs(reverse_error) < abs(forward_error):
+                        heading_error = reverse_error
+                        drive_sign = -1.0
+                    else:
+                        heading_error = forward_error
+                        drive_sign = 1.0
+                    dt_base = max(1.0e-6, float(args.sim_dt))
+                    speed = (
+                        drive_sign
+                        * min(
+                            float(args.pull_base_follow_max_speed),
+                            float(args.pull_base_follow_position_gain) * target_distance,
+                        )
+                        * max(0.0, math.cos(heading_error))
+                    )
+                    body_forward = np.array(
+                        [math.cos(previous_yaw), math.sin(previous_yaw)],
+                        dtype=np.float32,
+                    )
+                    base_xy = (
+                        previous_xy + body_forward * speed * dt_base
+                    ).astype(np.float32)
+                    yaw = float(
+                        previous_yaw
+                        + np.clip(
+                            heading_error,
+                            -float(args.pull_base_follow_max_yaw_rate) * dt_base,
+                            float(args.pull_base_follow_max_yaw_rate) * dt_base,
+                        )
+                    )
             if (
                 "pull_complete_step" in traj
                 and "pull_release_base_xy" not in traj
@@ -5697,12 +5846,14 @@ def trajectory_targets(
                 traj.get("pull_release_base_xy", base_pull),
                 dtype=np.float32,
             )
-            base_xy = lerp(
-                release_base_start,
-                base_release,
-                smoothstep(release_t),
+            # Keep the base fixed while opening/extracting the gripper.  The
+            # previous direct interpolation back to base_release was another
+            # uncommanded side translation when the pull ended off-axis.
+            base_xy = release_base_start.copy()
+            release_yaw = float(
+                traj.get("pull_release_yaw", yaw_stop)
             )
-            yaw = float(yaw_stop)
+            yaw = release_yaw
             joint_home_start = float(
                 np.clip(args.release_joint_home_start_fraction, 0.0, 0.95)
             )
@@ -5720,14 +5871,50 @@ def trajectory_targets(
                 (step - release_end + 1)
                 / max(1, int(args.pass_through_steps))
             )
-            base_xy = lerp(base_release, base_traverse, t)
-            yaw = float(
-                lerp(
-                    np.array([yaw_stop], dtype=np.float32),
-                    np.array([yaw_traverse], dtype=np.float32),
-                    t,
-                )[0]
+            previous_xy = np.asarray(
+                traj.get("base_xy", base_release), dtype=np.float32
             )
+            previous_yaw = float(traj.get("yaw", yaw_stop))
+            pass_delta = np.asarray(base_traverse, dtype=np.float32) - previous_xy
+            pass_distance = float(np.linalg.norm(pass_delta))
+            dt_base = max(1.0e-6, float(args.sim_dt))
+            if pass_distance > 0.015:
+                motion_heading = math.atan2(
+                    float(pass_delta[1]), float(pass_delta[0])
+                )
+                forward_error = wrap_to_pi(motion_heading - previous_yaw)
+                reverse_error = wrap_to_pi(motion_heading + math.pi - previous_yaw)
+                if abs(reverse_error) < abs(forward_error):
+                    heading_error = reverse_error
+                    drive_sign = -1.0
+                else:
+                    heading_error = forward_error
+                    drive_sign = 1.0
+                speed = (
+                    drive_sign
+                    * min(
+                        float(args.pass_base_follow_max_speed),
+                        2.0 * pass_distance,
+                    )
+                    * max(0.0, math.cos(heading_error))
+                )
+            else:
+                heading_error = wrap_to_pi(float(yaw_traverse) - previous_yaw)
+                speed = 0.0
+            yaw_step = float(
+                np.clip(
+                    heading_error,
+                    -float(args.pass_base_follow_max_yaw_rate) * dt_base,
+                    float(args.pass_base_follow_max_yaw_rate) * dt_base,
+                )
+            )
+            body_forward = np.array(
+                [math.cos(previous_yaw), math.sin(previous_yaw)], dtype=np.float32
+            )
+            base_xy = (
+                previous_xy + body_forward * speed * dt_base
+            ).astype(np.float32)
+            yaw = float(previous_yaw + yaw_step)
             retract_base_pos = traj.get("release_retract_base_pos")
             target_pos = (
                 base_pos_to_world(
@@ -5751,14 +5938,16 @@ def trajectory_targets(
             gripper = args.gripper_open
             phase = "pass_through"
         elif step < return_home_end:
-            final_base = base_traverse
-            final_yaw = yaw_traverse
             t = smoothstep(
                 (step - pass_end + 1) / max(1, args.return_home_steps)
             )
             if "return_home_start_base_xy" not in traj:
-                traj["return_home_start_base_xy"] = traj.get("base_xy", final_base).copy()
-                traj["return_home_start_yaw"] = float(traj.get("yaw", final_yaw))
+                traj["return_home_start_base_xy"] = np.asarray(
+                    traj.get("base_xy", base_traverse), dtype=np.float32
+                ).copy()
+                traj["return_home_start_yaw"] = float(
+                    traj.get("yaw", yaw_traverse)
+                )
                 traj["return_home_start_target_pos"] = (
                     traj["last_target_pos"].copy()
                     if "last_target_pos" in traj
@@ -5773,12 +5962,13 @@ def trajectory_targets(
                         traj["return_home_start_target_quat"] = traj["last_target_quat"].copy()
                     elif ik_state.current_quat_np is not None:
                         traj["return_home_start_target_quat"] = base_ik.normalize_quat(ik_state.current_quat_np).astype(np.float32)
-            base_xy = lerp(traj["return_home_start_base_xy"], final_base, t)
-            yaw = float(lerp(
-                np.array([traj["return_home_start_yaw"]], dtype=np.float32),
-                np.array([final_yaw], dtype=np.float32),
-                t,
-            )[0])
+            # return_home concerns the arm only.  Keep the quadruped exactly
+            # at the completed traversal pose; forcing it to a nominal point
+            # here introduced a small uncommanded lateral correction.
+            base_xy = np.asarray(
+                traj["return_home_start_base_xy"], dtype=np.float32
+            ).copy()
+            yaw = float(traj["return_home_start_yaw"])
             home_base_pos = traj.get("home_ee_base_pos")
             return_home_goal_pos = (
                 base_pos_to_world(home_base_pos, base_xy, args.robot_z, yaw)
@@ -5801,8 +5991,13 @@ def trajectory_targets(
             traj["return_home_alpha"] = t
             phase = "return_home"
         else:
-            final_base = base_traverse
-            final_yaw = yaw_traverse
+            final_base = np.asarray(
+                traj.get("return_home_start_base_xy", base_traverse),
+                dtype=np.float32,
+            )
+            final_yaw = float(
+                traj.get("return_home_start_yaw", yaw_traverse)
+            )
             home_base_pos = traj.get("home_ee_base_pos")
             fallback_pos = (
                 base_pos_to_world(home_base_pos, final_base, args.robot_z, final_yaw)
@@ -5826,6 +6021,31 @@ def trajectory_targets(
             phase = "hold_home"
 
     target_pos = smooth_door_twin_ee_command(args, traj, phase, target_pos)
+    previous_base_xy = traj.get("base_xy")
+    previous_base_yaw = traj.get("yaw")
+    if previous_base_xy is not None and previous_base_yaw is not None:
+        base_delta = np.asarray(base_xy, dtype=np.float32) - np.asarray(
+            previous_base_xy, dtype=np.float32
+        )
+        body_left = np.array(
+            [-math.sin(float(previous_base_yaw)), math.cos(float(previous_base_yaw))],
+            dtype=np.float32,
+        )
+        body_vy = float(np.dot(base_delta, body_left)) / max(
+            1.0e-6, float(args.sim_dt)
+        )
+        if phase in (
+            "pull_door",
+            "open_hold",
+            "release_handle",
+            "pass_through",
+            "return_home",
+            "hold_home",
+        ):
+            traj["pull_max_abs_body_vy_mps"] = max(
+                float(traj.get("pull_max_abs_body_vy_mps", 0.0)),
+                abs(body_vy),
+            )
     traj["base_xy"] = base_xy.copy()
     traj["yaw"] = float(yaw)
     traj["last_target_pos"] = np.asarray(target_pos, dtype=np.float32).copy()
@@ -6872,13 +7092,18 @@ def update_pull_raw_record_success(st, door_pos):
     max_traversal = float(
         st.traj.get("pull_record_max_traversal_m", float("-inf"))
     )
+    max_abs_body_vy = float(
+        st.traj.get("pull_max_abs_body_vy_mps", 0.0)
+    )
     release_ok = release_angle >= float(st.args.pull_release_angle_deg)
     open_ok = max_open >= float(st.args.pass_open_angle_deg)
     traversal_ok = max_traversal >= float(st.args.pull_record_traversal_distance_m)
+    lateral_motion_ok = max_abs_body_vy <= 1.0e-4
     st.dp_record_success = bool(
         release_ok
         and open_ok
         and traversal_ok
+        and lateral_motion_ok
         and not bool(getattr(st, "base_door_collision_detected", False))
     )
     st.dp_recorder.metadata.update(
@@ -6887,6 +7112,8 @@ def update_pull_raw_record_success(st, door_pos):
             "pull_release_angle_observed_deg": release_angle,
             "pull_max_open_deg": max_open,
             "pull_max_traversal_m": max_traversal,
+            "pull_max_abs_body_vy_mps": max_abs_body_vy,
+            "pull_body_vy_threshold_mps": 1.0e-4,
             "pull_open_threshold_deg": float(st.args.pass_open_angle_deg),
             "pull_traversal_threshold_m": float(
                 st.args.pull_record_traversal_distance_m
@@ -7538,6 +7765,10 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
     max_open_angles = [
         float(st.traj.get("pull_max_open_deg", 0.0)) for st in env_states
     ]
+    max_abs_body_vys = [
+        float(st.traj.get("pull_max_abs_body_vy_mps", 0.0))
+        for st in env_states
+    ]
     if release_angles:
         release_stats = (
             f"min/mean/max={min(release_angles):.2f}/"
@@ -7550,7 +7781,9 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
         f"released={len(release_angles)}/{len(env_states)} "
         f"release_angle_{release_stats} "
         f"max_open_ge_60={sum(angle >= 60.0 for angle in max_open_angles)}/"
-        f"{len(env_states)} completed_traverse={completed_count}/{len(env_states)}",
+        f"{len(env_states)} completed_traverse={completed_count}/{len(env_states)} "
+        f"max_abs_body_vy_mps="
+        f"{max(max_abs_body_vys, default=0.0):.6f}",
         flush=True,
     )
     print(f"Done after {step} steps ({elapsed:.2f}s).")
