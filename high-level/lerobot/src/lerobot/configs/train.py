@@ -74,6 +74,12 @@ class TrainPipelineConfig(HubMixin):
     save_checkpoint: bool = True
     # Checkpoint is saved every `save_freq` training iterations and after the last training step.
     save_freq: int = 20_000
+    # Optional piecewise-constant learning-rate override.  When both fields
+    # are set, updates whose zero-based starting step is greater than or equal
+    # to `learning_rate_override_step` use the requested LR.  The default is
+    # disabled so legacy commands/checkpoints retain identical behavior.
+    learning_rate_override_step: int | None = None
+    learning_rate_after_override: float | None = None
     use_policy_training_preset: bool = True
     optimizer: OptimizerConfig | None = None
     scheduler: LRSchedulerConfig | None = None
@@ -102,11 +108,33 @@ class TrainPipelineConfig(HubMixin):
     recovery_sampling_feature: str = "aux.is_recovery"
     recovery_sampling_threshold: float = 0.5
 
+    # Relative frame/chunk-anchor weights indexed by an integer phase feature.
+    # Example: "8:3,11:0.1,12:3,13:3,14:3" oversamples release and
+    # panel-interaction phases while downsampling hold_home. Unlisted phases
+    # use phase_sampling_default_weight. Empty keeps legacy sampling unchanged.
+    phase_sampling_weights: str = ""
+    phase_sampling_feature: str = "subtask_index"
+    phase_sampling_default_weight: float = 1.0
+
     # Rename map for the observation to override the image and state keys
     rename_map: dict[str, str] = field(default_factory=dict)
     checkpoint_path: Path | None = field(init=False, default=None)
 
     def validate(self) -> None:
+        lr_override_fields = (
+            self.learning_rate_override_step,
+            self.learning_rate_after_override,
+        )
+        if (lr_override_fields[0] is None) != (lr_override_fields[1] is None):
+            raise ValueError(
+                "learning_rate_override_step and learning_rate_after_override "
+                "must be specified together."
+            )
+        if self.learning_rate_override_step is not None:
+            if self.learning_rate_override_step < 0:
+                raise ValueError("learning_rate_override_step must be non-negative.")
+            if self.learning_rate_after_override is None or self.learning_rate_after_override <= 0:
+                raise ValueError("learning_rate_after_override must be positive.")
         # HACK: We parse again the cli args here to get the pretrained paths if there was some.
         policy_path = parser.get_path_arg("policy")
         if policy_path:
@@ -184,9 +212,21 @@ class TrainPipelineConfig(HubMixin):
             raise ValueError(
                 f"recovery_sampling_ratio must be in [0, 1], got {self.recovery_sampling_ratio}."
             )
-        if self.keyframe_sampling_ratio > 0.0 and self.recovery_sampling_ratio > 0.0:
+        if self.phase_sampling_default_weight < 0.0:
             raise ValueError(
-                "keyframe_sampling_ratio and recovery_sampling_ratio cannot both be enabled. "
+                "phase_sampling_default_weight must be non-negative, got "
+                f"{self.phase_sampling_default_weight}."
+            )
+        enabled_samplers = sum(
+            (
+                self.keyframe_sampling_ratio > 0.0,
+                self.recovery_sampling_ratio > 0.0,
+                bool(self.phase_sampling_weights.strip()),
+            )
+        )
+        if enabled_samplers > 1:
+            raise ValueError(
+                "keyframe, recovery, and phase sampling cannot be enabled together. "
                 "Use one sampler at a time so their probability masses are unambiguous."
             )
 

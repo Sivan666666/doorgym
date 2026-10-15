@@ -1108,6 +1108,22 @@ def prepare_float_ik_replay_args(float_mod, args, data, mode):
             args.door_name = selection["name"]
         elif selection.get("index") is not None:
             args.door_index = int(selection["index"])
+
+    # Door entries may carry scripted-controller overrides.  The standalone
+    # replay parser intentionally exposes only replay controls, so it does not
+    # normally define every controller argument accepted by the source scene.
+    # Seed any such attributes before door_common applies the per-door values;
+    # otherwise state replay of a door such as wc_nomenkuang fails while
+    # creating the actor even though controller settings are irrelevant to the
+    # recorded snapshot replay itself.
+    door_common = getattr(float_mod, "dc", None)
+    if door_common is not None and hasattr(door_common, "load_door_specs"):
+        _, _, loaded_specs = door_common.load_door_specs(args)
+        for _, spec, _, _ in loaded_specs:
+            for name in spec.get("controller_multipliers", {}):
+                set_missing_attr(args, name, 1.0)
+            for name, value in spec.get("controller_overrides", {}).items():
+                set_missing_attr(args, name, value)
     return selection
 
 

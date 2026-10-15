@@ -258,3 +258,116 @@ def make_recovery_sampler(
         stats["recovery_feature"] = stats.pop("weight_feature")
         stats["recovery_threshold"] = stats.pop("keyframe_threshold")
     return sampler, stats
+
+
+def _parse_phase_weights(spec: str | dict[int, float]) -> dict[int, float]:
+    if isinstance(spec, dict):
+        parsed = {int(key): float(value) for key, value in spec.items()}
+    else:
+        parsed = {}
+        for item in str(spec).split(","):
+            item = item.strip()
+            if not item:
+                continue
+            try:
+                phase, weight = item.split(":", maxsplit=1)
+                parsed[int(phase.strip())] = float(weight.strip())
+            except ValueError as exc:
+                raise ValueError(
+                    f"Invalid phase sampling item {item!r}; expected comma-separated PHASE_ID:WEIGHT pairs."
+                ) from exc
+    if any(weight < 0.0 for weight in parsed.values()):
+        raise ValueError(f"Phase sampling weights must be non-negative, got {parsed}.")
+    return parsed
+
+
+def make_phase_weighted_sampler(
+    dataset,
+    *,
+    phase_sampling_weights: str | dict[int, float],
+    phase_feature: str = "subtask_index",
+    default_weight: float = 1.0,
+    drop_n_first_frames: int = 0,
+    drop_n_last_frames: int = 0,
+    seed: int | None = None,
+) -> tuple[WeightedRandomSampler | None, dict]:
+    """Sample chunk anchors with relative weights determined by integer phase IDs."""
+    configured = _parse_phase_weights(phase_sampling_weights)
+    if not configured:
+        return None, {"enabled": False, "reason": "no phase weights configured"}
+    if default_weight < 0.0:
+        raise ValueError(f"default_weight must be non-negative, got {default_weight}.")
+
+    features = getattr(dataset, "features", {})
+    if phase_feature not in features:
+        return None, {
+            "enabled": False,
+            "reason": f"missing feature {phase_feature!r}",
+            "phase_feature": phase_feature,
+        }
+    if hasattr(dataset, "_ensure_hf_dataset_loaded"):
+        dataset._ensure_hf_dataset_loaded()
+    try:
+        phases = _as_1d_tensor(dataset.hf_dataset[phase_feature], dtype=torch.long)
+    except Exception as exc:
+        return None, {
+            "enabled": False,
+            "reason": f"failed to read feature {phase_feature!r}: {exc}",
+            "phase_feature": phase_feature,
+        }
+    if phases.numel() != len(dataset):
+        return None, {
+            "enabled": False,
+            "reason": f"feature length {phases.numel()} != dataset length {len(dataset)}",
+            "phase_feature": phase_feature,
+        }
+
+    allowed = _episode_allowed_mask(
+        dataset,
+        drop_n_first_frames=drop_n_first_frames,
+        drop_n_last_frames=drop_n_last_frames,
+    )
+    sample_weights = torch.full((len(dataset),), float(default_weight), dtype=torch.double)
+    sample_weights[~allowed] = 0.0
+    for phase, weight in configured.items():
+        sample_weights[allowed & (phases == int(phase))] = float(weight)
+    total_weight = float(sample_weights.sum().item())
+    if total_weight <= 0.0:
+        return None, {
+            "enabled": False,
+            "reason": "all eligible phase weights are zero",
+            "phase_feature": phase_feature,
+        }
+
+    generator = None
+    if seed is not None:
+        generator = torch.Generator().manual_seed(int(seed))
+    eligible_count = int(allowed.sum().item())
+    sampler = WeightedRandomSampler(
+        weights=sample_weights,
+        num_samples=eligible_count,
+        replacement=True,
+        generator=generator,
+    )
+
+    phase_stats = {}
+    for phase in torch.unique(phases[allowed]).tolist():
+        mask = allowed & (phases == int(phase))
+        count = int(mask.sum().item())
+        mass = float(sample_weights[mask].sum().item()) / total_weight
+        phase_stats[str(int(phase))] = {
+            "frames": count,
+            "relative_weight": float(configured.get(int(phase), default_weight)),
+            "expected_sampling_ratio": mass,
+        }
+    return sampler, {
+        "enabled": True,
+        "sampler_type": "phase_weighted",
+        "phase_feature": phase_feature,
+        "configured_weights": {str(key): value for key, value in sorted(configured.items())},
+        "default_weight": float(default_weight),
+        "eligible_frames": eligible_count,
+        "drop_n_first_frames": int(drop_n_first_frames),
+        "drop_n_last_frames": int(drop_n_last_frames),
+        "phase_stats": phase_stats,
+    }

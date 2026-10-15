@@ -1,0 +1,20 @@
+{
+  "run_root": "/mnt/sda/ps_archive/doorgym/high-level/dp/result/wc_meister_pipeline_20260920/smoke_v3",
+  "tools": {
+    "physics_python": "/home/ps/miniconda3/envs/txc_vbc/bin/python",
+    "render_python": "/mnt/sda/ps_archive/doorgym/high-level/dp/result/wc_meister_pipeline_20260920/runtime/bin/python",
+    "dataset_python": "/home/ps/miniconda3/envs/lerobot_pi05/bin/python",
+    "recorder": "/mnt/sda/ps_archive/doorgym/high-level/dp/result/wc_meister_pipeline_20260920/code/run_wc_contact_physics.py",
+    "scene_builder": "/mnt/sda/ps_archive/doorgym/high-level/dp/result/wc_meister_pipeline_20260920/code/render_wc_contact_blender.py",
+    "meister_root": "/mnt/sda/ps_archive/doorgym/high-level/dp/result/wc_meister_pipeline_20260920/SIM1MeisterRender",
+    "meister_commit": "c031e1f8594dab3a91832e817d884f55189a4e8a"
+  },
+  "physics": {"steps":2601,"seed":615456575,"base_y_range":[0.15,0.15],"min_open_deg":25,"min_traverse_m":0.5},
+  "scene": {
+    "base_blend":"/mnt/sda/ps_archive/doorgym/high-level/dp/result/wc_pull_blender_20260918/pull_replay_setup.blend",
+    "seed":20260920,"randomize":true,"minimum_robot_clearance_m":0.8
+  },
+  "render": {"width":160,"height":120,"fps":10,"samples":4,"denoise":true,"view_transform":"AgX","cpu_threads":4,"views":["front","wrist","overview"]},
+  "dataset": {"repo_id":"local/wc_meister_joint10_smoke","task":"Grasp the handle, pull the door open and pass through the doorway."},
+  "batch": {"episodes":1,"gpus":[3],"max_attempts":2,"physics_timeout_s":1800,"scene_timeout_s":600,"render_timeout_s":14400,"export_timeout_s":1800}
+}

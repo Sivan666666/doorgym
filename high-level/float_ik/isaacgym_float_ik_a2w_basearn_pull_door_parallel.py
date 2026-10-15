@@ -42,6 +42,7 @@ if str(KINEMATICS_DIR) not in sys.path:
 from joint_trajectory_smoothing import evaluate_polynomial, polynomial_coefficients
 
 import door_common as dc
+import rgb_doorman
 import isaacgym_a2w_ik_push_door_parallel as a2w_ik
 from door_twin import (
     DoorTwinSpec,
@@ -110,6 +111,10 @@ DP_PHASE_NAMES = [
     "pass_through",
     "return_home",
     "hold_home",
+    # Hybrid pull-then-panel-push phases are appended so legacy phase ids stay stable.
+    "panel_reposition",
+    "panel_contact",
+    "panel_push",
 ]
 DP_PHASE_ID = {name: idx for idx, name in enumerate(DP_PHASE_NAMES)}
 IKPULL_STATE_VERSION = "zero_leg_dof_pos_prev_action_v1"
@@ -131,6 +136,9 @@ DOOR_TWIN_KEYFRAME_PHASES = (
     "pull_door",
     "open_hold",
     "release_handle",
+    "panel_reposition",
+    "panel_contact",
+    "panel_push",
     "pass_through",
     "return_home",
     "hold_home",
@@ -155,6 +163,9 @@ DEFAULT_STAGE_SCREENSHOT_PHASES = (
     "pull_door",
     "open_hold",
     "release_handle",
+    "panel_reposition",
+    "panel_contact",
+    "panel_push",
     "pass_through",
     "return_home",
     "hold_home",
@@ -1346,7 +1357,7 @@ def parse_args():
         description="A2W+Z1 base+arm float IK door-pull demo.",
         headless=True,
         no_graphics=True,
-        custom_parameters=[
+        custom_parameters=rgb_doorman.cli_parameters() + [
             {"name": "--asset_root", "type": str, "default": str(A2WZ1_DEFAULT_ASSET_ROOT)},
             {"name": "--asset_file", "type": str, "default": A2WZ1_DEFAULT_ASSET_FILE},
             {"name": "--rl_device", "type": str, "default": "cuda:0"},
@@ -1461,6 +1472,26 @@ def parse_args():
             {"name": "--grasp_hold_steps", "type": int, "default": 0},
             {"name": "--gripper_close_steps", "type": int, "default": 50},
             {"name": "--handle_rotate_steps", "type": int, "default": 100},
+            {
+                "name": "--rotate_pull_overlap_steps",
+                "type": int,
+                "default": 0,
+                "help": (
+                    "Number of final rotate_handle steps that also apply a small "
+                    "outward pull after the simulated latch is actually unlocked. "
+                    "Zero preserves the legacy sequential rotate-then-pull motion."
+                ),
+            },
+            {
+                "name": "--rotate_pull_overlap_ee_distance",
+                "type": float,
+                "default": 0.01,
+                "help": (
+                    "Small live-tangent EE preload blended into the end of rotate_handle. "
+                    "Keep this much smaller than the gripper depth so overlap does not "
+                    "pull the fingers off the lever."
+                ),
+            },
             {"name": "--door_push_steps", "type": int, "default": 300},
             {
                 "name": "--door_pull_steps",
@@ -1599,6 +1630,25 @@ def parse_args():
                 "help": "Position gain used to approach the late-pull geometric base target.",
             },
             {
+                "name": "--pull_vx_monotonic_retreat",
+                "action": "store_true",
+                "default": False,
+                "help": (
+                    "In vx-only pull mode, keep the magnitude of the backward vx command "
+                    "nondecreasing until handle release. This removes measured-door-progress "
+                    "slowdowns without changing legacy trajectories unless explicitly enabled."
+                ),
+            },
+            {
+                "name": "--pull_vx_monotonic_max_accel_mps2",
+                "type": float,
+                "default": 0.8,
+                "help": (
+                    "Maximum increase of backward-speed magnitude per second when "
+                    "--pull_vx_monotonic_retreat is enabled."
+                ),
+            },
+            {
                 "name": "--pass_base_follow_max_speed",
                 "type": float,
                 "default": 0.55,
@@ -1729,6 +1779,532 @@ def parse_args():
                 ),
             },
             {
+                "name": "--pull_then_panel_push",
+                "dest": "pull_then_panel_push",
+                "action": "store_true",
+                "default": True,
+                "help": (
+                    "Use the hybrid expert: pull the unlocked door to a modest angle, "
+                    "release and retract, then push the opposite panel side to the final goal."
+                ),
+            },
+            {
+                "name": "--no_pull_then_panel_push",
+                "dest": "pull_then_panel_push",
+                "action": "store_false",
+                "help": "Retain the legacy grasp-and-pull-to-release trajectory.",
+            },
+            {
+                "name": "--pull_panel_release_angle_deg",
+                "type": float,
+                "default": 30.0,
+                "help": "Measured door angle at which the hybrid trajectory releases the handle.",
+            },
+            {
+                "name": "--pull_panel_release_angle_randomization",
+                "action": "store_true",
+                "default": False,
+                "help": (
+                    "Sample an independent measured-door release angle for each env. "
+                    "The fixed --pull_panel_release_angle_deg path remains unchanged "
+                    "unless this flag is explicitly enabled."
+                ),
+            },
+            {
+                "name": "--pull_panel_release_angle_min_deg",
+                "type": float,
+                "default": 10.0,
+                "help": "Minimum per-env hybrid handle-release angle when randomization is enabled.",
+            },
+            {
+                "name": "--pull_panel_release_angle_max_deg",
+                "type": float,
+                "default": 35.0,
+                "help": "Maximum per-env hybrid handle-release angle when randomization is enabled.",
+            },
+            {
+                "name": "--pull_panel_contact_loss_release",
+                "action": "store_true",
+                "default": False,
+                "help": (
+                    "During pull_door, release early when the measured door angle is at "
+                    "least --pull_panel_contact_loss_min_angle_deg and stable two-finger "
+                    "handle contact has been absent for the configured number of frames."
+                ),
+            },
+            {
+                "name": "--pull_panel_contact_loss_min_angle_deg",
+                "type": float,
+                "default": 10.0,
+                "help": "Minimum measured door angle that permits contact-loss early release.",
+            },
+            {
+                "name": "--pull_panel_contact_loss_min_frames",
+                "type": int,
+                "default": 3,
+                "help": "Consecutive frames without stable two-finger handle contact before early release.",
+            },
+            {
+                "name": "--pull_contact_loss_keep_release_geometry",
+                "action": "store_true",
+                "default": False,
+                "help": (
+                    "On observable contact-loss fallback, retain the fixed release target's "
+                    "post-release geometry instead of rebuilding it from the earlier angle."
+                ),
+            },
+            {
+                "name": "--pull_contact_loss_defer_base_retreat",
+                "action": "store_true",
+                "default": False,
+                "help": (
+                    "For a contact-loss early release, keep the base near its measured "
+                    "release pose during handle extraction, then perform one short "
+                    "measured-angle-triggered vx-only retreat during the panel transfer."
+                ),
+            },
+            {
+                "name": "--pull_defer_base_retreat_until_panel_push",
+                "action": "store_true",
+                "default": False,
+                "help": (
+                    "Use the measured-angle-gated close-base staging path for every "
+                    "hybrid release, not only contact-loss fallback releases. This keeps "
+                    "the panel target reachable and performs the short chassis-clearance "
+                    "retreat only after the door reaches the configured angle."
+                ),
+            },
+            {
+                "name": "--pull_contact_loss_near_base_retreat_distance",
+                "type": float,
+                "default": 0.36,
+                "help": (
+                    "Body-vx retreat from base_stop used as the close staging pose "
+                    "after an early contact-loss release."
+                ),
+            },
+            {
+                "name": "--pull_contact_loss_base_retreat_after_push_delta_deg",
+                "type": float,
+                "default": 10.0,
+                "help": (
+                    "Deprecated compatibility option. Contact-loss recovery now performs "
+                    "only one measured-angle-triggered retreat and does not retreat again "
+                    "during panel_push."
+                ),
+            },
+            {
+                "name": "--pull_contact_loss_collision_retreat_angle_deg",
+                "type": float,
+                "default": 35.0,
+                "help": (
+                    "Measured door angle that starts a short contact-loss base "
+                    "retreat so the opening slab does not collide with the chassis."
+                ),
+            },
+            {
+                "name": "--pull_contact_loss_collision_retreat_distance",
+                "type": float,
+                "default": 0.15,
+                "help": (
+                    "Single vx-only chassis retreat applied at the collision-avoidance "
+                    "angle; the base remains fixed at this pose for the rest of panel push."
+                ),
+            },
+            {
+                "name": "--pull_contact_loss_collision_retreat_ramp_deg",
+                "type": float,
+                "default": 5.0,
+                "help": "Door-angle interval over which the short collision retreat is blended.",
+            },
+            {
+                "name": "--pull_panel_adaptive_release_retreat",
+                "action": "store_true",
+                "default": False,
+                "help": (
+                    "After the fingers have extracted from the handle, complete an "
+                    "angle-dependent vx-only base retreat before the right-side panel transfer."
+                ),
+            },
+            {
+                "name": "--pull_refresh_adaptive_after_door_overrides",
+                "action": "store_true",
+                "default": False,
+                "help": (
+                    "Recompute release-angle-dependent transfer geometry after per-door "
+                    "controller overrides. Disabled by default for exact compatibility."
+                ),
+            },
+            {
+                "name": "--pull_panel_low_angle_base_retreat_distance",
+                "type": float,
+                "default": 0.36,
+                "help": (
+                    "Total base retreat at the minimum randomized release angle. "
+                    "It interpolates to --pull_base_retreat_distance at the maximum angle."
+                ),
+            },
+            {
+                "name": "--pull_panel_low_angle_right_arc_radius",
+                "type": float,
+                "default": 0.10,
+                "help": (
+                    "Robot-right arc radius at the minimum release angle. It interpolates "
+                    "to --panel_right_arc_radius at the maximum release angle."
+                ),
+            },
+            {
+                "name": "--pull_panel_low_angle_edge_clearance",
+                "type": float,
+                "default": 0.10,
+                "help": (
+                    "Free-edge clearance at the minimum release angle. It interpolates "
+                    "to --panel_edge_clearance at the maximum release angle."
+                ),
+            },
+            {
+                "name": "--pull_panel_low_angle_outward_clearance",
+                "type": float,
+                "default": 0.18,
+                "help": (
+                    "Slab-normal clearance at the minimum release angle. It interpolates "
+                    "to --panel_right_arc_outward_clearance at the maximum release angle."
+                ),
+            },
+            {
+                "name": "--pull_panel_low_angle_reposition_steps",
+                "type": int,
+                "default": 260,
+                "help": (
+                    "Panel-reposition duration at the minimum release angle. It "
+                    "interpolates to --panel_reposition_steps at the maximum angle, "
+                    "giving the arm time to cross the free edge before panel contact."
+                ),
+            },
+            {
+                "name": "--pull_panel_base_mode",
+                "type": str,
+                "default": "no_vy",
+                "help": (
+                    "Base motion used while following the panel contact point. no_vy uses "
+                    "vx+vyaw only; with_vy permits an explicit body-frame lateral command."
+                ),
+            },
+            {
+                "name": "--pull_vx_only_base",
+                "action": "store_true",
+                "default": False,
+                "help": (
+                    "Keep the quadruped at its initial yaw and constrain every scripted "
+                    "base displacement to body-forward vx. Both vy and vyaw are exactly zero."
+                ),
+            },
+            {
+                "name": "--panel_reposition_path",
+                "type": str,
+                "default": "direct",
+                "help": (
+                    "Arm path after returning home: direct retains the legacy two-line path; "
+                    "right_arc uses a cubic outside arc that initially moves to robot-right."
+                ),
+            },
+            {
+                "name": "--panel_right_arc_radius",
+                "type": float,
+                "default": 0.28,
+                "help": "Robot-right bulge of the collision-avoiding home-to-panel arc.",
+            },
+            {
+                "name": "--panel_right_arc_outward_clearance",
+                "type": float,
+                "default": 0.12,
+                "help": "Additional pull-side clearance used by the right-arc control points.",
+            },
+            {
+                "name": "--panel_right_arc_lift",
+                "type": float,
+                "default": 0.06,
+                "help": "Vertical lift of the right-arc control points above their endpoints.",
+            },
+            {
+                "name": "--panel_right_arc_joint1_hold_rad",
+                "type": float,
+                "default": 0.0,
+                "help": (
+                    "Optional signed joint1 guard during the right-arc transfer. "
+                    "It keeps the shoulder/elbow folded to robot-right so the proximal "
+                    "links do not straighten through the door slab. Zero disables it."
+                ),
+            },
+            {
+                "name": "--panel_right_arc_continuous_spline",
+                "action": "store_true",
+                "default": False,
+                "help": (
+                    "Interpolate the post-swivel right-side transfer with one C1 "
+                    "Catmull-Rom chain through all collision-avoidance waypoints. "
+                    "This removes the stop-and-go motion of the legacy piecewise "
+                    "smoothstep path while preserving the same slab-crossing points."
+                ),
+            },
+            {
+                "name": "--panel_reposition_steps",
+                "type": int,
+                "default": 60,
+                "help": "Frames for moving the retracted arm around the free edge to the panel backside.",
+            },
+            {
+                "name": "--panel_reposition_completion_gate",
+                "action": "store_true",
+                "default": False,
+                "help": (
+                    "Keep commanding the final backside precontact waypoint until the "
+                    "measured EE is actually behind the frozen release-time panel plane "
+                    "and close to that waypoint; do not enter panel_contact by time alone."
+                ),
+            },
+            {
+                "name": "--panel_reposition_completion_backside_margin_m",
+                "type": float,
+                "default": 0.01,
+                "help": "Required measured EE distance beyond the panel backside plane.",
+            },
+            {
+                "name": "--panel_reposition_completion_position_tolerance_m",
+                "type": float,
+                "default": 0.12,
+                "help": "Maximum EE-to-precontact distance for completing panel reposition.",
+            },
+            {
+                "name": "--panel_reposition_completion_max_extra_steps",
+                "type": int,
+                "default": 180,
+                "help": "Maximum extra hold frames after the nominal reposition trajectory.",
+            },
+            {
+                "name": "--panel_reposition_base_forward_distance",
+                "type": float,
+                "default": 0.0,
+                "help": (
+                    "Move the base forward by this distance while the arm takes the "
+                    "right-arc path. In pull_vx_only_base mode this is strictly body-vx; "
+                    "vy and yaw remain zero. Zero preserves legacy behavior."
+                ),
+            },
+            {
+                "name": "--panel_contact_steps",
+                "type": int,
+                "default": 35,
+                "help": "Frames for approaching from the panel precontact waypoint to contact.",
+            },
+            {
+                "name": "--panel_push_max_steps",
+                "type": int,
+                "default": 500,
+                "help": "Safety duration for panel pushing; completion is still measured-angle driven.",
+            },
+            {
+                "name": "--panel_push_planned_arc_steps",
+                "type": int,
+                "default": 0,
+                "help": (
+                    "If positive, actively sweep the opposite-side panel contact point "
+                    "around the hinge toward panel_push_goal_angle_deg over this many "
+                    "frames. Completion remains gated by the measured door angle. Zero "
+                    "preserves the legacy live-point follower."
+                ),
+            },
+            {
+                "name": "--panel_push_arc_lead_angle_deg",
+                "type": float,
+                "default": 5.0,
+                "help": (
+                    "Maximum planned panel-contact arc lead over the measured door "
+                    "angle, preventing the pusher from running away from contact."
+                ),
+            },
+            {
+                "name": "--panel_push_goal_angle_deg",
+                "type": float,
+                "default": 80.0,
+                "help": "Measured door angle required before pass_through begins.",
+            },
+            {
+                "name": "--panel_postpush_home_steps",
+                "type": int,
+                "default": 0,
+                "help": (
+                    "Frames used to interpolate the arm from its final panel-push "
+                    "configuration to joint home at the beginning of pass_through. "
+                    "Zero preserves the legacy one-frame home reset."
+                ),
+            },
+            {
+                "name": "--panel_precontact_distance",
+                "type": float,
+                "default": 0.06,
+                "help": "Backside normal clearance before contacting the mirrored handle point.",
+            },
+            {
+                "name": "--panel_contact_penetration",
+                "type": float,
+                "default": 0.10,
+                "help": "Commanded penetration along the pull-side panel normal while pushing.",
+            },
+            {
+                "name": "--panel_contact_initial_penetration",
+                "type": float,
+                "default": -1.0,
+                "help": (
+                    "Initial panel penetration, smoothly ramped to panel_contact_penetration "
+                    "over the planned arc. Negative preserves the legacy immediate value."
+                ),
+            },
+            {
+                "name": "--panel_target_z_offset",
+                "type": float,
+                "default": 0.0,
+                "help": (
+                    "Vertical offset from the mirrored handle point to a clean door-panel "
+                    "contact patch. Zero preserves the legacy trajectory."
+                ),
+            },
+            {
+                "name": "--panel_contact_inward_offset_m",
+                "type": float,
+                "default": 0.0,
+                "help": (
+                    "Move the mirrored-handle panel contact patch radially toward the "
+                    "hinge, preventing the physical palm from slipping beyond the free edge."
+                ),
+            },
+            {
+                "name": "--panel_push_gripper_closed",
+                "action": "store_true",
+                "default": False,
+                "help": (
+                    "After clearing the released handle, close the fingers into a compact "
+                    "pusher before contacting the door panel. Disabled for legacy behavior."
+                ),
+            },
+            {
+                "name": "--panel_push_use_grasp_orientation",
+                "action": "store_true",
+                "default": False,
+                "help": (
+                    "Orient the physical gripper toward the panel during reposition, "
+                    "contact, and push. Disabled to preserve legacy position-only IK."
+                ),
+            },
+            {
+                "name": "--panel_ee_tip_compensation_m",
+                "type": float,
+                "default": 0.0,
+                "help": (
+                    "Shift the commanded EE tip along gripper local +X so the physical "
+                    "palm collision geometry, rather than the massless EE tip, follows "
+                    "the panel contact path. Zero preserves legacy behavior."
+                ),
+            },
+            {
+                "name": "--panel_target_max_step_m",
+                "type": float,
+                "default": 0.0,
+                "help": (
+                    "Per-simulation-step Cartesian limit during panel_push. Positive "
+                    "values override pull_target_max_distance; zero preserves legacy."
+                ),
+            },
+            {
+                "name": "--panel_push_contact_gated",
+                "action": "store_true",
+                "default": False,
+                "help": (
+                    "Use the first real PhysX gripper-panel contact as the origin of "
+                    "the planned push arc, preventing the pusher from crossing the panel."
+                ),
+            },
+            {
+                "name": "--panel_push_contact_pressure_m",
+                "type": float,
+                "default": 0.04,
+                "help": "Final opening-normal pressure added after contact-gated panel acquisition.",
+            },
+            {
+                "name": "--panel_push_motion_mode",
+                "type": str,
+                "default": "hinge_arc",
+                "choices": ["hinge_arc", "linear_pull"],
+                "help": (
+                    "Door-panel push trajectory after contact. hinge_arc preserves the "
+                    "legacy hinge-following controller; linear_pull moves the pusher "
+                    "continuously along the measured pull direction."
+                ),
+            },
+            {
+                "name": "--panel_push_linear_distance_m",
+                "type": float,
+                "default": 0.55,
+                "help": "Total EE travel along pull_dir in linear_pull panel-push mode.",
+            },
+            {
+                "name": "--debug_panel_contacts",
+                "action": "store_true",
+                "default": False,
+                "help": "Print rigid-contact pairs involving the door panel during panel_push.",
+            },
+            {
+                "name": "--panel_edge_clearance",
+                "type": float,
+                "default": 0.12,
+                "help": "Extra in-plane clearance beyond the free edge during panel repositioning.",
+            },
+            {
+                "name": "--panel_base_follow_ratio",
+                "type": float,
+                "default": 0.65,
+                "help": "Fraction of panel contact-point sweep followed by the base during pushing.",
+            },
+            {
+                "name": "--panel_base_follow_max_speed",
+                "type": float,
+                "default": 0.28,
+                "help": "Maximum base translation speed during the panel-push phase.",
+            },
+            {
+                "name": "--panel_base_follow_max_lateral_speed",
+                "type": float,
+                "default": 0.14,
+                "help": (
+                    "Maximum body-frame vy used by the executable with_vy trajectory. "
+                    "The no_vy variant always keeps this command exactly zero."
+                ),
+            },
+            {
+                "name": "--panel_base_follow_min_lateral_speed",
+                "type": float,
+                "default": 0.10,
+                "help": (
+                    "Minimum magnitude of every active with_vy lateral command. "
+                    "Commands inside the lateral deadband remain exactly zero."
+                ),
+            },
+            {
+                "name": "--panel_base_follow_lateral_deadband_m",
+                "type": float,
+                "default": 0.015,
+                "help": "Lateral position-error deadband before a with_vy pulse starts.",
+            },
+            {
+                "name": "--panel_base_follow_lateral_min_hold_steps",
+                "type": int,
+                "default": 12,
+                "help": (
+                    "Minimum simulation frames for each nonzero vy pulse, preventing "
+                    "sub-actuation-threshold one-frame commands."
+                ),
+            },
+            {
                 "name": "--pull_release_angle_tolerance_deg",
                 "type": float,
                 "default": 0.0,
@@ -1783,6 +2359,27 @@ def parse_args():
                 ),
             },
             {
+                "name": "--release_joint_home_motion_profile",
+                "type": str,
+                "choices": ("smoothstep", "trapezoid"),
+                "default": "smoothstep",
+                "help": (
+                    "Time profile for the post-release joint-space return. "
+                    "smoothstep preserves the legacy behavior; trapezoid uses short "
+                    "acceleration/deceleration ramps and a nearly constant-speed middle "
+                    "section to avoid an abrupt fast-slow visual rhythm."
+                ),
+            },
+            {
+                "name": "--release_joint_home_ramp_fraction",
+                "type": float,
+                "default": 0.18,
+                "help": (
+                    "Acceleration and deceleration fraction at each end of the normalized "
+                    "trapezoid release-to-home profile. Must be in (0, 0.5]."
+                ),
+            },
+            {
                 "name": "--release_gripper_open_start_fraction",
                 "type": float,
                 "default": 0.0,
@@ -1816,6 +2413,108 @@ def parse_args():
                 "type": float,
                 "default": 0.14,
                 "help": "Extra pull-direction clearance before sweeping the released arm laterally.",
+            },
+            {
+                "name": "--release_to_clearance_pose",
+                "action": "store_true",
+                "default": False,
+                "help": (
+                    "For the hybrid pull-then-panel-push expert, do not return the arm "
+                    "to its full joint home before rounding the panel edge. Open the "
+                    "gripper, retreat 8-10 cm along the live pull direction, move to an "
+                    "outside clearance pose, and start panel_reposition from there. "
+                    "Disabled by default to preserve legacy trajectories."
+                ),
+            },
+            {
+                "name": "--release_clearance_retreat_distance",
+                "type": float,
+                "default": 0.09,
+                "help": (
+                    "Pull-direction retreat from the measured release pose before moving "
+                    "toward the outside clearance pose under --release_to_clearance_pose."
+                ),
+            },
+            {
+                "name": "--release_clearance_right_distance",
+                "type": float,
+                "default": 0.14,
+                "help": (
+                    "Robot-right displacement from the extracted handle pose to the "
+                    "outside clearance pose."
+                ),
+            },
+            {
+                "name": "--release_clearance_lift_distance",
+                "type": float,
+                "default": 0.03,
+                "help": "Vertical lift from the extracted handle pose to the outside clearance pose.",
+            },
+            {
+                "name": "--release_clearance_arc_radius_extra",
+                "type": float,
+                "default": 0.08,
+                "help": (
+                    "Additional robot-right arc radius used only by "
+                    "--release_to_clearance_pose when rounding the free edge."
+                ),
+            },
+            {
+                "name": "--release_clearance_edge_extra",
+                "type": float,
+                "default": 0.06,
+                "help": (
+                    "Additional in-plane distance beyond the panel free edge used only "
+                    "by --release_to_clearance_pose."
+                ),
+            },
+            {
+                "name": "--release_clearance_outward_extra",
+                "type": float,
+                "default": 0.06,
+                "help": (
+                    "Additional panel-normal clearance on both sides of the slab used "
+                    "only by --release_to_clearance_pose."
+                ),
+            },
+            {
+                "name": "--release_clearance_retreat_fraction",
+                "type": float,
+                "default": 0.45,
+                "help": (
+                    "Fraction of release_handle_motion_steps allocated to the initial "
+                    "straight retreat; the remaining frames move continuously to clearance."
+                ),
+            },
+            {
+                "name": "--release_clearance_base_retreat_extra",
+                "type": float,
+                "default": 0.30,
+                "help": (
+                    "Maximum additional fixed-heading body-X retreat performed only after "
+                    "handle release while moving to the clearance pose. With randomized "
+                    "release angles it is the value at the maximum release angle."
+                ),
+            },
+            {
+                "name": "--release_clearance_low_angle_base_retreat_extra",
+                "type": float,
+                "default": 0.15,
+                "help": (
+                    "Additional post-release body-X retreat at the minimum randomized "
+                    "release angle. It is interpolated to "
+                    "--release_clearance_base_retreat_extra at the maximum angle."
+                ),
+            },
+            {
+                "name": "--release_clearance_base_retreat_extra_scale",
+                "type": float,
+                "default": 1.0,
+                "help": (
+                    "Scale only the additional post-release chassis retreat. The legacy "
+                    "value 1 keeps existing trajectories unchanged; 0 keeps the nominal "
+                    "release-angle-dependent retreat without the extra clearance retreat."
+                ),
             },
             {
                 "name": "--release_extra_outward_distance",
@@ -1863,6 +2562,16 @@ def parse_args():
                 "help": "Smooth A2W base traversal duration after the arm clears the handle.",
             },
             {"name": "--return_home_steps", "type": int, "default": 150},
+            {
+                "name": "--pull_expert_arm_command_max_speed",
+                "type": float,
+                "default": 0.0,
+                "help": (
+                    "Optional post-grasp expert arm-target slew limit in rad/s. "
+                    "Zero preserves the legacy expert exactly. Never changes learned "
+                    "policy/replay commands, base commands, or gripper targets."
+                ),
+            },
             {"name": "--return_home_target_chase_alpha", "type": float, "default": 0.08},
             {
                 "name": "--ee_command_max_step",
@@ -1995,6 +2704,7 @@ def parse_args():
             {"name": "--handle_spring_stiffness", "type": float, "default": 0.5},
             {"name": "--handle_spring_damping", "type": float, "default": 0.1},
             {"name": "--handle_unlock_ratio", "type": float, "default": 40.0 / 45.0},
+            {"name": "--expected_handle_unlock_angle_deg", "type": float, "default": -1.0},
             {"name": "--door_open_resistance", "type": float, "default": 0.0},
             {"name": "--door_open_damping", "type": float, "default": 0.0},
             {
@@ -2259,6 +2969,11 @@ def parse_args():
             {"name": "--show_seg", "action": "store_true"},
             {"name": "--no_show_seg", "action": "store_true"},
             {"name": "--rgb", "action": "store_true", "help": "Show RGB+mask camera previews instead of full depth+mask."},
+            {
+                "name": "--dp_rgb_without_masks",
+                "action": "store_true",
+                "help": "Keep segmentation internal but omit RGB mask arrays from raw DP episodes.",
+            },
             {"name": "--depth_only", "dest": "depth_only", "action": "store_true", "default": True, "help": "Record/use only wrist/front depth images, without handle mask images."},
             {"name": "--no_depth_only", "dest": "depth_only", "action": "store_false", "help": "Use legacy depth+mask image inputs."},
             {"name": "--camera_rgb", "action": "store_true"},
@@ -2330,6 +3045,28 @@ def parse_args():
                 ),
             },
             {"name": "--record_dp_dataset", "action": "store_true"},
+            {
+                "name": "--pull_validation_result_json",
+                "type": str,
+                "default": "",
+                "help": (
+                    "Optional lightweight per-environment scripted validation output. "
+                    "This records every rollout exactly once without enabling dataset "
+                    "recording or success filtering."
+                ),
+            },
+            {
+                "name": "--overview_video_path",
+                "type": str,
+                "default": "",
+                "help": "Optional mp4 path for recording the Isaac Gym overview viewer.",
+            },
+            {"name": "--overview_video_fps", "type": float, "default": 25.0},
+            {"name": "--overview_video_capture_stride", "type": int, "default": 2},
+            {"name": "--overview_video_capture_start_step", "type": int, "default": 0},
+            {"name": "--overview_video_max_frames", "type": int, "default": -1},
+            {"name": "--overview_video_width", "type": int, "default": 1280},
+            {"name": "--overview_video_height", "type": int, "default": 720},
             {
                 "name": "--record_end_signal",
                 "action": "store_true",
@@ -2460,6 +3197,7 @@ def parse_args():
             {"name": "--keyframe_loss_radius", "type": int, "default": 3},
             {"name": "--no_keyframe_loss_weights", "action": "store_true"},
             {"name": "--dp_warmstart", "action": "store_true"},
+            {"name": "--dp_expert_handoff_manifest", "type": str, "default": ""},
             {"name": "--dp_warmstart_raw_episode", "type": str, "default": ""},
             {"name": "--dp_warmstart_step", "type": int, "default": -1},
             {"name": "--dp_warmstart_expert_obs", "dest": "dp_warmstart_expert_obs", "action": "store_true", "default": True},
@@ -2588,6 +3326,18 @@ def parse_args():
             setattr(args, attr, True)
         else:
             setattr(args, attr, bool(config_defaults.get(attr, True)))
+
+    # Isaac Gym's custom argparse wrapper also drops default=True for this
+    # paired store_true/store_false option.  The hybrid trajectory is the new
+    # default; retain an explicit opt-out for legacy experiments.
+    if "--no_pull_then_panel_push" in argv:
+        args.pull_then_panel_push = False
+    elif "--pull_then_panel_push" in argv:
+        args.pull_then_panel_push = True
+    else:
+        args.pull_then_panel_push = bool(
+            config_defaults.get("pull_then_panel_push", True)
+        )
 
     if "--no_show_seg" in argv:
         args.show_camera_images = False
@@ -2807,6 +3557,107 @@ def parse_args():
     # toward the robot. The handle-to-unlock rule itself remains unchanged.
     args.door_motion_sign = 1.0
     args.pass_through_door = not bool(args.no_pass_through_door)
+    args.pull_panel_base_mode = str(args.pull_panel_base_mode).strip().lower()
+    if args.pull_panel_base_mode not in {"no_vy", "with_vy"}:
+        raise ValueError(
+            "--pull_panel_base_mode must be either 'no_vy' or 'with_vy', got "
+            f"{args.pull_panel_base_mode!r}."
+        )
+    args.panel_reposition_path = str(args.panel_reposition_path).strip().lower()
+    if args.panel_reposition_path not in {"direct", "right_arc"}:
+        raise ValueError(
+            "--panel_reposition_path must be either 'direct' or 'right_arc', got "
+            f"{args.panel_reposition_path!r}."
+        )
+    if bool(args.pull_vx_only_base) and args.pull_panel_base_mode != "no_vy":
+        raise ValueError(
+            "--pull_vx_only_base requires --pull_panel_base_mode no_vy because vy must remain zero."
+        )
+    release_angle_min = float(args.pull_panel_release_angle_min_deg)
+    release_angle_max = float(args.pull_panel_release_angle_max_deg)
+    if release_angle_min < 0.0 or release_angle_max < release_angle_min:
+        raise ValueError(
+            "Randomized panel-release angles must satisfy 0 <= min <= max, got "
+            f"[{release_angle_min}, {release_angle_max}]."
+        )
+    if release_angle_max >= float(args.panel_push_goal_angle_deg):
+        raise ValueError(
+            "--pull_panel_release_angle_max_deg must be below "
+            "--panel_push_goal_angle_deg so the panel-push phase has positive progress."
+        )
+    if float(args.pull_panel_contact_loss_min_angle_deg) < 0.0:
+        raise ValueError("--pull_panel_contact_loss_min_angle_deg must be non-negative.")
+    if int(args.pull_panel_contact_loss_min_frames) <= 0:
+        raise ValueError("--pull_panel_contact_loss_min_frames must be positive.")
+    if float(args.pull_contact_loss_near_base_retreat_distance) < 0.0:
+        raise ValueError(
+            "--pull_contact_loss_near_base_retreat_distance must be non-negative."
+        )
+    if float(args.pull_contact_loss_collision_retreat_angle_deg) < 0.0:
+        raise ValueError(
+            "--pull_contact_loss_collision_retreat_angle_deg must be non-negative."
+        )
+    if float(args.pull_contact_loss_collision_retreat_distance) < 0.0:
+        raise ValueError(
+            "--pull_contact_loss_collision_retreat_distance must be non-negative."
+        )
+    if float(args.pull_contact_loss_collision_retreat_ramp_deg) <= 0.0:
+        raise ValueError(
+            "--pull_contact_loss_collision_retreat_ramp_deg must be positive."
+        )
+    for attr in (
+        "pull_panel_low_angle_base_retreat_distance",
+        "pull_panel_low_angle_right_arc_radius",
+        "pull_panel_low_angle_edge_clearance",
+        "pull_panel_low_angle_outward_clearance",
+    ):
+        if float(getattr(args, attr)) < 0.0:
+            raise ValueError(f"--{attr} must be non-negative.")
+    if int(args.pull_panel_low_angle_reposition_steps) <= 0:
+        raise ValueError("--pull_panel_low_angle_reposition_steps must be positive.")
+    for attr in (
+        "release_clearance_retreat_distance",
+        "release_clearance_right_distance",
+        "release_clearance_lift_distance",
+        "release_clearance_arc_radius_extra",
+        "release_clearance_edge_extra",
+        "release_clearance_outward_extra",
+        "release_clearance_base_retreat_extra",
+        "release_clearance_low_angle_base_retreat_extra",
+    ):
+        if float(getattr(args, attr)) < 0.0:
+            raise ValueError(f"--{attr} must be non-negative.")
+    if not 0.0 < float(args.release_clearance_retreat_fraction) < 1.0:
+        raise ValueError("--release_clearance_retreat_fraction must be in (0, 1).")
+    if float(args.panel_reposition_completion_backside_margin_m) < 0.0:
+        raise ValueError(
+            "--panel_reposition_completion_backside_margin_m must be non-negative."
+        )
+    if float(args.panel_reposition_completion_position_tolerance_m) <= 0.0:
+        raise ValueError(
+            "--panel_reposition_completion_position_tolerance_m must be positive."
+        )
+    if int(args.panel_reposition_completion_max_extra_steps) < 0:
+        raise ValueError(
+            "--panel_reposition_completion_max_extra_steps must be non-negative."
+        )
+    if (
+        args.pull_panel_base_mode == "with_vy"
+        and float(args.panel_base_follow_min_lateral_speed) < 0.1
+    ):
+        raise ValueError(
+            "--panel_base_follow_min_lateral_speed must be at least 0.1 m/s "
+            "for the executable with_vy trajectory."
+        )
+    if (
+        args.pull_panel_base_mode == "with_vy"
+        and float(args.panel_base_follow_max_lateral_speed)
+        < float(args.panel_base_follow_min_lateral_speed)
+    ):
+        raise ValueError(
+            "--panel_base_follow_max_lateral_speed must be greater than or "
+            "equal to --panel_base_follow_min_lateral_speed."
+        )
     configure_door_twin_args(args)
     return args
 
@@ -2904,6 +3755,8 @@ def load_a2wz1_float_robot_assets(gym, sim, args, temp_root: Path):
         args.asset_file,
         temp_root,
     )
+    from rgb_robot_materials import prepare_robot_visuals
+    prepare_robot_visuals(split_root, (base_file, arm_file), getattr(args, '_rgb_visual_runtime', None))
     base_asset = base_ik.load_asset_with_visual_flip(
         gym,
         sim,
@@ -3857,6 +4710,113 @@ def make_env_args(args, env_index, door_name=""):
     set_fixed("wc4_grasp_z_offset")
     set_fixed("handle_rotate_angle")
     set_fixed("door_push_distance")
+    release_angle_min = float(args.pull_panel_release_angle_min_deg)
+    release_angle_max = float(args.pull_panel_release_angle_max_deg)
+    if bool(args.pull_panel_release_angle_randomization):
+        sampled_release_angle = float(rng.uniform(release_angle_min, release_angle_max))
+    else:
+        sampled_release_angle = float(args.pull_panel_release_angle_deg)
+    release_angle_span = max(1.0e-6, release_angle_max - release_angle_min)
+    release_angle_fraction = float(
+        np.clip(
+            (sampled_release_angle - release_angle_min) / release_angle_span,
+            0.0,
+            1.0,
+        )
+    )
+    adaptive_retreat_distance = float(args.pull_base_retreat_distance)
+    effective_right_arc_radius = float(args.panel_right_arc_radius)
+    effective_edge_clearance = float(args.panel_edge_clearance)
+    effective_outward_clearance = float(args.panel_right_arc_outward_clearance)
+    effective_reposition_steps = int(args.panel_reposition_steps)
+    if bool(args.pull_panel_adaptive_release_retreat):
+        adaptive_retreat_distance = float(
+            lerp(
+                np.array(
+                    [float(args.pull_panel_low_angle_base_retreat_distance)],
+                    dtype=np.float32,
+                ),
+                np.array([float(args.pull_base_retreat_distance)], dtype=np.float32),
+                release_angle_fraction,
+            )[0]
+        )
+        effective_right_arc_radius = float(
+            lerp(
+                np.array(
+                    [float(args.pull_panel_low_angle_right_arc_radius)],
+                    dtype=np.float32,
+                ),
+                np.array([float(args.panel_right_arc_radius)], dtype=np.float32),
+                release_angle_fraction,
+            )[0]
+        )
+        effective_edge_clearance = float(
+            lerp(
+                np.array(
+                    [float(args.pull_panel_low_angle_edge_clearance)],
+                    dtype=np.float32,
+                ),
+                np.array([float(args.panel_edge_clearance)], dtype=np.float32),
+                release_angle_fraction,
+            )[0]
+        )
+        effective_outward_clearance = float(
+            lerp(
+                np.array(
+                    [float(args.pull_panel_low_angle_outward_clearance)],
+                    dtype=np.float32,
+                ),
+                np.array(
+                    [float(args.panel_right_arc_outward_clearance)],
+                    dtype=np.float32,
+                ),
+                release_angle_fraction,
+            )[0]
+        )
+        effective_reposition_steps = max(
+            1,
+            int(
+                round(
+                    float(args.pull_panel_low_angle_reposition_steps)
+                    + (
+                        float(args.panel_reposition_steps)
+                        - float(args.pull_panel_low_angle_reposition_steps)
+                    )
+                    * release_angle_fraction
+                )
+            ),
+        )
+    env_args.pull_panel_max_angle_right_arc_radius = float(args.panel_right_arc_radius)
+    env_args.pull_panel_max_angle_edge_clearance = float(args.panel_edge_clearance)
+    env_args.pull_panel_max_angle_outward_clearance = float(
+        args.panel_right_arc_outward_clearance
+    )
+    env_args.pull_panel_max_angle_reposition_steps = int(args.panel_reposition_steps)
+    env_args.pull_panel_release_angle_deg = sampled_release_angle
+    env_args.pull_panel_sampled_release_angle_deg = sampled_release_angle
+    env_args.pull_panel_release_angle_fraction = release_angle_fraction
+    env_args.pull_panel_adaptive_retreat_distance = adaptive_retreat_distance
+    env_args.panel_right_arc_radius = effective_right_arc_radius
+    env_args.panel_edge_clearance = effective_edge_clearance
+    env_args.panel_right_arc_outward_clearance = effective_outward_clearance
+    env_args.panel_reposition_steps = effective_reposition_steps
+    sampled["pull_panel_release_angle_randomization"] = bool(
+        args.pull_panel_release_angle_randomization
+    )
+    sampled["pull_panel_release_angle_deg"] = sampled_release_angle
+    sampled["pull_panel_release_angle_range_deg"] = [
+        release_angle_min,
+        release_angle_max,
+    ]
+    sampled["pull_panel_release_angle_fraction"] = release_angle_fraction
+    sampled["pull_panel_adaptive_release_retreat"] = bool(
+        args.pull_panel_adaptive_release_retreat
+    )
+    sampled["pull_panel_adaptive_retreat_distance"] = adaptive_retreat_distance
+    sampled["pull_panel_effective_right_arc_radius"] = effective_right_arc_radius
+    sampled["pull_panel_effective_edge_clearance"] = effective_edge_clearance
+    sampled["pull_panel_effective_outward_clearance"] = effective_outward_clearance
+    sampled["pull_panel_effective_reposition_steps"] = effective_reposition_steps
     set_sampled("door_joint_friction", "ikpush_door_joint_friction_rand", lower=0.0)
     set_sampled("door_joint_damping", "ikpush_door_joint_damping_rand", lower=0.0)
     set_sampled("handle_joint_friction", "ikpush_handle_joint_friction_rand", lower=0.0)
@@ -3900,8 +4860,17 @@ def make_env_args(args, env_index, door_name=""):
         env_args.door_open_resistance = float(args.door_open_resistance)
     requested_door_name = str(getattr(args, "door_name", "") or "").strip().lower()
     runtime_door_name = str(door_name or "").strip().lower()
+    wc4_pull_physics_names = {
+        "wc4",
+        "wc_nomenkuang",
+        "wc_articraft2",
+        "articraft_results_textured",
+    }
     wc4_resistance_disabled = (
-        (requested_door_name == "wc4" or runtime_door_name == "wc4")
+        (
+            requested_door_name in wc4_pull_physics_names
+            or runtime_door_name in wc4_pull_physics_names
+        )
         and not dc.cli_flag_was_set(args, "--wc4_enable_door_open_resistance")
     )
     if wc4_resistance_disabled:
@@ -3925,6 +4894,85 @@ def make_env_args(args, env_index, door_name=""):
 
     env_args.ikpush_randomization_json = json.dumps(sampled, sort_keys=True)
     return env_args
+
+
+def refresh_pull_adaptive_release_parameters(args):
+    """Recompute release-dependent geometry after per-door overrides are applied.
+
+    ``make_env_args`` computes these values before actors are created, while
+    ``apply_door_runtime_overrides`` runs during actor creation. A door profile
+    that sets the max-angle geometry can therefore overwrite the sampled/fixed
+    low-angle interpolation. Recomputing here preserves the resolved door
+    profile while keeping release geometry tied to the observable release angle.
+    """
+    if not bool(
+        getattr(args, "pull_refresh_adaptive_after_door_overrides", False)
+    ):
+        return
+    if not bool(getattr(args, "pull_panel_adaptive_release_retreat", False)):
+        return
+    fraction = float(
+        np.clip(getattr(args, "pull_panel_release_angle_fraction", 1.0), 0.0, 1.0)
+    )
+
+    def blend(low_name, high_name):
+        return float(
+            float(getattr(args, low_name))
+            + (float(getattr(args, high_name)) - float(getattr(args, low_name)))
+            * fraction
+        )
+
+    args.pull_panel_adaptive_retreat_distance = blend(
+        "pull_panel_low_angle_base_retreat_distance",
+        "pull_base_retreat_distance",
+    )
+    args.panel_right_arc_radius = blend(
+        "pull_panel_low_angle_right_arc_radius",
+        "pull_panel_max_angle_right_arc_radius",
+    )
+    args.panel_edge_clearance = blend(
+        "pull_panel_low_angle_edge_clearance",
+        "pull_panel_max_angle_edge_clearance",
+    )
+    args.panel_right_arc_outward_clearance = blend(
+        "pull_panel_low_angle_outward_clearance",
+        "pull_panel_max_angle_outward_clearance",
+    )
+    args.panel_reposition_steps = max(
+        1,
+        int(
+            round(
+                blend(
+                    "pull_panel_low_angle_reposition_steps",
+                    "pull_panel_max_angle_reposition_steps",
+                )
+            )
+        ),
+    )
+    raw_metadata = str(getattr(args, "ikpush_randomization_json", "") or "")
+    if raw_metadata:
+        metadata = json.loads(raw_metadata)
+        metadata.update(
+            {
+                "pull_panel_adaptive_retreat_distance": float(
+                    args.pull_panel_adaptive_retreat_distance
+                ),
+                "pull_panel_effective_right_arc_radius": float(
+                    args.panel_right_arc_radius
+                ),
+                "pull_panel_effective_edge_clearance": float(
+                    args.panel_edge_clearance
+                ),
+                "pull_panel_effective_outward_clearance": float(
+                    args.panel_right_arc_outward_clearance
+                ),
+                "pull_panel_effective_reposition_steps": int(
+                    args.panel_reposition_steps
+                ),
+                "pull_panel_adaptive_refreshed_after_door_overrides": True,
+            }
+        )
+        args.ikpush_randomization_json = json.dumps(metadata, sort_keys=True)
 
 
 set_robot_base_pose = dc.set_robot_base_pose
@@ -4595,6 +5643,8 @@ apply_float_dp_action = dc.apply_float_dp_action
 apply_float_dp_joint_action9 = dc.apply_float_dp_joint_action9
 set_a2w_joint_targets_from_action = dc.set_a2w_joint_targets_from_action
 float_dp_action_is_a2w_joint9 = dc.float_dp_action_is_a2w_joint9
+float_dp_action_is_a2w_joint10 = dc.float_dp_action_is_a2w_joint10
+float_dp_action_is_a2w_joint = dc.float_dp_action_is_a2w_joint
 make_float_dp_policy_log_record = dc.make_float_dp_policy_log_record
 print_float_dp_policy_log_record = dc.print_float_dp_policy_log_record
 make_float_replay_snapshot = dc.make_float_replay_snapshot
@@ -4900,6 +5950,165 @@ def apply_dp_warmstart_if_requested(gym, sim, args, controller, st, dof_names):
 
 door_hinge_open_ratio = dc.door_hinge_open_ratio
 compute_door_efforts = dc.compute_door_efforts
+
+
+def catmull_rom_waypoint_chain(points, progress):
+    """Evaluate a C1 path that interpolates every waypoint without intermediate stops."""
+
+    points = [np.asarray(point, dtype=np.float32) for point in points]
+    if len(points) < 2:
+        raise ValueError("Catmull-Rom waypoint chain requires at least two points.")
+    progress = float(np.clip(progress, 0.0, 1.0))
+    segment_count = len(points) - 1
+    scaled = progress * segment_count
+    segment = min(int(math.floor(scaled)), segment_count - 1)
+    local_t = float(scaled - segment)
+    if progress >= 1.0:
+        segment = segment_count - 1
+        local_t = 1.0
+
+    p0 = points[max(0, segment - 1)]
+    p1 = points[segment]
+    p2 = points[segment + 1]
+    p3 = points[min(len(points) - 1, segment + 2)]
+    t2 = local_t * local_t
+    t3 = t2 * local_t
+    return (
+        0.5
+        * (
+            2.0 * p1
+            + (-p0 + p2) * local_t
+            + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
+            + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3
+        )
+    ).astype(np.float32)
+
+
+def trapezoid_progress(progress, ramp_fraction=0.18):
+    """Unit-distance trapezoidal-velocity time profile on ``[0, 1]``.
+
+    The position and velocity are continuous, while the long constant-speed
+    middle section avoids the pronounced fast-then-slow rhythm of smoothstep.
+    """
+
+    t = float(np.clip(progress, 0.0, 1.0))
+    ramp = float(np.clip(ramp_fraction, 1.0e-3, 0.5))
+    peak = 1.0 / max(1.0e-6, 1.0 - ramp)
+    if t < ramp:
+        return float(0.5 * peak * t * t / ramp)
+    if t <= 1.0 - ramp:
+        return float(peak * (t - 0.5 * ramp))
+    remaining = 1.0 - t
+    return float(1.0 - 0.5 * peak * remaining * remaining / ramp)
+
+
+def limit_pull_expert_arm_command(dof_positions, traj, args, phase, dt, external=False):
+    """Opt-in physical expert command smoothing; recorded targets remain executable.
+
+    Arm actor order is joint1..joint6, jointGripper. Cache the prior command
+    during the untouched prefix so entry to pull does not lose its reference.
+    Do not apply this to a policy even if an expert flag was accidentally forwarded.
+    """
+    speed = float(getattr(args, "pull_expert_arm_command_max_speed", 0.0))
+    if speed <= 0.0 or external:
+        return
+    if len(dof_positions) != 7:
+        raise ValueError("Pull expert slew limit expects six arm joints and one gripper")
+    previous = traj.get("pull_expert_previous_arm_command")
+    phases = {"pull_door", "open_hold", "release_handle", "panel_reposition",
+              "panel_contact", "panel_push", "pass_through", "return_home", "hold_home"}
+    if previous is not None and phase in phases:
+        delta = speed * max(0.0, float(dt))
+        dof_positions[:6] = np.clip(dof_positions[:6], previous-delta, previous+delta)
+    traj["pull_expert_previous_arm_command"] = np.asarray(dof_positions[:6]).copy()
+
+
+def apply_panel_right_arc_joint_guard(dof_positions, traj, args, phase):
+    """Keep the proximal arm folded to robot-right during the slab crossing.
+
+    Position-only IK controls only the EE and is free to straighten the elbow
+    through the finite door panel.  This optional joint1 lower bound preserves
+    a collision-free redundant configuration while the EE rounds the free
+    edge.  It is disabled by default, so legacy trajectories are unchanged.
+    """
+
+    hold_rad = float(getattr(args, "panel_right_arc_joint1_hold_rad", 0.0))
+    if (
+        phase != "panel_reposition"
+        or str(getattr(args, "panel_reposition_path", "direct")) != "right_arc"
+        or abs(hold_rad) <= 1.0e-8
+        or len(dof_positions) < 1
+    ):
+        return
+    panel_t = float(np.clip(traj.get("panel_reposition_t", 0.0), 0.0, 1.0))
+    if panel_t < 0.20:
+        guarded_min = hold_rad * smoothstep(panel_t / 0.20)
+    elif panel_t < 0.60:
+        guarded_min = hold_rad
+    elif panel_t < 0.82:
+        inward_t = smoothstep((panel_t - 0.60) / 0.22)
+        # The signed joint guard is needed only while the finite arm links
+        # cross the slab plane outside the free edge.  Keeping even a partial
+        # guard at the end prevents the arm from reaching the mirrored panel
+        # contact point and leaves it stranded on the outside.  Release the
+        # guard completely after the slab crossing; the Cartesian path is
+        # already wholly on the opposite side during this final segment.
+        guarded_min = hold_rad * (1.0 - inward_t)
+    else:
+        guarded_min = 0.0
+    if hold_rad > 0.0:
+        dof_positions[0] = max(float(dof_positions[0]), float(guarded_min))
+    else:
+        dof_positions[0] = min(float(dof_positions[0]), float(guarded_min))
+
+
+def apply_panel_right_arc_joint_swivel(
+    dof_positions, home_positions, traj, args, phase
+):
+    """Execute the initial zero-pose-to-right arc in joint space.
+
+    A Cartesian home target plus a clipped joint1 value is not a pure swivel:
+    the Jacobian solver changes the remaining joints to compensate and can
+    straighten the arm toward the door.  During the first part of the right
+    arc, explicitly keep every joint at home except joint1.  This makes the
+    complete arm sweep around its mounting axis on the robot side of the door.
+    """
+
+    hold_rad = float(getattr(args, "panel_right_arc_joint1_hold_rad", 0.0))
+    panel_t = float(np.clip(traj.get("panel_reposition_t", 0.0), 0.0, 1.0))
+    if (
+        phase != "panel_reposition"
+        or str(getattr(args, "panel_reposition_path", "direct")) != "right_arc"
+        or abs(hold_rad) <= 1.0e-8
+        or panel_t >= 0.20
+        or len(dof_positions) < 1
+    ):
+        return False
+    if bool(getattr(args, "release_to_clearance_pose", False)):
+        # Preserve the measured clearance configuration and rotate only the
+        # proximal joint. Resetting every other joint to home here would
+        # silently reintroduce a full pre-push return-home discontinuity.
+        if "panel_right_arc_joint_swivel_start_dofs" not in traj:
+            traj["panel_right_arc_joint_swivel_start_dofs"] = np.asarray(
+                dof_positions, dtype=np.float32
+            ).copy()
+        swivel_start = np.asarray(
+            traj["panel_right_arc_joint_swivel_start_dofs"], dtype=np.float32
+        )
+        dof_positions[:] = swivel_start
+        dof_positions[0] = float(
+            lerp(
+                np.asarray([swivel_start[0]], dtype=np.float32),
+                np.asarray([hold_rad], dtype=np.float32),
+                smoothstep(panel_t / 0.20),
+            )[0]
+        )
+    else:
+        dof_positions[:] = np.asarray(home_positions, dtype=np.float32)
+        dof_positions[0] = hold_rad * smoothstep(panel_t / 0.20)
+    return True
+
+
 set_ik_target = dc.set_ik_target
 update_arm_ik_targets = dc.update_arm_ik_targets
 refresh_current_ee_pose = dc.refresh_current_ee_pose
@@ -4929,6 +6138,56 @@ def smooth_door_twin_ee_command(args, traj, phase, target_pos):
         "max_step": max_step,
     }
     return previous + delta * (max_step / distance)
+
+
+def mirrored_handle_goal_across_door_panel(
+    gym,
+    env,
+    door_actor,
+    door,
+    handle_goal,
+    pull_dir,
+):
+    """Mirror the live handle goal through the moving door panel mid-plane."""
+
+    panel_origin, panel_quat = get_body_pose(
+        gym, env, door_actor, door.door_body_index
+    )
+    fallback = normalize(np.asarray(pull_dir, dtype=np.float32).copy())
+    # The panel hinge axis is commonly local Z, so blindly selecting axis=2
+    # returns a vertical vector.  Of the two horizontal body axes, the radial
+    # axis has a large projection from the panel origin to the handle, whereas
+    # the panel normal only spans the panel/handle thickness.  Select the
+    # latter geometrically.  Do not re-select by alignment with the fixed
+    # closed-door pull direction: that criterion swaps normal and radial axes
+    # near 45 degrees and makes the panel-push controller stall there.
+    panel_origin = np.asarray(panel_origin, dtype=np.float32)
+    handle_goal = np.asarray(handle_goal, dtype=np.float32)
+    handle_from_panel = handle_goal - panel_origin
+    normal_candidates = []
+    for axis in (0, 1, 2):
+        candidate = np.asarray(quat_axis(panel_quat, axis=axis), dtype=np.float32)
+        candidate[2] = 0.0
+        candidate = normalize(candidate)
+        if float(np.linalg.norm(candidate)) > 1.0e-6:
+            normal_candidates.append(
+                (abs(float(np.dot(handle_from_panel, candidate))), candidate)
+            )
+    panel_normal = min(
+        normal_candidates,
+        key=lambda item: item[0],
+        default=(0.0, fallback),
+    )[1].copy()
+    if float(np.linalg.norm(panel_normal)) < 1.0e-6:
+        panel_normal = fallback
+    if float(np.dot(panel_normal, fallback)) < 0.0:
+        panel_normal = -panel_normal
+    signed_distance = float(np.dot(handle_goal - panel_origin, panel_normal))
+    mirrored_goal = handle_goal - 2.0 * signed_distance * panel_normal
+    radial = mirrored_goal - panel_origin
+    radial[2] = 0.0
+    radial = normalize(radial)
+    return mirrored_goal.astype(np.float32), panel_normal.astype(np.float32), radial.astype(np.float32)
 
 
 def trajectory_targets(
@@ -4975,7 +6234,28 @@ def trajectory_targets(
         grasp[2] += args.grasp_z_offset
         if dc.door_asset_family(door) == "wc4":
             grasp[2] += float(getattr(args, "wc4_grasp_z_offset", 0.0))
-    yaw_stop = yaw_start if legacy_skill_replay else yaw_start + move_to_approach_yaw_delta(args)
+    vx_only_base = bool(getattr(args, "pull_vx_only_base", False))
+    yaw_stop = (
+        float(yaw_start)
+        if vx_only_base or legacy_skill_replay
+        else yaw_start + move_to_approach_yaw_delta(args)
+    )
+    fixed_body_forward = np.asarray(
+        [math.cos(float(yaw_start)), math.sin(float(yaw_start))],
+        dtype=np.float32,
+    )
+
+    def project_to_fixed_forward(origin_xy, target_xy):
+        origin_xy = np.asarray(origin_xy, dtype=np.float32)
+        target_xy = np.asarray(target_xy, dtype=np.float32)
+        distance = float(np.dot(target_xy - origin_xy, fixed_body_forward))
+        return (origin_xy + fixed_body_forward * distance).astype(np.float32)
+
+    if vx_only_base:
+        # The geometric approach target can contain a tiny lateral component
+        # under randomized spawn geometry. Project it onto the initial body-X
+        # line so the scripted command is representable with vx alone.
+        base_stop = project_to_fixed_forward(base_start, base_stop)
     goal_quat = forward_ee_quat(args, yaw_stop)
     if skill_profile is not None and not legacy_skill_replay and abs(float(skill_profile.ee_roll_offset)) > 1.0e-6:
         goal_quat = base_ik.quat_multiply(
@@ -5004,21 +6284,22 @@ def trajectory_targets(
     push_dir = -pull_dir
     push_pos = rotate_pos + push_dir * args.door_push_distance
     pull_pos = rotate_pos + pull_dir * args.door_pull_distance
+    nominal_base_pull = (
+        np.asarray(base_stop, dtype=np.float32)
+        + pull_dir[:2] * float(args.pull_base_retreat_distance)
+    )
+    nominal_base_release = (
+        np.asarray(base_stop, dtype=np.float32)
+        + pull_dir[:2] * float(args.release_base_retreat_distance)
+    )
+    if vx_only_base:
+        nominal_base_pull = project_to_fixed_forward(base_stop, nominal_base_pull)
+        nominal_base_release = project_to_fixed_forward(base_stop, nominal_base_release)
     base_pull = np.asarray(
-        traj.get(
-            "base_pull",
-            np.asarray(base_stop, dtype=np.float32)
-            + pull_dir[:2] * float(args.pull_base_retreat_distance),
-        ),
-        dtype=np.float32,
+        traj.get("base_pull", nominal_base_pull), dtype=np.float32
     )
     base_release = np.asarray(
-        traj.get(
-            "base_release",
-            np.asarray(base_stop, dtype=np.float32)
-            + pull_dir[:2] * float(args.release_base_retreat_distance),
-        ),
-        dtype=np.float32,
+        traj.get("base_release", nominal_base_release), dtype=np.float32
     )
 
     walk_end = args.walk_steps
@@ -5028,13 +6309,37 @@ def trajectory_targets(
     close_end = grasp_hold_end + args.gripper_close_steps
     rotate_end = close_end + args.handle_rotate_steps
     nominal_pull_end = rotate_end + max(1, int(args.door_pull_steps))
+    hybrid_panel_push = bool(getattr(args, "pull_then_panel_push", True))
+    pull_release_target_deg = (
+        float(args.pull_panel_release_angle_deg)
+        if hybrid_panel_push
+        else float(args.pull_release_angle_deg)
+    )
     # Release is event driven: never leave pull_door merely because the nominal
     # duration elapsed.  The first frame at/above pull_release_angle_deg stores
     # pull_complete_step, after which the remaining phase boundaries are fixed.
     pull_end = int(traj.get("pull_complete_step", 2**31 - 1))
     open_hold_end = pull_end + max(0, int(args.open_hold_steps))
     release_end = open_hold_end + max(1, int(args.release_handle_steps))
-    pass_end = release_end + max(1, int(args.pass_through_steps))
+    nominal_panel_reposition_end = release_end + (
+        max(1, int(args.panel_reposition_steps)) if hybrid_panel_push else 0
+    )
+    panel_reposition_end = (
+        int(traj.get("panel_reposition_complete_step", 2**31 - 1))
+        if hybrid_panel_push
+        and bool(getattr(args, "panel_reposition_completion_gate", False))
+        else nominal_panel_reposition_end
+    )
+    panel_contact_end = panel_reposition_end + (
+        max(1, int(args.panel_contact_steps)) if hybrid_panel_push else 0
+    )
+    panel_push_end = (
+        int(traj.get("panel_push_complete_step", 2**31 - 1))
+        if hybrid_panel_push
+        else release_end
+    )
+    pass_start = panel_push_end
+    pass_end = pass_start + max(1, int(args.pass_through_steps))
     return_home_end = pass_end + max(0, int(args.return_home_steps))
 
     gripper_closed = args.gripper_open + (args.gripper_closed - args.gripper_open) * args.gripper_close_ratio
@@ -5084,6 +6389,26 @@ def trajectory_targets(
             traj["grasp"] = grasp.copy()
             traj["rotate"] = rotate_pos.copy()
             traj["push"] = push_pos.copy()
+            # Cache the geometry needed to preview the pull controller's
+            # circular hinge-following path.  The old visualizer connected
+            # rotate -> pull with the legacy linear waypoint even though the
+            # controller switches to a hinge arc after the latch unlocks.
+            # That line can look as if the policy pulls across the door panel
+            # or in the wrong direction, despite the executed target using the
+            # correct door_motion_sign below.
+            preview_hinge_pos, _ = get_body_pose(
+                gym, env, door_actor, door.door_body_index
+            )
+            traj["pull_preview_hinge_pos"] = np.asarray(
+                preview_hinge_pos, dtype=np.float32
+            ).copy()
+            traj["pull_preview_handle_start"] = np.asarray(
+                handle_goal, dtype=np.float32
+            ).copy()
+            traj["pull_preview_ee_offset_start"] = (
+                np.asarray(rotate_pos, dtype=np.float32)
+                - np.asarray(handle_goal, dtype=np.float32)
+            )
             traj["goal_quat"] = goal_quat.copy()
             traj["push_dir"] = push_dir.copy()
             traj["approach_dir"] = approach_dir.copy()
@@ -5123,17 +6448,71 @@ def trajectory_targets(
             gripper = args.gripper_open + (gripper_closed - args.gripper_open) * t
             phase = "close_gripper"
         elif step < rotate_end:
-            t = smoothstep((step - close_end + 1) / max(1, args.handle_rotate_steps))
+            t = smoothstep(
+                (step - close_end + 1) / max(1, args.handle_rotate_steps)
+            )
             target_pos = lerp(traj["grasp"], traj["rotate"], t)
+            traj["rotate_handle_wrist_angle"] = (
+                abs(float(args.handle_rotate_angle)) * float(t)
+            )
             target_quat = None if args.ik_position_only else base_ik.quat_multiply(
                 traj["goal_quat"],
                 quat_from_angle_axis(
                     float(args.handle_rotate_direction_sign)
-                    * t
-                    * float(args.handle_rotate_angle),
+                    * float(traj["rotate_handle_wrist_angle"]),
                     np.array([1.0, 0.0, 0.0], dtype=np.float32),
                 ),
             )
+            overlap_steps = min(
+                max(0, int(args.rotate_pull_overlap_steps)),
+                max(1, int(args.handle_rotate_steps)),
+            )
+            overlap_start_step = rotate_end - overlap_steps
+            if (
+                overlap_steps > 0
+                and step >= overlap_start_step
+                and door.open_stage
+            ):
+                # Begin pulling only after the simulated latch has physically
+                # unlocked.  The wrist keeps finishing the lever rotation while
+                # this small live-tangent displacement removes the old stop at
+                # the rotate_handle -> pull_door boundary.
+                overlap_t = smoothstep(
+                    (step - overlap_start_step + 1) / max(1, overlap_steps)
+                )
+                if "rotate_pull_overlap_contact_offset" not in traj:
+                    traj["rotate_pull_overlap_contact_offset"] = (
+                        np.asarray(target_pos, dtype=np.float32)
+                        - np.asarray(handle_goal, dtype=np.float32)
+                    )
+                    traj["rotate_pull_overlap_start_step"] = int(step)
+                live_pull_dir = dc.handle_open_tangent_dir(
+                    gym,
+                    env,
+                    door_actor,
+                    door,
+                    handle_goal,
+                    pull_dir,
+                    args,
+                )
+                if float(np.dot(live_pull_dir, approach_dir)) < 0.0:
+                    live_pull_dir = -live_pull_dir
+                # Follow the moving handle and add only a shallow preload.  A
+                # larger offset can pull the fingertips off the lever before
+                # the circular pull controller takes over.
+                target_pos = (
+                    np.asarray(handle_goal, dtype=np.float32)
+                    + np.asarray(
+                        traj["rotate_pull_overlap_contact_offset"],
+                        dtype=np.float32,
+                    )
+                    + live_pull_dir
+                    * float(args.rotate_pull_overlap_ee_distance)
+                    * float(overlap_t)
+                ).astype(np.float32)
+                traj["rotate_pull_overlap_active"] = True
+                traj["rotate_pull_overlap_progress"] = float(overlap_t)
+                traj["rotate_pull_overlap_last_target_pos"] = target_pos.copy()
             gripper = gripper_closed
             phase = "rotate_handle"
         elif step < pull_end:
@@ -5143,14 +6522,23 @@ def trajectory_targets(
                 # Retreat on one fixed straight line. Recomputing this point
                 # from the rotating handle frame would make the A2W base jump
                 # sideways as the door opens.
-                traj["base_pull"] = (
+                nominal_base_pull = (
                     np.asarray(base_stop, dtype=np.float32)
                     + pull_dir[:2] * float(args.pull_base_retreat_distance)
                 ).astype(np.float32)
-                traj["base_release"] = (
+                nominal_base_release = (
                     np.asarray(base_stop, dtype=np.float32)
                     + pull_dir[:2] * float(args.release_base_retreat_distance)
                 ).astype(np.float32)
+                if vx_only_base:
+                    nominal_base_pull = project_to_fixed_forward(
+                        base_stop, nominal_base_pull
+                    )
+                    nominal_base_release = project_to_fixed_forward(
+                        base_stop, nominal_base_release
+                    )
+                traj["base_pull"] = nominal_base_pull
+                traj["base_release"] = nominal_base_release
             pull_step = step - rotate_end
             t = smoothstep((pull_step + 1) / max(1, int(args.door_pull_steps)))
             turned_quat = base_ik.quat_multiply(
@@ -5162,10 +6550,27 @@ def trajectory_targets(
                 ),
             )
             traj["turned_quat"] = turned_quat.copy()
+            door_pos, _ = get_actor_dof_state(gym, env, door_actor)
+            door_open_deg = (
+                dc.door_open_degrees(door_pos, args) if len(door_pos) > 0 else 0.0
+            )
             if "handle_contact_offset_local" not in traj:
+                contact_reference = np.asarray(traj["rotate"], dtype=np.float32)
+                if bool(traj.get("rotate_pull_overlap_active", False)):
+                    contact_reference = (
+                        ik_state.current_pos_np.copy()
+                        if ik_state.current_pos_np is not None
+                        else np.asarray(
+                            traj.get(
+                                "rotate_pull_overlap_last_target_pos",
+                                traj["rotate"],
+                            ),
+                            dtype=np.float32,
+                        ).copy()
+                    )
                 traj["handle_contact_offset_local"] = quat_apply(
                     base_ik.quat_conjugate(handle_quat),
-                    traj["rotate"] - handle_goal,
+                    contact_reference - handle_goal,
                 )
                 traj["handle_contact_quat_local"] = base_ik.quat_multiply(
                     base_ik.quat_conjugate(handle_quat),
@@ -5173,10 +6578,7 @@ def trajectory_targets(
                 )
             if "pull_arc_hinge_pos" not in traj:
                 hinge_pos, _ = get_body_pose(
-                    gym,
-                    env,
-                    door_actor,
-                    door.door_body_index,
+                    gym, env, door_actor, door.door_body_index
                 )
                 current_ee = (
                     ik_state.current_pos_np.copy()
@@ -5190,23 +6592,127 @@ def trajectory_targets(
                     - np.asarray(handle_goal, dtype=np.float32)
                 )
                 traj["pull_arc_quat_start"] = np.asarray(turned_quat, dtype=np.float32).copy()
-            door_pos, _ = get_actor_dof_state(gym, env, door_actor)
-            door_open_deg = (
-                dc.door_open_degrees(door_pos, args) if len(door_pos) > 0 else 0.0
+                if bool(traj.get("rotate_pull_overlap_active", False)):
+                    # The circular pull reference was captured after the door
+                    # had already moved during overlap.  Subsequent geometry
+                    # therefore rotates only by the additional door angle.
+                    traj["pull_arc_open_start_deg"] = float(door_open_deg)
+            contact_loss_release = False
+            if (
+                bool(getattr(args, "pull_panel_contact_loss_release", False))
+                and door.open_stage
+                and door_open_deg
+                >= float(args.pull_panel_contact_loss_min_angle_deg)
+            ):
+                if bool(traj.get("gripper_handle_contact_both", False)):
+                    traj["pull_handle_contact_loss_frames"] = 0
+                else:
+                    traj["pull_handle_contact_loss_frames"] = int(
+                        traj.get("pull_handle_contact_loss_frames", 0)
+                    ) + 1
+                contact_loss_release = bool(
+                    int(traj["pull_handle_contact_loss_frames"])
+                    >= int(args.pull_panel_contact_loss_min_frames)
+                )
+            else:
+                traj["pull_handle_contact_loss_frames"] = 0
+
+            release_target_reached = bool(
+                door_open_deg
+                + max(0.0, float(args.pull_release_angle_tolerance_deg))
+                >= pull_release_target_deg
             )
             if (
                 door.open_stage
                 and (
-                    door_open_deg
-                    + max(0.0, float(args.pull_release_angle_tolerance_deg))
-                    >= float(args.pull_release_angle_deg)
+                    release_target_reached
+                    or contact_loss_release
                 )
                 and "pull_complete_step" not in traj
             ):
+                sampled_release_target_deg = float(pull_release_target_deg)
+                if (
+                    contact_loss_release
+                    and bool(getattr(args, "pull_panel_adaptive_release_retreat", False))
+                    and not bool(
+                        getattr(
+                            args,
+                            "pull_contact_loss_keep_release_geometry",
+                            False,
+                        )
+                    )
+                ):
+                    release_min_deg = float(args.pull_panel_release_angle_min_deg)
+                    release_max_deg = float(args.pull_panel_release_angle_max_deg)
+                    effective_release_deg = float(
+                        np.clip(door_open_deg, release_min_deg, release_max_deg)
+                    )
+                    release_fraction = float(
+                        np.clip(
+                            (effective_release_deg - release_min_deg)
+                            / max(1.0e-6, release_max_deg - release_min_deg),
+                            0.0,
+                            1.0,
+                        )
+                    )
+
+                    def release_lerp(low_value, high_value):
+                        return float(
+                            float(low_value)
+                            + (float(high_value) - float(low_value))
+                            * release_fraction
+                        )
+
+                    # A contact-loss fallback may happen well before the sampled
+                    # target. Rebuild all post-release geometry from the actual
+                    # measured hinge angle; otherwise a 15-degree opening could
+                    # incorrectly execute the shorter/larger 35-degree transfer.
+                    args.pull_panel_release_angle_deg = effective_release_deg
+                    args.pull_panel_release_angle_fraction = release_fraction
+                    args.pull_panel_adaptive_retreat_distance = release_lerp(
+                        args.pull_panel_low_angle_base_retreat_distance,
+                        args.pull_base_retreat_distance,
+                    )
+                    args.panel_right_arc_radius = release_lerp(
+                        args.pull_panel_low_angle_right_arc_radius,
+                        args.pull_panel_max_angle_right_arc_radius,
+                    )
+                    args.panel_edge_clearance = release_lerp(
+                        args.pull_panel_low_angle_edge_clearance,
+                        args.pull_panel_max_angle_edge_clearance,
+                    )
+                    args.panel_right_arc_outward_clearance = release_lerp(
+                        args.pull_panel_low_angle_outward_clearance,
+                        args.pull_panel_max_angle_outward_clearance,
+                    )
+                    args.panel_reposition_steps = max(
+                        1,
+                        int(
+                            round(
+                                release_lerp(
+                                    args.pull_panel_low_angle_reposition_steps,
+                                    args.pull_panel_max_angle_reposition_steps,
+                                )
+                            )
+                        ),
+                    )
+                    traj["pull_contact_loss_effective_release_angle_deg"] = (
+                        effective_release_deg
+                    )
+                    traj["pull_contact_loss_release_fraction"] = release_fraction
                 traj["pull_complete_step"] = (
                     int(step) + max(0, int(args.pull_settle_steps)) + 1
                 )
                 traj["pull_release_angle_observed_deg"] = float(door_open_deg)
+                traj["pull_release_sampled_target_deg"] = sampled_release_target_deg
+                traj["pull_release_effective_target_deg"] = float(
+                    args.pull_panel_release_angle_deg
+                )
+                traj["pull_release_reason"] = (
+                    "sampled_angle_reached"
+                    if release_target_reached
+                    else "two_finger_contact_lost"
+                )
                 release_begin_step = (
                     traj["pull_complete_step"]
                     + max(0, int(args.open_hold_steps))
@@ -5219,8 +6725,12 @@ def trajectory_targets(
                 print(
                     f"[A2WPull] env={int(getattr(args, 'parallel_env_id', 0))} "
                     f"door reached {door_open_deg:.1f} deg "
-                    f"(target={float(args.pull_release_angle_deg):.1f}, "
+                    f"(target={pull_release_target_deg:.1f}, "
                     f"tolerance={float(args.pull_release_angle_tolerance_deg):.1f}) "
+                    f"reason={traj['pull_release_reason']} "
+                    f"effective_target={float(args.pull_panel_release_angle_deg):.1f} "
+                    f"contact_both={bool(traj.get('gripper_handle_contact_both', False))} "
+                    f"contact_loss_frames={int(traj.get('pull_handle_contact_loss_frames', 0))} "
                     f"at step={int(step)}; "
                     f"{transition_note}"
                     f"release begins at step={release_begin_step}.",
@@ -5302,13 +6812,18 @@ def trajectory_targets(
                     # Keep a small circular-arc lead until the *measured*
                     # hinge reaches pull_release_angle_deg; release is still
                     # gated exclusively by the measured door angle above.
-                    float(args.pull_release_angle_deg) + arc_lead_deg,
+                    pull_release_target_deg + arc_lead_deg,
                     actual_open_deg
                     + arc_lead_deg * float(lead_ramp),
                 )
+                pull_arc_open_start_deg = float(
+                    traj.get("pull_arc_open_start_deg", 0.0)
+                )
                 planned_yaw = (
                     float(args.door_motion_sign)
-                    * math.radians(desired_open_deg)
+                    * math.radians(
+                        max(0.0, desired_open_deg - pull_arc_open_start_deg)
+                    )
                 )
                 hinge_pos = np.asarray(traj["pull_arc_hinge_pos"], dtype=np.float32)
                 handle_start = np.asarray(
@@ -5395,12 +6910,16 @@ def trajectory_targets(
                     (int(step) - int(traj["pull_late_retreat_start_step"]) + 1)
                     / max(1, int(args.pull_late_retreat_steps))
                 )
-            base_xy = (
-                np.asarray(base_xy, dtype=np.float32)
-                + np.asarray(traj["pull_dir"], dtype=np.float32)[:2]
+            late_retreat_delta = (
+                np.asarray(traj["pull_dir"], dtype=np.float32)[:2]
                 * float(args.pull_late_retreat_distance)
                 * float(late_retreat_t)
             )
+            if vx_only_base:
+                late_retreat_delta = fixed_body_forward * float(
+                    np.dot(late_retreat_delta, fixed_body_forward)
+                )
+            base_xy = np.asarray(base_xy, dtype=np.float32) + late_retreat_delta
             lateral_dir = np.array(
                 [-float(traj["pull_dir"][1]), float(traj["pull_dir"][0])],
                 dtype=np.float32,
@@ -5408,8 +6927,113 @@ def trajectory_targets(
             lateral_norm = float(np.linalg.norm(lateral_dir))
             if lateral_norm > 1.0e-9:
                 lateral_dir /= lateral_norm
-            yaw = float(yaw_stop)
-            if door.open_stage and "pull_late_retreat_start_step" in traj:
+            yaw = float(yaw_start if vx_only_base else yaw_stop)
+            if vx_only_base and door.open_stage:
+                geometric_base_target = project_to_fixed_forward(
+                    base_stop, base_xy
+                )
+                previous_xy = np.asarray(
+                    traj.get("base_xy", base_stop), dtype=np.float32
+                )
+                forward_error = float(
+                    np.dot(
+                        geometric_base_target - previous_xy,
+                        fixed_body_forward,
+                    )
+                )
+                dt_base = max(1.0e-6, float(args.sim_dt))
+                speed = float(
+                    np.clip(
+                        float(args.pull_base_follow_position_gain) * forward_error,
+                        -float(args.pull_base_follow_max_speed),
+                        float(args.pull_base_follow_max_speed),
+                    )
+                )
+                if bool(getattr(args, "pull_vx_monotonic_retreat", False)):
+                    # The geometric target follows measured door progress.  A
+                    # short hinge slowdown can therefore reduce the raw vx and
+                    # produce an undesirable accelerate/decelerate/accelerate
+                    # profile even though the requested motion is always a
+                    # retreat.  Use a rate-limited cumulative maximum of the
+                    # retreat-speed magnitude so vx may hold or increase, but
+                    # never fall before the event-driven handle release.
+                    retreat_sign_value = float(
+                        np.dot(
+                            np.asarray(traj["base_pull"], dtype=np.float32)
+                            - np.asarray(base_stop, dtype=np.float32),
+                            fixed_body_forward,
+                        )
+                    )
+                    retreat_sign = -1.0 if retreat_sign_value < 0.0 else 1.0
+                    raw_retreat_speed = max(0.0, retreat_sign * speed)
+                    previous_retreat_speed = float(
+                        traj.get("pull_vx_monotonic_speed_mps", 0.0)
+                    )
+                    requested_retreat_speed = max(
+                        previous_retreat_speed,
+                        raw_retreat_speed,
+                    )
+                    max_accel = max(
+                        0.0,
+                        float(args.pull_vx_monotonic_max_accel_mps2),
+                    )
+                    if max_accel > 0.0:
+                        requested_retreat_speed = min(
+                            requested_retreat_speed,
+                            previous_retreat_speed + max_accel * dt_base,
+                        )
+                    speed = retreat_sign * requested_retreat_speed
+                    traj["pull_vx_monotonic_speed_mps"] = float(
+                        requested_retreat_speed
+                    )
+                base_xy = (
+                    previous_xy + fixed_body_forward * speed * dt_base
+                ).astype(np.float32)
+                if bool(getattr(args, "pull_vx_monotonic_retreat", False)):
+                    # A failed grasp can prevent the measured hinge angle from
+                    # reaching the sampled release threshold.  The monotonic-vx
+                    # smoother must never integrate beyond the full planned
+                    # pull plus late-retreat distance while waiting for that
+                    # event.
+                    full_late_retreat = (
+                        np.asarray(traj["pull_dir"], dtype=np.float32)[:2]
+                        * float(args.pull_late_retreat_distance)
+                    )
+                    full_late_retreat = fixed_body_forward * float(
+                        np.dot(full_late_retreat, fixed_body_forward)
+                    )
+                    hard_limit_xy = project_to_fixed_forward(
+                        base_stop,
+                        np.asarray(traj["base_pull"], dtype=np.float32)
+                        + full_late_retreat,
+                    )
+                    candidate_progress = float(
+                        np.dot(
+                            np.asarray(base_xy, dtype=np.float32)
+                            - np.asarray(base_stop, dtype=np.float32),
+                            fixed_body_forward,
+                        )
+                    )
+                    hard_limit_progress = float(
+                        np.dot(
+                            np.asarray(hard_limit_xy, dtype=np.float32)
+                            - np.asarray(base_stop, dtype=np.float32),
+                            fixed_body_forward,
+                        )
+                    )
+                    bounded_progress = (
+                        max(candidate_progress, hard_limit_progress)
+                        if retreat_sign < 0.0
+                        else min(candidate_progress, hard_limit_progress)
+                    )
+                    if abs(bounded_progress - candidate_progress) > 1.0e-8:
+                        traj["pull_base_retreat_hard_limit_reached"] = True
+                    base_xy = (
+                        np.asarray(base_stop, dtype=np.float32)
+                        + fixed_body_forward * bounded_progress
+                    ).astype(np.float32)
+                yaw = float(yaw_start)
+            elif door.open_stage and "pull_late_retreat_start_step" in traj:
                 if "pull_lateral_follow_target_start" not in traj:
                     traj["pull_lateral_follow_target_start"] = np.asarray(
                         base_arc_target_pos,
@@ -5418,7 +7042,11 @@ def trajectory_targets(
                 release_geometry_yaw = (
                     float(args.door_motion_sign)
                     * math.radians(
-                        float(args.pull_release_angle_deg)
+                        max(
+                            0.0,
+                            pull_release_target_deg
+                            - float(traj.get("pull_arc_open_start_deg", 0.0)),
+                        )
                         + float(args.pull_late_arc_lead_angle_deg)
                     )
                 )
@@ -5459,7 +7087,7 @@ def trajectory_targets(
                             )
                             / max(
                                 1.0e-6,
-                                float(args.pull_release_angle_deg)
+                                pull_release_target_deg
                                 - float(args.pull_late_retreat_start_angle_deg),
                             ),
                             0.0,
@@ -5596,11 +7224,223 @@ def trajectory_targets(
                 "pull_complete_step" in traj
                 and "pull_release_base_xy" not in traj
             ):
-                traj["pull_release_base_xy"] = np.asarray(
+                release_base_xy = np.asarray(
                     base_xy,
                     dtype=np.float32,
                 ).copy()
+                traj["pull_release_base_xy"] = release_base_xy
                 traj["pull_release_yaw"] = float(yaw)
+                if bool(args.pull_panel_adaptive_release_retreat):
+                    adaptive_retreat_distance = max(
+                        0.0,
+                        float(
+                            getattr(
+                                args,
+                                "pull_panel_adaptive_retreat_distance",
+                                args.pull_base_retreat_distance,
+                            )
+                        ),
+                    )
+                    adaptive_base_goal = (
+                        np.asarray(base_stop, dtype=np.float32)
+                        + np.asarray(traj["pull_dir"], dtype=np.float32)[:2]
+                        * adaptive_retreat_distance
+                    )
+                    if bool(getattr(args, "release_to_clearance_pose", False)):
+                        release_fraction = float(
+                            np.clip(
+                                getattr(
+                                    args,
+                                    "pull_panel_release_angle_fraction",
+                                    1.0,
+                                ),
+                                0.0,
+                                1.0,
+                            )
+                        )
+                        clearance_base_retreat_extra = float(
+                            lerp(
+                                np.asarray(
+                                    [
+                                        float(
+                                            args.release_clearance_low_angle_base_retreat_extra
+                                        )
+                                    ],
+                                    dtype=np.float32,
+                                ),
+                                np.asarray(
+                                    [
+                                        float(
+                                            args.release_clearance_base_retreat_extra
+                                        )
+                                    ],
+                                    dtype=np.float32,
+                                ),
+                                release_fraction,
+                            )[0]
+                            * max(
+                                0.0,
+                                float(
+                                    args.release_clearance_base_retreat_extra_scale
+                                ),
+                            )
+                        )
+                    else:
+                        clearance_base_retreat_extra = 0.0
+                    if clearance_base_retreat_extra > 0.0:
+                        adaptive_base_goal = (
+                            adaptive_base_goal
+                            + np.asarray(
+                                traj["pull_dir"], dtype=np.float32
+                            )[:2]
+                            * clearance_base_retreat_extra
+                        )
+                    if vx_only_base:
+                        adaptive_base_goal = project_to_fixed_forward(
+                            base_stop,
+                            adaptive_base_goal,
+                        )
+                        # Randomized early release can occur before the nominal
+                        # retreat has completed. Never move back toward the door:
+                        # retain whichever point is farther along body-negative X.
+                        current_forward = float(
+                            np.dot(
+                                release_base_xy - np.asarray(base_stop, dtype=np.float32),
+                                fixed_body_forward,
+                            )
+                        )
+                        goal_forward = float(
+                            np.dot(
+                                adaptive_base_goal - np.asarray(base_stop, dtype=np.float32),
+                                fixed_body_forward,
+                            )
+                        )
+                        adaptive_base_goal = (
+                            np.asarray(base_stop, dtype=np.float32)
+                            + fixed_body_forward * min(current_forward, goal_forward)
+                        ).astype(np.float32)
+                    traj["pull_panel_adaptive_base_start"] = release_base_xy.copy()
+                    traj["pull_panel_adaptive_base_goal"] = np.asarray(
+                        adaptive_base_goal,
+                        dtype=np.float32,
+                    ).copy()
+                    defer_contact_loss_retreat = bool(
+                        getattr(
+                            args,
+                            "pull_defer_base_retreat_until_panel_push",
+                            False,
+                        )
+                        or (
+                            getattr(
+                                args,
+                                "pull_contact_loss_defer_base_retreat",
+                                False,
+                            )
+                            and traj.get("pull_release_reason")
+                            == "two_finger_contact_lost"
+                        )
+                    )
+                    traj["pull_contact_loss_deferred_base_retreat"] = (
+                        defer_contact_loss_retreat
+                    )
+                    if defer_contact_loss_retreat:
+                        # Move back to a close, reachable staging distance
+                        # while extracting from the lost grasp. The full
+                        # adaptive retreat is performed later, concurrently
+                        # with the free-edge arm transfer.
+                        close_base_goal = (
+                            np.asarray(base_stop, dtype=np.float32)
+                            + np.asarray(traj["pull_dir"], dtype=np.float32)[:2]
+                            * float(
+                                args.pull_contact_loss_near_base_retreat_distance
+                            )
+                        )
+                        if vx_only_base:
+                            close_base_goal = project_to_fixed_forward(
+                                base_stop,
+                                close_base_goal,
+                            )
+                            close_forward = float(
+                                np.dot(
+                                    close_base_goal
+                                    - np.asarray(base_stop, dtype=np.float32),
+                                    fixed_body_forward,
+                                )
+                            )
+                            current_forward = float(
+                                np.dot(
+                                    release_base_xy
+                                    - np.asarray(base_stop, dtype=np.float32),
+                                    fixed_body_forward,
+                                )
+                            )
+                            close_forward = max(
+                                close_forward,
+                                current_forward,
+                            )
+                            close_base_goal = (
+                                np.asarray(base_stop, dtype=np.float32)
+                                + fixed_body_forward * close_forward
+                            ).astype(np.float32)
+                        traj["pull_contact_loss_close_base_goal"] = np.asarray(
+                            close_base_goal,
+                            dtype=np.float32,
+                        ).copy()
+                        collision_retreat_delta = (
+                            np.asarray(adaptive_base_goal, dtype=np.float32)
+                            - np.asarray(close_base_goal, dtype=np.float32)
+                        )
+                        collision_retreat_available = float(
+                            np.linalg.norm(collision_retreat_delta)
+                        )
+                        collision_retreat_distance = min(
+                            float(args.pull_contact_loss_collision_retreat_distance),
+                            collision_retreat_available,
+                        )
+                        if collision_retreat_available > 1.0e-8:
+                            collision_base_goal = (
+                                np.asarray(close_base_goal, dtype=np.float32)
+                                + collision_retreat_delta
+                                / collision_retreat_available
+                                * collision_retreat_distance
+                            )
+                        else:
+                            collision_base_goal = np.asarray(
+                                close_base_goal, dtype=np.float32
+                            ).copy()
+                        traj[
+                            "pull_contact_loss_collision_base_goal"
+                        ] = np.asarray(
+                            collision_base_goal, dtype=np.float32
+                        ).copy()
+                        traj["pull_contact_loss_deferred_base_goal"] = np.asarray(
+                            adaptive_base_goal,
+                            dtype=np.float32,
+                        ).copy()
+                    traj["pull_panel_adaptive_retreat_distance"] = float(
+                        adaptive_retreat_distance
+                    )
+                    traj["release_clearance_base_retreat_extra"] = float(
+                        clearance_base_retreat_extra
+                    )
+                    print(
+                        f"[A2WPull] env={int(getattr(args, 'parallel_env_id', 0))} "
+                        f"adaptive release retreat: sampled_release="
+                        f"{float(getattr(args, 'pull_panel_sampled_release_angle_deg', args.pull_panel_release_angle_deg)):.2f}deg "
+                        f"effective_release={float(args.pull_panel_release_angle_deg):.2f}deg "
+                        f"retreat={adaptive_retreat_distance:.3f}m "
+                        f"clearance_base_extra={clearance_base_retreat_extra:.3f}m "
+                        f"arc_radius={float(args.panel_right_arc_radius):.3f}m "
+                        f"edge_clearance={float(args.panel_edge_clearance):.3f}m "
+                        f"defer_contact_loss_retreat={defer_contact_loss_retreat} "
+                        f"base_start={np.round(release_base_xy, 4).tolist()} "
+                        f"close_base_goal="
+                        f"{np.round(traj.get('pull_contact_loss_close_base_goal', release_base_xy), 4).tolist()} "
+                        f"collision_base_goal="
+                        f"{np.round(traj.get('pull_contact_loss_collision_base_goal', release_base_xy), 4).tolist()} "
+                        f"base_goal={np.round(adaptive_base_goal, 4).tolist()}.",
+                        flush=True,
+                    )
             tighten_t = smoothstep(
                 (pull_step + 1)
                 / max(1, int(args.pull_gripper_tighten_steps))
@@ -5680,43 +7520,101 @@ def trajectory_targets(
                 )
                 if float(np.dot(live_pull_dir, traj["approach_dir"])) < 0.0:
                     live_pull_dir = -live_pull_dir
-                release_out = (
-                    release_start
-                    + live_pull_dir * float(args.release_outward_distance)
+                release_to_clearance = bool(
+                    hybrid_panel_push
+                    and getattr(args, "release_to_clearance_pose", False)
                 )
-                release_outer = (
-                    release_out
-                    + live_pull_dir * float(args.release_extra_outward_distance)
-                )
-                home_world = None
-                if "home_ee_base_pos" in traj:
-                    home_world = base_pos_to_world(
-                        traj["home_ee_base_pos"],
-                        base_release,
-                        args.robot_z,
-                        yaw_stop,
+                if release_to_clearance:
+                    # Do not fold all the way back to joint home before panel
+                    # pushing. First leave the handle along the measured live
+                    # pull direction, then move to a compact pose on the
+                    # robot-right/outside side. The following free-edge path
+                    # starts directly from this measured clearance pose.
+                    release_out = (
+                        release_start
+                        + live_pull_dir
+                        * float(args.release_clearance_retreat_distance)
                     )
-                release_retract = release_outer.copy()
-                if home_world is not None:
-                    # The outside arc now finishes at the actual arm home
-                    # position before pass_through.  Keeping the old partially
-                    # extended endpoint attached to the moving base swept the
-                    # forearm back through the handle during traversal.
-                    release_retract = np.asarray(home_world, dtype=np.float32).copy()
+                    release_yaw_for_clearance = float(
+                        traj.get("pull_release_yaw", yaw_stop)
+                    )
+                    body_right = np.asarray(
+                        [
+                            math.sin(release_yaw_for_clearance),
+                            -math.cos(release_yaw_for_clearance),
+                            0.0,
+                        ],
+                        dtype=np.float32,
+                    )
+                    release_outer = release_out.copy()
+                    release_retract = (
+                        release_out
+                        + body_right
+                        * float(args.release_clearance_right_distance)
+                    )
+                    release_retract[2] += float(
+                        args.release_clearance_lift_distance
+                    )
+                    release_arc_control = (
+                        release_out
+                        + live_pull_dir
+                        * min(
+                            0.04,
+                            0.5
+                            * float(args.release_clearance_retreat_distance),
+                        )
+                        + 0.5 * (release_retract - release_out)
+                    )
+                    traj["release_clearance_pose"] = release_retract.copy()
+                    traj["release_clearance_body_right"] = body_right.copy()
+                    traj["release_to_clearance_pose"] = True
+                    print(
+                        f"[A2WPull] env={int(getattr(args, 'parallel_env_id', 0))} "
+                        f"release-to-clearance start="
+                        f"{np.round(release_start, 4).tolist()} retreat="
+                        f"{np.round(release_out, 4).tolist()} clearance="
+                        f"{np.round(release_retract, 4).tolist()}.",
+                        flush=True,
+                    )
                 else:
-                    lateral_delta = math.copysign(
-                        float(args.release_lateral_distance),
-                        float(base_pull[1] - release_outer[1])
-                        if abs(float(base_pull[1] - release_outer[1])) > 1.0e-6
-                        else 1.0,
+                    release_out = (
+                        release_start
+                        + live_pull_dir * float(args.release_outward_distance)
                     )
-                    release_retract[1] += lateral_delta
-                    release_retract[2] += float(args.release_lift_distance)
-                release_arc_control = (
-                    release_outer
-                    + live_pull_dir * float(args.release_outside_arc_bulge)
-                    + 0.5 * (release_retract - release_outer)
-                )
+                    release_outer = (
+                        release_out
+                        + live_pull_dir * float(args.release_extra_outward_distance)
+                    )
+                    home_world = None
+                    if "home_ee_base_pos" in traj:
+                        home_world = base_pos_to_world(
+                            traj["home_ee_base_pos"],
+                            base_release,
+                            args.robot_z,
+                            yaw_stop,
+                        )
+                    release_retract = release_outer.copy()
+                    if home_world is not None:
+                        # Legacy trajectory: finish at the actual arm home
+                        # position before panel_reposition/pass_through.
+                        release_retract = np.asarray(
+                            home_world, dtype=np.float32
+                        ).copy()
+                    else:
+                        lateral_delta = math.copysign(
+                            float(args.release_lateral_distance),
+                            float(base_pull[1] - release_outer[1])
+                            if abs(float(base_pull[1] - release_outer[1]))
+                            > 1.0e-6
+                            else 1.0,
+                        )
+                        release_retract[1] += lateral_delta
+                        release_retract[2] += float(args.release_lift_distance)
+                    release_arc_control = (
+                        release_outer
+                        + live_pull_dir * float(args.release_outside_arc_bulge)
+                        + 0.5 * (release_retract - release_outer)
+                    )
                 traj["release_start_pos"] = release_start
                 traj["release_out_pos"] = release_out
                 traj["release_outer_pos"] = release_outer
@@ -5752,8 +7650,18 @@ def trajectory_targets(
                             yaw_stop,
                         )
 
+            release_to_clearance = bool(
+                hybrid_panel_push
+                and getattr(args, "release_to_clearance_pose", False)
+            )
             outward_fraction = float(
-                np.clip(args.release_outward_fraction, 1.0e-3, 0.95)
+                np.clip(
+                    args.release_clearance_retreat_fraction
+                    if release_to_clearance
+                    else args.release_outward_fraction,
+                    1.0e-3,
+                    0.95,
+                )
             )
             outer_end_fraction = float(
                 np.clip(
@@ -5774,6 +7682,20 @@ def trajectory_targets(
                     traj["release_start_pos"],
                     traj["release_out_pos"],
                     motion_t,
+                )
+            elif release_to_clearance:
+                motion_t = smoothstep(
+                    (release_t - outward_fraction)
+                    / max(1.0e-6, 1.0 - outward_fraction)
+                )
+                one_minus_t = 1.0 - motion_t
+                target_pos = (
+                    one_minus_t * one_minus_t * traj["release_out_pos"]
+                    + 2.0
+                    * one_minus_t
+                    * motion_t
+                    * traj["release_arc_control_pos"]
+                    + motion_t * motion_t * traj["release_retract_pos"]
                 )
             elif release_t < outer_end_fraction:
                 motion_t = smoothstep(
@@ -5807,7 +7729,8 @@ def trajectory_targets(
                 release_quat = traj.get("release_quat", traj.get("turned_quat"))
                 retract_quat = traj.get("release_retract_quat", release_quat)
                 if (
-                    release_quat is not None
+                    not release_to_clearance
+                    and release_quat is not None
                     and retract_quat is not None
                     and release_t >= outer_end_fraction
                 ):
@@ -5846,31 +7769,1344 @@ def trajectory_targets(
                 traj.get("pull_release_base_xy", base_pull),
                 dtype=np.float32,
             )
-            # Keep the base fixed while opening/extracting the gripper.  The
-            # previous direct interpolation back to base_release was another
-            # uncommanded side translation when the pull ended off-axis.
-            base_xy = release_base_start.copy()
             release_yaw = float(
                 traj.get("pull_release_yaw", yaw_stop)
             )
+            # Keep the base fixed until the fingers have completed the first
+            # outward extraction. With adaptive retreat enabled, use the rest
+            # of release_handle to move farther away from the slab. The goal
+            # depends on the sampled release angle: an early, nearly closed
+            # door receives more clearance. In vx-only mode the entire motion
+            # is projected onto the original body-X axis, so vy=vyaw=0 exactly.
+            base_xy = release_base_start.copy()
             yaw = release_yaw
+            adaptive_base_goal = traj.get("pull_panel_adaptive_base_goal")
+            deferred_close_goal = traj.get(
+                "pull_contact_loss_close_base_goal"
+            )
+            if (
+                bool(traj.get("pull_contact_loss_deferred_base_retreat", False))
+                and deferred_close_goal is not None
+            ):
+                desired_base_xy = lerp(
+                    release_base_start,
+                    np.asarray(deferred_close_goal, dtype=np.float32),
+                    smoothstep(release_t),
+                )
+                previous_base_xy = np.asarray(
+                    traj.get("base_xy", release_base_start),
+                    dtype=np.float32,
+                )
+                base_delta = desired_base_xy - previous_base_xy
+                if vx_only_base:
+                    base_delta = (
+                        fixed_body_forward
+                        * float(np.dot(base_delta, fixed_body_forward))
+                    ).astype(np.float32)
+                max_base_step = float(args.pull_base_follow_max_speed) * max(
+                    1.0e-6,
+                    float(args.sim_dt),
+                )
+                base_delta_norm = float(np.linalg.norm(base_delta))
+                if base_delta_norm > max_base_step > 0.0:
+                    base_delta *= max_base_step / base_delta_norm
+                base_xy = (previous_base_xy + base_delta).astype(np.float32)
+                yaw = float(yaw_start if vx_only_base else release_yaw)
+            elif (
+                bool(args.pull_panel_adaptive_release_retreat)
+                and adaptive_base_goal is not None
+                and release_t > outward_fraction
+            ):
+                retreat_t = smoothstep(
+                    (release_t - outward_fraction)
+                    / max(1.0e-6, 1.0 - outward_fraction)
+                )
+                desired_base_xy = lerp(
+                    release_base_start,
+                    np.asarray(adaptive_base_goal, dtype=np.float32),
+                    retreat_t,
+                )
+                previous_base_xy = np.asarray(
+                    traj.get("base_xy", release_base_start),
+                    dtype=np.float32,
+                )
+                base_delta = desired_base_xy - previous_base_xy
+                if vx_only_base:
+                    base_delta = (
+                        fixed_body_forward
+                        * float(np.dot(base_delta, fixed_body_forward))
+                    ).astype(np.float32)
+                max_base_step = float(args.pull_base_follow_max_speed) * max(
+                    1.0e-6,
+                    float(args.sim_dt),
+                )
+                base_delta_norm = float(np.linalg.norm(base_delta))
+                if base_delta_norm > max_base_step > 0.0:
+                    base_delta *= max_base_step / base_delta_norm
+                base_xy = (previous_base_xy + base_delta).astype(np.float32)
+                yaw = float(yaw_start if vx_only_base else release_yaw)
             joint_home_start = float(
                 np.clip(args.release_joint_home_start_fraction, 0.0, 0.95)
             )
-            traj["release_joint_home_alpha"] = (
-                smoothstep(
+            if release_to_clearance:
+                # Keep Cartesian control active all the way to clearance. A
+                # nonzero value here activates the outer-loop direct joint
+                # interpolation and silently returns the arm to full home.
+                joint_home_alpha = 0.0
+            elif release_t >= joint_home_start:
+                joint_home_t = (
                     (release_t - joint_home_start)
                     / max(1.0e-6, 1.0 - joint_home_start)
                 )
-                if release_t >= joint_home_start
+                if str(args.release_joint_home_motion_profile) == "trapezoid":
+                    joint_home_alpha = trapezoid_progress(
+                        joint_home_t,
+                        args.release_joint_home_ramp_fraction,
+                    )
+                else:
+                    joint_home_alpha = smoothstep(joint_home_t)
+            else:
+                joint_home_alpha = 0.0
+            traj["release_joint_home_alpha"] = float(joint_home_alpha)
+            phase = "release_handle"
+        elif hybrid_panel_push and step < panel_reposition_end:
+            panel_t = float(
+                np.clip(
+                    (step - release_end + 1)
+                    / max(1, int(args.panel_reposition_steps)),
+                    0.0,
+                    1.0,
+                )
+            )
+            traj["panel_reposition_t"] = panel_t
+            mirrored_goal, panel_normal, radial_dir = mirrored_handle_goal_across_door_panel(
+                gym,
+                env,
+                door_actor,
+                door,
+                handle_goal,
+                traj["pull_dir"],
+            )
+            mirrored_goal = mirrored_goal.copy()
+            panel_edge_reference = mirrored_goal.copy()
+            mirrored_goal[:2] -= (
+                radial_dir[:2] * float(args.panel_contact_inward_offset_m)
+            )
+            mirrored_goal[2] += float(args.panel_target_z_offset)
+            # The mirrored point is already on the opposite face. Approach it
+            # from slightly farther along -normal, then press through +normal,
+            # which is the measured opening direction for the WC4 pull setup.
+            # The right-arc controls *how* the arm reaches this side; changing
+            # the contact-force sign here would push the door closed.
+            panel_side_sign = -1.0
+            panel_precontact = (
+                mirrored_goal
+                + panel_side_sign
+                * panel_normal
+                * float(args.panel_precontact_distance)
+            )
+            panel_tip_offset = (
+                quat_axis(traj["goal_quat"], axis=0)
+                * float(args.panel_ee_tip_compensation_m)
+            ).astype(np.float32)
+            panel_precontact_command = panel_precontact + panel_tip_offset
+            clearance_path_enabled = bool(
+                getattr(args, "release_to_clearance_pose", False)
+            )
+            path_edge_clearance = float(args.panel_edge_clearance) + (
+                float(args.release_clearance_edge_extra)
+                if clearance_path_enabled
                 else 0.0
             )
-            phase = "release_handle"
+            path_arc_radius = float(args.panel_right_arc_radius) + (
+                float(args.release_clearance_arc_radius_extra)
+                if clearance_path_enabled
+                else 0.0
+            )
+            path_outward_clearance = float(
+                args.panel_right_arc_outward_clearance
+            ) + (
+                float(args.release_clearance_outward_extra)
+                if clearance_path_enabled
+                else 0.0
+            )
+            edge_waypoint = (
+                panel_precontact
+                + radial_dir * path_edge_clearance
+            )
+            edge_waypoint_command = edge_waypoint + panel_tip_offset
+            traj["panel_mirrored_goal"] = mirrored_goal.copy()
+            traj["panel_precontact"] = panel_precontact.copy()
+            traj["panel_edge_waypoint"] = edge_waypoint.copy()
+            if "panel_reposition_start_pos" not in traj:
+                # Start from the measured EE pose. Legacy mode reaches this
+                # point from joint home; release-to-clearance mode reaches it
+                # from the compact outside pose. Never jump to a stale shaping
+                # target at this phase transition.
+                measured_reposition_start = getattr(
+                    ik_state, "current_pos_np", None
+                )
+                if measured_reposition_start is None:
+                    measured_reposition_start = traj.get(
+                        "last_target_pos",
+                        traj.get("release_retract_pos", panel_precontact_command),
+                    )
+                traj["panel_reposition_start_pos"] = np.asarray(
+                    measured_reposition_start,
+                    dtype=np.float32,
+                ).copy()
+                traj["panel_push_base_start"] = np.asarray(
+                    traj.get("base_xy", base_release), dtype=np.float32
+                ).copy()
+                if bool(
+                    traj.get("pull_contact_loss_deferred_base_retreat", False)
+                ):
+                    traj["panel_reposition_base_goal"] = np.asarray(
+                        traj.get(
+                            "pull_contact_loss_collision_base_goal",
+                            traj["panel_push_base_start"],
+                        ),
+                        dtype=np.float32,
+                    ).copy()
+                else:
+                    traj["panel_reposition_base_goal"] = (
+                        np.asarray(traj["panel_push_base_start"], dtype=np.float32)
+                        + fixed_body_forward
+                        * float(args.panel_reposition_base_forward_distance)
+                    ).astype(np.float32)
+                traj["panel_push_mirror_start"] = mirrored_goal.copy()
+                traj["panel_reposition_normal_snapshot"] = np.asarray(
+                    panel_normal, dtype=np.float32
+                ).copy()
+                traj["panel_reposition_mirrored_goal_snapshot"] = np.asarray(
+                    mirrored_goal, dtype=np.float32
+                ).copy()
+                if str(args.panel_reposition_path) == "right_arc":
+                    fixed_yaw = float(
+                        yaw_start if vx_only_base else traj.get("pull_release_yaw", yaw_stop)
+                    )
+                    body_right = np.asarray(
+                        [math.sin(fixed_yaw), -math.cos(fixed_yaw), 0.0],
+                        dtype=np.float32,
+                    )
+                    right_control = (
+                        traj["panel_reposition_start_pos"]
+                        + body_right * path_arc_radius
+                    )
+                    right_control[2] += float(args.panel_right_arc_lift)
+                    traj["panel_right_arc_body_right"] = body_right
+                    traj["panel_right_arc_control_start"] = right_control
+                    # Freeze the door geometry at release for the collision-
+                    # avoidance portion of the transfer.  Recomputing these
+                    # waypoints from a moving/rebounding door makes the path
+                    # cut back through the slab.  The final contact phase will
+                    # resume using the live panel pose.
+                    edge_bypass = (
+                        panel_edge_reference
+                        + radial_dir * path_edge_clearance
+                        + body_right * path_arc_radius
+                    )
+                    edge_bypass[2] += float(args.panel_right_arc_lift)
+                    traj["panel_right_arc_front_edge"] = (
+                        edge_bypass
+                        + panel_normal
+                        * path_outward_clearance
+                        + panel_tip_offset
+                    ).astype(np.float32)
+                    traj["panel_right_arc_back_edge"] = (
+                        edge_bypass
+                        - panel_normal
+                        * path_outward_clearance
+                        + panel_tip_offset
+                    ).astype(np.float32)
+                    traj["panel_right_arc_precontact_snapshot"] = (
+                        panel_precontact_command.copy()
+                    )
+                    # Keep the entire free-edge transfer at the measured
+                    # joint-home EE height.  Combining the long lateral
+                    # reach with a simultaneous lift toward the handle puts
+                    # the 6-DOF arm close to a singular straight-arm posture.
+                    # Once the EE is wholly behind the slab, move inward at
+                    # this low height and lift vertically as a final stage.
+                    transfer_z = float(traj["panel_reposition_start_pos"][2])
+                    traj["panel_right_arc_front_edge"][2] = transfer_z
+                    traj["panel_right_arc_back_edge"][2] = transfer_z
+                    backside_low = panel_precontact_command.copy()
+                    backside_low[2] = transfer_z
+                    traj["panel_right_arc_backside_low"] = backside_low.astype(
+                        np.float32
+                    )
+                print(
+                    f"[A2WPull] env={int(getattr(args, 'parallel_env_id', 0))} "
+                    f"hybrid panel reposition: mirrored_goal="
+                    f"{np.round(mirrored_goal, 4).tolist()} "
+                    f"normal={np.round(panel_normal, 4).tolist()} "
+                    f"gripper_x={np.round(quat_axis(traj['goal_quat'], axis=0), 4).tolist()} "
+                    f"path={str(args.panel_reposition_path)} "
+                    f"arc_radius={path_arc_radius:.3f}m "
+                    f"edge_clearance={path_edge_clearance:.3f}m "
+                    f"outward_clearance={path_outward_clearance:.3f}m "
+                    f"deferred_contact_loss_retreat="
+                    f"{bool(traj.get('pull_contact_loss_deferred_base_retreat', False))} "
+                    f"base_start={np.round(traj['panel_push_base_start'], 4).tolist()} "
+                    f"base_goal={np.round(traj['panel_reposition_base_goal'], 4).tolist()} "
+                    f"measured_start={np.round(traj['panel_reposition_start_pos'], 4).tolist()}.",
+                    flush=True,
+                )
+            if str(args.panel_reposition_path) == "right_arc":
+                front_edge = np.asarray(
+                    traj["panel_right_arc_front_edge"], dtype=np.float32
+                )
+                backside_edge = np.asarray(
+                    traj["panel_right_arc_back_edge"], dtype=np.float32
+                )
+                precontact_snapshot = np.asarray(
+                    traj["panel_right_arc_precontact_snapshot"], dtype=np.float32
+                )
+                backside_low = np.asarray(
+                    traj["panel_right_arc_backside_low"], dtype=np.float32
+                )
+                if panel_t < 0.20:
+                    # Stage 0: hold the Cartesian home target while the signed
+                    # joint1 guard rotates only the arm base joint.  Because
+                    # the remaining joints are at home, the EE follows a real
+                    # circular arc toward robot-right without extending at or
+                    # sweeping through the door.
+                    target_pos = traj["panel_reposition_start_pos"].copy()
+                elif bool(getattr(args, "panel_right_arc_continuous_spline", False)):
+                    # Use one continuous interpolation after the joint-space
+                    # swivel.  The legacy path applies an independent
+                    # smoothstep to every pair of waypoints, which forces the
+                    # EE speed to zero at each internal boundary and looks
+                    # visibly stop-and-go.  Catmull-Rom still passes through
+                    # the frozen front/back free-edge points, backside-low
+                    # point and precontact point, but is C1 across them.
+                    if "panel_right_arc_swivel_start" not in traj:
+                        measured_swivel = getattr(ik_state, "current_pos_np", None)
+                        if measured_swivel is None:
+                            measured_swivel = traj["panel_reposition_start_pos"]
+                        traj["panel_right_arc_swivel_start"] = np.asarray(
+                            measured_swivel, dtype=np.float32
+                        ).copy()
+                    spline_t = float(np.clip((panel_t - 0.20) / 0.80, 0.0, 1.0))
+                    target_pos = catmull_rom_waypoint_chain(
+                        (
+                            traj["panel_right_arc_swivel_start"],
+                            front_edge,
+                            backside_edge,
+                            backside_low,
+                            precontact_snapshot,
+                        ),
+                        spline_t,
+                    )
+                elif panel_t < 0.42:
+                    # Stage 1: after the joint-space swivel, connect the
+                    # measured right-side pose to the front free-edge point.
+                    # Capturing the measured pose avoids commanding a jump
+                    # back to the original pre-swivel Cartesian home point.
+                    if "panel_right_arc_swivel_start" not in traj:
+                        measured_swivel = getattr(ik_state, "current_pos_np", None)
+                        if measured_swivel is None:
+                            measured_swivel = traj["panel_reposition_start_pos"]
+                        traj["panel_right_arc_swivel_start"] = np.asarray(
+                            measured_swivel, dtype=np.float32
+                        ).copy()
+                        swivel_control = traj["panel_right_arc_swivel_start"].copy()
+                        swivel_control += (
+                            traj["panel_right_arc_body_right"]
+                            * 0.5
+                            * float(args.panel_right_arc_radius)
+                        )
+                        traj["panel_right_arc_swivel_control"] = swivel_control
+                    right_t = smoothstep((panel_t - 0.20) / 0.22)
+                    one_minus_t = 1.0 - right_t
+                    target_pos = (
+                        one_minus_t**2 * traj["panel_right_arc_swivel_start"]
+                        + 2.0
+                        * one_minus_t
+                        * right_t
+                        * traj["panel_right_arc_swivel_control"]
+                        + right_t**2 * front_edge
+                    ).astype(np.float32)
+                elif panel_t < 0.60:
+                    # Stage 2: cross the slab plane only while outside the
+                    # finite free edge, so neither the wrist nor upper links
+                    # sweep through the door.
+                    cross_t = smoothstep((panel_t - 0.42) / 0.18)
+                    target_pos = lerp(front_edge, backside_edge, cross_t)
+                elif panel_t < 0.82:
+                    # Stage 3: remain low and move inward only after every arm
+                    # link has crossed to the back side of the slab.
+                    inward_t = smoothstep((panel_t - 0.60) / 0.22)
+                    target_pos = lerp(backside_edge, backside_low, inward_t)
+                else:
+                    # Stage 4: lift vertically on the back side to the frozen
+                    # pre-contact point. Live geometry is resumed by the
+                    # following panel_contact phase.
+                    lift_t = smoothstep((panel_t - 0.82) / 0.18)
+                    target_pos = lerp(backside_low, precontact_snapshot, lift_t)
+            else:
+                if panel_t < 0.55:
+                    motion_t = smoothstep(panel_t / 0.55)
+                    target_pos = lerp(
+                        traj["panel_reposition_start_pos"], edge_waypoint_command, motion_t
+                    )
+                else:
+                    motion_t = smoothstep((panel_t - 0.55) / 0.45)
+                    target_pos = lerp(
+                        edge_waypoint_command, panel_precontact_command, motion_t
+                    )
+            if (
+                bool(getattr(args, "panel_reposition_completion_gate", False))
+                and panel_t >= 1.0
+            ):
+                # The collision-avoidance arc is frozen only while crossing
+                # the slab's free edge. Once that transfer is complete, track
+                # the live backside precontact point so hinge rebound cannot
+                # leave the EE on the wrong side of the current panel pose.
+                target_pos = np.asarray(
+                    panel_precontact_command, dtype=np.float32
+                ).copy()
+            if (
+                bool(getattr(args, "panel_reposition_completion_gate", False))
+                and "panel_reposition_complete_step" not in traj
+                and panel_t >= 1.0
+            ):
+                measured_ee = getattr(ik_state, "current_pos_np", None)
+                signed_side_m = float("inf")
+                precontact_error_m = float("inf")
+                if measured_ee is not None:
+                    measured_ee = np.asarray(measured_ee, dtype=np.float32)
+                    signed_side_m = float(
+                        np.dot(
+                            measured_ee - np.asarray(mirrored_goal, dtype=np.float32),
+                            np.asarray(panel_normal, dtype=np.float32),
+                        )
+                    )
+                    precontact_error_m = float(
+                        np.linalg.norm(
+                            measured_ee
+                            - np.asarray(panel_precontact_command, dtype=np.float32)
+                        )
+                    )
+                backside_ready = bool(
+                    signed_side_m
+                    <= -float(args.panel_reposition_completion_backside_margin_m)
+                    and precontact_error_m
+                    <= float(args.panel_reposition_completion_position_tolerance_m)
+                )
+                timed_out = bool(
+                    int(step)
+                    >= int(nominal_panel_reposition_end)
+                    + int(args.panel_reposition_completion_max_extra_steps)
+                )
+                if backside_ready or timed_out:
+                    traj["panel_reposition_complete_step"] = int(step) + 1
+                    traj["panel_reposition_completion_reason"] = (
+                        "measured_backside_ready" if backside_ready else "timeout"
+                    )
+                    traj["panel_reposition_completion_signed_side_m"] = signed_side_m
+                    traj["panel_reposition_completion_error_m"] = precontact_error_m
+                    print(
+                        f"[A2WPull] env={int(getattr(args, 'parallel_env_id', 0))} "
+                        f"panel reposition complete reason="
+                        f"{traj['panel_reposition_completion_reason']} "
+                        f"signed_side={signed_side_m:.3f}m "
+                        f"precontact_error={precontact_error_m:.3f}m "
+                        f"at step={int(step)}.",
+                        flush=True,
+                    )
+            # Once the handle has been released, panel pushing is a point
+            # contact task.  Leaving orientation unconstrained avoids an
+            # unnecessary wrist-orientation conflict while following the
+            # moving mirrored contact point.
+            target_quat = (
+                np.asarray(traj["goal_quat"], dtype=np.float32).copy()
+                if bool(args.panel_push_use_grasp_orientation)
+                else None
+            )
+            reposition_base_start = np.asarray(
+                traj.get("panel_push_base_start", traj.get("pull_release_base_xy", base_pull)),
+                dtype=np.float32,
+            )
+            reposition_base_goal = np.asarray(
+                traj.get("panel_reposition_base_goal", reposition_base_start),
+                dtype=np.float32,
+            )
+            if bool(
+                traj.get("pull_contact_loss_deferred_base_retreat", False)
+            ):
+                door_pos_for_reposition, _ = get_actor_dof_state(
+                    gym, env, door_actor
+                )
+                reposition_open_deg = (
+                    dc.door_open_degrees(door_pos_for_reposition, args)
+                    if len(door_pos_for_reposition) > 0
+                    else float(
+                        traj.get("pull_release_angle_observed_deg", 0.0)
+                    )
+                )
+                # Stay close while rounding the free edge. Once the measured
+                # door reaches the chassis-clearance angle, make only a short
+                # retreat so the slab can continue opening. The larger retreat
+                # remains gated on actual panel_push progress below.
+                max_contact_loss_open_deg = max(
+                    float(
+                        traj.get(
+                            "pull_contact_loss_max_open_deg",
+                            traj.get(
+                                "pull_release_angle_observed_deg",
+                                reposition_open_deg,
+                            ),
+                        )
+                    ),
+                    float(reposition_open_deg),
+                )
+                traj["pull_contact_loss_max_open_deg"] = max_contact_loss_open_deg
+                collision_retreat_angle_deg = float(
+                    args.pull_contact_loss_collision_retreat_angle_deg
+                )
+                if (
+                    max_contact_loss_open_deg >= collision_retreat_angle_deg
+                    and not bool(
+                        traj.get(
+                            "pull_contact_loss_collision_retreat_triggered", False
+                        )
+                    )
+                ):
+                    traj["pull_contact_loss_collision_retreat_triggered"] = True
+                    traj[
+                        "pull_contact_loss_collision_retreat_trigger_step"
+                    ] = int(step)
+                    print(
+                        f"[A2WPull] env={int(getattr(args, 'parallel_env_id', 0))} "
+                        f"door reached chassis-clearance angle "
+                        f"{max_contact_loss_open_deg:.1f} deg at step={int(step)}; "
+                        f"short base retreat begins.",
+                        flush=True,
+                    )
+                base_motion_t = smoothstep(
+                    float(
+                        np.clip(
+                            (
+                                max_contact_loss_open_deg
+                                - collision_retreat_angle_deg
+                            )
+                            / float(
+                                args.pull_contact_loss_collision_retreat_ramp_deg
+                            ),
+                            0.0,
+                            1.0,
+                        )
+                    )
+                )
+                reposition_base_goal = np.asarray(
+                    traj.get(
+                        "pull_contact_loss_collision_base_goal",
+                        reposition_base_start,
+                    ),
+                    dtype=np.float32,
+                )
+            elif str(args.panel_reposition_path) == "right_arc":
+                # Do not move the base toward the door until the arm has first
+                # cleared the free edge.  Motion remains strictly fixed-heading
+                # body-vx under --pull_vx_only_base.
+                base_motion_t = smoothstep(
+                    float(np.clip((panel_t - 0.60) / 0.22, 0.0, 1.0))
+                )
+            else:
+                base_motion_t = smoothstep(panel_t)
+            base_xy = lerp(
+                reposition_base_start,
+                reposition_base_goal,
+                base_motion_t,
+            )
+            yaw = float(
+                yaw_start
+                if vx_only_base
+                else traj.get("pull_release_yaw", yaw_stop)
+            )
+            if bool(args.panel_push_gripper_closed):
+                close_t = smoothstep(
+                    float(np.clip((panel_t - 0.40) / 0.35, 0.0, 1.0))
+                )
+                gripper = float(
+                    lerp(
+                        np.array([args.gripper_open], dtype=np.float32),
+                        np.array([args.gripper_closed], dtype=np.float32),
+                        close_t,
+                    )[0]
+                )
+            else:
+                gripper = args.gripper_open
+            phase = "panel_reposition"
+        elif hybrid_panel_push and step < panel_contact_end:
+            contact_t = smoothstep(
+                (step - panel_reposition_end + 1)
+                / max(1, int(args.panel_contact_steps))
+            )
+            mirrored_goal, panel_normal, radial_dir = mirrored_handle_goal_across_door_panel(
+                gym,
+                env,
+                door_actor,
+                door,
+                handle_goal,
+                traj["pull_dir"],
+            )
+            mirrored_goal = mirrored_goal.copy()
+            mirrored_goal[:2] -= (
+                radial_dir[:2] * float(args.panel_contact_inward_offset_m)
+            )
+            mirrored_goal[2] += float(args.panel_target_z_offset)
+            panel_side_sign = -1.0
+            panel_precontact = (
+                mirrored_goal
+                + panel_side_sign
+                * panel_normal
+                * float(args.panel_precontact_distance)
+            )
+            panel_tip_offset = (
+                quat_axis(traj["goal_quat"], axis=0)
+                * float(args.panel_ee_tip_compensation_m)
+            ).astype(np.float32)
+            if "panel_contact_start_pos" not in traj:
+                traj["panel_contact_start_pos"] = np.asarray(
+                    traj.get("last_target_pos", panel_precontact), dtype=np.float32
+                ).copy()
+            target_pos = lerp(
+                traj["panel_contact_start_pos"],
+                mirrored_goal + panel_tip_offset,
+                contact_t,
+            )
+            # Positive signed distance is the robot/pull side of the panel;
+            # negative is the opposite side from which the gripper must push.
+            # Keep this diagnostic in the trajectory so contact acceptance can
+            # reject a link that touched the panel before the gripper actually
+            # completed the right-side arc.
+            if ik_state.current_pos_np is not None:
+                traj["panel_ee_signed_side_m"] = float(
+                    np.dot(
+                        np.asarray(ik_state.current_pos_np, dtype=np.float32)
+                        - mirrored_goal,
+                        panel_normal,
+                    )
+                )
+            target_quat = (
+                np.asarray(traj["goal_quat"], dtype=np.float32).copy()
+                if bool(args.panel_push_use_grasp_orientation)
+                else None
+            )
+            if bool(
+                traj.get("pull_contact_loss_deferred_base_retreat", False)
+            ):
+                door_pos_for_contact, _ = get_actor_dof_state(
+                    gym, env, door_actor
+                )
+                panel_contact_open_deg = (
+                    dc.door_open_degrees(door_pos_for_contact, args)
+                    if len(door_pos_for_contact) > 0
+                    else float(
+                        traj.get("pull_release_angle_observed_deg", 0.0)
+                    )
+                )
+                close_base_xy = np.asarray(
+                    traj.get(
+                        "panel_push_base_start",
+                        traj.get("pull_release_base_xy", base_pull),
+                    ),
+                    dtype=np.float32,
+                )
+                collision_base_xy = np.asarray(
+                    traj.get(
+                        "pull_contact_loss_collision_base_goal",
+                        close_base_xy,
+                    ),
+                    dtype=np.float32,
+                )
+                max_contact_loss_open_deg = max(
+                    float(
+                        traj.get(
+                            "pull_contact_loss_max_open_deg",
+                            traj.get(
+                                "pull_release_angle_observed_deg",
+                                panel_contact_open_deg,
+                            ),
+                        )
+                    ),
+                    float(panel_contact_open_deg),
+                )
+                traj["pull_contact_loss_max_open_deg"] = max_contact_loss_open_deg
+                collision_t = smoothstep(
+                    float(
+                        np.clip(
+                            (
+                                max_contact_loss_open_deg
+                                - float(
+                                    args.pull_contact_loss_collision_retreat_angle_deg
+                                )
+                            )
+                            / float(
+                                args.pull_contact_loss_collision_retreat_ramp_deg
+                            ),
+                            0.0,
+                            1.0,
+                        )
+                    )
+                )
+                base_xy = lerp(close_base_xy, collision_base_xy, collision_t)
+            else:
+                base_xy = np.asarray(
+                    traj.get(
+                        "panel_reposition_base_goal",
+                        traj.get("pull_release_base_xy", base_pull),
+                    ),
+                    dtype=np.float32,
+                ).copy()
+            yaw = float(
+                yaw_start
+                if vx_only_base
+                else traj.get("pull_release_yaw", yaw_stop)
+            )
+            gripper = (
+                args.gripper_closed
+                if bool(args.panel_push_gripper_closed)
+                else args.gripper_open
+            )
+            phase = "panel_contact"
+        elif hybrid_panel_push and step < panel_push_end:
+            mirrored_goal, panel_normal, radial_dir = mirrored_handle_goal_across_door_panel(
+                gym,
+                env,
+                door_actor,
+                door,
+                handle_goal,
+                traj["pull_dir"],
+            )
+            mirrored_goal = mirrored_goal.copy()
+            mirrored_goal[:2] -= (
+                radial_dir[:2] * float(args.panel_contact_inward_offset_m)
+            )
+            mirrored_goal[2] += float(args.panel_target_z_offset)
+            door_pos, _door_vel = get_actor_dof_state(gym, env, door_actor)
+            door_open_deg = (
+                dc.door_open_degrees(door_pos, args) if len(door_pos) > 0 else 0.0
+            )
+            if bool(args.debug_panel_contacts) and int(step) % 50 == 0:
+                try:
+                    panel_body_env = int(
+                        gym.get_actor_rigid_body_index(
+                            env,
+                            door_actor,
+                            int(door.door_body_index),
+                            gymapi.DOMAIN_ENV,
+                        )
+                    )
+                    contacts = gym.get_env_rigid_contacts(env)
+                    panel_pairs = []
+                    for contact in contacts:
+                        body0 = int(contact["body0"])
+                        body1 = int(contact["body1"])
+                        if panel_body_env in {body0, body1}:
+                            panel_pairs.append((body0, body1))
+                    print(
+                        f"[A2WPullContactDebug] step={int(step)} "
+                        f"panel_body={panel_body_env} pairs={panel_pairs[:20]} "
+                        f"total_panel_contacts={len(panel_pairs)}",
+                        flush=True,
+                    )
+                    if int(step) % 100 == 50:
+                        arm_actor_debug = gym.find_actor_handle(
+                            env, base_ik.ARM_ACTOR_NAME
+                        )
+                        arm_body_dict = gym.get_actor_rigid_body_dict(
+                            env, arm_actor_debug
+                        )
+                        arm_body_env_debug = {
+                            str(body_name): int(
+                                gym.get_actor_rigid_body_index(
+                                    env,
+                                    arm_actor_debug,
+                                    int(local_body_index),
+                                    gymapi.DOMAIN_ENV,
+                                )
+                            )
+                            for body_name, local_body_index in arm_body_dict.items()
+                        }
+                        arm_states_debug = gym.get_actor_rigid_body_states(
+                            env, arm_actor_debug, gymapi.STATE_POS
+                        )
+                        debug_poses = {}
+                        for body_name in (
+                            "gripperStator",
+                            "gripperMover",
+                            "ee_gripper_link",
+                        ):
+                            if body_name in arm_body_dict:
+                                body_idx = int(arm_body_dict[body_name])
+                                pos_raw = arm_states_debug["pose"]["p"][body_idx]
+                                debug_poses[body_name] = [
+                                    float(pos_raw["x"]),
+                                    float(pos_raw["y"]),
+                                    float(pos_raw["z"]),
+                                ]
+                        panel_pose_debug, _ = get_body_pose(
+                            gym, env, door_actor, door.door_body_index
+                        )
+                        print(
+                            f"[A2WPullContactDebugPose] step={int(step)} "
+                            f"panel_origin={np.round(panel_pose_debug, 4).tolist()} "
+                            f"handle={np.round(handle_goal, 4).tolist()} "
+                            f"mirror={np.round(mirrored_goal, 4).tolist()} "
+                            f"arm={debug_poses} body_env={arm_body_env_debug}",
+                            flush=True,
+                        )
+                except Exception as exc:
+                    print(
+                        f"[A2WPullContactDebug] step={int(step)} error={exc}",
+                        flush=True,
+                    )
+            if (
+                bool(args.panel_push_contact_gated)
+                and "panel_push_contact_step" not in traj
+            ):
+                try:
+                    panel_body_env = int(
+                        gym.get_actor_rigid_body_index(
+                            env,
+                            door_actor,
+                            int(door.door_body_index),
+                            gymapi.DOMAIN_ENV,
+                        )
+                    )
+                    arm_actor_contact = gym.find_actor_handle(
+                        env, base_ik.ARM_ACTOR_NAME
+                    )
+                    arm_body_dict_contact = gym.get_actor_rigid_body_dict(
+                        env, arm_actor_contact
+                    )
+                    gripper_local_body_indices = [
+                        int(local_body_index)
+                        for body_name, local_body_index in arm_body_dict_contact.items()
+                        if "gripper" in str(body_name).lower()
+                    ]
+                    arm_body_env_indices = {
+                        int(
+                            gym.get_actor_rigid_body_index(
+                                env,
+                                arm_actor_contact,
+                                local_body_index,
+                                gymapi.DOMAIN_ENV,
+                            )
+                        )
+                        for local_body_index in gripper_local_body_indices
+                    }
+                    if bool(args.debug_panel_contacts) and not traj.get(
+                        "panel_gripper_contact_indices_printed", False
+                    ):
+                        traj["panel_gripper_contact_indices_printed"] = True
+                        print(
+                            "[A2WPullContactDebug] gripper_env_body_indices="
+                            f"{sorted(arm_body_env_indices)} names="
+                            f"{[name for name in arm_body_dict_contact if 'gripper' in name.lower()]}",
+                            flush=True,
+                        )
+                    panel_has_robot_contact = False
+                    for contact in gym.get_env_rigid_contacts(env):
+                        body0 = int(contact["body0"])
+                        body1 = int(contact["body1"])
+                        if (
+                            panel_body_env == body0
+                            and body1 in arm_body_env_indices
+                        ):
+                            panel_has_robot_contact = True
+                            break
+                        if (
+                            panel_body_env == body1
+                            and body0 in arm_body_env_indices
+                        ):
+                            panel_has_robot_contact = True
+                            break
+                    ee_signed_side_m = float(
+                        np.dot(
+                            np.asarray(ik_state.current_pos_np, dtype=np.float32)
+                            - mirrored_goal,
+                            panel_normal,
+                        )
+                    ) if ik_state.current_pos_np is not None else float("inf")
+                    traj["panel_ee_signed_side_m"] = ee_signed_side_m
+                    # Contact is valid only after the EE reference has crossed
+                    # the slab to the opposite side.  This prevents a proximal
+                    # link or a gripper edge touching from the robot side from
+                    # falsely starting the panel-push controller.
+                    panel_contact_from_backside = ee_signed_side_m <= -0.005
+                    if (
+                        panel_has_robot_contact
+                        and panel_contact_from_backside
+                        and ik_state.current_pos_np is not None
+                    ):
+                        traj["panel_push_contact_step"] = int(step)
+                        traj["panel_push_contact_open_deg"] = float(door_open_deg)
+                        traj["panel_push_contact_ee"] = np.asarray(
+                            ik_state.current_pos_np, dtype=np.float32
+                        ).copy()
+                        # Rotate the panel-push contact point around the actual
+                        # door hinge.  The door rigid-body pose is generally at
+                        # the panel/link origin rather than on the hinge axis;
+                        # treating it as the hinge makes the requested EE arc
+                        # drift away from the moving panel as the door opens.
+                        traj["panel_push_contact_hinge"] = np.asarray(
+                            traj["pull_arc_hinge_pos"], dtype=np.float32
+                        ).copy()
+                        traj["panel_push_contact_normal"] = panel_normal.copy()
+                        print(
+                            f"[A2WPull] env={int(getattr(args, 'parallel_env_id', 0))} "
+                            f"panel contact established at step={int(step)}, "
+                            f"door={float(door_open_deg):.1f} deg, "
+                            f"signed_side={ee_signed_side_m:.3f} m; measured-contact "
+                            "push arc begins.",
+                            flush=True,
+                        )
+                except Exception:
+                    pass
+            contact_arc_ready = (
+                not bool(args.panel_push_contact_gated)
+                or "panel_push_contact_step" in traj
+            )
+            planned_arc_steps = (
+                max(0, int(args.panel_push_planned_arc_steps))
+                if contact_arc_ready
+                else 0
+            )
+            panel_penetration_t = (
+                0.0
+                if bool(args.panel_push_contact_gated) and not contact_arc_ready
+                else 1.0
+            )
+            if planned_arc_steps > 0:
+                if "panel_push_arc_start_step" not in traj:
+                    traj["panel_push_arc_start_step"] = int(step)
+                    traj["panel_push_arc_start_open_deg"] = float(door_open_deg)
+                    traj["panel_push_arc_start_goal"] = mirrored_goal.copy()
+                    traj["panel_push_arc_start_normal"] = panel_normal.copy()
+                    traj["panel_push_arc_hinge_pos"] = np.asarray(
+                        traj["pull_arc_hinge_pos"], dtype=np.float32
+                    ).copy()
+                arc_t = float(
+                    np.clip(
+                        (int(step) - int(traj["panel_push_arc_start_step"]) + 1)
+                        / max(1, planned_arc_steps),
+                        0.0,
+                        1.0,
+                    )
+                )
+                panel_penetration_t = smoothstep(arc_t)
+                desired_open_deg = float(
+                    lerp(
+                        np.array(
+                            [float(traj["panel_push_arc_start_open_deg"])],
+                            dtype=np.float32,
+                        ),
+                        np.array(
+                            [float(args.panel_push_goal_angle_deg) + 3.0],
+                            dtype=np.float32,
+                        ),
+                        smoothstep(arc_t),
+                    )[0]
+                )
+                desired_open_deg = min(
+                    desired_open_deg,
+                    float(door_open_deg)
+                    + max(0.0, float(args.panel_push_arc_lead_angle_deg)),
+                )
+                # Never let the planned contact point follow a rebounding door
+                # back toward closed. It must at least hold the angle observed
+                # at panel-push entry, then advance only in the opening sense.
+                desired_open_deg = max(
+                    float(traj["panel_push_arc_start_open_deg"]),
+                    desired_open_deg,
+                )
+                planned_delta_yaw = float(args.door_motion_sign) * math.radians(
+                    desired_open_deg
+                    - float(traj["panel_push_arc_start_open_deg"])
+                )
+                hinge_pos = np.asarray(
+                    traj["panel_push_arc_hinge_pos"], dtype=np.float32
+                )
+                start_goal = np.asarray(
+                    traj["panel_push_arc_start_goal"], dtype=np.float32
+                )
+                radial = start_goal - hinge_pos
+                mirrored_goal = hinge_pos.copy()
+                mirrored_goal[:2] += dc.rotate_xy(
+                    radial[:2], planned_delta_yaw
+                )
+                mirrored_goal[2] += radial[2]
+                start_normal = np.asarray(
+                    traj["panel_push_arc_start_normal"], dtype=np.float32
+                )
+                panel_normal = start_normal.copy()
+                panel_normal[:2] = dc.rotate_xy(
+                    start_normal[:2], planned_delta_yaw
+                )
+            if (
+                door_open_deg >= float(args.panel_push_goal_angle_deg)
+                and "panel_push_complete_step" not in traj
+            ):
+                traj["panel_push_complete_step"] = int(step) + 1
+                traj["panel_push_goal_observed_deg"] = float(door_open_deg)
+                print(
+                    f"[A2WPull] env={int(getattr(args, 'parallel_env_id', 0))} "
+                    f"panel push reached {door_open_deg:.1f} deg at step={int(step)}; "
+                    f"pass_through begins at step={int(step) + 1}.",
+                    flush=True,
+                )
+            panel_push_sign = 1.0
+            panel_penetration = float(args.panel_contact_penetration)
+            if float(args.panel_contact_initial_penetration) >= 0.0:
+                panel_penetration = float(
+                    lerp(
+                        np.array(
+                            [float(args.panel_contact_initial_penetration)],
+                            dtype=np.float32,
+                        ),
+                        np.array(
+                            [float(args.panel_contact_penetration)],
+                            dtype=np.float32,
+                        ),
+                        panel_penetration_t,
+                    )[0]
+                )
+            target_pos = (
+                mirrored_goal
+                + panel_push_sign
+                * panel_normal
+                * panel_penetration
+                + quat_axis(traj["goal_quat"], axis=0)
+                * float(args.panel_ee_tip_compensation_m)
+            )
+            linear_push_delta_xy = None
+            if (
+                bool(args.panel_push_contact_gated)
+                and "panel_push_contact_step" in traj
+            ):
+                contact_step = int(traj["panel_push_contact_step"])
+                contact_start_deg = float(traj["panel_push_contact_open_deg"])
+                contact_arc_t = float(
+                    np.clip(
+                        (int(step) - contact_step + 1)
+                        / max(1, int(args.panel_push_planned_arc_steps)),
+                        0.0,
+                        1.0,
+                    )
+                )
+                desired_contact_deg = float(
+                    lerp(
+                        np.array([contact_start_deg], dtype=np.float32),
+                        np.array(
+                            [float(args.panel_push_goal_angle_deg) + 3.0],
+                            dtype=np.float32,
+                        ),
+                        smoothstep(contact_arc_t),
+                    )[0]
+                )
+                desired_contact_deg = max(
+                    contact_start_deg,
+                    min(
+                        desired_contact_deg,
+                        float(door_open_deg)
+                        + max(0.0, float(args.panel_push_arc_lead_angle_deg)),
+                    ),
+                )
+                contact_delta_yaw = float(args.door_motion_sign) * math.radians(
+                    desired_contact_deg - contact_start_deg
+                )
+                contact_hinge = np.asarray(
+                    traj["panel_push_contact_hinge"], dtype=np.float32
+                )
+                contact_start_ee = np.asarray(
+                    traj["panel_push_contact_ee"], dtype=np.float32
+                )
+                contact_radial = contact_start_ee - contact_hinge
+                target_pos = contact_hinge.copy()
+                target_pos[:2] += dc.rotate_xy(
+                    contact_radial[:2], contact_delta_yaw
+                )
+                target_pos[2] += contact_radial[2]
+                contact_normal = np.asarray(
+                    traj["panel_push_contact_normal"], dtype=np.float32
+                ).copy()
+                if str(args.panel_push_motion_mode) == "linear_pull":
+                    # Once the handle has unlocked the door, push the panel
+                    # from its opposite face in the same world-space
+                    # direction used by the pull.  This intentionally does
+                    # not prescribe the door's hinge trajectory: physical
+                    # contact converts the straight pusher motion into hinge
+                    # rotation, while allowing the contact point to slide on
+                    # the panel as it would on the real robot.
+                    pull_direction = np.asarray(traj["pull_dir"], dtype=np.float32).copy()
+                    pull_direction[2] = 0.0
+                    pull_direction_norm = float(np.linalg.norm(pull_direction[:2]))
+                    if pull_direction_norm > 1.0e-9:
+                        pull_direction /= pull_direction_norm
+                    linear_push_delta = (
+                        pull_direction
+                        * float(args.panel_push_linear_distance_m)
+                        * smoothstep(contact_arc_t)
+                    ).astype(np.float32)
+                    linear_push_delta_xy = linear_push_delta[:2].copy()
+                    target_pos = contact_start_ee + linear_push_delta
+                    # A small pressure bias keeps the gripper on the panel
+                    # during the initial sliding contact without dictating the
+                    # subsequent hinge angle.
+                    target_pos += (
+                        contact_normal
+                        * float(args.panel_push_contact_pressure_m)
+                        * smoothstep(contact_arc_t)
+                    )
+                else:
+                    contact_normal[:2] = dc.rotate_xy(
+                        contact_normal[:2], contact_delta_yaw
+                    )
+                    target_pos += (
+                        contact_normal
+                        * float(args.panel_push_contact_pressure_m)
+                        * smoothstep(contact_arc_t)
+                    )
+            max_target_lead = (
+                float(args.panel_target_max_step_m)
+                if float(args.panel_target_max_step_m) > 0.0
+                else float(args.pull_target_max_distance)
+            )
+            if max_target_lead > 0.0 and ik_state.current_pos_np is not None:
+                current_ee = np.asarray(ik_state.current_pos_np, dtype=np.float32)
+                target_delta = np.asarray(target_pos, dtype=np.float32) - current_ee
+                distance = float(np.linalg.norm(target_delta))
+                if distance > max_target_lead:
+                    target_pos = current_ee + target_delta * (
+                        max_target_lead / max(distance, 1.0e-9)
+                    )
+            target_quat = (
+                np.asarray(traj["goal_quat"], dtype=np.float32).copy()
+                if bool(args.panel_push_use_grasp_orientation)
+                else None
+            )
+            previous_xy = np.asarray(
+                traj.get("base_xy", traj["panel_push_base_start"]),
+                dtype=np.float32,
+            )
+            previous_yaw = float(traj.get("yaw", yaw_stop))
+            panel_base_anchor = np.asarray(
+                traj.get(
+                    "panel_reposition_base_goal",
+                    traj["panel_push_base_start"],
+                ),
+                dtype=np.float32,
+            )
+            if bool(
+                traj.get("pull_contact_loss_deferred_base_retreat", False)
+            ):
+                # Contact-loss recovery has exactly one chassis retreat: stay
+                # close enough to reach the panel, move back 0.15 m as the
+                # measured door angle crosses 35 deg, then hold that base pose.
+                # There is deliberately no second/full retreat during push.
+                close_base_xy = np.asarray(
+                    traj["panel_push_base_start"], dtype=np.float32
+                )
+                collision_base_xy = np.asarray(
+                    traj.get(
+                        "pull_contact_loss_collision_base_goal",
+                        close_base_xy,
+                    ),
+                    dtype=np.float32,
+                )
+                max_contact_loss_open_deg = max(
+                    float(
+                        traj.get(
+                            "pull_contact_loss_max_open_deg",
+                            traj.get(
+                                "pull_release_angle_observed_deg",
+                                door_open_deg,
+                            ),
+                        )
+                    ),
+                    float(door_open_deg),
+                )
+                traj["pull_contact_loss_max_open_deg"] = max_contact_loss_open_deg
+                collision_t = smoothstep(
+                    float(
+                        np.clip(
+                            (
+                                max_contact_loss_open_deg
+                                - float(
+                                    args.pull_contact_loss_collision_retreat_angle_deg
+                                )
+                            )
+                            / float(
+                                args.pull_contact_loss_collision_retreat_ramp_deg
+                            ),
+                            0.0,
+                            1.0,
+                        )
+                    )
+                )
+                panel_base_anchor = lerp(
+                    close_base_xy, collision_base_xy, collision_t
+                )
+            geometric_base_target = (
+                # The right-arc transfer may deliberately back the robot away
+                # from the slab before contact.  Follow the panel from that
+                # completed transfer pose; returning toward the pre-transfer
+                # base pose while pushing folds the forearm into the panel and
+                # cancels the gripper's opening torque.
+                panel_base_anchor
+                + (
+                    mirrored_goal[:2]
+                    - np.asarray(traj["panel_push_mirror_start"], dtype=np.float32)[:2]
+                )
+                * float(args.panel_base_follow_ratio)
+            )
+            if linear_push_delta_xy is not None:
+                geometric_base_target = (
+                    panel_base_anchor
+                    + np.asarray(linear_push_delta_xy, dtype=np.float32)
+                    * float(args.panel_base_follow_ratio)
+                )
+            target_delta = geometric_base_target - previous_xy
+            max_step = float(args.panel_base_follow_max_speed) * max(
+                1.0e-6, float(args.sim_dt)
+            )
+            target_distance = float(np.linalg.norm(target_delta))
+            if target_distance > max_step > 0.0:
+                target_delta *= max_step / target_distance
+            if vx_only_base:
+                # Fixed-heading panel follower. Only the component of the
+                # geometric target along the initial body-X axis is applied;
+                # therefore both body vy and vyaw remain exactly zero.
+                forward_error = float(np.dot(target_delta, fixed_body_forward))
+                dt_base = max(1.0e-6, float(args.sim_dt))
+                speed = float(
+                    np.clip(
+                        2.0 * forward_error,
+                        -float(args.panel_base_follow_max_speed),
+                        float(args.panel_base_follow_max_speed),
+                    )
+                )
+                base_xy = (
+                    previous_xy + fixed_body_forward * speed * dt_base
+                ).astype(np.float32)
+                yaw = float(yaw_start)
+            elif str(args.pull_panel_base_mode) == "with_vy":
+                # Holonomic comparison: use the same forward/yaw follower as
+                # no_vy, plus a bounded body-frame lateral correction.  A
+                # direct world-space teleport-like follower cancelled the
+                # arm's panel pressure; the bounded command preserves contact
+                # while still producing a genuine vy training signal.
+                if target_distance > 1.0e-7:
+                    motion_heading = math.atan2(
+                        float(target_delta[1]), float(target_delta[0])
+                    )
+                    forward_error = wrap_to_pi(motion_heading - previous_yaw)
+                    reverse_error = wrap_to_pi(
+                        motion_heading + math.pi - previous_yaw
+                    )
+                    if abs(reverse_error) < abs(forward_error):
+                        heading_error = reverse_error
+                        drive_sign = -1.0
+                    else:
+                        heading_error = forward_error
+                        drive_sign = 1.0
+                    dt_base = max(1.0e-6, float(args.sim_dt))
+                    forward_speed = drive_sign * min(
+                        float(args.panel_base_follow_max_speed),
+                        2.0 * target_distance,
+                    ) * max(0.0, math.cos(heading_error))
+                    body_forward = np.asarray(
+                        [math.cos(previous_yaw), math.sin(previous_yaw)],
+                        dtype=np.float32,
+                    )
+                    body_left = np.asarray(
+                        [-math.sin(previous_yaw), math.cos(previous_yaw)],
+                        dtype=np.float32,
+                    )
+                    # Keep the critical physical panel-push contact identical
+                    # to the proven no_vy controller.  Executable lateral
+                    # motion is introduced only after the door reaches 80 deg,
+                    # during pass-through alignment.
+                    lateral_speed = 0.0
+                    base_xy = previous_xy + (
+                        body_forward * forward_speed + body_left * lateral_speed
+                    ) * dt_base
+                    yaw = previous_yaw + float(
+                        np.clip(
+                            heading_error,
+                            -float(args.pull_base_follow_max_yaw_rate) * dt_base,
+                            float(args.pull_base_follow_max_yaw_rate) * dt_base,
+                        )
+                    )
+                else:
+                    base_xy = previous_xy.copy()
+                    yaw = previous_yaw
+            else:
+                # Joint9-compatible comparison: integrate only vx and vyaw.
+                if target_distance > 1.0e-7:
+                    motion_heading = math.atan2(
+                        float(target_delta[1]), float(target_delta[0])
+                    )
+                    forward_error = wrap_to_pi(motion_heading - previous_yaw)
+                    reverse_error = wrap_to_pi(motion_heading + math.pi - previous_yaw)
+                    if abs(reverse_error) < abs(forward_error):
+                        heading_error = reverse_error
+                        drive_sign = -1.0
+                    else:
+                        heading_error = forward_error
+                        drive_sign = 1.0
+                    dt_base = max(1.0e-6, float(args.sim_dt))
+                    speed = drive_sign * min(
+                        float(args.panel_base_follow_max_speed),
+                        2.0 * target_distance,
+                    ) * max(0.0, math.cos(heading_error))
+                    body_forward = np.asarray(
+                        [math.cos(previous_yaw), math.sin(previous_yaw)],
+                        dtype=np.float32,
+                    )
+                    base_xy = previous_xy + body_forward * speed * dt_base
+                    yaw = previous_yaw + float(
+                        np.clip(
+                            heading_error,
+                            -float(args.pull_base_follow_max_yaw_rate) * dt_base,
+                            float(args.pull_base_follow_max_yaw_rate) * dt_base,
+                        )
+                    )
+                else:
+                    base_xy = previous_xy.copy()
+                    yaw = previous_yaw
+            gripper = (
+                args.gripper_closed
+                if bool(args.panel_push_gripper_closed)
+                else args.gripper_open
+            )
+            phase = "panel_push"
         elif step < pass_end:
             t = smoothstep(
-                (step - release_end + 1)
+                (step - pass_start + 1)
                 / max(1, int(args.pass_through_steps))
             )
+            postpush_home_steps = max(
+                0, int(getattr(args, "panel_postpush_home_steps", 0))
+            )
+            if hybrid_panel_push and postpush_home_steps > 0:
+                if "panel_postpush_home_start_step" not in traj:
+                    traj["panel_postpush_home_start_step"] = int(step)
+                home_elapsed = (
+                    int(step) - int(traj["panel_postpush_home_start_step"]) + 1
+                )
+                traj["panel_postpush_home_alpha"] = smoothstep(
+                    float(np.clip(home_elapsed / postpush_home_steps, 0.0, 1.0))
+                )
+            else:
+                # Preserve the historical immediate reset unless the new
+                # trajectory option is explicitly enabled.
+                traj["panel_postpush_home_alpha"] = 1.0
             previous_xy = np.asarray(
                 traj.get("base_xy", base_release), dtype=np.float32
             )
@@ -5911,10 +9147,65 @@ def trajectory_targets(
             body_forward = np.array(
                 [math.cos(previous_yaw), math.sin(previous_yaw)], dtype=np.float32
             )
-            base_xy = (
-                previous_xy + body_forward * speed * dt_base
-            ).astype(np.float32)
-            yaw = float(previous_yaw + yaw_step)
+            body_left = np.array(
+                [-math.sin(previous_yaw), math.cos(previous_yaw)], dtype=np.float32
+            )
+            lateral_speed = 0.0
+            if (
+                str(args.pull_panel_base_mode) == "with_vy"
+                and pass_distance > 0.015
+            ):
+                lateral_error = float(np.dot(pass_delta, body_left))
+                lateral_hold = int(traj.get("pass_lateral_hold_remaining", 0))
+                if lateral_hold > 0:
+                    lateral_speed = float(
+                        traj.get("pass_lateral_command_mps", 0.0)
+                    )
+                    traj["pass_lateral_hold_remaining"] = lateral_hold - 1
+                elif abs(lateral_error) >= float(
+                    args.panel_base_follow_lateral_deadband_m
+                ):
+                    min_lateral = float(
+                        args.panel_base_follow_min_lateral_speed
+                    )
+                    max_lateral = max(
+                        min_lateral,
+                        float(args.panel_base_follow_max_lateral_speed),
+                    )
+                    lateral_speed = math.copysign(
+                        min(
+                            max_lateral,
+                            max(min_lateral, 2.0 * abs(lateral_error)),
+                        ),
+                        lateral_error,
+                    )
+                    traj["pass_lateral_command_mps"] = lateral_speed
+                    traj["pass_lateral_hold_remaining"] = max(
+                        0,
+                        int(args.panel_base_follow_lateral_min_hold_steps) - 1,
+                    )
+                else:
+                    traj["pass_lateral_command_mps"] = 0.0
+            if vx_only_base:
+                forward_error = float(np.dot(pass_delta, fixed_body_forward))
+                speed = float(
+                    np.clip(
+                        2.0 * forward_error,
+                        -float(args.pass_base_follow_max_speed),
+                        float(args.pass_base_follow_max_speed),
+                    )
+                )
+                base_xy = (
+                    previous_xy + fixed_body_forward * speed * dt_base
+                ).astype(np.float32)
+                yaw = float(yaw_start)
+                lateral_speed = 0.0
+            else:
+                base_xy = (
+                    previous_xy
+                    + (body_forward * speed + body_left * lateral_speed) * dt_base
+                ).astype(np.float32)
+                yaw = float(previous_yaw + yaw_step)
             retract_base_pos = traj.get("release_retract_base_pos")
             target_pos = (
                 base_pos_to_world(
@@ -6038,6 +9329,9 @@ def trajectory_targets(
             "pull_door",
             "open_hold",
             "release_handle",
+            "panel_reposition",
+            "panel_contact",
+            "panel_push",
             "pass_through",
             "return_home",
             "hold_home",
@@ -6082,12 +9376,67 @@ def draw_scripted_trajectory(gym, viewer, env, traj, args, current_target_pos=No
         color2=(1.0, 0.0, 0.0),
     )
 
-    points = [np.asarray(traj[key], dtype=np.float32) for key in keys]
+    # Only the approach/grasp/handle-rotation portion is linear.  The pull
+    # controller follows the handle around the hinge and must be visualized as
+    # that same circular arc rather than the obsolete rotate -> pull segment.
+    points = [np.asarray(traj[key], dtype=np.float32) for key in keys[:-1]]
     for a, b in zip(points[:-1], points[1:]):
         for i in range(samples):
             u = i / max(1, samples - 1)
             pos = lerp(a, b, u)
             gymutil.draw_lines(green_sphere, gym, viewer, env, base_ik.transform_from_arrays(pos))
+
+    hinge_pos = traj.get("pull_arc_hinge_pos", traj.get("pull_preview_hinge_pos"))
+    handle_start = traj.get(
+        "pull_arc_handle_start", traj.get("pull_preview_handle_start")
+    )
+    ee_offset_start = traj.get(
+        "pull_arc_ee_offset_start", traj.get("pull_preview_ee_offset_start")
+    )
+    if hinge_pos is not None and handle_start is not None and ee_offset_start is not None:
+        hinge_pos = np.asarray(hinge_pos, dtype=np.float32)
+        handle_start = np.asarray(handle_start, dtype=np.float32)
+        ee_offset_start = np.asarray(ee_offset_start, dtype=np.float32)
+        radial = handle_start - hinge_pos
+        preview_angle_deg = (
+            float(args.pull_panel_release_angle_deg)
+            if bool(getattr(args, "pull_then_panel_push", True))
+            else float(args.pull_release_angle_deg)
+        )
+        preview_angle_deg += max(0.0, float(args.pull_arc_lead_angle_deg))
+        for i in range(samples):
+            u = i / max(1, samples - 1)
+            yaw = (
+                float(args.door_motion_sign)
+                * math.radians(preview_angle_deg)
+                * float(u)
+            )
+            pos = hinge_pos.copy()
+            pos[:2] += dc.rotate_xy(radial[:2], yaw)
+            pos[2] += radial[2]
+            rotated_ee_offset = ee_offset_start.copy()
+            rotated_ee_offset[:2] = dc.rotate_xy(ee_offset_start[:2], yaw)
+            pos += rotated_ee_offset
+            gymutil.draw_lines(
+                green_sphere,
+                gym,
+                viewer,
+                env,
+                base_ik.transform_from_arrays(pos),
+            )
+
+    panel_points = [
+        np.asarray(traj[key], dtype=np.float32)
+        for key in ("panel_edge_waypoint", "panel_precontact", "panel_mirrored_goal")
+        if key in traj
+    ]
+    for a, b in zip(panel_points[:-1], panel_points[1:]):
+        for i in range(samples):
+            u = i / max(1, samples - 1)
+            pos = lerp(a, b, u)
+            gymutil.draw_lines(
+                green_sphere, gym, viewer, env, base_ik.transform_from_arrays(pos)
+            )
 
     if current_target_pos is not None:
         gymutil.draw_lines(
@@ -6256,6 +9605,20 @@ def run_demo(
             if gripper_idx is not None:
                 dof_positions[gripper_idx] = home_positions[gripper_idx]
             ik_state.last_pos_error = 0.0
+        elif (
+            phase == "pass_through"
+            and float(traj.get("panel_postpush_home_alpha", 1.0)) < 1.0
+        ):
+            if "panel_postpush_home_start_dofs" not in traj:
+                traj["panel_postpush_home_start_dofs"] = np.asarray(
+                    dof_positions, dtype=np.float32
+                ).copy()
+            dof_positions[:] = lerp(
+                traj["panel_postpush_home_start_dofs"],
+                home_positions,
+                float(traj["panel_postpush_home_alpha"]),
+            )
+            ik_state.last_pos_error = 0.0
         elif phase == "return_home":
             if "return_home_start_dofs" not in traj:
                 traj["return_home_start_dofs"] = np.asarray(dof_positions, dtype=np.float32).copy()
@@ -6270,6 +9633,14 @@ def run_demo(
             update_arm_ik_targets(gym, sim, dof_positions, ik_state, args, num_arm_dofs)
             if gripper_idx is not None:
                 dof_positions[gripper_idx] = np.clip(gripper, ik_state.lower[gripper_idx].item(), ik_state.upper[gripper_idx].item())
+        joint_swivel_active = apply_panel_right_arc_joint_swivel(
+            dof_positions, home_positions, traj, args, phase
+        )
+        if not joint_swivel_active:
+            apply_panel_right_arc_joint_guard(
+                dof_positions, traj, args, phase
+            )
+        limit_pull_expert_arm_command(dof_positions, traj, args, phase, dt)
         gym.set_actor_dof_position_targets(env, arm_actor, dof_positions)
 
         dc.enforce_locked_door_hinge(gym, env, door_actor, door, args)
@@ -6488,6 +9859,9 @@ def create_parallel_env_states(
             env_index,
             str(door_template.spec.get("name", "")),
         )
+        if getattr(args, "dp_expert_handoff_manifest", ""):
+            from pull_expert_handoff import prepare_env_args
+            prepare_env_args(env_args, args, env_index)
         env, arm_actor, actor_handles, door_actor, _ = create_parallel_env_actors(
             gym,
             sim,
@@ -6500,6 +9874,7 @@ def create_parallel_env_states(
             env_index,
             envs_per_row,
         )
+        refresh_pull_adaptive_release_parameters(env_args)
         configure_pull_contact_friction(
             gym,
             env,
@@ -6508,6 +9883,7 @@ def create_parallel_env_states(
             env_args,
         )
         apply_a2w_base_visual_dofs(gym, env, actor_handles, base_dof_data)
+        rgb_doorman.attach(gym, sim, gymapi, env, door_actor, door, env_args)
         created.append((env_index, env_args, env, arm_actor, actor_handles, door, door_actor))
 
     env_states = []
@@ -6831,6 +10207,7 @@ def run_parallel_recovery_batch(gym, sim, env_states, viewer, args, dt, dof_name
     max_steps = max(int(st.recovery_total_steps) for st in env_states)
     print(f"Recovery verification batch: candidates={len(env_states)} steps={max_steps}", flush=True)
     for step in range(max_steps):
+        rgb_doorman.update(gym, sim, gymapi, args, step, dt)
         gym.refresh_rigid_body_state_tensor(sim)
         gym.refresh_dof_state_tensor(sim)
         gym.refresh_jacobian_tensors(sim)
@@ -7053,9 +10430,6 @@ def update_pull_raw_record_success(st, door_pos):
     signed base traversal beyond the door plane.  Keeping this override in the
     pull entrypoint leaves every push-door rule unchanged.
     """
-    if st.dp_recorder is None:
-        return
-
     open_deg = dc.door_open_degrees(door_pos, st.args) if len(door_pos) else 0.0
     st.traj["pull_record_max_open_deg"] = max(
         float(st.traj.get("pull_record_max_open_deg", 0.0)),
@@ -7095,10 +10469,17 @@ def update_pull_raw_record_success(st, door_pos):
     max_abs_body_vy = float(
         st.traj.get("pull_max_abs_body_vy_mps", 0.0)
     )
-    release_ok = release_angle >= float(st.args.pull_release_angle_deg)
+    hybrid_panel_push = bool(getattr(st.args, "pull_then_panel_push", True))
+    release_threshold = (
+        float(st.args.pull_panel_release_angle_deg)
+        if hybrid_panel_push
+        else float(st.args.pull_release_angle_deg)
+    )
+    release_ok = release_angle >= release_threshold
     open_ok = max_open >= float(st.args.pass_open_angle_deg)
     traversal_ok = max_traversal >= float(st.args.pull_record_traversal_distance_m)
-    lateral_motion_ok = max_abs_body_vy <= 1.0e-4
+    allow_lateral = str(getattr(st.args, "pull_panel_base_mode", "no_vy")) == "with_vy"
+    lateral_motion_ok = allow_lateral or max_abs_body_vy <= 1.0e-4
     st.dp_record_success = bool(
         release_ok
         and open_ok
@@ -7106,25 +10487,134 @@ def update_pull_raw_record_success(st, door_pos):
         and lateral_motion_ok
         and not bool(getattr(st, "base_door_collision_detected", False))
     )
-    st.dp_recorder.metadata.update(
-        {
+    if st.dp_recorder is not None:
+        st.dp_recorder.metadata.update(
+            {
             "pull_success_metric": "max_open_and_signed_base_traversal",
             "pull_release_angle_observed_deg": release_angle,
+            "pull_release_angle_threshold_deg": release_threshold,
+            "pull_then_panel_push": hybrid_panel_push,
+            "pull_panel_base_mode": str(st.args.pull_panel_base_mode),
             "pull_max_open_deg": max_open,
             "pull_max_traversal_m": max_traversal,
             "pull_max_abs_body_vy_mps": max_abs_body_vy,
-            "pull_body_vy_threshold_mps": 1.0e-4,
+            "pull_body_vy_threshold_mps": None if allow_lateral else 1.0e-4,
+            "pull_active_body_vy_min_mps": (
+                float(st.args.panel_base_follow_min_lateral_speed)
+                if allow_lateral
+                else 0.0
+            ),
+            "pull_active_body_vy_max_mps": (
+                float(st.args.panel_base_follow_max_lateral_speed)
+                if allow_lateral
+                else 0.0
+            ),
             "pull_open_threshold_deg": float(st.args.pass_open_angle_deg),
             "pull_traversal_threshold_m": float(
                 st.args.pull_record_traversal_distance_m
             ),
-        }
-    )
+            }
+        )
+
+
+class PullOverviewVideoRecorder:
+    """Record the rendered Isaac Gym viewer without changing policy observations."""
+
+    def __init__(self, gym, viewer, args):
+        self.gym = gym
+        self.viewer = viewer
+        self.args = args
+        self.path_text = str(getattr(args, "overview_video_path", "") or "").strip()
+        self.enabled = bool(self.path_text)
+        self.path = None
+        self.writer = None
+        self.frame_count = 0
+        self.tmp_dir = None
+        if not self.enabled:
+            return
+        if viewer is None:
+            raise RuntimeError("--overview_video_path requires a non-headless Isaac Gym viewer.")
+        if cv2 is None:
+            raise RuntimeError("OpenCV is required for --overview_video_path.")
+        self.path = Path(self.path_text).expanduser()
+        if not self.path.is_absolute():
+            self.path = (Path.cwd() / self.path).resolve()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.tmp_dir = tempfile.TemporaryDirectory(prefix="a2w_pull_overview_frames_")
+        print(
+            "Pull overview video: "
+            f"path={self.path} fps={float(args.overview_video_fps):.2f} "
+            f"capture_stride={int(args.overview_video_capture_stride)}",
+            flush=True,
+        )
+
+    def capture(self, step):
+        if not self.enabled:
+            return
+        if int(step) < max(0, int(self.args.overview_video_capture_start_step)):
+            return
+        max_frames = int(self.args.overview_video_max_frames)
+        if max_frames >= 0 and self.frame_count >= max_frames:
+            return
+        stride = max(1, int(self.args.overview_video_capture_stride))
+        if int(step) % stride != 0:
+            return
+        frame_path = Path(self.tmp_dir.name) / f"frame_{self.frame_count:06d}.png"
+        self.gym.write_viewer_image_to_file(self.viewer, str(frame_path))
+        frame = cv2.imread(str(frame_path), cv2.IMREAD_COLOR)
+        if frame is None:
+            raise RuntimeError(f"Failed to read Isaac Gym viewer frame {frame_path}.")
+        width = int(self.args.overview_video_width)
+        height = int(self.args.overview_video_height)
+        if width > 0 and height > 0 and (frame.shape[1] != width or frame.shape[0] != height):
+            frame = cv2.resize(frame, (width, height), interpolation=cv2.INTER_AREA)
+        if self.writer is None:
+            output_height, output_width = frame.shape[:2]
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            self.writer = cv2.VideoWriter(
+                str(self.path),
+                fourcc,
+                float(self.args.overview_video_fps),
+                (output_width, output_height),
+            )
+            if not self.writer.isOpened():
+                raise RuntimeError(f"Failed to open overview video writer {self.path}.")
+        self.writer.write(frame)
+        self.frame_count += 1
+
+    def close(self):
+        if self.writer is not None:
+            self.writer.release()
+            self.writer = None
+        if self.tmp_dir is not None:
+            self.tmp_dir.cleanup()
+            self.tmp_dir = None
+        if self.enabled:
+            print(
+                f"Pull overview video saved: {self.path} frames={self.frame_count}",
+                flush=True,
+            )
+
+
+def audit_pull_unlock_threshold(env_states, expected_deg):
+    """Opt-in assertion of the actual physical latch threshold after asset setup."""
+    rows = []
+    for st in env_states:
+        actual = math.degrees(float(st.door.handle_unlock_threshold))
+        if not math.isfinite(actual) or abs(actual - float(expected_deg)) > 1.0e-4:
+            raise ValueError(f"Physical handle unlock threshold env={st.index}: {actual}deg != {expected_deg}deg")
+        rows.append({"env_id": int(st.index), "handle_unlock_angle_deg": actual,
+                     "handle_rest_angle_rad": float(st.door.handle_rest_angle),
+                     "handle_unlock_ratio": float(st.args.handle_unlock_ratio)})
+    return rows
 
 
 def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
     if not env_states:
         raise RuntimeError("No parallel envs were created.")
+    expected_unlock = float(getattr(args, "expected_handle_unlock_angle_deg", -1.0))
+    if expected_unlock >= 0.0:
+        print("[PullUnlockAudit] " + json.dumps(audit_pull_unlock_threshold(env_states, expected_unlock)), flush=True)
     num_arm_dofs = len(env_states[0].dof_positions)
     dof_dict = {name: i for i, name in enumerate(dof_names)}
     gripper_idx = dof_dict.get("jointGripper")
@@ -7196,6 +10686,9 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
     external_action_control = bool(dp_controller is not None or expert_replay is not None)
     if external_action_control:
         apply_dp_warmstart_if_requested(gym, sim, args, dp_controller, dp_control_state, dof_names)
+        if getattr(args, "dp_expert_handoff_manifest", ""):
+            from pull_expert_handoff import restore_batch
+            restore_batch(gym, sim, env_states, args, dp_controller, dof_names, sys.modules[__name__])
         dp_policy_stride = dc.float_dp_policy_sample_stride(args, dt)
         dp_policy_dt = float(dt) * float(dp_policy_stride)
         for st in env_states:
@@ -7215,11 +10708,18 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
     else:
         dp_policy_action_names = []
         external_action_frame = "world"
-    dp_policy_uses_joint_action = bool(float_dp_action_is_a2w_joint9(dp_policy_action_names))
+    dp_policy_uses_joint_action = bool(float_dp_action_is_a2w_joint(dp_policy_action_names))
+    dp_policy_joint_has_vy = bool(float_dp_action_is_a2w_joint10(dp_policy_action_names))
     if dp_policy_uses_joint_action:
-        print("Door DP policy action mode: A2W joint9 (vx, yaw, joint1..joint6, jointGripper).", flush=True)
+        mode_label = "joint10 (vx, vy, yaw" if dp_policy_joint_has_vy else "joint9 (vx, yaw"
+        print(
+            f"Door DP policy action mode: A2W {mode_label}, joint1..joint6, jointGripper).",
+            flush=True,
+        )
 
+    overview_video = PullOverviewVideoRecorder(gym, viewer, args)
     while step < max_steps:
+        rgb_doorman.update(gym, sim, gymapi, args, step, dt)
         if not handle_viewer_pause(gym, sim, viewer):
             break
 
@@ -7330,6 +10830,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                         base_xy_current,
                         yaw_current,
                         dt,
+                        include_vy=dp_policy_joint_has_vy,
                     )
                     set_a2w_joint_targets_from_action(
                         st.dof_positions,
@@ -7363,6 +10864,20 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                         phase,
                     )
             else:
+                if bool(getattr(st.args, "pull_panel_contact_loss_release", False)):
+                    contact_snapshot = dc.gripper_handle_contact_snapshot(gym, st)
+                    st.traj["gripper_handle_contact_any"] = bool(
+                        np.asarray(
+                            contact_snapshot["gripper_handle_contact_any"]
+                        ).reshape(-1)[0]
+                        > 0.5
+                    )
+                    st.traj["gripper_handle_contact_both"] = bool(
+                        np.asarray(
+                            contact_snapshot["gripper_handle_contact_both"]
+                        ).reshape(-1)[0]
+                        > 0.5
+                    )
                 phase, base_xy, yaw, target_pos, target_quat, gripper, handle_goal = trajectory_targets(
                     step,
                     st.args,
@@ -7482,6 +10997,21 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                     st.dof_positions[gripper_idx] = st.home_positions[gripper_idx]
                 st.ik_state.last_pos_error = 0.0
                 reset_tracik_controller_to_targets(gym, st, step, dt)
+            elif (
+                phase == "pass_through"
+                and float(st.traj.get("panel_postpush_home_alpha", 1.0)) < 1.0
+            ):
+                if "panel_postpush_home_start_dofs" not in st.traj:
+                    st.traj["panel_postpush_home_start_dofs"] = np.asarray(
+                        st.dof_positions, dtype=np.float32
+                    ).copy()
+                st.dof_positions[:] = lerp(
+                    st.traj["panel_postpush_home_start_dofs"],
+                    st.home_positions,
+                    float(st.traj["panel_postpush_home_alpha"]),
+                )
+                st.ik_state.last_pos_error = 0.0
+                reset_tracik_controller_to_targets(gym, st, step, dt)
             elif phase == "return_home":
                 if "return_home_start_dofs" not in st.traj:
                     st.traj["return_home_start_dofs"] = np.asarray(st.dof_positions, dtype=np.float32).copy()
@@ -7536,6 +11066,21 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                             st.ik_state.lower[gripper_idx].item(),
                             st.ik_state.upper[gripper_idx].item(),
                         )
+            joint_swivel_active = apply_panel_right_arc_joint_swivel(
+                st.dof_positions,
+                st.home_positions,
+                st.traj,
+                st.args,
+                st.last_phase,
+            )
+            if not joint_swivel_active:
+                apply_panel_right_arc_joint_guard(
+                    st.dof_positions, st.traj, st.args, st.last_phase
+                )
+            limit_pull_expert_arm_command(
+                st.dof_positions, st.traj, st.args, st.last_phase, dt,
+                external=bool(external_action_control and st.index in dp_control_env_id_set),
+            )
             gym.set_actor_dof_position_targets(st.env, st.arm_actor, st.dof_positions)
 
             dc.enforce_locked_door_hinge(gym, st.env, st.door_actor, st.door, st.args)
@@ -7591,6 +11136,15 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
         for st in env_states:
             door_pos_record, door_vel_record = get_actor_dof_state(gym, st.env, st.door_actor)
             st.last_door_pos = door_pos_record
+            current_open_deg = (
+                dc.door_open_degrees(door_pos_record, st.args)
+                if len(door_pos_record)
+                else 0.0
+            )
+            st.traj["pull_max_open_deg"] = max(
+                float(st.traj.get("pull_max_open_deg", 0.0)),
+                float(current_open_deg),
+            )
             dc.monitor_base_door_collision(gym, step, st)
             if door_twin_dump_due:
                 maybe_dump_door_twin_keyframe_images(gym, sim, st, step)
@@ -7608,10 +11162,10 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                     door_pos_record,
                     door_vel_record,
                 )
-                update_pull_raw_record_success(st, door_pos_record)
                 tracker = getattr(st, "door_twin_tracker", None)
                 if tracker is not None and frame_recorded:
                     tracker.mark_camera_available(True)
+            update_pull_raw_record_success(st, door_pos_record)
             update_door_twin_tracker(st, step, door_pos_record)
             st.prev_base_xy = np.asarray(st.traj.get("base_xy", st.base_start), dtype=np.float32).copy()
             st.prev_yaw = float(st.traj.get("yaw", st.yaw_start))
@@ -7673,6 +11227,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                             ),
                         )
             gym.draw_viewer(viewer, sim, True)
+            overview_video.capture(step)
             gym.sync_frame_time(sim)
 
         if args.log_interval > 0 and step % args.log_interval == 0:
@@ -7689,9 +11244,33 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
             ]
             handle_unlocked = [bool(st.door.open_stage) for st in shown]
             phases = [st.last_phase for st in shown]
+            ik_pos_errs = [
+                round(float(st.ik_state.last_pos_error), 4) for st in shown
+            ]
+            ik_rot_errs = [
+                None
+                if st.ik_state.last_rot_error is None
+                else round(float(st.ik_state.last_rot_error), 4)
+                for st in shown
+            ]
+            contact_any = [
+                bool(st.traj.get("gripper_handle_contact_any", False))
+                for st in shown
+            ]
+            contact_both = [
+                bool(st.traj.get("gripper_handle_contact_both", False))
+                for st in shown
+            ]
             successes = sum(st.dp_record_success for st in env_states if st.dp_recorder is not None)
             pull_note = ""
-            if shown and shown[0].last_phase in {"pull_door", "open_hold", "release_handle"}:
+            if shown and shown[0].last_phase in {
+                "pull_door",
+                "open_hold",
+                "release_handle",
+                "panel_reposition",
+                "panel_contact",
+                "panel_push",
+            }:
                 pull_state = shown[0]
                 pull_note = (
                     f" pull_ee={np.round(pull_state.ik_state.current_pos_np, 3).tolist()}"
@@ -7747,6 +11326,8 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
             print(
                 f"[{step:04d}] phases={phases} door_deg={door_deg} "
                 f"handle_deg={handle_deg} handle_unlocked={handle_unlocked} "
+                f"ik_pos_errs={ik_pos_errs} ik_rot_errs={ik_rot_errs} "
+                f"contact_any={contact_any} contact_both={contact_both} "
                 f"record_success={successes}/{sum(st.dp_recorder is not None for st in env_states)}"
                 f"{pull_note}"
                 f"{tracik_note}",
@@ -7754,6 +11335,7 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
             )
         step += 1
 
+    overview_video.close()
     elapsed = time.time() - start
     release_angles = [
         float(st.traj["pull_release_angle_observed_deg"])
@@ -7763,7 +11345,13 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
     completed_phases = {"return_home", "hold_home"}
     completed_count = sum(st.last_phase in completed_phases for st in env_states)
     max_open_angles = [
-        float(st.traj.get("pull_max_open_deg", 0.0)) for st in env_states
+        float(
+            st.traj.get(
+                "pull_record_max_open_deg",
+                st.traj.get("pull_max_open_deg", 0.0),
+            )
+        )
+        for st in env_states
     ]
     max_abs_body_vys = [
         float(st.traj.get("pull_max_abs_body_vy_mps", 0.0))
@@ -7786,6 +11374,62 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
         f"{max(max_abs_body_vys, default=0.0):.6f}",
         flush=True,
     )
+    validation_path = str(getattr(args, "pull_validation_result_json", "") or "").strip()
+    if validation_path:
+        result_path = Path(validation_path).expanduser()
+        if not result_path.is_absolute():
+            result_path = (Path.cwd() / result_path).resolve()
+        result_path.parent.mkdir(parents=True, exist_ok=True)
+        environments = []
+        for st in env_states:
+            max_open = float(st.traj.get("pull_record_max_open_deg", 0.0))
+            max_traversal = float(
+                st.traj.get("pull_record_max_traversal_m", float("-inf"))
+            )
+            release_angle = float(
+                st.traj.get("pull_release_angle_observed_deg", 0.0)
+            )
+            open_ok = max_open >= float(st.args.pass_open_angle_deg)
+            traversal_ok = max_traversal >= float(
+                st.args.pull_record_traversal_distance_m
+            )
+            collision = bool(getattr(st, "base_door_collision_detected", False))
+            environments.append(
+                {
+                    "env_id": int(st.index),
+                    "release_angle_observed_deg": release_angle,
+                    "max_open_deg": max_open,
+                    "max_traversal_m": max_traversal,
+                    "open_success": bool(open_ok),
+                    "traversal_success": bool(traversal_ok),
+                    "base_door_collision": collision,
+                    "joint_success": bool(open_ok and traversal_ok and not collision),
+                    "final_phase": str(st.last_phase),
+                }
+            )
+        payload = {
+            "schema_version": 1,
+            "seed": int(getattr(args, "seed", 0)),
+            "num_envs": len(environments),
+            "open_threshold_deg": float(args.pass_open_angle_deg),
+            "traversal_threshold_m": float(args.pull_record_traversal_distance_m),
+            "release_target_deg": float(args.pull_panel_release_angle_deg),
+            "release_randomization": bool(args.pull_panel_release_angle_randomization),
+            "open_successes": sum(item["open_success"] for item in environments),
+            "traversal_successes": sum(
+                item["traversal_success"] for item in environments
+            ),
+            "joint_successes": sum(item["joint_success"] for item in environments),
+            "environments": environments,
+        }
+        with result_path.open("w", encoding="utf-8") as stream:
+            json.dump(payload, stream, indent=2, sort_keys=True)
+        print(
+            "[A2WPullValidation] "
+            f"joint_success={payload['joint_successes']}/{payload['num_envs']} "
+            f"result_json={result_path}",
+            flush=True,
+        )
     print(f"Done after {step} steps ({elapsed:.2f}s).")
     raw_episode_snapshots = snapshot_raw_dp_episodes(env_states)
     dc.finish_float_dp_recorders(env_states, args)
@@ -7839,6 +11483,7 @@ def main():
     create_tracik_solver_if_requested(args)
     seed = resolve_seed(args)
     print(f"ikpush seed={seed}", flush=True)
+    rgb_doorman.initialize(args)
     gym = gymapi.acquire_gym()
     sim, dt = base_ik.create_sim(gym, args)
     args.sim_dt = float(dt)

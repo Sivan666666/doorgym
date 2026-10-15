@@ -19,6 +19,7 @@ DEFAULT_DEPTH_FAR_METERS = 2.0
 DEPTH_IMAGE_KEYS = ["wrist_handle_mask", "wrist_masked_depth", "front_handle_mask", "front_masked_depth"]
 DEPTH_ONLY_IMAGE_KEYS = ["wrist_masked_depth", "front_masked_depth"]
 RGB_IMAGE_KEYS = ["wrist_handle_mask", "wrist_rgb", "front_handle_mask", "front_rgb"]
+RGB_ONLY_IMAGE_KEYS = ["wrist_rgb", "front_rgb"]
 DEPTH_LEROBOT_IMAGE_KEYS = [
     "observation.images.wrist_handle_mask",
     "observation.images.wrist_masked_depth",
@@ -33,6 +34,10 @@ RGB_LEROBOT_IMAGE_KEYS = [
     "observation.images.wrist_handle_mask",
     "observation.images.wrist_rgb",
     "observation.images.front_handle_mask",
+    "observation.images.front_rgb",
+]
+RGB_ONLY_LEROBOT_IMAGE_KEYS = [
+    "observation.images.wrist_rgb",
     "observation.images.front_rgb",
 ]
 FRONT_CAMERA_POSE_FEATURE = "observation.camera_pose.front"
@@ -56,6 +61,7 @@ HANDLE_LATENT_FEATURES = [
     WRIST_HANDLE_LATENT_VALID_FEATURE,
 ]
 DATASET_METADATA_KEYS = (
+    "rgb_visual_randomization",
     "action_frame",
     "action_pose_frame",
     "target_pose_frame",
@@ -133,6 +139,9 @@ DATASET_METADATA_KEYS = (
     "interaction_contact_min_consecutive_frames",
     "interaction_handle_unlock_angle_deg",
     "interaction_door_goal_angle_deg",
+    "gripper_handle_contact_features",
+    "gripper_handle_contact_finger_order",
+    "gripper_handle_contact_version",
     "handle_closed_angle",
     "door_closed_angle",
     "handle_unlock_threshold",
@@ -151,6 +160,14 @@ INTERACTION_STATE_FEATURES = (
     INTERACTION_CONTACT_FEATURE,
     INTERACTION_HANDLE_PROGRESS_FEATURE,
     INTERACTION_DOOR_PROGRESS_FEATURE,
+)
+GRIPPER_HANDLE_CONTACT_LOWER_FEATURE = "aux.gripper_handle_contact_lower"
+GRIPPER_HANDLE_CONTACT_UPPER_FEATURE = "aux.gripper_handle_contact_upper"
+GRIPPER_HANDLE_CONTACT_BOTH_FEATURE = "aux.gripper_handle_contact_both"
+GRIPPER_HANDLE_CONTACT_FEATURES = (
+    GRIPPER_HANDLE_CONTACT_LOWER_FEATURE,
+    GRIPPER_HANDLE_CONTACT_UPPER_FEATURE,
+    GRIPPER_HANDLE_CONTACT_BOTH_FEATURE,
 )
 POINT_CLOUD_FEATURE = "observation.point_cloud"
 DEFAULT_KEYFRAME_LOSS_WEIGHT = 8.0
@@ -954,17 +971,33 @@ def make_interaction_state_targets(
     door_closed_angle=None,
     handle_unlock_delta_rad=math.radians(40.0),
     door_goal_delta_rad=math.radians(90.0),
+    door_dof_index=0,
+    handle_dof_index=1,
+    handle_progress_constant=None,
 ):
     """Create causal contact and cumulative articulation progress targets."""
     contact_both = np.asarray(contact_both, dtype=np.float32).reshape(-1)
     door_dof_pos = np.asarray(door_dof_pos, dtype=np.float32)
-    if door_dof_pos.ndim != 2 or door_dof_pos.shape[1] < 2:
-        raise ValueError(f"door_dof_pos must have shape (T, >=2), got {door_dof_pos.shape}.")
+    if door_dof_pos.ndim != 2 or door_dof_pos.shape[1] < 1:
+        raise ValueError(f"door_dof_pos must have shape (T, >=1), got {door_dof_pos.shape}.")
+    door_dof_index = int(door_dof_index)
+    handle_dof_index = int(handle_dof_index)
+    if not 0 <= door_dof_index < door_dof_pos.shape[1]:
+        raise ValueError(
+            f"door_dof_index={door_dof_index} is invalid for door_dof_pos {door_dof_pos.shape}."
+        )
+    if handle_progress_constant is None and not 0 <= handle_dof_index < door_dof_pos.shape[1]:
+        raise ValueError(
+            f"handle_dof_index={handle_dof_index} is invalid for door_dof_pos {door_dof_pos.shape}."
+        )
     if contact_both.shape[0] != door_dof_pos.shape[0]:
         raise ValueError(
             f"contact/door frame count mismatch: {contact_both.shape[0]} vs {door_dof_pos.shape[0]}."
         )
-    if not np.all(np.isfinite(contact_both)) or not np.all(np.isfinite(door_dof_pos[:, :2])):
+    relevant = [door_dof_index]
+    if handle_progress_constant is None:
+        relevant.append(handle_dof_index)
+    if not np.all(np.isfinite(contact_both)) or not np.all(np.isfinite(door_dof_pos[:, relevant])):
         raise ValueError("Interaction-state source arrays must contain only finite values.")
     min_frames = int(contact_min_consecutive_frames)
     if min_frames <= 0:
@@ -980,15 +1013,31 @@ def make_interaction_state_targets(
         run_length = run_length + 1 if bool(active) else 0
         contact[idx] = float(run_length >= min_frames)
 
-    handle_closed = float(door_dof_pos[0, 1] if handle_closed_angle is None else handle_closed_angle)
-    door_closed = float(door_dof_pos[0, 0] if door_closed_angle is None else door_closed_angle)
-    raw_handle = np.clip(
-        np.abs(door_dof_pos[:, 1] - handle_closed) / handle_unlock_delta_rad,
-        0.0,
-        1.0,
+    handle_closed = float(
+        0.0
+        if handle_progress_constant is not None and handle_closed_angle is None
+        else (
+            door_dof_pos[0, handle_dof_index]
+            if handle_closed_angle is None
+            else handle_closed_angle
+        )
     )
+    door_closed = float(
+        door_dof_pos[0, door_dof_index] if door_closed_angle is None else door_closed_angle
+    )
+    if handle_progress_constant is None:
+        raw_handle = np.clip(
+            np.abs(door_dof_pos[:, handle_dof_index] - handle_closed) / handle_unlock_delta_rad,
+            0.0,
+            1.0,
+        )
+    else:
+        constant = float(handle_progress_constant)
+        if not np.isfinite(constant) or not 0.0 <= constant <= 1.0:
+            raise ValueError("handle_progress_constant must be finite and in [0, 1].")
+        raw_handle = np.full(contact_both.shape[0], constant, dtype=np.float32)
     raw_door = np.clip(
-        np.abs(door_dof_pos[:, 0] - door_closed) / door_goal_delta_rad,
+        np.abs(door_dof_pos[:, door_dof_index] - door_closed) / door_goal_delta_rad,
         0.0,
         1.0,
     )
@@ -1396,9 +1445,11 @@ class DoorDPLeRobotRecorder:
         include_handle_latent=False,
         include_end_signal=False,
         include_interaction_state=False,
+        include_contact_labels=False,
         include_images=True,
         include_point_cloud=False,
         point_cloud_num_points=1024,
+        image_feature_keys=None,
     ):
         from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
@@ -1407,6 +1458,23 @@ class DoorDPLeRobotRecorder:
         self.fps = int(fps)
         self.task = task
         self.vision_mode = normalize_vision_mode(vision_mode)
+        self.image_keys = list(
+            image_feature_keys
+            if image_feature_keys is not None
+            else lerobot_image_keys_for_vision_mode(self.vision_mode)
+        )
+        valid_image_keys = set(lerobot_image_keys_for_vision_mode(self.vision_mode))
+        if not set(self.image_keys).issubset(valid_image_keys):
+            raise ValueError(
+                f"Invalid image_feature_keys={self.image_keys!r} for vision_mode={self.vision_mode!r}."
+            )
+        if self.vision_mode == "rgb" and self.image_keys not in (
+            RGB_LEROBOT_IMAGE_KEYS,
+            RGB_ONLY_LEROBOT_IMAGE_KEYS,
+        ):
+            raise ValueError(
+                "RGB Door DP image features must be either legacy RGB+mask or wrist/front RGB-only."
+            )
         self.image_storage = str(image_storage).lower()
         if self.image_storage not in ("video", "image"):
             raise ValueError(f"Unsupported image_storage={image_storage!r}; expected 'video' or 'image'.")
@@ -1419,6 +1487,7 @@ class DoorDPLeRobotRecorder:
         self.include_handle_latent = bool(include_handle_latent)
         self.include_end_signal = bool(include_end_signal)
         self.include_interaction_state = bool(include_interaction_state)
+        self.include_contact_labels = bool(include_contact_labels)
         self.include_images = bool(include_images)
         self.include_point_cloud = bool(include_point_cloud)
         self.point_cloud_num_points = int(point_cloud_num_points)
@@ -1465,6 +1534,13 @@ class DoorDPLeRobotRecorder:
                 (INTERACTION_DOOR_PROGRESS_FEATURE, "door_progress"),
             ):
                 features[key] = {"dtype": "float32", "shape": (1,), "names": [name]}
+        if self.include_contact_labels:
+            for key, name in (
+                (GRIPPER_HANDLE_CONTACT_LOWER_FEATURE, "lower_contact"),
+                (GRIPPER_HANDLE_CONTACT_UPPER_FEATURE, "upper_contact"),
+                (GRIPPER_HANDLE_CONTACT_BOTH_FEATURE, "both_contact"),
+            ):
+                features[key] = {"dtype": "float32", "shape": (1,), "names": [name]}
         if self.include_camera_pose:
             for key in CAMERA_POSE_FEATURES:
                 features[key] = {
@@ -1500,7 +1576,7 @@ class DoorDPLeRobotRecorder:
                 "names": ["point", ["x", "y", "z"]],
             }
         if self.include_images:
-            for key in lerobot_image_keys_for_vision_mode(self.vision_mode):
+            for key in self.image_keys:
                 features[key] = {
                     "dtype": self.image_storage,
                     "shape": (IMAGE_HEIGHT, IMAGE_WIDTH, 3),
@@ -1531,7 +1607,7 @@ class DoorDPLeRobotRecorder:
         sidecar = {
             "state": self.state_feature_names,
             "action": self.action_names,
-            "image_features": lerobot_image_keys_for_vision_mode(self.vision_mode) if self.include_images else [],
+            "image_features": self.image_keys if self.include_images else [],
             "image_width": IMAGE_WIDTH,
             "image_height": IMAGE_HEIGHT,
             "image_storage": self.image_storage,
@@ -1559,6 +1635,11 @@ class DoorDPLeRobotRecorder:
         for key in DATASET_METADATA_KEYS:
             if hasattr(self, "metadata") and key in self.metadata:
                 sidecar[key] = self.metadata[key]
+        # Raw Isaac Sim metadata lists the NPZ field names under the same key.
+        # The LeRobot sidecar must instead advertise the actual aux feature keys.
+        if self.include_contact_labels:
+            sidecar["gripper_handle_contact_features"] = list(GRIPPER_HANDLE_CONTACT_FEATURES)
+            sidecar["gripper_handle_contact_finger_order"] = ["lower", "upper"]
         out = self.dataset_root / "door_dp_feature_names.json"
         out.parent.mkdir(parents=True, exist_ok=True)
         with open(out, "w", encoding="utf-8") as f:
@@ -1585,6 +1666,9 @@ class DoorDPLeRobotRecorder:
         interaction_contact=None,
         interaction_handle_progress=None,
         interaction_door_progress=None,
+        contact_lower=None,
+        contact_upper=None,
+        contact_both=None,
         point_cloud=None,
     ):
         if self.vision_mode == "depth":
@@ -1594,7 +1678,7 @@ class DoorDPLeRobotRecorder:
             front_second_rgb = _zero_image_like(wrist_second_rgb) if front_second_rgb is None else front_second_rgb
         elif front_mask_rgb is None or front_second_rgb is None:
             raise ValueError("RGB Door DP LeRobot frames require wrist/front RGB and mask images.")
-        image_keys = lerobot_image_keys_for_vision_mode(self.vision_mode)
+        image_keys = self.image_keys
         frame = {
             "observation.state": np.asarray(state, dtype=np.float32),
             "action": np.asarray(action, dtype=np.float32),
@@ -1635,6 +1719,19 @@ class DoorDPLeRobotRecorder:
                 if not np.isfinite(scalar) or scalar < 0.0 or scalar > 1.0:
                     raise ValueError(f"Invalid {key}={scalar}; expected a finite value in [0, 1].")
                 frame[key] = np.asarray([scalar], dtype=np.float32)
+        if self.include_contact_labels:
+            values = {
+                GRIPPER_HANDLE_CONTACT_LOWER_FEATURE: contact_lower,
+                GRIPPER_HANDLE_CONTACT_UPPER_FEATURE: contact_upper,
+                GRIPPER_HANDLE_CONTACT_BOTH_FEATURE: contact_both,
+            }
+            for key, value in values.items():
+                if value is None:
+                    raise ValueError(f"LeRobot contact-label frame requires {key!r}.")
+                scalar = float(np.asarray(value, dtype=np.float32).reshape(-1)[0])
+                if scalar not in (0.0, 1.0):
+                    raise ValueError(f"Invalid binary contact label {key}={scalar}.")
+                frame[key] = np.asarray([scalar], dtype=np.float32)
         if self.include_camera_pose:
             if front_camera_pose_base is None or wrist_camera_pose_base is None:
                 raise ValueError("LeRobot camera-pose dataset frames require both front and wrist camera poses.")
@@ -1663,6 +1760,9 @@ class DoorDPLeRobotRecorder:
             )
         if self.include_images:
             if self.vision_mode == "depth_only":
+                frame[image_keys[0]] = np.asarray(wrist_second_rgb, dtype=np.uint8)
+                frame[image_keys[1]] = np.asarray(front_second_rgb, dtype=np.uint8)
+            elif self.vision_mode == "rgb" and image_keys == RGB_ONLY_LEROBOT_IMAGE_KEYS:
                 frame[image_keys[0]] = np.asarray(wrist_second_rgb, dtype=np.uint8)
                 frame[image_keys[1]] = np.asarray(front_second_rgb, dtype=np.uint8)
             else:
@@ -1705,10 +1805,17 @@ class RawDoorDPRecorder:
         self.fps = int(fps)
         self.task = str(task)
         self.vision_mode = normalize_vision_mode(vision_mode)
-        self.image_keys = raw_image_keys_for_vision_mode(self.vision_mode)
         self.state_feature_names = list(state_feature_names)
         self.action_names = list(action_feature_names or ACTION_NAMES)
         self.metadata = dict(metadata or {})
+        self.rgb_masks_included = not (
+            self.vision_mode == "rgb" and self.metadata.get("rgb_masks_included") is False
+        )
+        self.image_keys = (
+            list(RGB_ONLY_IMAGE_KEYS)
+            if self.vision_mode == "rgb" and not self.rgb_masks_included
+            else raw_image_keys_for_vision_mode(self.vision_mode)
+        )
         self.raw_root.mkdir(parents=True, exist_ok=True)
         self.frames = {
             "state": [],
@@ -1769,6 +1876,9 @@ class RawDoorDPRecorder:
         if self.vision_mode == "depth_only":
             self.frames[self.image_keys[0]].append(depth_image_to_single_channel_uint8(wrist_second_rgb))
             self.frames[self.image_keys[1]].append(depth_image_to_single_channel_uint8(front_second_rgb))
+        elif self.vision_mode == "rgb" and not self.rgb_masks_included:
+            self.frames[self.image_keys[0]].append(np.asarray(wrist_second_rgb, dtype=np.uint8).copy())
+            self.frames[self.image_keys[1]].append(np.asarray(front_second_rgb, dtype=np.uint8).copy())
         else:
             self.frames[self.image_keys[0]].append(np.asarray(wrist_mask_rgb, dtype=np.uint8).copy())
             self.frames[self.image_keys[1]].append(np.asarray(wrist_second_rgb, dtype=np.uint8).copy())

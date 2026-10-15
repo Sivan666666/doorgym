@@ -144,12 +144,27 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--steps", type=int, default=None)
     parser.add_argument("--pass_open_angle_deg", type=float, default=80.0)
     parser.add_argument(
+        "--door_dof_index",
+        type=int,
+        default=0,
+        help="Door hinge DOF index in the logged door.dof array (glass_door2 uses 1).",
+    )
+    parser.add_argument(
         "--pull_traversal_distance_m",
         type=float,
-        default=0.8,
+        default=0.5,
         help=(
             "For --mode ikpull/pull, require the robot base to move this far beyond the randomized "
             "door plane along the traversal direction. Push modes ignore this option."
+        ),
+    )
+    parser.add_argument(
+        "--pull_handle_unlock_angle_deg",
+        type=float,
+        default=40.0,
+        help=(
+            "Handle-angle threshold used only to classify failed pull trials as "
+            "grasp failures versus insufficient opening. It does not change success."
         ),
     )
     parser.add_argument("--success_metric", choices=["auto", "signed", "abs"], default="auto")
@@ -287,12 +302,17 @@ def read_jsonl(path: Path):
                 raise ValueError(f"Invalid JSONL in {path}:{line_no}: {exc}") from exc
 
 
-def door_open_deg(record: dict[str, Any], metric: str, door_motion_sign: float) -> float | None:
+def door_open_deg(
+    record: dict[str, Any],
+    metric: str,
+    door_motion_sign: float,
+    door_dof_index: int = 0,
+) -> float | None:
     door = record.get("door") or {}
     dof = door.get("dof")
-    if not dof:
+    if not dof or int(door_dof_index) < 0 or int(door_dof_index) >= len(dof):
         return None
-    hinge_rad = float(dof[0])
+    hinge_rad = float(dof[int(door_dof_index)])
     hinge_deg = math.degrees(hinge_rad)
     if metric == "abs":
         return abs(hinge_deg)
@@ -329,7 +349,8 @@ def scan_log_progress(
     metric: str,
     door_motion_sign: float,
     mode: str = "ikpush",
-    pull_traversal_distance_m: float = 0.8,
+    pull_traversal_distance_m: float = 0.5,
+    door_dof_index: int = 0,
 ) -> dict[str, Any]:
     require_pull_traversal = is_pull_mode(mode)
     progress: dict[str, Any] = {
@@ -365,7 +386,12 @@ def scan_log_progress(
                 env_id = -1
             if env_id >= 0:
                 progress["env_ids"].add(env_id)
-            open_deg = door_open_deg(record, metric=metric, door_motion_sign=door_motion_sign)
+            open_deg = door_open_deg(
+                record,
+                metric=metric,
+                door_motion_sign=door_motion_sign,
+                door_dof_index=door_dof_index,
+            )
             if open_deg is None or env_id < 0:
                 continue
             max_by_env = progress["max_open_deg_by_env"]
@@ -450,7 +476,8 @@ def summarize_log(
     metric: str,
     door_motion_sign: float,
     mode: str = "ikpush",
-    pull_traversal_distance_m: float = 0.8,
+    pull_traversal_distance_m: float = 0.5,
+    door_dof_index: int = 0,
 ) -> list[dict[str, Any]]:
     require_pull_traversal = is_pull_mode(mode)
     stats = {
@@ -458,6 +485,7 @@ def summarize_log(
             "env_id": env_id,
             "records": 0,
             "max_open_deg": float("-inf"),
+            "max_handle_or_secondary_dof_deg": float("-inf"),
             "max_pull_traversal_m": float("-inf"),
             "first_door_open_step": None,
             "first_traversal_step": None,
@@ -485,7 +513,24 @@ def summarize_log(
             continue
         item = stats[env_id]
         item["records"] += 1
-        open_deg = door_open_deg(record, metric=metric, door_motion_sign=door_motion_sign)
+        door_record = record.get("door") or {}
+        door_dof = door_record.get("dof")
+        secondary_indices = (
+            [idx for idx in range(len(door_dof)) if idx != int(door_dof_index)]
+            if isinstance(door_dof, (list, tuple))
+            else []
+        )
+        if secondary_indices:
+            handle_deg = abs(float(door_dof[secondary_indices[0]])) * 180.0 / math.pi
+            item["max_handle_or_secondary_dof_deg"] = max(
+                float(item["max_handle_or_secondary_dof_deg"]), handle_deg
+            )
+        open_deg = door_open_deg(
+            record,
+            metric=metric,
+            door_motion_sign=door_motion_sign,
+            door_dof_index=door_dof_index,
+        )
         end_record = record.get("end_signal") or {}
         interaction = record.get("interaction_state") or {}
         if interaction:
@@ -545,6 +590,8 @@ def summarize_log(
         item = dict(stats[env_id])
         if item["max_open_deg"] == float("-inf"):
             item["max_open_deg"] = None
+        if item["max_handle_or_secondary_dof_deg"] == float("-inf"):
+            item["max_handle_or_secondary_dof_deg"] = None
         if item["max_pull_traversal_m"] == float("-inf"):
             item["max_pull_traversal_m"] = None
         success_step = item.get("first_success_step")
@@ -1082,6 +1129,7 @@ def run_batch_job(args: argparse.Namespace, spec: BatchSpec, metric: str) -> Bat
                 door_motion_sign=float(args.door_motion_sign),
                 mode=args.mode,
                 pull_traversal_distance_m=float(args.pull_traversal_distance_m),
+                door_dof_index=int(args.door_dof_index),
             )
             update_progress_line(spec, int(args.steps), progress, done=False, elapsed_s=now - start)
             last_progress_time = now
@@ -1099,6 +1147,7 @@ def run_batch_job(args: argparse.Namespace, spec: BatchSpec, metric: str) -> Bat
             door_motion_sign=float(args.door_motion_sign),
             mode=args.mode,
             pull_traversal_distance_m=float(args.pull_traversal_distance_m),
+            door_dof_index=int(args.door_dof_index),
         )
         update_progress_line(spec, int(args.steps), progress, done=True, elapsed_s=elapsed)
         remove_progress_line(spec)
@@ -1205,6 +1254,7 @@ def main() -> None:
                     door_motion_sign=float(args.door_motion_sign),
                     mode=args.mode,
                     pull_traversal_distance_m=float(args.pull_traversal_distance_m),
+                    door_dof_index=int(args.door_dof_index),
                 )
                 max_step = progress.get("max_step")
                 completed_steps = max_step is not None and int(max_step) >= max(0, int(args.steps) - 1)
@@ -1234,6 +1284,7 @@ def main() -> None:
                 door_motion_sign=float(args.door_motion_sign),
                 mode=args.mode,
                 pull_traversal_distance_m=float(args.pull_traversal_distance_m),
+                door_dof_index=int(args.door_dof_index),
             )
             for item in batch_stats:
                 item["batch"] = spec.batch_idx
@@ -1276,6 +1327,29 @@ def main() -> None:
         for item in batch_trials[idx]:
             item["global_trial"] = len(all_trials)
             all_trials.append(item)
+
+    failure_category_counts = {
+        "grasp_failure": 0,
+        "insufficient_opening": 0,
+        "opened_not_traversed": 0,
+        "unknown_failure": 0,
+    }
+    if is_pull_mode(args.mode):
+        for item in all_trials:
+            category = None
+            if not bool(item.get("success")):
+                if bool(item.get("door_open_success")):
+                    category = "opened_not_traversed"
+                else:
+                    max_handle = item.get("max_handle_or_secondary_dof_deg")
+                    if max_handle is None:
+                        category = "unknown_failure"
+                    elif float(max_handle) < float(args.pull_handle_unlock_angle_deg):
+                        category = "grasp_failure"
+                    else:
+                        category = "insufficient_opening"
+                failure_category_counts[category] += 1
+            item["failure_category"] = category
 
     total_successes = sum(1 for item in all_trials if item["success"])
     total_open_successes = sum(1 for item in all_trials if item["door_open_success"])
@@ -1329,7 +1403,11 @@ def main() -> None:
         "pull_traversal_distance_m": (
             float(args.pull_traversal_distance_m) if is_pull_mode(args.mode) else None
         ),
+        "pull_handle_unlock_angle_deg": (
+            float(args.pull_handle_unlock_angle_deg) if is_pull_mode(args.mode) else None
+        ),
         "success_metric": metric,
+        "door_dof_index": int(args.door_dof_index),
         "door_motion_sign": float(args.door_motion_sign),
         "base_seed": args.base_seed,
         "headless": bool(args.headless),
@@ -1368,6 +1446,7 @@ def main() -> None:
         "traversal_success_rate": (
             traversal_success_rate if is_pull_mode(args.mode) else None
         ),
+        "failure_categories": failure_category_counts if is_pull_mode(args.mode) else None,
         "end_trigger_rate": len(end_triggered_trials) / max(1, total),
         "end_false_trigger_count": int(end_false_trigger_count),
         "end_missing_trigger_count": int(end_missing_trigger_count),
@@ -1409,6 +1488,10 @@ def main() -> None:
         )
         safe_print(
             f"TRAVERSAL_SUCCESS {total_traversal_successes}/{total} = {traversal_success_rate:.4f}"
+        )
+        safe_print(
+            "FAILURE_CATEGORIES "
+            + " ".join(f"{name}={count}" for name, count in failure_category_counts.items())
         )
     safe_print(f"SUCCESS_RATE {total_successes}/{total} = {success_rate:.4f}")
     safe_print(f"Summary: {summary_path}")

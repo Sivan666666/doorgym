@@ -1,0 +1,152 @@
+<robot name="single_restroom_door_wc4_compatible_pull">
+  <material name="frame_white"><color rgba="0.82 0.84 0.82 1" /></material>
+  <material name="white_wood"><color rgba="0.79 0.81 0.79 1" /></material>
+  <material name="window_trim"><color rgba="0.72 0.75 0.72 1" /></material>
+  <material name="frosted_glass"><color rgba="0.42 0.48 0.47 0.46" /></material>
+  <material name="glass_lines"><color rgba="0.25 0.29 0.28 0.55" /></material>
+  <material name="black_metal"><color rgba="0.025 0.028 0.026 1" /></material>
+  <link name="fixed_frame">
+    <!-- Apply one rigid assembly transform from the original Articraft hinge
+         (-0.447838, 0, 0.002) to WC4's hinge (-0.463, 0.143, 0).
+         Door/frame relative placement therefore remains exactly as authored. -->
+    <visual name="frame">
+      <origin xyz="-0.015162 0.143 -0.002" rpy="0 0 0" />
+      <geometry><mesh filename="assets/meshes/frame.obj" /></geometry>
+    </visual>
+    <!-- Physical geometry below is copied from WC4 verbatim.  The Articraft
+         mesh above is rendering-only, so the two assets have identical
+         contact geometry despite using different appearance meshes. -->
+    <collision name="left_jamb"><origin xyz="-0.4975 0.055 1.125" rpy="0 0 0" /><geometry><box size="0.055 0.18 2.25" /></geometry></collision>
+    <collision name="right_jamb"><origin xyz="0.4975 0.055 1.125" rpy="0 0 0" /><geometry><box size="0.055 0.18 2.25" /></geometry></collision>
+    <collision name="header"><origin xyz="0 0.055 2.23" rpy="0 0 0" /><geometry><box size="1.05 0.18 0.04" /></geometry></collision>
+    <collision name="left_casing_trim"><origin xyz="-0.502 -0.038 1.125" rpy="0 0 0" /><geometry><box size="0.046 0.006 2.25" /></geometry></collision>
+    <collision name="right_casing_trim"><origin xyz="0.502 -0.038 1.125" rpy="0 0 0" /><geometry><box size="0.046 0.006 2.25" /></geometry></collision>
+    <collision name="header_casing_trim"><origin xyz="0 -0.038 2.232" rpy="0 0 0" /><geometry><box size="1.05 0.006 0.036" /></geometry></collision>
+    <collision name="left_stop"><origin xyz="-0.468 0.09 1.1075" rpy="0 0 0" /><geometry><box size="0.014 0.014 2.165" /></geometry></collision>
+    <collision name="right_stop"><origin xyz="0.468 0.09 1.1075" rpy="0 0 0" /><geometry><box size="0.014 0.014 2.165" /></geometry></collision>
+    <collision name="header_stop"><origin xyz="0 0.09 2.213" rpy="0 0 0" /><geometry><box size="0.936 0.014 0.014" /></geometry></collision>
+    <collision name="left_shadow_gap"><origin xyz="-0.474 0.0575 1.105" rpy="0 0 0" /><geometry><box size="0.004 0.155 2.155" /></geometry></collision>
+    <collision name="right_shadow_gap"><origin xyz="0.474 0.0575 1.105" rpy="0 0 0" /><geometry><box size="0.004 0.155 2.155" /></geometry></collision>
+    <collision name="top_shadow_gap"><origin xyz="0 0.0575 2.207" rpy="0 0 0" /><geometry><box size="0.93 0.155 0.004" /></geometry></collision>
+    <collision name="frame_vertical_grain_0"><origin xyz="-0.514 -0.041 1.105" rpy="0 0 0" /><geometry><box size="0.0025 0.001 2.12" /></geometry></collision>
+    <collision name="frame_vertical_grain_1"><origin xyz="-0.502 -0.041 1.105" rpy="0 0 0" /><geometry><box size="0.0025 0.001 2.12" /></geometry></collision>
+    <collision name="frame_vertical_grain_2"><origin xyz="-0.491 -0.041 1.105" rpy="0 0 0" /><geometry><box size="0.0025 0.001 2.12" /></geometry></collision>
+    <collision name="frame_vertical_grain_3"><origin xyz="0.491 -0.041 1.105" rpy="0 0 0" /><geometry><box size="0.0025 0.001 2.12" /></geometry></collision>
+    <collision name="frame_vertical_grain_4"><origin xyz="0.504 -0.041 1.105" rpy="0 0 0" /><geometry><box size="0.0025 0.001 2.12" /></geometry></collision>
+    <collision name="frame_vertical_grain_5"><origin xyz="0.515 -0.041 1.105" rpy="0 0 0" /><geometry><box size="0.0025 0.001 2.12" /></geometry></collision>
+    <collision name="header_grain_line"><origin xyz="0 -0.041 2.236" rpy="0 0 0" /><geometry><box size="0.965 0.001 0.003" /></geometry></collision>
+  </link>
+  <link name="door_panel">
+    <!-- The canonical hinge joint already applies the assembly transform, so
+         the original door mesh stays at its authored child-link origin. -->
+    <visual name="door_leaf">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry><mesh filename="assets/meshes/door_leaf.obj" /></geometry>
+    </visual>
+    <collision name="door_slab"><geometry><mesh filename="../wc4/assets/meshes/door_slab.obj" /></geometry></collision>
+    <collision name="glass_panel"><origin xyz="0.728 -0.02 1.115" rpy="0 0 0" /><geometry><box size="0.112 0.016 1.6" /></geometry></collision>
+    <collision name="glass_gasket_left"><origin xyz="0.667 -0.02 1.115" rpy="0 0 0" /><geometry><box size="0.01 0.044 1.66" /></geometry></collision>
+    <collision name="glass_gasket_right"><origin xyz="0.789 -0.02 1.115" rpy="0 0 0" /><geometry><box size="0.01 0.044 1.66" /></geometry></collision>
+    <collision name="glass_gasket_top"><origin xyz="0.728 -0.02 1.93" rpy="0 0 0" /><geometry><box size="0.132 0.044 0.03" /></geometry></collision>
+    <collision name="glass_gasket_bottom"><origin xyz="0.728 -0.02 0.3" rpy="0 0 0" /><geometry><box size="0.132 0.044 0.03" /></geometry></collision>
+    <collision name="latch_edge_plate"><origin xyz="0.915 -0.02 0.985" rpy="0 0 0" /><geometry><box size="0.004 0.018 0.07" /></geometry></collision>
+    <collision name="door_vertical_grain_0"><origin xyz="0.073 -0.04235 1.14" rpy="0 0 0" /><geometry><box size="0.0032 0.0009 2.03" /></geometry></collision>
+    <collision name="door_vertical_grain_1"><origin xyz="0.128 -0.04235 1.1" rpy="0 0 0" /><geometry><box size="0.0038 0.0009 1.95" /></geometry></collision>
+    <collision name="door_vertical_grain_2"><origin xyz="0.178 -0.04235 1.06" rpy="0 0 0" /><geometry><box size="0.0032 0.0009 1.87" /></geometry></collision>
+    <collision name="door_vertical_grain_3"><origin xyz="0.238 -0.04235 1.14" rpy="0 0 0" /><geometry><box size="0.0038 0.0009 2.03" /></geometry></collision>
+    <collision name="door_vertical_grain_4"><origin xyz="0.298 -0.04235 1.1" rpy="0 0 0" /><geometry><box size="0.0032 0.0009 1.95" /></geometry></collision>
+    <collision name="door_vertical_grain_5"><origin xyz="0.358 -0.04235 1.06" rpy="0 0 0" /><geometry><box size="0.0038 0.0009 1.87" /></geometry></collision>
+    <collision name="door_vertical_grain_6"><origin xyz="0.408 -0.04235 1.14" rpy="0 0 0" /><geometry><box size="0.0032 0.0009 2.03" /></geometry></collision>
+    <collision name="door_vertical_grain_7"><origin xyz="0.483 -0.04235 1.1" rpy="0 0 0" /><geometry><box size="0.0038 0.0009 1.95" /></geometry></collision>
+    <collision name="door_vertical_grain_8"><origin xyz="0.538 -0.04235 1.06" rpy="0 0 0" /><geometry><box size="0.0032 0.0009 1.87" /></geometry></collision>
+    <collision name="door_vertical_grain_9"><origin xyz="0.608 -0.04235 1.14" rpy="0 0 0" /><geometry><box size="0.0038 0.0009 2.03" /></geometry></collision>
+    <collision name="door_vertical_grain_10"><origin xyz="0.798 -0.04235 1.1" rpy="0 0 0" /><geometry><box size="0.0032 0.0009 1.95" /></geometry></collision>
+    <collision name="door_vertical_grain_11"><origin xyz="0.848 -0.04235 1.06" rpy="0 0 0" /><geometry><box size="0.0038 0.0009 1.87" /></geometry></collision>
+    <collision name="subtle_panel_seam_0"><origin xyz="0.218 -0.04245 1.115" rpy="0 0 0" /><geometry><box size="0.002 0.001 2.08" /></geometry></collision>
+    <collision name="subtle_panel_seam_1"><origin xyz="0.568 -0.04245 1.115" rpy="0 0 0" /><geometry><box size="0.002 0.001 2.08" /></geometry></collision>
+    <collision name="pictogram_border_top"><origin xyz="0.348 -0.04255 1.598" rpy="0 0 0" /><geometry><box size="0.084 0.001 0.006" /></geometry></collision>
+    <collision name="pictogram_border_bottom"><origin xyz="0.348 -0.04255 1.512" rpy="0 0 0" /><geometry><box size="0.084 0.001 0.006" /></geometry></collision>
+    <collision name="pictogram_border_left"><origin xyz="0.306 -0.04255 1.555" rpy="0 0 0" /><geometry><box size="0.006 0.001 0.086" /></geometry></collision>
+    <collision name="pictogram_border_right"><origin xyz="0.39 -0.04255 1.555" rpy="0 0 0" /><geometry><box size="0.006 0.001 0.086" /></geometry></collision>
+    <collision name="pictogram_head"><origin xyz="0.348 -0.04255 1.579" rpy="1.5708 0 0" /><geometry><cylinder radius="0.007" length="0.0012" /></geometry></collision>
+    <collision name="pictogram_torso"><origin xyz="0.348 -0.04255 1.551" rpy="0 0 0" /><geometry><box size="0.018 0.001 0.036" /></geometry></collision>
+    <collision name="pictogram_leg_0"><origin xyz="0.342 -0.04255 1.522" rpy="0 0 0" /><geometry><box size="0.007 0.001 0.03" /></geometry></collision>
+    <collision name="pictogram_leg_1"><origin xyz="0.354 -0.04255 1.522" rpy="0 0 0" /><geometry><box size="0.007 0.001 0.03" /></geometry></collision>
+  </link>
+  <link name="hinge_leaf_frame">
+    <collision name="frame_leaf"><origin xyz="-0.48 0.143 1.115" rpy="0 0 0" /><geometry><box size="0.02 0.004 2.05" /></geometry></collision>
+  </link>
+  <link name="hinge_pin">
+    <collision name="pin"><origin xyz="-0.463 0.143 1.115" rpy="0 0 0" /><geometry><cylinder radius="0.007" length="2.05" /></geometry></collision>
+  </link>
+  <link name="hinge_leaf_panel">
+    <collision name="panel_leaf"><origin xyz="0.019 0.004 1.115" rpy="0 0 0" /><geometry><box size="0.024 0.004 2.05" /></geometry></collision>
+  </link>
+  <link name="handle_back_plate">
+    <collision name="back_plate"><geometry><box size="0.038 0.006 0.125" /></geometry></collision>
+    <collision name="handle_hub"><origin xyz="0 -0.008 0" rpy="1.5708 0 0" /><geometry><cylinder radius="0.012" length="0.01" /></geometry></collision>
+  </link>
+  <link name="lever_handle">
+    <!-- Preserve the original Articraft lever installation exactly.  The
+         inverse X rotation compensates WC4's canonical spindle frame, and the
+         translation compensates the original/new mount origins. -->
+    <visual name="lever_handle">
+      <origin xyz="-0.015812 -0.027572 -0.0095" rpy="-1.5707963267948966 0 0" />
+      <geometry><mesh filename="assets/meshes/lever_handle.obj" /></geometry>
+    </visual>
+    <!-- Stable primitives fitted to the three connected components of the
+         original visible mesh after the frame transform above. -->
+    <collision name="handle_hub_component">
+      <origin xyz="-0.015806 -0.027570 0.0095" rpy="0 0 0" />
+      <geometry><cylinder radius="0.017001" length="0.038" /></geometry>
+    </collision>
+    <collision name="handle_connector_component">
+      <origin xyz="-0.015806 -0.0275695 0.039499" rpy="0 0 0" />
+      <geometry><box size="0.022005 0.017995 0.029998" /></geometry>
+    </collision>
+    <collision name="handle_grip_component">
+      <origin xyz="-0.0633125 -0.0275695 0.062502" rpy="0 0 0" />
+      <geometry><box size="0.095013 0.017995 0.018003" /></geometry>
+    </collision>
+  </link>
+  <link name="strike_plate">
+    <collision name="strike_face"><origin xyz="0.473 0.123 0.985" rpy="0 0 0" /><geometry><box size="0.004 0.036 0.07" /></geometry></collision>
+  </link>
+  <!-- Match WC4 exactly: +Z hinge axis and negative runtime joint motion open
+       toward the pull-side robot. -->
+  <joint name="door_hinge_joint" type="revolute">
+    <origin xyz="-0.463 0.143 0" rpy="0 0 0" />
+    <parent link="fixed_frame" />
+    <child link="door_panel" />
+    <axis xyz="0 0 1" />
+    <limit effort="45" velocity="1.2" lower="0" upper="1.5708" />
+  </joint>
+  <joint name="frame_hinge_leaf_mount" type="fixed">
+    <parent link="fixed_frame" />
+    <child link="hinge_leaf_frame" />
+  </joint>
+  <joint name="hinge_pin_mount" type="fixed">
+    <parent link="fixed_frame" />
+    <child link="hinge_pin" />
+  </joint>
+  <joint name="panel_hinge_leaf_mount" type="fixed">
+    <parent link="door_panel" />
+    <child link="hinge_leaf_panel" />
+  </joint>
+  <joint name="back_plate_mount" type="fixed">
+    <origin xyz="0.868 -0.045 0.985" rpy="0 0 0" />
+    <parent link="door_panel" />
+    <child link="handle_back_plate" />
+  </joint>
+  <joint name="handle_spindle_joint" type="revolute">
+    <origin xyz="0 -0.013 0" rpy="1.5707963267948966 0 0" />
+    <parent link="handle_back_plate" />
+    <child link="lever_handle" />
+    <axis xyz="0 0 1" />
+    <limit effort="4" velocity="2" lower="0" upper="1.5708" />
+  </joint>
+  <joint name="strike_plate_mount" type="fixed">
+    <parent link="fixed_frame" />
+    <child link="strike_plate" />
+  </joint>
+</robot>

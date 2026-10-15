@@ -41,6 +41,14 @@ class PI05Config(PreTrainedConfig):
     max_state_dim: int = 32
     max_action_dim: int = 32
 
+    # Optional continuous proprioceptive conditioning. Legacy pi0.5 discretizes
+    # observation.state into the language prompt; it does not consume the
+    # continuous tensor directly. Keep this disabled by default so old prompts,
+    # checkpoints, and inference are bitwise compatible. When enabled, one
+    # projected state token is appended to the image/language prefix and the
+    # duplicated textual state is omitted from the prompt.
+    state_conditioning: bool = False
+
     # Flow matching parameters: see openpi `PI0Pytorch`
     num_inference_steps: int = 10
     time_sampling_beta_alpha: float = 1.5

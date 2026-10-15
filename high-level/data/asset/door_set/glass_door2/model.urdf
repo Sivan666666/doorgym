@@ -1,0 +1,525 @@
+<robot name="paired_glazed_pull_door">
+  <material name="black_aluminum">
+    <color rgba="0.018 0.022 0.026 1" />
+    </material>
+  <material name="tinted_glass">
+    <color rgba="0.105 0.17 0.22 0.34" />
+    </material>
+  <material name="glossy_black_handle">
+    <color rgba="0.01 0.012 0.014 1" />
+    </material>
+  <link name="frame">
+    <visual name="side_frame_0">
+      <origin xyz="-0.674986 0.025 1.32672" rpy="0 0 0" />
+      <geometry>
+        <box size="0.10758 0.08 2.65343" />
+        </geometry>
+      <material name="black_aluminum">
+        <color rgba="0.018 0.022 0.026 1" />
+        </material>
+      </visual>
+    <visual name="side_frame_1">
+      <origin xyz="0.674986 0.025 1.32672" rpy="0 0 0" />
+      <geometry>
+        <box size="0.10758 0.08 2.65343" />
+        </geometry>
+      <material name="black_aluminum">
+        <color rgba="0.018 0.022 0.026 1" />
+        </material>
+      </visual>
+    <visual name="inner_header">
+      <origin xyz="0 0.02 2.57893" rpy="0 0 0" />
+      <geometry>
+        <box size="1.24239 0.07 0.086" />
+        </geometry>
+      <material name="black_aluminum">
+        <color rgba="0.018 0.022 0.026 1" />
+        </material>
+      </visual>
+    <visual name="upper_header">
+      <origin xyz="0 0.025 2.63768" rpy="0 0 0" />
+      <geometry>
+        <box size="1.24239 0.08 0.0315027" />
+        </geometry>
+      <material name="black_aluminum">
+        <color rgba="0.018 0.022 0.026 1" />
+        </material>
+      </visual>
+    <visual name="hinge_jamb_0">
+      <origin xyz="-0.620821 0.024 1.26759" rpy="0 0 0" />
+      <geometry>
+        <box size="0.00075 0.048 2.53518" />
+        </geometry>
+      <material name="black_aluminum">
+        <color rgba="0.018 0.022 0.026 1" />
+        </material>
+      </visual>
+    <visual name="hinge_jamb_1">
+      <origin xyz="0.620821 0.024 1.26759" rpy="0 0 0" />
+      <geometry>
+        <box size="0.00075 0.048 2.53518" />
+        </geometry>
+      <material name="black_aluminum">
+        <color rgba="0.018 0.022 0.026 1" />
+        </material>
+      </visual>
+    <visual name="jamb_stop_0">
+      <origin xyz="-0.612196 0.061 1.26759" rpy="0 0 0" />
+      <geometry>
+        <box size="0.018 0.018 2.53518" />
+        </geometry>
+      <material name="black_aluminum">
+        <color rgba="0.018 0.022 0.026 1" />
+        </material>
+      </visual>
+    <visual name="jamb_stop_1">
+      <origin xyz="0.612196 0.061 1.26759" rpy="0 0 0" />
+      <geometry>
+        <box size="0.018 0.018 2.53518" />
+        </geometry>
+      <material name="black_aluminum">
+        <color rgba="0.018 0.022 0.026 1" />
+        </material>
+      </visual>
+    <collision name="side_frame_0">
+      <origin xyz="-0.674986 0.025 1.32672" rpy="0 0 0" />
+      <geometry>
+        <box size="0.10758 0.08 2.65343" />
+        </geometry>
+      </collision>
+    <collision name="side_frame_1">
+      <origin xyz="0.674986 0.025 1.32672" rpy="0 0 0" />
+      <geometry>
+        <box size="0.10758 0.08 2.65343" />
+        </geometry>
+      </collision>
+    <collision name="inner_header">
+      <origin xyz="0 0.02 2.57893" rpy="0 0 0" />
+      <geometry>
+        <box size="1.24239 0.07 0.086" />
+        </geometry>
+      </collision>
+    <collision name="upper_header">
+      <origin xyz="0 0.025 2.63768" rpy="0 0 0" />
+      <geometry>
+        <box size="1.24239 0.08 0.0315027" />
+        </geometry>
+      </collision>
+    <collision name="hinge_jamb_0">
+      <origin xyz="-0.620821 0.024 1.26759" rpy="0 0 0" />
+      <geometry>
+        <box size="0.00075 0.048 2.53518" />
+        </geometry>
+      </collision>
+    <collision name="hinge_jamb_1">
+      <origin xyz="0.620821 0.024 1.26759" rpy="0 0 0" />
+      <geometry>
+        <box size="0.00075 0.048 2.53518" />
+        </geometry>
+      </collision>
+    <collision name="jamb_stop_0">
+      <origin xyz="-0.612196 0.061 1.26759" rpy="0 0 0" />
+      <geometry>
+        <box size="0.018 0.018 2.53518" />
+        </geometry>
+      </collision>
+    <collision name="jamb_stop_1">
+      <origin xyz="0.612196 0.061 1.26759" rpy="0 0 0" />
+      <geometry>
+        <box size="0.018 0.018 2.53518" />
+        </geometry>
+      </collision>
+    </link>
+  <link name="door_0">
+    <visual name="outer_stile">
+      <origin xyz="0.023 0.024 1.26759" rpy="0 0 0" />
+      <geometry>
+        <box size="0.046 0.048 2.53518" />
+        </geometry>
+      <material name="black_aluminum">
+        <color rgba="0.018 0.022 0.026 1" />
+        </material>
+      </visual>
+    <visual name="meeting_stile">
+      <origin xyz="0.603446 0.024 1.26759" rpy="0 0 0" />
+      <geometry>
+        <box size="0.034 0.048 2.53518" />
+        </geometry>
+      <material name="black_aluminum">
+        <color rgba="0.018 0.022 0.026 1" />
+        </material>
+      </visual>
+    <visual name="bottom_rail">
+      <origin xyz="0.316223 0.024 0.03" rpy="0 0 0" />
+      <geometry>
+        <box size="0.540446 0.048 0.06" />
+        </geometry>
+      <material name="black_aluminum">
+        <color rgba="0.018 0.022 0.026 1" />
+        </material>
+      </visual>
+    <visual name="top_rail">
+      <origin xyz="0.316223 0.024 2.50518" rpy="0 0 0" />
+      <geometry>
+        <box size="0.540446 0.048 0.06" />
+        </geometry>
+      <material name="black_aluminum">
+        <color rgba="0.018 0.022 0.026 1" />
+        </material>
+      </visual>
+    <visual name="glass_panel">
+      <origin xyz="0.316223 0.024 1.26759" rpy="0 0 0" />
+      <geometry>
+        <box size="0.540446 0.014 2.41518" />
+        </geometry>
+      <material name="tinted_glass">
+        <color rgba="0.105 0.17 0.22 0.34" />
+        </material>
+      </visual>
+    <collision name="outer_stile">
+      <origin xyz="0.023 0.024 1.26759" rpy="0 0 0" />
+      <geometry>
+        <box size="0.046 0.048 2.53518" />
+        </geometry>
+      </collision>
+    <collision name="meeting_stile">
+      <origin xyz="0.603446 0.024 1.26759" rpy="0 0 0" />
+      <geometry>
+        <box size="0.034 0.048 2.53518" />
+        </geometry>
+      </collision>
+    <collision name="bottom_rail">
+      <origin xyz="0.316223 0.024 0.03" rpy="0 0 0" />
+      <geometry>
+        <box size="0.540446 0.048 0.06" />
+        </geometry>
+      </collision>
+    <collision name="top_rail">
+      <origin xyz="0.316223 0.024 2.50518" rpy="0 0 0" />
+      <geometry>
+        <box size="0.540446 0.048 0.06" />
+        </geometry>
+      </collision>
+    <collision name="glass_panel">
+      <origin xyz="0.316223 0.024 1.26759" rpy="0 0 0" />
+      <geometry>
+        <box size="0.540446 0.014 2.41518" />
+        </geometry>
+      </collision>
+    </link>
+  <link name="door_1">
+    <visual name="outer_stile">
+      <origin xyz="-0.023 0.024 1.26759" rpy="0 0 0" />
+      <geometry>
+        <box size="0.046 0.048 2.53518" />
+        </geometry>
+      <material name="black_aluminum">
+        <color rgba="0.018 0.022 0.026 1" />
+        </material>
+      </visual>
+    <visual name="meeting_stile">
+      <origin xyz="-0.603446 0.024 1.26759" rpy="0 0 0" />
+      <geometry>
+        <box size="0.034 0.048 2.53518" />
+        </geometry>
+      <material name="black_aluminum">
+        <color rgba="0.018 0.022 0.026 1" />
+        </material>
+      </visual>
+    <visual name="bottom_rail">
+      <origin xyz="-0.316223 0.024 0.03" rpy="0 0 0" />
+      <geometry>
+        <box size="0.540446 0.048 0.06" />
+        </geometry>
+      <material name="black_aluminum">
+        <color rgba="0.018 0.022 0.026 1" />
+        </material>
+      </visual>
+    <visual name="top_rail">
+      <origin xyz="-0.316223 0.024 2.50518" rpy="0 0 0" />
+      <geometry>
+        <box size="0.540446 0.048 0.06" />
+        </geometry>
+      <material name="black_aluminum">
+        <color rgba="0.018 0.022 0.026 1" />
+        </material>
+      </visual>
+    <visual name="glass_panel">
+      <origin xyz="-0.316223 0.024 1.26759" rpy="0 0 0" />
+      <geometry>
+        <box size="0.540446 0.014 2.41518" />
+        </geometry>
+      <material name="tinted_glass">
+        <color rgba="0.105 0.17 0.22 0.34" />
+        </material>
+      </visual>
+    <collision name="outer_stile">
+      <origin xyz="-0.023 0.024 1.26759" rpy="0 0 0" />
+      <geometry>
+        <box size="0.046 0.048 2.53518" />
+        </geometry>
+      </collision>
+    <collision name="meeting_stile">
+      <origin xyz="-0.603446 0.024 1.26759" rpy="0 0 0" />
+      <geometry>
+        <box size="0.034 0.048 2.53518" />
+        </geometry>
+      </collision>
+    <collision name="bottom_rail">
+      <origin xyz="-0.316223 0.024 0.03" rpy="0 0 0" />
+      <geometry>
+        <box size="0.540446 0.048 0.06" />
+        </geometry>
+      </collision>
+    <collision name="top_rail">
+      <origin xyz="-0.316223 0.024 2.50518" rpy="0 0 0" />
+      <geometry>
+        <box size="0.540446 0.048 0.06" />
+        </geometry>
+      </collision>
+    <collision name="glass_panel">
+      <origin xyz="-0.316223 0.024 1.26759" rpy="0 0 0" />
+      <geometry>
+        <box size="0.540446 0.014 2.41518" />
+        </geometry>
+      </collision>
+    </link>
+  <link name="handle_mount_0">
+    <visual name="pull_bar">
+      <origin xyz="0.532949 -0.083 1.18032" rpy="0 0 0" />
+      <geometry>
+        <box size="0.038 0.038 1.46" />
+        </geometry>
+      <material name="glossy_black_handle">
+        <color rgba="0.01 0.012 0.014 1" />
+        </material>
+      </visual>
+    <visual name="handle_mount_0">
+      <origin xyz="0.532949 -0.006 0.505321" rpy="0 0 0" />
+      <geometry>
+        <box size="0.072 0.014 0.145" />
+        </geometry>
+      <material name="glossy_black_handle">
+        <color rgba="0.01 0.012 0.014 1" />
+        </material>
+      </visual>
+    <visual name="handle_mount_1">
+      <origin xyz="0.532949 -0.006 1.88032" rpy="0 0 0" />
+      <geometry>
+        <box size="0.072 0.014 0.145" />
+        </geometry>
+      <material name="glossy_black_handle">
+        <color rgba="0.01 0.012 0.014 1" />
+        </material>
+      </visual>
+    <visual name="handle_connector_0">
+      <origin xyz="0.532949 -0.039 0.505321" rpy="0 0 0" />
+      <geometry>
+        <box size="0.054 0.052 0.066" />
+        </geometry>
+      <material name="glossy_black_handle">
+        <color rgba="0.01 0.012 0.014 1" />
+        </material>
+      </visual>
+    <visual name="handle_connector_1">
+      <origin xyz="0.532949 -0.039 1.88032" rpy="0 0 0" />
+      <geometry>
+        <box size="0.054 0.052 0.066" />
+        </geometry>
+      <material name="glossy_black_handle">
+        <color rgba="0.01 0.012 0.014 1" />
+        </material>
+      </visual>
+    <visual name="leaf_anchor_0">
+      <origin xyz="0.532949 -0.0029 0.505321" rpy="0 0 0" />
+      <geometry>
+        <box size="0.054 0.04 0.066" />
+        </geometry>
+      <material name="glossy_black_handle">
+        <color rgba="0.01 0.012 0.014 1" />
+        </material>
+      </visual>
+    <visual name="leaf_anchor_1">
+      <origin xyz="0.532949 -0.0029 1.88032" rpy="0 0 0" />
+      <geometry>
+        <box size="0.054 0.04 0.066" />
+        </geometry>
+      <material name="glossy_black_handle">
+        <color rgba="0.01 0.012 0.014 1" />
+        </material>
+      </visual>
+    <collision name="pull_bar">
+      <origin xyz="0.532949 -0.083 1.18032" rpy="0 0 0" />
+      <geometry>
+        <box size="0.038 0.038 1.46" />
+        </geometry>
+      </collision>
+    <collision name="handle_mount_0">
+      <origin xyz="0.532949 -0.006 0.505321" rpy="0 0 0" />
+      <geometry>
+        <box size="0.072 0.014 0.145" />
+        </geometry>
+      </collision>
+    <collision name="handle_mount_1">
+      <origin xyz="0.532949 -0.006 1.88032" rpy="0 0 0" />
+      <geometry>
+        <box size="0.072 0.014 0.145" />
+        </geometry>
+      </collision>
+    <collision name="handle_connector_0">
+      <origin xyz="0.532949 -0.039 0.505321" rpy="0 0 0" />
+      <geometry>
+        <box size="0.054 0.052 0.066" />
+        </geometry>
+      </collision>
+    <collision name="handle_connector_1">
+      <origin xyz="0.532949 -0.039 1.88032" rpy="0 0 0" />
+      <geometry>
+        <box size="0.054 0.052 0.066" />
+        </geometry>
+      </collision>
+    <collision name="leaf_anchor_0">
+      <origin xyz="0.532949 -0.0029 0.505321" rpy="0 0 0" />
+      <geometry>
+        <box size="0.054 0.04 0.066" />
+        </geometry>
+      </collision>
+    <collision name="leaf_anchor_1">
+      <origin xyz="0.532949 -0.0029 1.88032" rpy="0 0 0" />
+      <geometry>
+        <box size="0.054 0.04 0.066" />
+        </geometry>
+      </collision>
+    </link>
+  <link name="handle_mount_1">
+    <visual name="pull_bar">
+      <origin xyz="-0.532949 -0.083 1.18032" rpy="0 0 0" />
+      <geometry>
+        <box size="0.038 0.038 1.46" />
+        </geometry>
+      <material name="glossy_black_handle">
+        <color rgba="0.01 0.012 0.014 1" />
+        </material>
+      </visual>
+    <visual name="handle_mount_0">
+      <origin xyz="-0.532949 -0.006 0.505321" rpy="0 0 0" />
+      <geometry>
+        <box size="0.072 0.014 0.145" />
+        </geometry>
+      <material name="glossy_black_handle">
+        <color rgba="0.01 0.012 0.014 1" />
+        </material>
+      </visual>
+    <visual name="handle_mount_1">
+      <origin xyz="-0.532949 -0.006 1.88032" rpy="0 0 0" />
+      <geometry>
+        <box size="0.072 0.014 0.145" />
+        </geometry>
+      <material name="glossy_black_handle">
+        <color rgba="0.01 0.012 0.014 1" />
+        </material>
+      </visual>
+    <visual name="handle_connector_0">
+      <origin xyz="-0.532949 -0.039 0.505321" rpy="0 0 0" />
+      <geometry>
+        <box size="0.054 0.052 0.066" />
+        </geometry>
+      <material name="glossy_black_handle">
+        <color rgba="0.01 0.012 0.014 1" />
+        </material>
+      </visual>
+    <visual name="handle_connector_1">
+      <origin xyz="-0.532949 -0.039 1.88032" rpy="0 0 0" />
+      <geometry>
+        <box size="0.054 0.052 0.066" />
+        </geometry>
+      <material name="glossy_black_handle">
+        <color rgba="0.01 0.012 0.014 1" />
+        </material>
+      </visual>
+    <visual name="leaf_anchor_0">
+      <origin xyz="-0.532949 -0.0029 0.505321" rpy="0 0 0" />
+      <geometry>
+        <box size="0.054 0.04 0.066" />
+        </geometry>
+      <material name="glossy_black_handle">
+        <color rgba="0.01 0.012 0.014 1" />
+        </material>
+      </visual>
+    <visual name="leaf_anchor_1">
+      <origin xyz="-0.532949 -0.0029 1.88032" rpy="0 0 0" />
+      <geometry>
+        <box size="0.054 0.04 0.066" />
+        </geometry>
+      <material name="glossy_black_handle">
+        <color rgba="0.01 0.012 0.014 1" />
+        </material>
+      </visual>
+    <collision name="pull_bar">
+      <origin xyz="-0.532949 -0.083 1.18032" rpy="0 0 0" />
+      <geometry>
+        <box size="0.038 0.038 1.46" />
+        </geometry>
+      </collision>
+    <collision name="handle_mount_0">
+      <origin xyz="-0.532949 -0.006 0.505321" rpy="0 0 0" />
+      <geometry>
+        <box size="0.072 0.014 0.145" />
+        </geometry>
+      </collision>
+    <collision name="handle_mount_1">
+      <origin xyz="-0.532949 -0.006 1.88032" rpy="0 0 0" />
+      <geometry>
+        <box size="0.072 0.014 0.145" />
+        </geometry>
+      </collision>
+    <collision name="handle_connector_0">
+      <origin xyz="-0.532949 -0.039 0.505321" rpy="0 0 0" />
+      <geometry>
+        <box size="0.054 0.052 0.066" />
+        </geometry>
+      </collision>
+    <collision name="handle_connector_1">
+      <origin xyz="-0.532949 -0.039 1.88032" rpy="0 0 0" />
+      <geometry>
+        <box size="0.054 0.052 0.066" />
+        </geometry>
+      </collision>
+    <collision name="leaf_anchor_0">
+      <origin xyz="-0.532949 -0.0029 0.505321" rpy="0 0 0" />
+      <geometry>
+        <box size="0.054 0.04 0.066" />
+        </geometry>
+      </collision>
+    <collision name="leaf_anchor_1">
+      <origin xyz="-0.532949 -0.0029 1.88032" rpy="0 0 0" />
+      <geometry>
+        <box size="0.054 0.04 0.066" />
+        </geometry>
+      </collision>
+    </link>
+  <joint name="frame_to_door_0" type="revolute">
+    <origin xyz="-0.620446 0 0" rpy="0 0 0" />
+    <parent link="frame" />
+    <child link="door_0" />
+    <axis xyz="0 0 -1" />
+    <limit effort="80" velocity="1.2" lower="0" upper="1.7" />
+    <dynamics damping="2" friction="0.25" />
+    </joint>
+  <joint name="frame_to_door_1" type="revolute">
+    <origin xyz="0.620446 0 0" rpy="0 0 0" />
+    <parent link="frame" />
+    <child link="door_1" />
+    <axis xyz="0 0 1" />
+    <limit effort="80" velocity="1.2" lower="0" upper="1.7" />
+    <dynamics damping="2" friction="0.25" />
+    </joint>
+  <joint name="door_0_to_handle_mount" type="fixed">
+    <parent link="door_0" />
+    <child link="handle_mount_0" />
+    </joint>
+  <joint name="door_1_to_handle_mount" type="fixed">
+    <parent link="door_1" />
+    <child link="handle_mount_1" />
+    </joint>
+  </robot>

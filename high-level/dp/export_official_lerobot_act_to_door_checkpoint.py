@@ -127,6 +127,8 @@ def main():
         state_dim=state_dim,
         action_dim=action_dim,
         pretrained_path=str(policy_dir),
+        image_features=[key for key, feature in policy_config['input_features'].items()
+                        if str(feature['type']).upper() == 'VISUAL'],
         normalization_mapping=policy_config.get("normalization_mapping"),
         point_cloud_conditioning=bool(policy_config.get("point_cloud_conditioning", False)),
         point_cloud_key=policy_config.get("point_cloud_key", "observation.point_cloud"),

@@ -18,7 +18,7 @@ import pytest
 import torch
 
 from lerobot.datasets.push_dataset_to_hub.utils import calculate_episode_data_index
-from lerobot.datasets.sampler import EpisodeAwareSampler, make_recovery_sampler
+from lerobot.datasets.sampler import EpisodeAwareSampler, make_phase_weighted_sampler, make_recovery_sampler
 from lerobot.datasets.utils import (
     hf_transform_to_torch,
 )
@@ -146,3 +146,34 @@ def test_recovery_sampler_requires_indicator_feature():
     assert sampler is None
     assert stats["enabled"] is False
     assert "missing feature" in stats["reason"]
+
+
+class _PhaseSamplerDataset:
+    def __init__(self, values):
+        self.features = {"subtask_index": {}}
+        self.hf_dataset = {"subtask_index": values}
+        self._length = len(values)
+
+    def __len__(self):
+        return self._length
+
+
+def test_phase_sampler_applies_relative_phase_weights():
+    dataset = _PhaseSamplerDataset([[8], [11], [11], [12]])
+    sampler, stats = make_phase_weighted_sampler(
+        dataset,
+        phase_sampling_weights="8:3,11:0.1,12:3",
+        seed=123,
+    )
+
+    assert sampler is not None
+    assert sampler.weights.tolist() == pytest.approx([3.0, 0.1, 0.1, 3.0])
+    assert stats["phase_stats"]["8"]["expected_sampling_ratio"] == pytest.approx(3.0 / 6.2)
+    assert stats["phase_stats"]["11"]["expected_sampling_ratio"] == pytest.approx(0.2 / 6.2)
+    assert stats["phase_stats"]["12"]["expected_sampling_ratio"] == pytest.approx(3.0 / 6.2)
+
+
+def test_phase_sampler_rejects_negative_weight():
+    dataset = _PhaseSamplerDataset([[8], [11]])
+    with pytest.raises(ValueError, match="non-negative"):
+        make_phase_weighted_sampler(dataset, phase_sampling_weights="8:3,11:-1")

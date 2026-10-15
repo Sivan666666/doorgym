@@ -50,7 +50,7 @@ def parse_args():
     parser.add_argument("--depth_only", action="store_true")
     parser.add_argument("--action_horizon", type=int, default=None)
     parser.add_argument("--num_inference_steps", type=int, default=None)
-    parser.add_argument("--task_prompt", type=str, default="open the door")
+    parser.add_argument("--task_prompt", type=str, default=None)
     parser.add_argument(
         "--tokenizer_name",
         type=str,
@@ -141,6 +141,19 @@ def _as_hw_pair(value, default=(224, 224)):
     return tuple(default)
 
 
+def resolve_task_prompt(dataset_root: Path, explicit: Optional[str], continuous_state: bool) -> str:
+    if explicit is not None:
+        return explicit
+    if not continuous_state:
+        return "open the door"  # Preserve the old wrapper default.
+    import pandas as pd
+
+    tasks = pd.read_parquet(dataset_root / "meta" / "tasks.parquet")
+    if len(tasks) != 1:
+        raise ValueError("Dataset has multiple tasks; specify --task_prompt for evaluation.")
+    return str(tasks.index[0])
+
+
 def main():
     args = parse_args()
     device = torch.device(args.device if torch.cuda.is_available() or not str(args.device).startswith("cuda") else "cpu")
@@ -183,6 +196,8 @@ def main():
         )
 
     tokenizer_name = resolve_tokenizer_name(policy_dir, policy_config, args.tokenizer_name)
+    saved_processors = bool(policy_config.get("state_conditioning", False)) or policy_type == "pi05_evo"
+    task_prompt = resolve_task_prompt(dataset_root, args.task_prompt, saved_processors)
     backend = LeRobotPI05DoorPolicyBackend.create(
         stats=stats,
         vision_mode=vision_mode,
@@ -194,7 +209,7 @@ def main():
         state_dim=state_dim,
         action_dim=action_dim,
         pretrained_path=str(policy_dir),
-        task_prompt=args.task_prompt,
+        task_prompt=task_prompt,
         tokenizer_name=tokenizer_name,
         policy_type=policy_type,
         normalization_mapping=policy_config.get("normalization_mapping"),
@@ -211,6 +226,8 @@ def main():
         compile_mode=policy_config.get("compile_mode", "max-autotune"),
         freeze_vision_encoder=bool(policy_config.get("freeze_vision_encoder", False)),
         train_expert_only=bool(policy_config.get("train_expert_only", False)),
+        state_conditioning=bool(policy_config.get("state_conditioning", False)),
+        processor_checkpoint=str(policy_dir) if saved_processors else None,
     )
 
     out_dir = Path(args.out_dir).expanduser().resolve()
@@ -232,7 +249,7 @@ def main():
         "controller_mode": controller_mode,
         "stats_source": "official_lerobot_preprocessor" if processor_stats else "dataset",
         "tokenizer_name": tokenizer_name,
-        "task_prompt": args.task_prompt,
+        "task_prompt": task_prompt,
     }
     backend.save_checkpoint(out_dir, optimizer=None, extra_config=train_config, manifest_path=manifest_path)
     print(

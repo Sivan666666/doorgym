@@ -1,0 +1,82 @@
+<robot name="pale_wood_glazed_push_door">
+  <material name="pale_oak">
+    <color rgba="0.72 0.7 0.64 1" />
+  </material>
+  <material name="frame_oak">
+    <color rgba="0.66 0.64 0.59 1" />
+  </material>
+  <material name="frosted_glass">
+    <color rgba="0.72 0.84 0.84 0.62" />
+  </material>
+  <material name="black_hardware">
+    <color rgba="0.025 0.03 0.03 1" />
+  </material>
+  <material name="plaque_white">
+    <color rgba="0.91 0.91 0.88 1" />
+  </material>
+  <link name="frame">
+    <visual name="frame">
+      <geometry>
+        <mesh filename="assets/meshes/frame.obj" />
+      </geometry>
+    </visual>
+    <collision name="frame_collision">
+      <geometry>
+        <mesh filename="assets/meshes/frame.obj" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="door_leaf">
+    <visual name="door_leaf_opaque">
+      <geometry>
+        <mesh filename="assets/meshes/door_leaf_opaque.obj" />
+      </geometry>
+    </visual>
+    <visual name="door_leaf_frosted_lite">
+      <geometry>
+        <mesh filename="assets/meshes/door_leaf_frosted_lite.obj" />
+      </geometry>
+      <material name="frosted_glass">
+        <color rgba="0.72 0.84 0.84 0.62" />
+      </material>
+    </visual>
+    <collision name="door_leaf_collision">
+      <geometry>
+        <mesh filename="assets/meshes/door_leaf_opaque.obj" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="handle_mount">
+    </link>
+  <link name="lever_handle">
+    <visual name="lever_handle">
+      <geometry>
+        <mesh filename="assets/meshes/lever_handle.obj" />
+      </geometry>
+    </visual>
+    <collision name="lever_handle_collision">
+      <geometry>
+        <mesh filename="assets/meshes/lever_handle.obj" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="frame_to_door_leaf" type="revolute">
+    <origin xyz="-0.443226 -0.015 0.004" rpy="0 0 0" />
+    <parent link="frame" />
+    <child link="door_leaf" />
+    <axis xyz="0 0 1" />
+    <limit effort="80" velocity="1.5" lower="0" upper="1.72" />
+  </joint>
+  <joint name="door_to_handle_mount" type="fixed">
+    <origin xyz="0.8613 -0.021 0.922" rpy="0 0 0" />
+    <parent link="door_leaf" />
+    <child link="handle_mount" />
+  </joint>
+  <joint name="mount_to_handle" type="revolute">
+    <origin xyz="0 -0.022 0" rpy="0 0 0" />
+    <parent link="handle_mount" />
+    <child link="lever_handle" />
+    <axis xyz="0 -1 0" />
+    <limit effort="12" velocity="4" lower="0" upper="0.95" />
+  </joint>
+</robot>

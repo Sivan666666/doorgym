@@ -3400,6 +3400,61 @@ env:
             handle_joint_damping: 0.5
             handle_spring_stiffness: 0.5
             handle_spring_damping: 0.5
+        "674":
+          # WC4 geometry/physics with the complete hinged door assembly moved
+          # 0.143 m toward the robot-facing outer side (local y: 0.143 -> 0 m).
+          # The handle, latch, joint topology and scripted-controller tuning
+          # remain identical to WC4.
+          bounding_box: "wc4/bounding_box.json"
+          handle_bounding: "wc4/handle_bounding.json"
+          name: "wc_nomenkuang"
+          path: "wc_nomenkuang/model.urdf"
+          asset_family_override: "wc4"
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset: [0.11, 0.0, 0.0]
+          # Put the side-wall plane at the robot-facing front surface of the
+          # shifted door slab: actor x offset 0.110 m + local front y 0.002 m.
+          # Per-environment door_wall_x_offset randomization is added on top.
+          door_wall_x_reference_offset: 0.112
+          robot_y_offset: 0.18
+          door_motion_sign_multiplier: -1.0
+          door_body_name: "door_panel"
+          handle_body_name: "lever_handle"
+          door_dof_name: "door_hinge_joint"
+          handle_dof_name: "handle_spindle_joint"
+          controller_multipliers:
+            door_joint_friction: 0.5
+            door_joint_damping: 0.5
+            handle_joint_friction: 0.5
+            handle_joint_damping: 0.5
+            handle_spring_stiffness: 0.5
+            handle_spring_damping: 0.5
+          controller_overrides:
+            # The slab is moved to the front of the frame, so the original
+            # release-to-panel arc leaves too little clearance for the wrist
+            # camera mount and finger links. Use a moderately wider outside
+            # loop only for wc_nomenkuang; grasp/pull/panel-push stay intact.
+            pull_base_retreat_distance: 0.48
+            release_clearance_right_distance: 0.18
+            release_clearance_base_retreat_extra: 0.30
+            release_clearance_low_angle_base_retreat_extra: 0.15
+            release_clearance_arc_radius_extra: 0.09
+            release_clearance_edge_extra: 0.08
+            release_clearance_outward_extra: 0.08
+            pull_panel_low_angle_right_arc_radius: 0.12
+            pull_panel_low_angle_edge_clearance: 0.12
+            pull_panel_low_angle_outward_clearance: 0.20
+            pull_panel_low_angle_reposition_steps: 260
+            pull_panel_max_angle_right_arc_radius: 0.27
+            pull_panel_max_angle_edge_clearance: 0.22
+            pull_panel_max_angle_outward_clearance: 0.27
+            pull_panel_max_angle_reposition_steps: 170
+            panel_right_arc_radius: 0.27
+            panel_edge_clearance: 0.22
+            panel_right_arc_outward_clearance: 0.27
+            panel_reposition_steps: 170
+            panel_reposition_completion_max_extra_steps: 300
         "668":
           bounding_box: "button_door/bounding_box.json"
           handle_bounding: "button_door/handle_bounding.json"
@@ -3474,11 +3529,121 @@ env:
             handle_spring_stiffness: 0.5
             handle_spring_damping: 0.5
           controller_overrides:
-            door_joint_friction: 0.25
-            door_joint_damping: 0.18
-            door_open_resistance: 0.08
-            door_open_damping: 0.05
+            door_joint_friction: 0.38
+            door_joint_damping: 0.28
+            door_open_resistance: 0.10
+            door_open_damping: 0.09
             door_auto_open_force: 0.0
+        "675":
+          # Paired glass door. Use only the right leaf (door_1) and its pull
+          # handle; keep the left leaf locked at its closed joint target.
+          bounding_box: "glass_door2/bounding_box.json"
+          handle_bounding: "glass_door2/handle_bounding.json"
+          name: "glass_door2"
+          path: "glass_door2/model.urdf"
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          bounds_yaw_offset_override: 0.0
+          observer_target_local: [0.087497, -0.083, 0.95]
+          handle_closeup_target_local: [0.087497, -0.083, 0.95]
+          # Preserve glass_door's partial handle-side base alignment: the base
+          # center remains about 0.20 m to the positive side of the handle.
+          robot_alignment_y_offset: 0.2875
+          scripted_approach_direction_mode: "robot_vx"
+          scripted_push_direction_mode: "hinge_tangent"
+          # A fixed handle has no separate unlock DOF, so open_stage is true
+          # from reset.  Do not enter passive handle-follow until the arm has
+          # actively initiated a measurable hinge rotation.
+          scripted_handle_follow_min_open_deg: 4.0
+          door_motion_sign_multiplier: 1.0
+          # The paired leaves and frame are imported as one articulation.
+          # Disable only intra-door self-collision while retaining contacts
+          # against the robot, whose actors use different collision groups.
+          door_actor_collision_filter: 2
+          door_body_name: "door_1"
+          handle_body_name: "door_1"
+          door_dof_name: "frame_to_door_1"
+          handle_dof_name: ""
+          handle_unlock_angle: 0.0
+          locked_dof_names: ["frame_to_door_0"]
+          locked_dof_stiffness: 5000.0
+          locked_dof_damping: 250.0
+          # model.urdf intentionally remains untouched. Match the active
+          # leaf's runtime mass properties to glass_door.
+          rigid_body_property_overrides:
+            door_1:
+              mass: 34.0
+              center_of_mass: [-0.5, 0.0, 1.25]
+              inertia:
+                - [17.7086, 0.0, 0.0]
+                - [0.0, 20.5417, 0.0]
+                - [0.0, 0.0, 2.83362]
+          controller_multipliers:
+            door_joint_friction: 0.5
+            door_joint_damping: 0.5
+            handle_joint_friction: 0.5
+            handle_joint_damping: 0.5
+            handle_spring_stiffness: 0.5
+            handle_spring_damping: 0.5
+          controller_overrides:
+            door_joint_friction: 0.38
+            door_joint_damping: 0.28
+            door_open_resistance: 0.10
+            door_open_damping: 0.09
+            door_auto_open_force: 0.0
+        "676":
+          # Frameless paired wooden door. Operate the right leaf and right
+          # knob, while locking the unused left leaf and knob. The source URDF
+          # remains untouched.
+          bounding_box: "wooden_circle/bounding_box.json"
+          handle_bounding: "wooden_circle/handle_bounding.json"
+          name: "wooden_circle"
+          path: "wooden_circle/model.urdf"
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          bounds_yaw_offset_override: 0.0
+          # The global default door_z_offset is 0.01 m. Together these place
+          # the lowest door geometry exactly 0.595 m above the ground.
+          actor_position_offset: [0.0, 0.0, 0.585]
+          # Root-local center of knob_1. It is used only by observer cameras;
+          # the controller goal comes from knob_1-local handle_bounding.json.
+          observer_target_local: [0.0359995, -0.0567505, 0.3179975]
+          handle_closeup_target_local: [0.0359995, -0.0567505, 0.3179975]
+          # After the +90 degree actor yaw, the selected knob center lies at
+          # world-local y=+0.036 m.
+          # Use robot_y=0.2 m as this door's default while retaining an
+          # explicit command-line --robot_y override for manual adjustment.
+          robot_y_default: 0.2
+          robot_alignment_y_offset: 0.036
+          scripted_approach_direction_mode: "robot_vx"
+          scripted_push_direction_mode: "hinge_tangent"
+          # This round knob does not need to be actuated for the task. Keep
+          # the grasp/close stages, skip rotate_handle entirely, then actively
+          # push until the hinge has started moving before following its arc.
+          scripted_handle_follow_min_open_deg: 4.0
+          # Use the negative rotation of the right-leaf +Z hinge so the panel
+          # opens away from the robot (push), rather than toward it (pull).
+          door_motion_sign_multiplier: 1.0
+          door_actor_collision_filter: 2
+          door_body_name: "door_1"
+          handle_body_name: "knob_1"
+          door_dof_name: "root_to_door_1"
+          # Treat knob_1 as a fixed grasp fixture for this push-only task.
+          handle_dof_name: ""
+          handle_rest_angle: 0.0
+          handle_unlock_direction_sign: 1.0
+          handle_unlock_angle: 0.0
+          locked_dof_names: ["root_to_door_0", "knob_mount_0_to_knob_0", "knob_mount_1_to_knob_1"]
+          locked_dof_stiffness: 5000.0
+          locked_dof_damping: 250.0
+          controller_overrides:
+            handle_rotate_steps: 0
+            handle_rotate_angle: 0.0
+            handle_rotate_right_distance: 0.0
+            handle_rotate_down_distance: 0.0
+            # Do not loosen the gripper merely because this no-lock door is
+            # considered open-stage from reset.
+            gripper_open_stage_ratio: 0.8
         "671":
           bounding_box: "wc_articraft/bounding_box.json"
           handle_bounding: "wc_articraft/handle_bounding.json"
@@ -3509,7 +3674,10 @@ env:
           bounding_box: "wc_articraft2/bounding_box.json"
           handle_bounding: "wc_articraft2/handle_bounding.json"
           name: "wc_articraft2"
-          path: "wc_articraft2/model.urdf"
+          # Keep model.urdf as the untouched Articraft export.  This runtime
+          # variant shifts the complete hinged assembly by local -9.497 mm so
+          # the closed door-leaf center matches the frame-depth center.
+          path: "wc_articraft2/model_centered.urdf"
           actor_scale: 1.0
           actor_yaw_offset: -1.5707963267948966
           bounds_yaw_offset_override: 0.0
@@ -3551,6 +3719,51 @@ env:
                 - [44.951148986816406, 0.0022575741168111563, 0.0022391199599951506]
                 - [0.0022575741168111563, 52.817657470703125, -0.00010123486572410911]
                 - [0.0022391199599951506, -0.00010123486572410911, 7.922125339508057]
+        "673":
+          # Directly load the original textured Articraft output. Its URDF and
+          # geometry are identical to wc_articraft2, while this entry keeps the
+          # original asset directory and textured material sidecars.
+          bounding_box: "articraft_results_textured/bounding_box.json"
+          handle_bounding: "articraft_results_textured/handle_bounding.json"
+          name: "articraft_results_textured"
+          path: "articraft_results_textured/model_pull.urdf"
+          asset_family_override: "wc4"
+          actor_scale: 1.0
+          actor_yaw_offset: -1.5707963267948966
+          actor_position_offset: [0.11, 0.0, 0.0]
+          robot_y_offset: 0.18
+          # Match WC4's +Z hinge with negative joint motion toward the pull side.
+          door_motion_sign_multiplier: -1.0
+          door_body_name: "door_panel"
+          handle_body_name: "lever_handle"
+          door_dof_name: "door_hinge_joint"
+          handle_dof_name: "handle_spindle_joint"
+          handle_rest_angle: 0.0
+          handle_unlock_direction_sign: 1.0
+          runtime_mapping: "lever"
+          wc4_pull_physics: true
+          controller_multipliers:
+            door_joint_friction: 0.5
+            door_joint_damping: 0.5
+            handle_joint_friction: 0.5
+            handle_joint_damping: 0.5
+            handle_spring_stiffness: 0.5
+            handle_spring_damping: 0.5
+          rigid_body_property_overrides:
+            door_panel:
+              mass: 114.10994720458984
+              center_of_mass: [0.47238337993621826, -0.02006930485367775, 1.1149605512619019]
+              inertia:
+                - [44.951148986816406, 0.0022575741168111563, 0.0022391199599951506]
+                - [0.0022575741168111563, 52.817657470703125, -0.00010123486572410911]
+                - [0.0022391199599951506, -0.00010123486572410911, 7.922125339508057]
+            lever_handle:
+              mass: 0.029999997466802597
+              center_of_mass: [-0.04000000283122063, 0.0, 0.027000000700354576]
+              inertia:
+                - [0.00000257999954556, 0.0, 0.00000359999944521]
+                - [0.0, 0.00004332999378676, 0.0]
+                - [0.00000359999967259, 0.0, 0.00004124999031774]
 
     control:
       stiffness: {"joint": 80, "z1": 5}

@@ -2752,7 +2752,11 @@ def init_door_twin_tracker(st):
         getattr(st.args, "record_dp_dataset", False)
         or getattr(st.args, "dump_keyframe_images", False)
     )
-    handle_lower = float(st.door.dof_lower[1]) if len(st.door.dof_lower) > 1 else 0.0
+    handle_lower = (
+        float(st.door.dof_lower[st.door.handle_dof_index])
+        if st.door.handle_dof_index is not None
+        else 0.0
+    )
     configured_handle_rest = getattr(st.door, "handle_rest_angle", None)
     handle_rest = (
         handle_lower
@@ -2830,7 +2834,7 @@ def update_door_twin_tracker(st, step, door_pos_record):
     tracker.update(
         step=int(step),
         phase=str(st.last_phase),
-        door_pos=door_pos_record,
+        door_pos=dc.canonical_door_dof_positions(st.door, door_pos_record),
         handle_goal=st.last_handle_goal,
         target_pos=st.last_target_pos,
         ee_pos=ee_pos,
@@ -3284,7 +3288,7 @@ def sample_env_value(rng, args, attr, half_attr, lower=None, upper=None):
     return value
 
 
-def make_env_args(args, env_index):
+def make_env_args(args, env_index, door=None):
     env_args = SimpleNamespace(**vars(args))
     env_args._camera_axis_local_poses = {}
     env_seed = seed_for_env(args, env_index)
@@ -3311,6 +3315,13 @@ def make_env_args(args, env_index):
 
     def set_sampled_offset_range(attr, min_attr, max_attr, legacy_half_attr=None, lower=None, upper=None):
         base_value = getattr(args, attr)
+        if (
+            attr == "robot_y"
+            and door is not None
+            and door.spec.get("robot_y_default") is not None
+            and not dc.cli_flag_was_set(args, "--robot_y")
+        ):
+            base_value = float(door.spec["robot_y_default"])
         use_legacy_half_range = (
             legacy_half_attr is not None
             and dc.cli_flag_was_set(args, f"--{legacy_half_attr}")
@@ -4288,10 +4299,13 @@ def apply_warmstart_state(gym, sim, st, data, step, dof_names):
         # Legacy snapshots did not store the internal latch state. Infer it
         # conservatively: tiny PhysX hinge drift must not unlock the door.
         closed_angle = dc.closed_hinge_angle(st.door, st.args)
-        hinge_departure = abs(float(door_pos[0]) - float(closed_angle)) if n >= 1 else 0.0
+        hinge_departure = abs(dc.door_hinge_angle(st.door, door_pos) - float(closed_angle)) if n >= 1 else 0.0
         st.door.open_stage = bool(
             hinge_departure >= math.radians(2.0)
-            or (n >= 2 and dc.handle_is_unlocked(st.door, float(door_pos[1])))
+            or (
+                st.door.handle_dof_index is not None
+                and dc.handle_is_unlocked(st.door, dc.door_handle_angle(st.door, door_pos))
+            )
         )
     if not st.door.open_stage:
         # Remove the small numerical hinge displacement stored in a locked
@@ -4450,11 +4464,33 @@ def trajectory_targets(
     handle_pos, handle_quat = get_body_pose(gym, env, door_actor, door.handle_body_index)
     handle_goal = quat_apply(handle_quat, door.handle_goal_offset) + handle_pos
     base_xy_current = traj.get("base_xy", base_start)
-    approach_dir = np.array([base_xy_current[0], base_xy_current[1], args.robot_z], dtype=np.float32) - handle_goal
-    approach_dir[2] = 0.0
-    approach_dir = normalize(approach_dir)
-    if np.linalg.norm(approach_dir) < 1.0e-5:
-        approach_dir = np.array([math.cos(yaw_start), math.sin(yaw_start), 0.0], dtype=np.float32)
+    approach_direction_mode = str(
+        door.spec.get("scripted_approach_direction_mode", "handle_to_base") or "handle_to_base"
+    ).strip().lower()
+    if approach_direction_mode == "robot_vx":
+        # Skill-local +X points away from the door. Since the trajectory moves
+        # from pregrasp X=+0.16 to grasp X=-0.04, using -robot_forward here
+        # makes the executed pregrasp->grasp displacement exactly +robot vx.
+        robot_yaw = float(traj.get("yaw", yaw_start))
+        approach_dir = -np.asarray(
+            [math.cos(robot_yaw), math.sin(robot_yaw), 0.0], dtype=np.float32
+        )
+    elif approach_direction_mode == "handle_to_base":
+        approach_dir = (
+            np.array([base_xy_current[0], base_xy_current[1], args.robot_z], dtype=np.float32)
+            - handle_goal
+        )
+        approach_dir[2] = 0.0
+        approach_dir = normalize(approach_dir)
+        if np.linalg.norm(approach_dir) < 1.0e-5:
+            approach_dir = np.array(
+                [math.cos(yaw_start), math.sin(yaw_start), 0.0], dtype=np.float32
+            )
+    else:
+        raise ValueError(
+            f"Unsupported scripted_approach_direction_mode={approach_direction_mode!r} "
+            f"for door {door.spec.get('name', '')!r}; expected 'handle_to_base' or 'robot_vx'"
+        )
 
     skill_profile = door_twin_profile_for_args(args)
     legacy_skill_replay = door_twin_legacy_replay_for_args(args)
@@ -4499,6 +4535,26 @@ def trajectory_targets(
     if float(np.dot(pull_dir, approach_dir)) < 0.0:
         pull_dir = -pull_dir
     push_dir = -pull_dir
+    push_direction_mode = str(
+        door.spec.get("scripted_push_direction_mode", "legacy_handle_axis")
+        or "legacy_handle_axis"
+    ).strip().lower()
+    if push_direction_mode == "hinge_tangent":
+        push_dir = dc.handle_open_tangent_dir(
+            gym,
+            env,
+            door_actor,
+            door,
+            handle_goal,
+            push_dir,
+            args,
+        )
+    elif push_direction_mode != "legacy_handle_axis":
+        raise ValueError(
+            f"Unsupported scripted_push_direction_mode={push_direction_mode!r} "
+            f"for door {door.spec.get('name', '')!r}; expected "
+            "'legacy_handle_axis' or 'hinge_tangent'"
+        )
     push_pos = rotate_pos + push_dir * args.door_push_distance
 
     walk_end = args.walk_steps
@@ -4648,7 +4704,17 @@ def trajectory_targets(
                     turned_quat,
                 )
             live_push_dir = traj["push_dir"].copy()
-            if door.open_stage:
+            if push_direction_mode == "hinge_tangent":
+                live_push_dir = dc.handle_open_tangent_dir(
+                    gym,
+                    env,
+                    door_actor,
+                    door,
+                    handle_goal,
+                    live_push_dir,
+                    args,
+                )
+            elif door.open_stage:
                 live_pull_dir = quat_axis(handle_quat, axis=2)
                 live_pull_dir[2] = 0.0
                 live_pull_dir = normalize(live_pull_dir)
@@ -4657,8 +4723,26 @@ def trajectory_targets(
                         live_pull_dir = -live_pull_dir
                     live_push_dir = -live_pull_dir
 
+            freeze_ee_target = False
+            door_pos, _ = get_actor_dof_state(gym, env, door_actor)
+            door_open_ratio = (
+                door_hinge_open_ratio(door, dc.door_hinge_angle(door, door_pos), args)
+                if len(door_pos) > 0
+                else 0.0
+            )
+            door_open_deg = (
+                dc.door_open_degrees(door_pos, args, door=door)
+                if len(door_pos) > 0
+                else 0.0
+            )
+            handle_follow_min_open_deg = max(
+                0.0,
+                float(door.spec.get("scripted_handle_follow_min_open_deg", 0.0)),
+            )
+            handle_follow_ready = door_open_deg >= handle_follow_min_open_deg
             follow_handle = (
                 door.open_stage
+                and handle_follow_ready
                 and t <= args.handle_follow_push_ratio
                 and "handle_contact_offset_local" in traj
             )
@@ -4666,12 +4750,8 @@ def trajectory_targets(
                 skill_profile is not None
                 and not legacy_skill_replay
                 and door.open_stage
+                and handle_follow_ready
                 and "handle_contact_offset_local" in traj
-            )
-            freeze_ee_target = False
-            door_pos, _ = get_actor_dof_state(gym, env, door_actor)
-            door_open_ratio = (
-                door_hinge_open_ratio(door, float(door_pos[0]), args) if len(door_pos) > 0 else 0.0
             )
             if "handle_contact_offset_local" in traj:
                 handle_contact_offset = quat_apply(handle_quat, traj["handle_contact_offset_local"])
@@ -4882,6 +4962,20 @@ def draw_scripted_trajectory(gym, viewer, env, traj, args, current_target_pos=No
         color=(1.0, 0.0, 0.0),
         color2=(1.0, 0.0, 0.0),
     )
+    pregrasp_sphere = gymutil.WireframeSphereGeometry(
+        radius=radius * 1.6,
+        num_lats=10,
+        num_lons=10,
+        color=(0.0, 0.45, 1.0),
+        color2=(0.0, 0.75, 1.0),
+    )
+    grasp_sphere = gymutil.WireframeSphereGeometry(
+        radius=radius * 1.6,
+        num_lats=10,
+        num_lons=10,
+        color=(1.0, 0.8, 0.0),
+        color2=(1.0, 0.45, 0.0),
+    )
 
     points = [np.asarray(traj[key], dtype=np.float32) for key in keys]
     for a, b in zip(points[:-1], points[1:]):
@@ -4889,6 +4983,23 @@ def draw_scripted_trajectory(gym, viewer, env, traj, args, current_target_pos=No
             u = i / max(1, samples - 1)
             pos = lerp(a, b, u)
             gymutil.draw_lines(green_sphere, gym, viewer, env, base_ik.transform_from_arrays(pos))
+
+    # Draw the final, post-offset waypoints as persistent, distinguishable
+    # markers. These are the exact points consumed by the trajectory controller.
+    gymutil.draw_lines(
+        pregrasp_sphere,
+        gym,
+        viewer,
+        env,
+        base_ik.transform_from_arrays(np.asarray(traj["pregrasp"], dtype=np.float32)),
+    )
+    gymutil.draw_lines(
+        grasp_sphere,
+        gym,
+        viewer,
+        env,
+        base_ik.transform_from_arrays(np.asarray(traj["grasp"], dtype=np.float32)),
+    )
 
     if current_target_pos is not None:
         gymutil.draw_lines(
@@ -5146,9 +5257,9 @@ def run_demo(
             print(
                 f"[{step:04d}] phase={phase:14s} "
                 f"ik_pos_err={ik_state.last_pos_error:.4f} "
-                f"door={math.degrees(float(door_pos[0])) if len(door_pos) else 0.0:.1f}deg "
-                f"signed_push={math.degrees(args.door_motion_sign * float(door_pos[0])) if len(door_pos) else 0.0:.1f}deg "
-                f"handle={math.degrees(float(door_pos[1])) if len(door_pos) > 1 else 0.0:.1f}deg "
+                f"door={math.degrees(dc.door_hinge_angle(door, door_pos)) if len(door_pos) else 0.0:.1f}deg "
+                f"signed_push={dc.door_open_degrees(door_pos, args, door=door):.1f}deg "
+                f"handle={math.degrees(dc.door_handle_angle(door, door_pos)) if door.handle_dof_index is not None else 0.0:.1f}deg "
                 f"open_stage={door.open_stage}",
                 flush=True,
             )
@@ -5265,7 +5376,7 @@ def create_parallel_env_states(
     for env_index in range(int(args.num_envs)):
         door_template = door_templates[env_index % len(door_templates)]
         door = clone_door_runtime(door_template)
-        env_args = make_env_args(args, env_index)
+        env_args = make_env_args(args, env_index, door=door)
         env, arm_actor, actor_handles, door_actor, _ = create_parallel_env_actors(
             gym,
             sim,
@@ -5698,7 +5809,9 @@ def run_parallel_recovery_batch(gym, sim, env_states, viewer, args, dt, dof_name
                 st.recovery_first_contact_both_step = int(step)
             closed_angle = dc.closed_hinge_angle(st.door, st.args)
             locked_hinge_drift_deg = (
-                abs(math.degrees(float(door_pos[0]) - float(closed_angle))) if len(door_pos) else 0.0
+                abs(math.degrees(dc.door_hinge_angle(st.door, door_pos) - float(closed_angle)))
+                if len(door_pos)
+                else 0.0
             )
             if not st.door.open_stage:
                 st.recovery_max_locked_hinge_drift_deg = max(
@@ -5709,8 +5822,10 @@ def run_parallel_recovery_batch(gym, sim, env_states, viewer, args, dt, dof_name
                 st.recovery_first_unlock_step = int(step)
                 st.recovery_unlock_phase = str(st.last_phase)
                 st.recovery_handle_deg_at_unlock = (
-                    math.degrees(max(0.0, dc.handle_unlock_progress(st.door, float(door_pos[1]))))
-                    if len(door_pos) > 1
+                    math.degrees(
+                        max(0.0, dc.handle_unlock_progress(st.door, dc.door_handle_angle(st.door, door_pos)))
+                    )
+                    if st.door.handle_dof_index is not None
                     else 0.0
                 )
                 if (
@@ -5721,7 +5836,7 @@ def run_parallel_recovery_batch(gym, sim, env_states, viewer, args, dt, dof_name
                     st.recovery_premature_unlock = True
             ee_pos, _ee_quat = current_ee_pose_from_refreshed_tensors(st.ik_state)
             recovery_local_success(st, contact_both, door_pos, ee_pos, st.last_handle_goal, step)
-            door_deg = abs(math.degrees(float(door_pos[0]))) if len(door_pos) else 0.0
+            door_deg = abs(dc.door_open_degrees(door_pos, st.args, door=st.door)) if len(door_pos) else 0.0
             st.recovery_max_door_deg = max(float(st.recovery_max_door_deg), float(door_deg))
             if (
                 door_deg >= float(args.pass_open_angle_deg)
@@ -5792,7 +5907,7 @@ def run_parallel_recovery_batch(gym, sim, env_states, viewer, args, dt, dof_name
             "max_locked_hinge_drift_deg": float(st.recovery_max_locked_hinge_drift_deg),
             "premature_unlock": bool(st.recovery_premature_unlock),
             "max_door_deg": float(st.recovery_max_door_deg),
-            "final_door_deg": abs(math.degrees(float(door_pos[0]))) if door_pos.size else 0.0,
+            "final_door_deg": abs(dc.door_open_degrees(door_pos, st.args, door=st.door)) if door_pos.size else 0.0,
             "unsafe_or_collision": bool(st.base_door_collision_detected),
             "raw_episode": None if raw_path is None else str(raw_path),
         }
@@ -6319,12 +6434,14 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
         if args.log_interval > 0 and step % args.log_interval == 0:
             shown = env_states[: min(len(env_states), 4)]
             door_deg = [
-                round(math.degrees(float(st.last_door_pos[0])), 1) if st.last_door_pos is not None and len(st.last_door_pos) else 0.0
+                round(dc.door_open_degrees(st.last_door_pos, st.args, door=st.door), 1)
+                if st.last_door_pos is not None and len(st.last_door_pos)
+                else 0.0
                 for st in shown
             ]
             handle_deg = [
-                round(math.degrees(float(st.last_door_pos[1])), 1)
-                if st.last_door_pos is not None and len(st.last_door_pos) > 1
+                round(math.degrees(dc.door_handle_angle(st.door, st.last_door_pos)), 1)
+                if st.last_door_pos is not None and st.door.handle_dof_index is not None
                 else None
                 for st in shown
             ]
@@ -6381,6 +6498,23 @@ def run_parallel_demo(gym, sim, env_states, viewer, args, dt, dof_names):
                 f"{tracik_note}",
                 flush=True,
             )
+            if bool(getattr(args, "debug_gripper_handle_contact", False)):
+                for st in shown:
+                    contact = dc.gripper_handle_contact_snapshot(gym, st)
+                    ee_pos = getattr(st.ik_state, "current_pos_np", None)
+                    push_dir = st.traj.get("push_dir")
+                    print(
+                        "[PushContactDebug] "
+                        f"env={st.index} phase={st.last_phase} "
+                        f"scores={np.asarray(contact['gripper_handle_contact_score']).round(5).tolist()} "
+                        f"counts={np.asarray(contact['gripper_handle_contact_count']).astype(int).tolist()} "
+                        f"both={float(np.asarray(contact['gripper_handle_contact_both']).reshape(-1)[0]):.0f} "
+                        f"push_dir={None if push_dir is None else np.asarray(push_dir).round(4).tolist()} "
+                        f"target={None if st.last_target_pos is None else np.asarray(st.last_target_pos).round(4).tolist()} "
+                        f"ee={None if ee_pos is None else np.asarray(ee_pos).round(4).tolist()} "
+                        f"handle={None if st.last_handle_goal is None else np.asarray(st.last_handle_goal).round(4).tolist()}",
+                        flush=True,
+                    )
         step += 1
 
     elapsed = time.time() - start

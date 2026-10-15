@@ -48,6 +48,7 @@ from lerobot.utils.constants import (
     ACTION,
     OBS_LANGUAGE_ATTENTION_MASK,
     OBS_LANGUAGE_TOKENS,
+    OBS_STATE,
     OPENPI_ATTENTION_MASK_VALUE,
 )
 
@@ -560,6 +561,13 @@ class PI05Pytorch(nn.Module):  # see openpi `PI0Pytorch`
         self.action_in_proj = nn.Linear(config.max_action_dim, action_expert_config.width)
         self.action_out_proj = nn.Linear(action_expert_config.width, config.max_action_dim)
 
+        # Legacy pi0.5 receives quantized state through its language prompt. For
+        # robot control we optionally expose the continuous proprioceptive state
+        # as one prefix token instead. Do not instantiate this module in legacy
+        # mode: this preserves strict state-dict and numerical compatibility.
+        if config.state_conditioning:
+            self.state_proj = nn.Linear(config.max_state_dim, paligemma_config.width)
+
         self.time_mlp_in = nn.Linear(action_expert_config.width, action_expert_config.width)
         self.time_mlp_out = nn.Linear(action_expert_config.width, action_expert_config.width)
 
@@ -632,9 +640,9 @@ class PI05Pytorch(nn.Module):  # see openpi `PI0Pytorch`
         return time.to(dtype=torch.float32, device=device)
 
     def embed_prefix(
-        self, images, img_masks, tokens, masks
+        self, images, img_masks, tokens, masks, state=None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Embed images with SigLIP and language tokens with embedding layer."""
+        """Embed images, language, and optionally the current robot state."""
         embs = []
         pad_masks = []
         att_masks = []
@@ -664,6 +672,32 @@ class PI05Pytorch(nn.Module):  # see openpi `PI0Pytorch`
 
         num_lang_embs = lang_emb.shape[1]
         att_masks += [0] * num_lang_embs
+
+        if self.config.state_conditioning:
+            if state is None:
+                raise ValueError(
+                    "PI05 state conditioning is enabled, but observation.state was not provided."
+                )
+            if state.ndim != 2 or state.shape[-1] != self.config.max_state_dim:
+                raise ValueError(
+                    "Expected padded observation.state with shape "
+                    f"[B, {self.config.max_state_dim}], got {tuple(state.shape)}."
+                )
+            if self.state_proj.weight.dtype == torch.float32:
+                state = state.to(torch.float32)
+
+            def state_proj_func(state):
+                return self.state_proj(state)
+
+            state_emb = self._apply_checkpoint(state_proj_func, state)
+            # Image/language embeddings may be bf16 while the projection is
+            # intentionally kept in fp32 for stable proprioceptive encoding.
+            state_emb = state_emb.to(dtype=lang_emb.dtype)
+            embs.append(state_emb[:, None, :])
+            pad_masks.append(
+                torch.ones(state_emb.shape[0], 1, dtype=torch.bool, device=state_emb.device)
+            )
+            att_masks += [0]
 
         embs = torch.cat(embs, dim=1)
         pad_masks = torch.cat(pad_masks, dim=1)
@@ -721,7 +755,9 @@ class PI05Pytorch(nn.Module):  # see openpi `PI0Pytorch`
 
         return embs, pad_masks, att_masks, adarms_cond
 
-    def forward(self, images, img_masks, tokens, masks, actions, noise=None, time=None) -> Tensor:
+    def forward(
+        self, images, img_masks, tokens, masks, actions, noise=None, time=None, state=None
+    ) -> Tensor:
         """Do a full training forward pass and compute the loss."""
         if noise is None:
             noise = self.sample_noise(actions.shape, actions.device)
@@ -733,7 +769,9 @@ class PI05Pytorch(nn.Module):  # see openpi `PI0Pytorch`
         x_t = time_expanded * noise + (1 - time_expanded) * actions
         u_t = noise - actions
 
-        prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(images, img_masks, tokens, masks)
+        prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
+            images, img_masks, tokens, masks, state=state
+        )
         suffix_embs, suffix_pad_masks, suffix_att_masks, adarms_cond = self.embed_suffix(x_t, time)
 
         if (
@@ -785,6 +823,7 @@ class PI05Pytorch(nn.Module):  # see openpi `PI0Pytorch`
         masks,
         noise=None,
         num_steps=None,
+        state=None,
         **kwargs: Unpack[ActionSelectKwargs],
     ) -> Tensor:
         """Do a full inference forward and compute the action."""
@@ -803,7 +842,9 @@ class PI05Pytorch(nn.Module):  # see openpi `PI0Pytorch`
             )  # Use config max_action_dim for internal processing
             noise = self.sample_noise(actions_shape, device)
 
-        prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(images, img_masks, tokens, masks)
+        prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
+            images, img_masks, tokens, masks, state=state
+        )
         prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
         prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
 
@@ -1017,8 +1058,28 @@ class PI05Policy(PreTrainedPolicy):
             if remap_count > 0:
                 print(f"Remapped {remap_count} state dict keys")
 
-            # Load the remapped state dict into the model
-            missing_keys, unexpected_keys = model.load_state_dict(remapped_state_dict, strict=strict)
+            # Load non-strictly first so optional, explicitly enabled modules can
+            # be initialized while every legacy parameter is still validated.
+            missing_keys, unexpected_keys = model.load_state_dict(remapped_state_dict, strict=False)
+            # Safetensors stores only one copy of this tied language embedding.
+            # The checkpoint contains the shared counterpart, so this is an
+            # expected omission rather than an incompatible architecture.
+            allowed_missing_keys = {
+                "model.paligemma_with_expert.paligemma.model.language_model.embed_tokens.weight"
+            }
+            if model.config.state_conditioning:
+                allowed_missing_keys.update(
+                    {
+                        "model.state_proj.weight",
+                        "model.state_proj.bias",
+                    }
+                )
+            disallowed_missing_keys = [key for key in missing_keys if key not in allowed_missing_keys]
+            if strict and (disallowed_missing_keys or unexpected_keys):
+                raise RuntimeError(
+                    "PI05 checkpoint is incompatible with the requested architecture: "
+                    f"missing={disallowed_missing_keys}, unexpected={unexpected_keys}"
+                )
 
             if missing_keys:
                 print(f"Missing keys when loading state dict: {len(missing_keys)} keys")
@@ -1045,6 +1106,8 @@ class PI05Policy(PreTrainedPolicy):
 
         except Exception as e:
             print(f"Warning: Could not remap state dict keys: {e}")
+            if strict:
+                raise
 
         return model
 
@@ -1088,9 +1151,12 @@ class PI05Policy(PreTrainedPolicy):
                 new_key = key.replace("action_time_mlp_in.", "time_mlp_in.")
             elif key.startswith("action_time_mlp_out."):
                 new_key = key.replace("action_time_mlp_out.", "time_mlp_out.")
-            # Also handle state_proj which shouldn't exist in pi05
+            # Upstream pi0 checkpoints may contain an action-expert state_proj
+            # with a different role and width. Ignore that unprefixed key. Our
+            # optional pi0.5 prefix projection is saved as model.state_proj.*
+            # and therefore loads normally from our own checkpoints.
             if key.startswith("state_proj."):
-                logging.warning(f"Skipping state_proj key in pi05 mode: {key}")
+                logging.warning(f"Skipping upstream state_proj key in pi05 mode: {key}")
                 continue
 
             # Handle vision tower embedding layer potential differences
@@ -1199,6 +1265,23 @@ class PI05Policy(PreTrainedPolicy):
         actions = pad_vector(batch[ACTION], self.config.max_action_dim)
         return actions
 
+    def prepare_state(self, batch):
+        """Validate and pad the normalized current robot state."""
+        if not self.config.state_conditioning:
+            return None
+        if OBS_STATE not in batch:
+            raise ValueError(
+                f"PI05 state conditioning requires batch key {OBS_STATE!r}; "
+                f"available keys: {sorted(batch)}"
+            )
+        state = batch[OBS_STATE]
+        expected_dim = self.config.input_features[OBS_STATE].shape[0]
+        if state.ndim != 2 or state.shape[-1] != expected_dim:
+            raise ValueError(
+                f"Expected {OBS_STATE} shape [B, {expected_dim}], got {tuple(state.shape)}"
+            )
+        return pad_vector(state, self.config.max_state_dim)
+
     @torch.no_grad()
     def select_action(self, batch: dict[str, Tensor]) -> Tensor:
         """Select a single action given environment observations."""
@@ -1224,9 +1307,9 @@ class PI05Policy(PreTrainedPolicy):
         # Prepare inputs
         images, img_masks = self._preprocess_images(batch)
         tokens, masks = batch[f"{OBS_LANGUAGE_TOKENS}"], batch[f"{OBS_LANGUAGE_ATTENTION_MASK}"]
+        state = self.prepare_state(batch)
 
-        # Sample actions using the model (pass through RTC kwargs, no separate state needed for PI05)
-        actions = self.model.sample_actions(images, img_masks, tokens, masks, **kwargs)
+        actions = self.model.sample_actions(images, img_masks, tokens, masks, state=state, **kwargs)
 
         # Unpad actions to actual action dimension
         original_action_dim = self.config.output_features[ACTION].shape[0]
@@ -1246,11 +1329,11 @@ class PI05Policy(PreTrainedPolicy):
         # Prepare inputs
         images, img_masks = self._preprocess_images(batch)
         tokens, masks = batch[f"{OBS_LANGUAGE_TOKENS}"], batch[f"{OBS_LANGUAGE_ATTENTION_MASK}"]
+        state = self.prepare_state(batch)
 
         actions = self.prepare_action(batch)
 
-        # Compute loss (no separate state needed for PI05)
-        losses = self.model.forward(images, img_masks, tokens, masks, actions)
+        losses = self.model.forward(images, img_masks, tokens, masks, actions, state=state)
 
         # Truncate losses to actual action dimensions
         original_action_dim = self.config.output_features[ACTION].shape[0]

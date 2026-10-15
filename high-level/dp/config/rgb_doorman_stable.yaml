@@ -1,0 +1,63 @@
+# Deliberate stable Gym adaptation, NOT an exact DoorMan augmentation preset.
+version: doorman_rgb_gym_v2
+robot_appearance:
+  enabled: true
+image_augmentation:
+  enabled: true
+  temporal_mode: episode
+  brightness: {probability: 0.25, range: [0.9, 1.1]}
+  saturation: {probability: 0.25, range: [0.8, 1.2]}
+  hue: {probability: 0.5, range: [-0.025, 0.025]}
+  contrast: {probability: 0.25, range: [0.9, 1.1]}
+  gaussian_noise: {probability: 0.25, std_range: [0.0, 0.015]}
+  gaussian_blur: {probability: 0.1, kernel_size: [3, 5], sigma: [0.1, 1.5]}
+materials:
+  enabled: true
+  texture_variants: 20
+  paint_variants: 100
+  rotation_deg: [0, 360]
+  translation: [0, 100]
+  paint_tint_exponential_scale: 0.02
+  # Gym lacks the original PBR indirect illumination; avoid almost-black paint.
+  paint_tint_range: [0.25, 1.0]
+  texture_resolution: 512
+  dynamic: false
+  wc_reference:
+    enabled: true
+    texture_root: doortwin/wc/assets/textures
+    grain_contrast: [2.0, 3.5]
+    handle_rgb: [24, 24, 24]
+    panel_palettes:
+      - {name: whitewashed, rgb: [224, 219, 207]}
+      - {name: warm_oak, rgb: [188, 153, 110]}
+      - {name: walnut, rgb: [125, 92, 66]}
+      - {name: gray_wood, rgb: [163, 173, 177]}
+lighting:
+  enabled: true
+  temporal_mode: episode
+  interval_s: 1.0
+  intensity: [2500, 3500]
+  rotation_deg: [0, 360]
+  gym_intensity_reference: 3000.0
+  gym_ambient_gain: 0.65
+  gym_directional_gain: 0.7
+  neutral_color_mix: 0.75
+  gym_hemisphere_key_fill: true
+scene:
+  enabled: true
+  wall_height: 3.2
+  opening_top_clearance: 0.02
+  floor_half_extent: 6.0
+  wall_texture_tile_m: 1.5
+  floor_texture_tile_m: 1.5
+  indoor_room:
+    enabled: true
+    far_wall_distance_m: [3.0, 4.0]
+    half_width_m: 3.0
+    approach_ceiling_extent_m: 2.0
+    ceiling_gray_range: [205, 236]
+# Floors are now visual meshes on EXISTING no-collision wall actors, visible in
+# both viewer and policy cameras; avoid applying the old RGB floor twice.
+ground_rgb_projection: false
+# HDR informs episode-fixed light color only; cameras see actual room meshes.
+hdr_background_rgb: false

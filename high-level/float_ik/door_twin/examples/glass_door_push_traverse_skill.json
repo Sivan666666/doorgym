@@ -3,7 +3,7 @@
   "metadata": {
     "name": "glass_door_push_traverse",
     "asset_name": "glass_door",
-    "source_round": "glass_door_resistance_check_v2",
+    "source_round": "glass_door_heavier_v2b_yminus002_20260808",
     "purpose": "Open the single-DOF central glass door by grasping its vertical pull handle from the robot side, pushing the door open, then traversing straight through.",
     "notes": {
       "base_speed_mps": 0.2,
@@ -16,12 +16,13 @@
       "base_alignment": "handle-side partial offset; robot y=-0.24 while handle world y is about -0.44 at spawn",
       "door_motion": "uses negative hinge travel for push-open behavior from the robot side",
       "handle_goal_bias_world": [-0.035, -0.02, -0.015],
+      "grasp_offset_local": [-0.04, -0.02, -0.02],
       "ee_roll_offset": 1.5707963267948966,
       "validated_with_resistance_overrides": {
-        "door_joint_friction": 0.25,
-        "door_joint_damping": 0.18,
-        "door_open_resistance": 0.08,
-        "door_open_damping": 0.05,
+        "door_joint_friction": 0.38,
+        "door_joint_damping": 0.28,
+        "door_open_resistance": 0.10,
+        "door_open_damping": 0.09,
         "door_auto_open_force": 0.0
       }
     }
@@ -41,8 +42,8 @@
     },
     {
       "name": "MoveEEToHandle",
-      "pregrasp_offset": [0.16, 0.0, -0.02],
-      "grasp_offset": [0.0, 0.0, -0.02],
+      "pregrasp_offset": [0.16, -0.02, -0.02],
+      "grasp_offset": [-0.04, -0.02, -0.02],
       "handle_goal_bias_world": [-0.035, -0.02, -0.015],
       "ee_roll_offset": 1.5707963267948966,
       "duration_steps": 50

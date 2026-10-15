@@ -80,17 +80,27 @@ def parse_args():
         default=100,
         help="Safety cap on simulator launches for success-target and per-door quota modes.",
     )
+    parser.add_argument(
+        "--continue_after_cleanup_sigsegv",
+        action="store_true",
+        help=(
+            "Continue to the next randomized recording batch when Isaac Gym exits with "
+            "SIGSEGV during teardown even if that batch saved no episode. This is intended "
+            "only for known headless cleanup crashes and is disabled by default."
+        ),
+    )
     parser.add_argument("--raw_root", type=str, default=str(A2W_RAW_ROOT))
     parser.add_argument(
         "--state_action_mode",
-        choices=["ee_state10", "joint_state9"],
+        choices=["ee_state10", "joint_state9", "joint_state10"],
         default="ee_state10",
         help=(
             "ee_state10 keeps the old 10D state/action schema "
             "[last_command_vx, last_command_vyaw, EE pose, gripper] + EE target action. "
             "joint_state9 records 9D state/action "
             "[last_command_vx, last_command_vyaw, joint1..joint6, jointGripper] "
-            "and uses joint targets as actions."
+            "and uses joint targets as actions. joint_state10 additionally records "
+            "body-frame last_command_vy/action vy for holonomic trajectory experiments."
         ),
     )
     parser.add_argument("--fps", type=int, default=25)
@@ -143,6 +153,16 @@ def parse_args():
     parser.add_argument("--graphics_device_id", type=int, default=None)
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--rgb", action="store_true", help="Record A2W ikpush RGB+mask vision instead of depth-only vision.")
+    parser.add_argument(
+        "--rgb_only",
+        "--rgb_without_masks",
+        dest="rgb_only",
+        action="store_true",
+        help=(
+            "Record only wrist/front RGB arrays. Segmentation may still be rendered internally for "
+            "bbox/contact diagnostics, but mask images are not stored in raw episodes."
+        ),
+    )
     parser.add_argument("--depth_only", dest="depth_only", action="store_true", default=True, help="Record only wrist/front depth images, without mask images.")
     parser.add_argument("--no_depth_only", dest="depth_only", action="store_false", help="Record legacy depth+mask image inputs.")
     add_depth_aug_args(parser)
@@ -239,6 +259,8 @@ def script_for_mode(mode):
 def dp_record_state_mode_for_schema(schema):
     if schema == "joint_state9":
         return "a2w_last_command_joint_state9"
+    if schema == "joint_state10":
+        return "a2w_last_command_joint_state10"
     if schema == "ee_state10":
         return "pi05_last_command_state10"
     raise ValueError(schema)
@@ -247,6 +269,8 @@ def dp_record_state_mode_for_schema(schema):
 def expected_action_names_for_schema(schema):
     if schema == "joint_state9":
         return list(A2W_JOINT_ACTION9_NAMES)
+    if schema == "joint_state10":
+        return ["vx", "vy", "yaw", *A2W_JOINT_ACTION9_NAMES[2:]]
     if schema == "ee_state10":
         return list(A2W_EE_ACTION10_NAMES)
     raise ValueError(schema)
@@ -583,6 +607,8 @@ def run_one(mode, rollout_idx, args):
             raise ValueError("--rgb and --depth_only are mutually exclusive.")
         if args.rgb:
             cmd += ["--rgb", "--camera_rgb", "--no_camera_depth"]
+            if args.rgb_only:
+                cmd.append("--dp_rgb_without_masks")
         else:
             cmd.append("--camera_depth")
             if args.depth_only:
@@ -637,6 +663,8 @@ def run_one(mode, rollout_idx, args):
         raise ValueError("--rgb and --depth_only are mutually exclusive.")
     if args.rgb:
         cmd += ["--rgb", "--camera_rgb", "--no_camera_depth"]
+        if args.rgb_only:
+            cmd.append("--dp_rgb_without_masks")
     else:
         cmd.append("--camera_depth")
         if args.depth_only:
@@ -696,13 +724,23 @@ def record_until_target_successes(args, mode):
             # other failures, or a cleanup crash that produced no episodes,
             # remain fatal.
             cleanup_sigsegv = int(batch_error.returncode) == -int(signal.SIGSEGV)
-            if not cleanup_sigsegv or saved_after <= saved_before:
+            if not cleanup_sigsegv or (
+                saved_after <= saved_before and not args.continue_after_cleanup_sigsegv
+            ):
                 raise batch_error
-            print(
-                f"Warning: recording subprocess exited with SIGSEGV during cleanup, "
-                f"but {saved_after - saved_before} new episode(s) were saved; continuing.",
-                flush=True,
-            )
+            if saved_after > saved_before:
+                print(
+                    f"Warning: recording subprocess exited with SIGSEGV during cleanup, "
+                    f"but {saved_after - saved_before} new episode(s) were saved; continuing.",
+                    flush=True,
+                )
+            else:
+                print(
+                    "Warning: recording subprocess exited with SIGSEGV during cleanup and "
+                    "saved no episode; continuing with the next randomized batch because "
+                    "--continue_after_cleanup_sigsegv is enabled.",
+                    flush=True,
+                )
         print(
             f"[target] after batch {rollout_idx + 1}: successful={saved_after}/{target} "
             f"new={saved_after - saved_before}",
@@ -716,6 +754,8 @@ def record_until_target_successes(args, mode):
 def main():
     args = parse_args()
     apply_depth_aug_config_defaults(args, sys.argv[1:])
+    if args.rgb_only:
+        args.rgb = True
     args.raw_root = str(Path(args.raw_root).expanduser().resolve())
     if args.num_episodes <= 0:
         raise ValueError("--num_episodes must be positive")
@@ -791,6 +831,13 @@ def main():
             "[last_command_vx, last_command_vyaw, joint1..joint6, jointGripper]"
         )
         repo_hint = "local/door_a2w_joint_state9"
+    elif args.state_action_mode == "joint_state10":
+        schema_desc = (
+            "The raw observation.state/action are both 10D "
+            "[last_command_vx, last_command_vy, last_command_vyaw, "
+            "joint1..joint6, jointGripper]"
+        )
+        repo_hint = "local/door_a2w_joint_state10"
     else:
         schema_desc = (
             "The raw observation.state is 10D "

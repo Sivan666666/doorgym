@@ -1,0 +1,403 @@
+<robot name="central_glass_door">
+  <material name="clear_slight_green_glass">
+    <color rgba="0.7 0.92 0.92 0.28" />
+    </material>
+  <material name="dark_edge_gaskets">
+    <color rgba="0.05 0.06 0.065 1" />
+    </material>
+  <material name="brushed_stainless_steel">
+    <color rgba="0.72 0.73 0.72 1" />
+    </material>
+  <material name="silver_keypad_lock">
+    <color rgba="0.68 0.7 0.7 1" />
+    </material>
+  <material name="black_keypad_face">
+    <color rgba="0.02 0.025 0.03 1" />
+    </material>
+  <material name="dark_floor_track">
+    <color rgba="0.06 0.06 0.055 1" />
+    </material>
+  <material name="white_wall_jamb">
+    <color rgba="0.82 0.84 0.84 1" />
+    </material>
+  <link name="door_frame">
+    <inertial>
+      <mass value="58" />
+      <inertia ixx="33.3345" ixy="0" ixz="0" iyy="39.57" iyz="0" izz="6.54868" />
+      </inertial>
+    <visual name="floor_sill">
+      <origin xyz="-0.005 0 -0.02" rpy="0 0 0" />
+      <geometry>
+        <box size="1.15 0.09 0.04" />
+        </geometry>
+      <material name="dark_floor_track">
+        <color rgba="0.06 0.06 0.055 1" />
+        </material>
+      </visual>
+    <visual name="ceiling_rail">
+      <origin xyz="-0.005 0 2.54" rpy="0 0 0" />
+      <geometry>
+        <box size="1.15 0.1 0.08" />
+        </geometry>
+      <material name="brushed_stainless_steel">
+        <color rgba="0.72 0.73 0.72 1" />
+        </material>
+      </visual>
+    <visual name="latch_mullion">
+      <origin xyz="-0.56 0 1.29" rpy="0 0 0" />
+      <geometry>
+        <box size="0.04 0.065 2.58" />
+        </geometry>
+      <material name="brushed_stainless_steel">
+        <color rgba="0.72 0.73 0.72 1" />
+        </material>
+      </visual>
+    <visual name="hinge_jamb">
+      <origin xyz="0.485 0 1.29" rpy="0 0 0" />
+      <geometry>
+        <box size="0.05 0.085 2.58" />
+        </geometry>
+      <material name="brushed_stainless_steel">
+        <color rgba="0.72 0.73 0.72 1" />
+        </material>
+      </visual>
+    <visual name="right_wall_return">
+      <origin xyz="0.575 0.055 1.26" rpy="0 0 0" />
+      <geometry>
+        <box size="0.13 0.15 2.52" />
+        </geometry>
+      <material name="white_wall_jamb">
+        <color rgba="0.82 0.84 0.84 1" />
+        </material>
+      </visual>
+    <visual name="top_closer_body">
+      <origin xyz="0.235 -0.07 2.545" rpy="0 0 0" />
+      <geometry>
+        <box size="0.285 0.085 0.065" />
+        </geometry>
+      <material name="brushed_stainless_steel">
+        <color rgba="0.72 0.73 0.72 1" />
+        </material>
+      </visual>
+    <visual name="top_closer_cap">
+      <origin xyz="0.235 -0.073 2.582" rpy="0 0 0" />
+      <geometry>
+        <box size="0.23 0.092 0.012" />
+        </geometry>
+      <material name="dark_edge_gaskets">
+        <color rgba="0.05 0.06 0.065 1" />
+        </material>
+      </visual>
+    <visual name="floor_pivot_plate">
+      <origin xyz="0.43 0.003 0.0125" rpy="0 0 0" />
+      <geometry>
+        <box size="0.19 0.03 0.025" />
+        </geometry>
+      <material name="brushed_stainless_steel">
+        <color rgba="0.72 0.73 0.72 1" />
+        </material>
+      </visual>
+    <collision name="floor_sill">
+      <origin xyz="-0.005 0 -0.02" rpy="0 0 0" />
+      <geometry>
+        <box size="1.15 0.09 0.04" />
+        </geometry>
+      </collision>
+    <collision name="ceiling_rail">
+      <origin xyz="-0.005 0 2.54" rpy="0 0 0" />
+      <geometry>
+        <box size="1.15 0.1 0.08" />
+        </geometry>
+      </collision>
+    <collision name="latch_mullion">
+      <origin xyz="-0.56 0 1.29" rpy="0 0 0" />
+      <geometry>
+        <box size="0.04 0.065 2.58" />
+        </geometry>
+      </collision>
+    <collision name="hinge_jamb">
+      <origin xyz="0.485 0 1.29" rpy="0 0 0" />
+      <geometry>
+        <box size="0.05 0.085 2.58" />
+        </geometry>
+      </collision>
+    <collision name="right_wall_return">
+      <origin xyz="0.575 0.055 1.26" rpy="0 0 0" />
+      <geometry>
+        <box size="0.13 0.15 2.52" />
+        </geometry>
+      </collision>
+    <collision name="top_closer_body">
+      <origin xyz="0.235 -0.07 2.545" rpy="0 0 0" />
+      <geometry>
+        <box size="0.285 0.085 0.065" />
+        </geometry>
+      </collision>
+    <collision name="top_closer_cap">
+      <origin xyz="0.235 -0.073 2.582" rpy="0 0 0" />
+      <geometry>
+        <box size="0.23 0.092 0.012" />
+        </geometry>
+      </collision>
+    <collision name="floor_pivot_plate">
+      <origin xyz="0.43 0.003 0.0125" rpy="0 0 0" />
+      <geometry>
+        <box size="0.19 0.03 0.025" />
+        </geometry>
+      </collision>
+    </link>
+  <link name="glass_door">
+    <inertial>
+      <origin xyz="-0.5 0 1.25" rpy="0 0 0" />
+      <mass value="34" />
+      <inertia ixx="17.7086" ixy="0" ixz="0" iyy="20.5417" iyz="0" izz="2.83362" />
+      </inertial>
+    <visual name="door_glass_panel">
+      <origin xyz="-0.5 0 1.25" rpy="0 0 0" />
+      <geometry>
+        <box size="1 0.01 2.5" />
+        </geometry>
+      <material name="clear_slight_green_glass">
+        <color rgba="0.7 0.92 0.92 0.28" />
+        </material>
+      </visual>
+    <visual name="pivot_edge_tube">
+      <origin xyz="-0.006 0 1.27" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.006" length="2.42" />
+        </geometry>
+      <material name="brushed_stainless_steel">
+        <color rgba="0.72 0.73 0.72 1" />
+        </material>
+      </visual>
+    <visual name="bottom_patch_shoe">
+      <origin xyz="-0.07 0 0.0525" rpy="0 0 0" />
+      <geometry>
+        <box size="0.125 0.062 0.055" />
+        </geometry>
+      <material name="brushed_stainless_steel">
+        <color rgba="0.72 0.73 0.72 1" />
+        </material>
+      </visual>
+    <visual name="top_patch_clamp">
+      <origin xyz="-0.07 0 2.43" rpy="0 0 0" />
+      <geometry>
+        <box size="0.125 0.062 0.052" />
+        </geometry>
+      <material name="brushed_stainless_steel">
+        <color rgba="0.72 0.73 0.72 1" />
+        </material>
+      </visual>
+    <visual name="closer_swing_arm">
+      <origin xyz="-0.18 -0.036 2.455" rpy="0 0 0" />
+      <geometry>
+        <box size="0.34 0.018 0.018" />
+        </geometry>
+      <material name="brushed_stainless_steel">
+        <color rgba="0.72 0.73 0.72 1" />
+        </material>
+      </visual>
+    <visual name="vertical_pull_handle">
+      <origin xyz="-0.9 -0.04 1.27" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.02" length="1.2" />
+        </geometry>
+      <material name="brushed_stainless_steel">
+        <color rgba="0.72 0.73 0.72 1" />
+        </material>
+      </visual>
+    <visual name="handle_standoff_0">
+      <origin xyz="-0.9 -0.0125 0.85" rpy="1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.011" length="0.015" />
+        </geometry>
+      <material name="brushed_stainless_steel">
+        <color rgba="0.72 0.73 0.72 1" />
+        </material>
+      </visual>
+    <visual name="handle_standoff_1">
+      <origin xyz="-0.9 -0.0125 1.69" rpy="1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.011" length="0.015" />
+        </geometry>
+      <material name="brushed_stainless_steel">
+        <color rgba="0.72 0.73 0.72 1" />
+        </material>
+      </visual>
+    <visual name="password_lock_body">
+      <origin xyz="-0.955 -0.015 1.285" rpy="0 0 0" />
+      <geometry>
+        <box size="0.065 0.02 0.17" />
+        </geometry>
+      <material name="silver_keypad_lock">
+        <color rgba="0.68 0.7 0.7 1" />
+        </material>
+      </visual>
+    <visual name="password_lock_display">
+      <origin xyz="-0.955 -0.027 1.33" rpy="0 0 0" />
+      <geometry>
+        <box size="0.044 0.004 0.03" />
+        </geometry>
+      <material name="black_keypad_face">
+        <color rgba="0.02 0.025 0.03 1" />
+        </material>
+      </visual>
+    <visual name="password_button_0_0">
+      <origin xyz="-0.969 -0.027 1.25" rpy="0 0 0" />
+      <geometry>
+        <box size="0.01 0.004 0.01" />
+        </geometry>
+      <material name="black_keypad_face">
+        <color rgba="0.02 0.025 0.03 1" />
+        </material>
+      </visual>
+    <visual name="password_button_0_1">
+      <origin xyz="-0.941 -0.027 1.25" rpy="0 0 0" />
+      <geometry>
+        <box size="0.01 0.004 0.01" />
+        </geometry>
+      <material name="black_keypad_face">
+        <color rgba="0.02 0.025 0.03 1" />
+        </material>
+      </visual>
+    <visual name="password_button_1_0">
+      <origin xyz="-0.969 -0.027 1.275" rpy="0 0 0" />
+      <geometry>
+        <box size="0.01 0.004 0.01" />
+        </geometry>
+      <material name="black_keypad_face">
+        <color rgba="0.02 0.025 0.03 1" />
+        </material>
+      </visual>
+    <visual name="password_button_1_1">
+      <origin xyz="-0.941 -0.027 1.275" rpy="0 0 0" />
+      <geometry>
+        <box size="0.01 0.004 0.01" />
+        </geometry>
+      <material name="black_keypad_face">
+        <color rgba="0.02 0.025 0.03 1" />
+        </material>
+      </visual>
+    <visual name="password_button_2_0">
+      <origin xyz="-0.969 -0.027 1.3" rpy="0 0 0" />
+      <geometry>
+        <box size="0.01 0.004 0.01" />
+        </geometry>
+      <material name="black_keypad_face">
+        <color rgba="0.02 0.025 0.03 1" />
+        </material>
+      </visual>
+    <visual name="password_button_2_1">
+      <origin xyz="-0.941 -0.027 1.3" rpy="0 0 0" />
+      <geometry>
+        <box size="0.01 0.004 0.01" />
+        </geometry>
+      <material name="black_keypad_face">
+        <color rgba="0.02 0.025 0.03 1" />
+        </material>
+      </visual>
+    <collision name="door_glass_panel">
+      <origin xyz="-0.5 0 1.25" rpy="0 0 0" />
+      <geometry>
+        <box size="1 0.01 2.5" />
+        </geometry>
+      </collision>
+    <collision name="pivot_edge_tube">
+      <origin xyz="-0.006 0 1.27" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.006" length="2.42" />
+        </geometry>
+      </collision>
+    <collision name="bottom_patch_shoe">
+      <origin xyz="-0.07 0 0.0525" rpy="0 0 0" />
+      <geometry>
+        <box size="0.125 0.062 0.055" />
+        </geometry>
+      </collision>
+    <collision name="top_patch_clamp">
+      <origin xyz="-0.07 0 2.43" rpy="0 0 0" />
+      <geometry>
+        <box size="0.125 0.062 0.052" />
+        </geometry>
+      </collision>
+    <collision name="closer_swing_arm">
+      <origin xyz="-0.18 -0.036 2.455" rpy="0 0 0" />
+      <geometry>
+        <box size="0.34 0.018 0.018" />
+        </geometry>
+      </collision>
+    <collision name="vertical_pull_handle">
+      <origin xyz="-0.9 -0.04 1.27" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.02" length="1.2" />
+        </geometry>
+      </collision>
+    <collision name="handle_standoff_0">
+      <origin xyz="-0.9 -0.0125 0.85" rpy="1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.011" length="0.015" />
+        </geometry>
+      </collision>
+    <collision name="handle_standoff_1">
+      <origin xyz="-0.9 -0.0125 1.69" rpy="1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.011" length="0.015" />
+        </geometry>
+      </collision>
+    <collision name="password_lock_body">
+      <origin xyz="-0.955 -0.015 1.285" rpy="0 0 0" />
+      <geometry>
+        <box size="0.065 0.02 0.17" />
+        </geometry>
+      </collision>
+    <collision name="password_lock_display">
+      <origin xyz="-0.955 -0.027 1.33" rpy="0 0 0" />
+      <geometry>
+        <box size="0.044 0.004 0.03" />
+        </geometry>
+      </collision>
+    <collision name="password_button_0_0">
+      <origin xyz="-0.969 -0.027 1.25" rpy="0 0 0" />
+      <geometry>
+        <box size="0.01 0.004 0.01" />
+        </geometry>
+      </collision>
+    <collision name="password_button_0_1">
+      <origin xyz="-0.941 -0.027 1.25" rpy="0 0 0" />
+      <geometry>
+        <box size="0.01 0.004 0.01" />
+        </geometry>
+      </collision>
+    <collision name="password_button_1_0">
+      <origin xyz="-0.969 -0.027 1.275" rpy="0 0 0" />
+      <geometry>
+        <box size="0.01 0.004 0.01" />
+        </geometry>
+      </collision>
+    <collision name="password_button_1_1">
+      <origin xyz="-0.941 -0.027 1.275" rpy="0 0 0" />
+      <geometry>
+        <box size="0.01 0.004 0.01" />
+        </geometry>
+      </collision>
+    <collision name="password_button_2_0">
+      <origin xyz="-0.969 -0.027 1.3" rpy="0 0 0" />
+      <geometry>
+        <box size="0.01 0.004 0.01" />
+        </geometry>
+      </collision>
+    <collision name="password_button_2_1">
+      <origin xyz="-0.941 -0.027 1.3" rpy="0 0 0" />
+      <geometry>
+        <box size="0.01 0.004 0.01" />
+        </geometry>
+      </collision>
+    </link>
+  <joint name="wall_to_glass_door" type="revolute">
+    <origin xyz="0.46 -0.018 0" rpy="0 0 0" />
+    <parent link="door_frame" />
+    <child link="glass_door" />
+    <axis xyz="0 0 1" />
+    <limit effort="80" velocity="1.4" lower="0" upper="1.65" />
+    </joint>
+  </robot>

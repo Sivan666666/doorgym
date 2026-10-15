@@ -1,0 +1,20 @@
+# Blender 5.1.0 MTL File: 'None'
+# www.blender.org
+
+newmtl tripo_mat_bfea6001_4465_4e0d_baf6_9393cafd3dc3
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 2
+Pr 0.500000
+Pm 0.000000
+Ps 0.000000
+Pc 0.000000
+Pcr 0.030000
+aniso 0.000000
+anisor 0.000000
+map_Kd tripo_image_bfea6001-4465-4e0d-baf6-9393cafd3dc3_0.jpg
+map_Bump -bm 1.000000 tripo_image_bfea6001-4465-4e0d-baf6-9393cafd3dc3_2.jpg
+map_Pr tripo_image_bfea6001-4465-4e0d-baf6-9393cafd3dc3_0_Roughness.jpg
+map_Pm tripo_image_bfea6001-4465-4e0d-baf6-9393cafd3dc3_0_Metallic.jpg

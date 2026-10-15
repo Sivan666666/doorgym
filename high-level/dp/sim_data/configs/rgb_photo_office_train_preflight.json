@@ -1,0 +1,148 @@
+{
+  "run_root": "/mnt/sda/ps_archive/doorgym/high-level/dp/result/wc_dim60_aug100_pi05_20261008/run",
+  "tools": {
+    "physics_python": "/home/ps/miniconda3/envs/txc_vbc/bin/python",
+    "render_python": "/mnt/sda/ps_archive/doorgym/high-level/dp/result/wc_meister_pipeline_20260920/runtime/bin/python",
+    "dataset_python": "/home/ps/miniconda3/envs/lerobot_pi05/bin/python",
+    "recorder": "/mnt/sda/ps_archive/doorgym/high-level/dp/result/wc_meister_rgb_aug5_20260921/code/run_wc_contact_physics.py",
+    "scene_builder": "/mnt/sda/ps_archive/doorgym/high-level/dp/result/wc_dim60_aug100_pi05_20261008/code/render_wc_contact_blender.py",
+    "photo_room_builder": "/mnt/sda/ps_archive/doorgym/high-level/dp/result/wc_dim60_aug100_pi05_20261008/code/furnish_wc_photo_room.py",
+    "rgb_augmenter": "/mnt/sda/ps_archive/doorgym/high-level/dp/result/wc_meister_rgb_aug5_20260921/code/rgb_doorman.py",
+    "meister_root": "/mnt/sda/ps_archive/doorgym/high-level/dp/result/wc_meister_pipeline_20260920/SIM1MeisterRender",
+    "meister_commit": "c031e1f8594dab3a91832e817d884f55189a4e8a"
+  },
+  "physics": {
+    "steps": 2601,
+    "seed": 615456580,
+    "base_y_range": [
+      0.15,
+      0.175
+    ],
+    "min_open_deg": 25,
+    "min_traverse_m": 0.5,
+    "reuse_episodes": {
+      "0": "/mnt/sda/ps_archive/doorgym/high-level/dp/result/wc_photo_office_dim60_20261008/run"
+    },
+    "retry_seed_stride": 100000
+  },
+  "scene": {
+    "base_blend": "/mnt/sda/ps_archive/doorgym/high-level/dp/result/wc_pull_blender_20260918/pull_replay_setup.blend",
+    "seed": 20261008,
+    "randomize": false,
+    "variant": "photo_office_20261008",
+    "photo_room": {
+      "reference_dir": "/mnt/sda/ps_archive/doorgym/high-level/dp/result/wc_photo_office_20261008/references",
+      "entrance_panel_energy": 65,
+      "office_strip_energy": 135,
+      "light_multiplier": 0.6
+    },
+    "lighting": {
+      "enabled": true,
+      "energy_multiplier_range": [
+        0.8,
+        1.2
+      ],
+      "world_multiplier_range": [
+        1,
+        1
+      ],
+      "warmth_range": [
+        -0.05,
+        0.05
+      ]
+    }
+  },
+  "render": {
+    "width": 640,
+    "height": 480,
+    "fps": 10,
+    "samples": 24,
+    "denoise": true,
+    "view_transform": "AgX",
+    "cpu_threads": 4,
+    "views": [
+      "front",
+      "wrist"
+    ],
+    "clean_preview_frames": [
+      0,
+      240,
+      490
+    ],
+    "image_augmentation": {
+      "enabled": true,
+      "temporal_mode": "episode",
+      "brightness": {
+        "probability": 0.25,
+        "range": [
+          0.9,
+          1.1
+        ]
+      },
+      "saturation": {
+        "probability": 0.25,
+        "range": [
+          0.8,
+          1.2
+        ]
+      },
+      "hue": {
+        "probability": 0.5,
+        "range": [
+          -0.025,
+          0.025
+        ]
+      },
+      "contrast": {
+        "probability": 0.25,
+        "range": [
+          0.9,
+          1.1
+        ]
+      },
+      "gaussian_noise": {
+        "probability": 0.25,
+        "std_range": [
+          0,
+          0.015
+        ]
+      },
+      "gaussian_blur": {
+        "probability": 0.1,
+        "kernel_size": [
+          3,
+          5
+        ],
+        "sigma": [
+          0.1,
+          1.5
+        ]
+      }
+    }
+  },
+  "dataset": {
+    "repo_id": "local/wc_dim60_pi05_preflight",
+    "task": "Grasp the handle, pull the door open and pass through the doorway.",
+    "include_camera_metadata": false,
+    "include_door_state": false,
+    "require_unique_trajectories": false
+  },
+  "batch": {
+    "episodes": 1,
+    "gpus": [
+      0,
+      1,
+      3
+    ],
+    "max_attempts": 2,
+    "physics_timeout_s": 1800,
+    "scene_timeout_s": 1200,
+    "render_timeout_s": 28800,
+    "export_timeout_s": 18000,
+    "stage_attempts": {
+      "record": 8,
+      "scene": 1,
+      "render": 2
+    }
+  }
+}

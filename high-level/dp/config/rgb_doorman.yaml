@@ -1,0 +1,33 @@
+# DoorMan 016c70c1e4e76f521963c36691ee69a6ab3ac9cd visual-only adaptation.
+version: doorman_rgb_gym_v1
+image_augmentation:
+  enabled: true
+  brightness: {probability: 0.25, range: [0.7, 2.0]}
+  saturation: {probability: 0.25, range: [0.5, 2.0]}
+  hue: {probability: 0.5, range: [-0.1, 0.1]}
+  contrast: {probability: 0.25, range: [0.5, 1.5]}
+  gaussian_noise: {probability: 0.25, std_range: [0.0, 0.15]}
+  # Actual upstream call: fixed anisotropic kernel/sigma, NOT random ranges.
+  gaussian_blur: {probability: 0.25, kernel_size: [3, 5], sigma: [0.1, 1.5]}
+materials:
+  enabled: true
+  texture_variants: 20
+  paint_variants: 100
+  rotation_deg: [0, 360]
+  translation: [0, 100]
+  paint_tint_exponential_scale: 0.02
+  texture_resolution: 512
+  dynamic: false
+lighting:
+  enabled: true
+  interval_s: 1.0
+  intensity: [1000, 5000]
+  rotation_deg: [0, 360]
+  # Gym approximation: HDR mean + three directional lobes, not a PBR dome.
+  # Unitless Gym mapping, not Isaac Sim lux/exposure equivalence. Keep the
+  # upstream 1000-5000 distribution above; these gains compensate for no dome GI.
+  gym_intensity_reference: 3000.0
+  gym_ambient_gain: 0.8
+  gym_directional_gain: 1.5
+ground_rgb_projection: true
+hdr_background_rgb: true

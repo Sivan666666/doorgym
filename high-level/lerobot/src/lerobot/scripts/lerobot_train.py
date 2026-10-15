@@ -32,7 +32,12 @@ from tqdm import tqdm
 from lerobot.configs import parser
 from lerobot.configs.train import TrainPipelineConfig
 from lerobot.datasets.factory import make_dataset
-from lerobot.datasets.sampler import EpisodeAwareSampler, make_keyframe_window_sampler, make_recovery_sampler
+from lerobot.datasets.sampler import (
+    EpisodeAwareSampler,
+    make_keyframe_window_sampler,
+    make_phase_weighted_sampler,
+    make_recovery_sampler,
+)
 from lerobot.datasets.utils import cycle
 from lerobot.envs.factory import make_env, make_env_pre_post_processors
 from lerobot.envs.utils import close_envs
@@ -236,6 +241,27 @@ def update_policy(
     return train_metrics, output_dict
 
 
+def apply_learning_rate_override(
+    optimizer: torch.optim.Optimizer,
+    *,
+    completed_steps: int,
+    override_step: int | None,
+    learning_rate: float | None,
+) -> bool:
+    """Apply an opt-in post-milestone LR without changing legacy schedules.
+
+    `completed_steps` is the number of optimizer updates already completed.
+    Therefore an override at 40_000 affects the next update after checkpoint
+    040000.  Reapplying it before every update also makes the requested LR
+    authoritative if a resumed checkpoint happens to contain a scheduler.
+    """
+    if override_step is None or learning_rate is None or completed_steps < override_step:
+        return False
+    for parameter_group in optimizer.param_groups:
+        parameter_group["lr"] = float(learning_rate)
+    return True
+
+
 @parser.wrap()
 def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
     """
@@ -424,6 +450,13 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
     if cfg.resume:
         step, optimizer, lr_scheduler = load_training_state(cfg.checkpoint_path, optimizer, lr_scheduler)
 
+    if cfg.learning_rate_override_step is not None:
+        logging.info(
+            "Learning-rate override enabled: step >= %d uses lr=%.8g",
+            cfg.learning_rate_override_step,
+            cfg.learning_rate_after_override,
+        )
+
     num_learnable_params = sum(p.numel() for p in policy.parameters() if p.requires_grad)
     num_total_params = sum(p.numel() for p in policy.parameters())
 
@@ -454,7 +487,24 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
     shuffle = True
     drop_n_first_frames = 0
     drop_n_last_frames = int(getattr(cfg.policy, "drop_n_last_frames", 0))
-    if getattr(cfg, "recovery_sampling_ratio", 0.0) > 0.0:
+    if str(getattr(cfg, "phase_sampling_weights", "")).strip():
+        if cfg.dataset.streaming:
+            logging.warning("Phase-weighted sampling is disabled for streaming datasets.")
+        else:
+            sampler, phase_sampler_stats = make_phase_weighted_sampler(
+                dataset,
+                phase_sampling_weights=cfg.phase_sampling_weights,
+                phase_feature=cfg.phase_sampling_feature,
+                default_weight=cfg.phase_sampling_default_weight,
+                drop_n_first_frames=drop_n_first_frames,
+                drop_n_last_frames=drop_n_last_frames,
+                seed=cfg.dataloader_seed if cfg.dataloader_seed is not None else cfg.seed,
+            )
+            if sampler is None:
+                raise ValueError(f"Phase-weighted sampler could not be enabled: {phase_sampler_stats}")
+            shuffle = False
+            logging.info("Using phase-weighted sampler: %s", phase_sampler_stats)
+    elif getattr(cfg, "recovery_sampling_ratio", 0.0) > 0.0:
         if cfg.dataset.streaming:
             logging.warning("Recovery sampling is disabled for streaming datasets.")
         else:
@@ -566,6 +616,12 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
 
     for _ in range(step, cfg.steps):
         start_time = time.perf_counter()
+        apply_learning_rate_override(
+            optimizer,
+            completed_steps=step,
+            override_step=cfg.learning_rate_override_step,
+            learning_rate=cfg.learning_rate_after_override,
+        )
         batch = next(dl_iter)
         if cfg.dataloader_seed is not None and step < 2 and "index" in batch:
             batch_indices = batch["index"].reshape(-1).tolist()

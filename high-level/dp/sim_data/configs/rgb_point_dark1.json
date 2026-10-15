@@ -1,0 +1,44 @@
+{
+  "run_root":"/mnt/sda/ps_archive/doorgym/high-level/dp/result/wc_meister_point_dark1_20260922/run_normal",
+  "tools": {
+    "physics_python":"/home/ps/miniconda3/envs/txc_vbc/bin/python",
+    "render_python":"/mnt/sda/ps_archive/doorgym/high-level/dp/result/wc_meister_pipeline_20260920/runtime/bin/python",
+    "dataset_python":"/home/ps/miniconda3/envs/lerobot_pi05/bin/python",
+    "recorder":"/mnt/sda/ps_archive/doorgym/high-level/dp/result/wc_meister_rgb_aug5_20260921/code/run_wc_contact_physics.py",
+    "scene_builder":"/mnt/sda/ps_archive/doorgym/high-level/dp/result/wc_meister_rgb_aug5_20260921/code/render_wc_contact_blender.py",
+    "rgb_augmenter":"/mnt/sda/ps_archive/doorgym/high-level/dp/result/wc_meister_rgb_aug5_20260921/code/rgb_doorman.py",
+    "meister_root":"/mnt/sda/ps_archive/doorgym/high-level/dp/result/wc_meister_pipeline_20260920/SIM1MeisterRender",
+    "meister_commit":"c031e1f8594dab3a91832e817d884f55189a4e8a"
+  },
+  "physics": {
+    "steps":2601,"seed":615456580,"base_y_range":[0.15,0.15],"min_open_deg":25,"min_traverse_m":0.5,
+    "reuse_run_root":"/mnt/sda/ps_archive/doorgym/high-level/dp/result/wc_meister_ceiling1_20260922/run"
+  },
+  "scene": {
+    "base_blend":"/mnt/sda/ps_archive/doorgym/high-level/dp/result/wc_pull_blender_20260918/pull_replay_setup.blend",
+    "seed":20260921,"randomize":false,"minimum_robot_clearance_m":0.8,
+    "lighting": {
+      "enabled":true,"point_only":true,
+      "point_lights":[
+        {"name":"Door / front distant point","location":[0.0,-4.0,1.6],"energy":12.0,"radius_m":0.08,"color":[1.0,0.97,0.93]},
+        {"name":"Door / back distant point","location":[0.0,3.5,1.6],"energy":12.0,"radius_m":0.08,"color":[1.0,0.97,0.93]}
+      ],
+      "world_multiplier_range":[0.0,0.0]
+    }
+  },
+  "render": {
+    "width":640,"height":480,"fps":10,"samples":16,"denoise":true,"view_transform":"AgX","cpu_threads":4,
+    "views":["front","wrist","overview"],"clean_preview_frames":[0,240,490],
+    "image_augmentation": {
+      "enabled":true,"temporal_mode":"episode",
+      "brightness":{"probability":1.0,"range":[1.0,1.0]},
+      "saturation":{"probability":0.0,"range":[1.0,1.0]},
+      "hue":{"probability":0.0,"range":[0.0,0.0]},
+      "contrast":{"probability":1.0,"range":[1.0,1.0]},
+      "gaussian_noise":{"probability":0.0,"std_range":[0.0,0.0]},
+      "gaussian_blur":{"probability":0.0,"kernel_size":[3,5],"sigma":[0.1,1.5]}
+    }
+  },
+  "dataset":{"repo_id":"local/wc_meister_point_dark1_joint10","task":"Grasp the handle, pull the door open and pass through the doorway."},
+  "batch":{"episodes":1,"gpus":[0],"max_attempts":2,"physics_timeout_s":1800,"scene_timeout_s":900,"render_timeout_s":28800,"export_timeout_s":7200}
+}

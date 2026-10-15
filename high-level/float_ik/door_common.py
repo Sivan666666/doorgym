@@ -169,6 +169,7 @@ FLOAT_DP_STATE_MODE_FULL = "full"
 FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10 = "pi05_current_state10"
 FLOAT_DP_STATE_MODE_PI05_LAST_COMMAND_STATE10 = "pi05_last_command_state10"
 FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE9 = "a2w_last_command_joint_state9"
+FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE10 = "a2w_last_command_joint_state10"
 FLOAT_DP_EE_ACTION10_NAMES = [
     "vx",
     "yaw",
@@ -200,6 +201,19 @@ A2W_JOINT_ACTION9_NAMES = [
     "yaw",
     *A2W_Z1_JOINT_NAMES,
 ]
+A2W_LAST_COMMAND_JOINT_STATE10_NAMES = [
+    "last_command_vx",
+    "last_command_vy",
+    "last_command_vyaw",
+    *A2W_Z1_JOINT_NAMES,
+]
+A2W_JOINT_ACTION10_NAMES = [
+    "vx",
+    "vy",
+    "yaw",
+    *A2W_Z1_JOINT_NAMES,
+]
+A2W_JOINT10_MIN_LATERAL_SPEED_MPS = 0.1
 PI05_CURRENT_STATE10_NAMES = [
     "vx",
     "yaw_rate",
@@ -227,6 +241,11 @@ PI05_LAST_COMMAND_STATE10_NAMES = [
 
 
 def door_asset_family(door):
+    family_override = str(
+        door.spec.get("asset_family_override", "") or ""
+    ).strip().lower()
+    if family_override in {"wc4", "partnet_numeric", "record_materialization"}:
+        return family_override
     name = str(door.spec.get("name", ""))
     path = str(door.spec.get("path", ""))
     if name == "wc4" or "/wc4/" in f"/{path}/" or path.startswith("wc4/"):
@@ -360,6 +379,8 @@ class DoorRuntime:
     dof_names: list[str]
     dof_lower: np.ndarray
     dof_upper: np.ndarray
+    door_dof_index: int
+    handle_dof_index: int | None
     handle_body_index: int
     door_body_index: int
     handle_goal_offset: np.ndarray
@@ -766,7 +787,12 @@ def load_door_assets(gym, sim, args):
         door_file = os.path.join(asset_file_door, spec["path"])
         print(f"Loading door[{asset_index}]: root={asset_root}, file={door_file}, name={spec['name']}")
         body_rgba = load_urdf_link_rgba(asset_root, door_file) if bool(getattr(args, "door_use_urdf_rgba", False)) else {}
-        door_asset = gym.load_asset(sim, asset_root, door_file, door_opts)
+        visual_root, visual_file = asset_root, door_file
+        visual_runtime = getattr(args, "_rgb_visual_runtime", None)
+        if visual_runtime is not None:
+            from rgb_door_materials import prepare_visual_door
+            visual_root, visual_file = prepare_visual_door(visual_runtime, asset_root, door_file)
+        door_asset = gym.load_asset(sim, visual_root, visual_file, door_opts)
         if door_asset is None:
             raise RuntimeError(f"Failed to load door asset {door_file}")
 
@@ -775,20 +801,22 @@ def load_door_assets(gym, sim, args):
         if len(dof_names) < 1:
             raise RuntimeError(f"Door {spec['name']!r} must expose a door DOF; loaded DOFs: {dof_names}")
         expected_door_dof = spec.get("door_dof_name", dof_names[0])
-        if dof_names[0] != expected_door_dof:
+        if expected_door_dof not in dof_names:
             raise RuntimeError(
-                f"Door {spec['name']!r} first DOF must be {expected_door_dof!r}, loaded {dof_names[0]!r}"
+                f"Door {spec['name']!r} door DOF {expected_door_dof!r} not found; loaded DOFs: {dof_names}"
             )
+        door_dof_index = dof_names.index(expected_door_dof)
         expected_handle_dof = str(spec.get("handle_dof_name", "") or "")
+        handle_dof_index = None
         if expected_handle_dof:
-            if len(dof_names) < 2:
+            if expected_handle_dof not in dof_names:
                 raise RuntimeError(
-                    f"Door {spec['name']!r} expected handle DOF {expected_handle_dof!r}, "
-                    f"but loaded DOFs: {dof_names}"
+                    f"Door {spec['name']!r} handle DOF {expected_handle_dof!r} not found; loaded DOFs: {dof_names}"
                 )
-            if dof_names[1] != expected_handle_dof:
+            handle_dof_index = dof_names.index(expected_handle_dof)
+            if handle_dof_index == door_dof_index:
                 raise RuntimeError(
-                    f"Door {spec['name']!r} second DOF must be {expected_handle_dof!r}, loaded {dof_names[1]!r}"
+                    f"Door {spec['name']!r} door and handle DOFs resolve to the same index {door_dof_index}"
                 )
         handle_body_name = spec.get("handle_body_name")
         door_body_name = spec.get("door_body_name")
@@ -803,12 +831,14 @@ def load_door_assets(gym, sim, args):
         handle_body_index = body_names.index(handle_body_name) if handle_body_name else len(body_names) - 1
         door_body_index = body_names.index(door_body_name) if door_body_name else max(0, len(body_names) - 2)
         dof_props = gym.get_asset_dof_properties(door_asset)
-        if len(dof_props["upper"]) >= 2:
+        if handle_dof_index is not None:
             handle_upper_override = spec.get("handle_dof_upper_override")
             if handle_upper_override is not None:
-                dof_props["upper"][1] = float(handle_upper_override)
+                dof_props["upper"][handle_dof_index] = float(handle_upper_override)
             else:
-                dof_props["upper"][1] = min(float(dof_props["upper"][1]), math.pi / 4)
+                dof_props["upper"][handle_dof_index] = min(
+                    float(dof_props["upper"][handle_dof_index]), math.pi / 4
+                )
         lower = np.asarray(dof_props["lower"], dtype=np.float32)
         upper = np.asarray(dof_props["upper"], dtype=np.float32)
 
@@ -818,17 +848,22 @@ def load_door_assets(gym, sim, args):
         gym.set_asset_rigid_shape_properties(door_asset, shape_props)
 
         handle_goal_offset = actor_scale * np.asarray(handle_bounding["goal_pos"], dtype=np.float32)
-        handle_range = max(1.0e-6, float(upper[1] - lower[1]) if len(upper) >= 2 else 0.0)
+        handle_range = max(
+            1.0e-6,
+            float(upper[handle_dof_index] - lower[handle_dof_index])
+            if handle_dof_index is not None
+            else 0.0,
+        )
         handle_unlock_angle = spec.get("handle_unlock_angle")
         handle_unlock_threshold = (
             float(handle_unlock_angle)
             if handle_unlock_angle is not None
-            else (args.handle_unlock_ratio * handle_range if len(upper) >= 2 else 0.0)
+            else (args.handle_unlock_ratio * handle_range if handle_dof_index is not None else 0.0)
         )
         handle_rest_angle = (
             float(spec["handle_rest_angle"])
             if spec.get("handle_rest_angle") is not None
-            else (float(lower[1]) if len(lower) >= 2 else 0.0)
+            else (float(lower[handle_dof_index]) if handle_dof_index is not None else 0.0)
         )
         handle_unlock_direction_sign = (
             -1.0 if float(spec.get("handle_unlock_direction_sign", 1.0)) < 0.0 else 1.0
@@ -849,6 +884,8 @@ def load_door_assets(gym, sim, args):
                 dof_names=dof_names,
                 dof_lower=lower,
                 dof_upper=upper,
+                door_dof_index=door_dof_index,
+                handle_dof_index=handle_dof_index,
                 handle_body_index=handle_body_index,
                 door_body_index=door_body_index,
                 handle_goal_offset=handle_goal_offset,
@@ -984,39 +1021,61 @@ def configure_door_actor_dofs(gym, env, door_actor, door, args):
         return
 
     door_dof_props["driveMode"][:] = gymapi.DOF_MODE_EFFORT
-    n = min(len(door_dof_props), 2)
-    if n >= 1:
-        if float(args.door_motion_sign) < 0.0:
-            door_dof_props["lower"][0] = -math.pi / 2
-            door_dof_props["upper"][0] = 0.0
-        else:
-            door_dof_props["lower"][0] = 0.0
-            door_dof_props["upper"][0] = math.pi / 2
-        door_dof_props["damping"][0] = args.door_joint_damping
-        door_dof_props["friction"][0] = args.door_joint_friction
-    if n >= 2:
-        door_dof_props["damping"][1] = args.handle_joint_damping
-        door_dof_props["friction"][1] = args.handle_joint_friction
+    hinge_idx = int(door.door_dof_index)
+    handle_idx = door.handle_dof_index
+    if float(args.door_motion_sign) < 0.0:
+        door_dof_props["lower"][hinge_idx] = -math.pi / 2
+        door_dof_props["upper"][hinge_idx] = 0.0
+    else:
+        door_dof_props["lower"][hinge_idx] = 0.0
+        door_dof_props["upper"][hinge_idx] = math.pi / 2
+    door_dof_props["damping"][hinge_idx] = args.door_joint_damping
+    door_dof_props["friction"][hinge_idx] = args.door_joint_friction
+    if handle_idx is not None:
+        door_dof_props["damping"][handle_idx] = args.handle_joint_damping
+        door_dof_props["friction"][handle_idx] = args.handle_joint_friction
         handle_upper_override = door.spec.get("handle_dof_upper_override")
         if handle_upper_override is not None:
-            door_dof_props["upper"][1] = float(handle_upper_override)
+            door_dof_props["upper"][handle_idx] = float(handle_upper_override)
         else:
-            door_dof_props["upper"][1] = min(float(door_dof_props["upper"][1]), math.pi / 4)
+            door_dof_props["upper"][handle_idx] = min(
+                float(door_dof_props["upper"][handle_idx]), math.pi / 4
+            )
+
+    locked_dof_names = set(door.spec.get("locked_dof_names", []))
+    for dof_index, dof_name in enumerate(door.dof_names):
+        if dof_name not in locked_dof_names:
+            continue
+        door_dof_props["driveMode"][dof_index] = gymapi.DOF_MODE_POS
+        door_dof_props["stiffness"][dof_index] = float(
+            door.spec.get("locked_dof_stiffness", 5000.0)
+        )
+        door_dof_props["damping"][dof_index] = float(
+            door.spec.get("locked_dof_damping", 250.0)
+        )
     gym.set_actor_dof_properties(env, door_actor, door_dof_props)
+    if locked_dof_names:
+        targets = np.zeros(len(door_dof_props), dtype=np.float32)
+        gym.set_actor_dof_position_targets(env, door_actor, targets)
 
     door.dof_lower = np.asarray(door_dof_props["lower"], dtype=np.float32).copy()
     door.dof_upper = np.asarray(door_dof_props["upper"], dtype=np.float32).copy()
-    handle_range = max(1.0e-6, float(door.dof_upper[1] - door.dof_lower[1]) if len(door.dof_upper) >= 2 else 0.0)
+    handle_range = max(
+        1.0e-6,
+        float(door.dof_upper[handle_idx] - door.dof_lower[handle_idx])
+        if handle_idx is not None
+        else 0.0,
+    )
     handle_unlock_angle = door.spec.get("handle_unlock_angle")
     door.handle_unlock_threshold = (
         float(handle_unlock_angle)
         if handle_unlock_angle is not None
-        else (args.handle_unlock_ratio * handle_range if len(door.dof_upper) >= 2 else 0.0)
+        else (args.handle_unlock_ratio * handle_range if handle_idx is not None else 0.0)
     )
     door.handle_rest_angle = (
         float(door.spec["handle_rest_angle"])
         if door.spec.get("handle_rest_angle") is not None
-        else (float(door.dof_lower[1]) if len(door.dof_lower) >= 2 else 0.0)
+        else (float(door.dof_lower[handle_idx]) if handle_idx is not None else 0.0)
     )
     door.handle_unlock_direction_sign = (
         -1.0 if float(door.spec.get("handle_unlock_direction_sign", 1.0)) < 0.0 else 1.0
@@ -1125,14 +1184,17 @@ def create_door_side_walls(gym, sim, env, door, args, env_index=0):
     opening_width = max(1.0e-3, opening_width)
     gap = max(0.0, float(getattr(args, "door_wall_gap", 0.0)))
 
-    center_x = 0.5 * (world_min_x + world_max_x) + float(getattr(args, "door_wall_x_offset", 0.0))
+    wall_x_offset = float(getattr(args, "door_wall_x_offset", 0.0)) + float(
+        door.spec.get("door_wall_x_reference_offset", 0.0)
+    )
+    center_x = 0.5 * (world_min_x + world_max_x) + wall_x_offset
     center_y = 0.5 * (world_min_y + world_max_y) + float(getattr(args, "door_wall_y_offset", 0.0))
     if opening_axis == "x":
-        center_x = opening_center + float(getattr(args, "door_wall_x_offset", 0.0))
+        center_x = opening_center + wall_x_offset
     else:
         center_y = opening_center + float(getattr(args, "door_wall_y_offset", 0.0))
     if door_asset_family(door) == "wc4":
-        center_x = float(args.door_x) + float(getattr(args, "door_wall_x_offset", 0.0))
+        center_x = float(args.door_x) + wall_x_offset
     z = float(getattr(args, "door_z_offset", 0.0)) + 0.5 * height
     side_offsets = (
         -0.5 * opening_width - gap - 0.5 * side_width,
@@ -1152,9 +1214,16 @@ def create_door_side_walls(gym, sim, env, door, args, env_index=0):
         else:
             pose.p = gymapi.Vec3(center_x, center_y + side_offset, z)
         pose.r = gymapi.Quat(0.0, 0.0, 0.0, 1.0)
+        visual_runtime = getattr(args, "_rgb_visual_runtime", None)
+        visual_scene = bool(visual_runtime is not None and visual_runtime.config.get("scene", {}).get("enabled"))
+        actor_asset = wall_asset
+        if visual_scene:
+            from rgb_visual_scene import make_wall_asset
+            actor_asset = make_wall_asset(gym, sim, gymapi, visual_runtime, args, door, int(env_index),
+                side_name, pose, opening_axis, opening_width, (center_x, center_y))
         actor = gym.create_actor(
             env,
-            wall_asset,
+            actor_asset,
             pose,
             f"door_side_wall_{env_index}_{side_name}",
             int(env_index),
@@ -1162,7 +1231,8 @@ def create_door_side_walls(gym, sim, env, door, args, env_index=0):
             0,
         )
         try:
-            gym.set_rigid_body_color(env, actor, 0, gymapi.MESH_VISUAL, color)
+            if not visual_scene:
+                gym.set_rigid_body_color(env, actor, 0, gymapi.MESH_VISUAL, color)
         except Exception:
             pass
         actors.append(actor)
@@ -1205,7 +1275,16 @@ def create_env_actors(gym, sim, base_asset, arm_asset, door, dof_props, dof_stat
         float(-door.bounding["min"][2] * door.actor_scale + args.door_z_offset + actor_offset[2]),
     )
     door_pose.r = gymapi.Quat.from_euler_zyx(0.0, 0.0, float(door.actor_yaw))
-    door_actor = gym.create_actor(env, door.asset, door_pose, "door", 0, 0, 1)
+    door_collision_filter = int(door.spec.get("door_actor_collision_filter", 0))
+    door_actor = gym.create_actor(
+        env,
+        door.asset,
+        door_pose,
+        "door",
+        0,
+        door_collision_filter,
+        1,
+    )
     if abs(door.actor_scale - 1.0) > 1.0e-6:
         gym.set_actor_scale(env, door_actor, door.actor_scale)
     apply_door_rigid_body_property_overrides(gym, env, door_actor, door)
@@ -1267,7 +1346,16 @@ def create_parallel_env_actors(
         float(-door.bounding["min"][2] * door.actor_scale + args.door_z_offset + actor_offset[2]),
     )
     door_pose.r = gymapi.Quat.from_euler_zyx(0.0, 0.0, float(door.actor_yaw))
-    door_actor = gym.create_actor(env, door.asset, door_pose, f"door_{env_index}", env_index, 0, 1)
+    door_collision_filter = int(door.spec.get("door_actor_collision_filter", 0))
+    door_actor = gym.create_actor(
+        env,
+        door.asset,
+        door_pose,
+        f"door_{env_index}",
+        env_index,
+        door_collision_filter,
+        1,
+    )
     if abs(door.actor_scale - 1.0) > 1.0e-6:
         gym.set_actor_scale(env, door_actor, door.actor_scale)
     apply_door_rigid_body_property_overrides(gym, env, door_actor, door)
@@ -2181,7 +2269,7 @@ def monitor_base_door_collision(gym, step, st):
     )
     threshold = float(getattr(args, "base_door_collision_distance", 0.04))
     phase = str(getattr(st, "last_phase", "unknown"))
-    open_deg = door_open_degrees(getattr(st, "last_door_pos", None), args)
+    open_deg = door_open_degrees(getattr(st, "last_door_pos", None), args, door=st.door)
     ignore_open_traverse_geom = bool(
         getattr(args, "pass_through_door", False)
         and phase in ("traverse_door", "return_home", "hold_home")
@@ -2288,7 +2376,7 @@ def monitor_base_door_collision(gym, step, st):
                 f" rigid_contact=True geom_distance={geom_distance:.4f}"
                 f" gate={rigid_gate:.4f}"
                 f" contact_pair={contact_pair}"
-                f" open_deg={door_open_degrees(getattr(st, 'last_door_pos', None), args):.1f}",
+                f" open_deg={door_open_degrees(getattr(st, 'last_door_pos', None), args, door=st.door):.1f}",
                 flush=True,
             )
     return collision
@@ -2765,6 +2853,14 @@ def camera_color_to_rgb(image, height, width):
     return np.clip(array, 0, 255).astype(np.uint8)
 
 
+def process_camera_rgb_for_args(gym, sim, env, camera, prefix, rgb_image, args):
+    runtime = getattr(args, "_rgb_visual_runtime", None)
+    if runtime is not None:
+        return runtime.process(gym, sim, env, camera, prefix, rgb_image, args, gymapi,
+            lambda rgb: remap_camera_image_for_args(rgb, prefix, args, interpolation="linear"))
+    return remap_camera_image_for_args(rgb_image, prefix, args, interpolation="linear")
+
+
 def show_camera_handle_images(gym, sim, env, camera_handles, args):
     if not args.show_camera_images or not camera_handles or cv2 is None:
         return
@@ -2791,7 +2887,7 @@ def show_camera_handle_images(gym, sim, env, camera_handles, args):
             if rgb_raw is None:
                 continue
             rgb_image = camera_color_to_rgb(rgb_raw, height, width)
-            rgb_image = remap_camera_image_for_args(rgb_image, prefix, args, interpolation="linear")
+            rgb_image = process_camera_rgb_for_args(gym, sim, env, camera_handle, prefix, rgb_image, args)
             rgb_nonzero = int(np.count_nonzero(rgb_image))
             printed = getattr(args, "_camera_image_stats_printed", set())
             if prefix not in printed:
@@ -2978,7 +3074,7 @@ def capture_dp_camera_images_from_rendered(gym, sim, env, camera_handles, args):
             if rgb_raw is None:
                 continue
             rgb_image = camera_color_to_rgb(rgb_raw, height, width)
-            rgb_image = remap_camera_image_for_args(rgb_image, prefix, args, interpolation="linear")
+            rgb_image = process_camera_rgb_for_args(gym, sim, env, camera_handle, prefix, rgb_image, args)
             images[f"{prefix}_rgb"] = rgb_image
             if args.headless and not getattr(args, f"_{prefix}_headless_rgb_checked", False):
                 if int(np.count_nonzero(rgb_image)) == 0:
@@ -3360,6 +3456,34 @@ def base_command_from_targets(base_xy, yaw, prev_base_xy, prev_yaw, dt):
     return vx, yaw_rate
 
 
+def base_command_from_targets_with_lateral(base_xy, yaw, prev_base_xy, prev_yaw, dt):
+    """Return body-frame vx, vy and yaw rate for a sampled base trajectory."""
+
+    if prev_base_xy is None or prev_yaw is None or dt <= 0.0:
+        return 0.0, 0.0, 0.0
+    delta_xy = (
+        np.asarray(base_xy, dtype=np.float32)
+        - np.asarray(prev_base_xy, dtype=np.float32)
+    ) / float(dt)
+    forward = np.asarray(
+        [math.cos(float(prev_yaw)), math.sin(float(prev_yaw))], dtype=np.float32
+    )
+    left = np.asarray([-forward[1], forward[0]], dtype=np.float32)
+    vx = float(np.dot(delta_xy, forward))
+    vy = float(np.dot(delta_xy, left))
+    yaw_rate = wrap_to_pi(float(yaw) - float(prev_yaw)) / float(dt)
+    return vx, vy, yaw_rate
+
+
+def executable_a2w_joint10_lateral_speed(vy):
+    """Apply the physical Joint10 lateral-command deadband."""
+
+    value = float(vy)
+    if abs(value) < A2W_JOINT10_MIN_LATERAL_SPEED_MPS:
+        return 0.0
+    return value
+
+
 def target_quat_for_dp(target_quat, ik_state, ee_quat):
     if target_quat is not None:
         return base_ik.normalize_quat(target_quat)
@@ -3445,6 +3569,12 @@ def normalize_float_dp_state_mode(mode):
         "joint9": FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE9,
         "last_command_joint_state9": FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE9,
         "a2w_last_command_joint9": FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE9,
+        "a2w_joint_state10": FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE10,
+        "a2w_joint10": FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE10,
+        "joint_state10": FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE10,
+        "joint10": FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE10,
+        "last_command_joint_state10": FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE10,
+        "a2w_last_command_joint10": FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE10,
     }
     mode = aliases.get(mode, mode)
     supported_modes = (
@@ -3452,6 +3582,7 @@ def normalize_float_dp_state_mode(mode):
         FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10,
         FLOAT_DP_STATE_MODE_PI05_LAST_COMMAND_STATE10,
         FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE9,
+        FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE10,
     )
     if mode not in supported_modes:
         raise ValueError(
@@ -3470,6 +3601,8 @@ def float_dp_state_feature_names(args, phase_names, make_state_feature_names_fn)
         return list(PI05_LAST_COMMAND_STATE10_NAMES)
     if state_mode == FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE9:
         return list(A2W_LAST_COMMAND_JOINT_STATE9_NAMES)
+    if state_mode == FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE10:
+        return list(A2W_LAST_COMMAND_JOINT_STATE10_NAMES)
     return make_state_feature_names_fn(DP_NUM_DOFS, DP_NUM_ACTIONS, phase_names)
 
 
@@ -3480,6 +3613,8 @@ def float_dp_state_mode_from_feature_names(state_feature_names):
         return FLOAT_DP_STATE_MODE_PI05_LAST_COMMAND_STATE10
     if list(state_feature_names or []) == A2W_LAST_COMMAND_JOINT_STATE9_NAMES:
         return FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE9
+    if list(state_feature_names or []) == A2W_LAST_COMMAND_JOINT_STATE10_NAMES:
+        return FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE10
     return FLOAT_DP_STATE_MODE_FULL
 
 
@@ -3490,6 +3625,8 @@ def float_dp_action_feature_names(args=None, state_mode=None):
         state_mode = normalize_float_dp_state_mode(state_mode)
     if state_mode == FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE9:
         return list(A2W_JOINT_ACTION9_NAMES)
+    if state_mode == FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE10:
+        return list(A2W_JOINT_ACTION10_NAMES)
     return list(FLOAT_DP_EE_ACTION10_NAMES)
 
 
@@ -3497,11 +3634,24 @@ def float_dp_action_mode_from_feature_names(action_feature_names):
     names = list(action_feature_names or [])
     if names == A2W_JOINT_ACTION9_NAMES:
         return "a2w_joint_action9"
+    if names == A2W_JOINT_ACTION10_NAMES:
+        return "a2w_joint_action10"
     return "ee_action10"
 
 
 def float_dp_action_is_a2w_joint9(action_feature_names):
     return float_dp_action_mode_from_feature_names(action_feature_names) == "a2w_joint_action9"
+
+
+def float_dp_action_is_a2w_joint10(action_feature_names):
+    return float_dp_action_mode_from_feature_names(action_feature_names) == "a2w_joint_action10"
+
+
+def float_dp_action_is_a2w_joint(action_feature_names):
+    return float_dp_action_mode_from_feature_names(action_feature_names) in {
+        "a2w_joint_action9",
+        "a2w_joint_action10",
+    }
 
 
 def a2w_joint_values_from_dofs(dof_names, dof_pos, joint_names=A2W_Z1_JOINT_NAMES):
@@ -3593,6 +3743,16 @@ def make_a2w_last_command_joint_state9(last_dp_action, dof_names, dof_pos):
     ).astype(np.float32)
 
 
+def make_a2w_last_command_joint_state10(last_dp_action, dof_names, dof_pos):
+    last_command = np.zeros(3, dtype=np.float32)
+    if last_dp_action is not None:
+        values = np.asarray(last_dp_action, dtype=np.float32).reshape(-1)
+        last_command[: min(3, values.shape[0])] = values[:3]
+    return np.concatenate(
+        [last_command, a2w_joint_values_from_dofs(dof_names, dof_pos)], axis=0
+    ).astype(np.float32)
+
+
 def make_float_dp_observation_state(
     dof_names,
     dof_pos,
@@ -3606,6 +3766,7 @@ def make_float_dp_observation_state(
     gripper,
     last_dp_action=None,
     vx=0.0,
+    vy=0.0,
     state_mode=FLOAT_DP_STATE_MODE_FULL,
     base_pitch=0.0,
     pose_frame="base",
@@ -3638,6 +3799,8 @@ def make_float_dp_observation_state(
         )
     if state_mode == FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE9:
         return make_a2w_last_command_joint_state9(last_dp_action, dof_names, dof_pos)
+    if state_mode == FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE10:
+        return make_a2w_last_command_joint_state10(last_dp_action, dof_names, dof_pos)
     return make_float_dp_state(
         dof_names,
         dof_pos,
@@ -3669,19 +3832,27 @@ def make_float_dp_action(
     dof_pos=None,
     base_pitch=0.0,
     pose_frame="base",
+    vy=0.0,
 ):
     if str(action_mode or "").lower() == "a2w_joint_action9":
         action_names = A2W_JOINT_ACTION9_NAMES
+    elif str(action_mode or "").lower() == "a2w_joint_action10":
+        action_names = A2W_JOINT_ACTION10_NAMES
     else:
         action_names = float_dp_action_feature_names(state_mode=action_mode)
-    if float_dp_action_is_a2w_joint9(action_names):
+    if float_dp_action_is_a2w_joint(action_names):
         if dof_names is None or dof_pos is None:
-            raise ValueError("A2W joint9 action recording requires dof_names and dof_pos.")
+            raise ValueError("A2W joint action recording requires dof_names and dof_pos.")
+        base_command = (
+            np.asarray(
+                [vx, executable_a2w_joint10_lateral_speed(vy), yaw_rate],
+                dtype=np.float32,
+            )
+            if float_dp_action_is_a2w_joint10(action_names)
+            else np.asarray([vx, yaw_rate], dtype=np.float32)
+        )
         return np.concatenate(
-            [
-                np.asarray([vx, yaw_rate], dtype=np.float32),
-                a2w_joint_values_from_dofs(dof_names, dof_pos),
-            ],
+            [base_command, a2w_joint_values_from_dofs(dof_names, dof_pos)],
             axis=0,
         ).astype(np.float32)
     target_pos_base = world_pos_to_base(
@@ -3754,19 +3925,29 @@ def apply_float_dp_action(action, base_xy, base_z, yaw, dt, action_frame="base",
     return base_xy_next.astype(np.float32), yaw_next, target_pos, target_quat, gripper
 
 
-def apply_float_dp_joint_action9(action, base_xy, yaw, dt):
+def apply_float_dp_joint_action9(action, base_xy, yaw, dt, include_vy=False):
     action = np.asarray(action, dtype=np.float32).reshape(-1)
-    if action.shape[0] < len(A2W_JOINT_ACTION9_NAMES):
+    expected_names = A2W_JOINT_ACTION10_NAMES if include_vy else A2W_JOINT_ACTION9_NAMES
+    if action.shape[0] < len(expected_names):
         raise ValueError(
-            f"A2W joint action must have at least {len(A2W_JOINT_ACTION9_NAMES)} values, got shape {action.shape}"
+            f"A2W joint action must have at least {len(expected_names)} values, got shape {action.shape}"
         )
     vx = float(action[0])
-    yaw_rate = float(action[1])
+    vy = (
+        executable_a2w_joint10_lateral_speed(action[1])
+        if include_vy
+        else 0.0
+    )
+    yaw_rate = float(action[2]) if include_vy else float(action[1])
+    joint_offset = 3 if include_vy else 2
     yaw_next = float(yaw) + yaw_rate * float(dt)
     heading = np.asarray([math.cos(float(yaw)), math.sin(float(yaw))], dtype=np.float32)
-    base_xy_next = np.asarray(base_xy, dtype=np.float32) + heading * (vx * float(dt))
+    left = np.asarray([-heading[1], heading[0]], dtype=np.float32)
+    base_xy_next = np.asarray(base_xy, dtype=np.float32) + (
+        heading * vx + left * vy
+    ) * float(dt)
     joint_targets = {
-        joint_name: float(action[2 + joint_idx])
+        joint_name: float(action[joint_offset + joint_idx])
         for joint_idx, joint_name in enumerate(A2W_Z1_JOINT_NAMES)
     }
     return base_xy_next.astype(np.float32), yaw_next, joint_targets
@@ -3812,7 +3993,7 @@ def make_float_dp_policy_log_record(
     action_frame = str(getattr(st, "dp_action_frame", "base"))
     action_names = list(action_names or [])
     action_mode = float_dp_action_mode_from_feature_names(action_names)
-    if action_mode == "a2w_joint_action9":
+    if action_mode in {"a2w_joint_action9", "a2w_joint_action10"}:
         ee_record = {
             "target_pos_world": _round_list(st.last_target_pos),
             "target_pos_action": [],
@@ -3821,7 +4002,8 @@ def make_float_dp_policy_log_record(
             "actual_pos_world": _round_list(ee_pos),
             "actual_quat": _round_list(ee_quat),
         }
-        joint_targets = _round_list(dp_action[2:9])
+        joint_offset = 3 if action_mode == "a2w_joint_action10" else 2
+        joint_targets = _round_list(dp_action[joint_offset : joint_offset + 7])
     else:
         ee_record = {
             "target_pos_world": _round_list(st.last_target_pos),
@@ -3978,14 +4160,15 @@ def update_float_dp_end_signal_monitor(st, policy_output, step, door_pos, phase)
 def print_float_dp_policy_log_record(record):
     action = record["dp_action_raw"]
     ee = record["ee"]
-    if record.get("action_mode") == "a2w_joint_action9":
+    if record.get("action_mode") in {"a2w_joint_action9", "a2w_joint_action10"}:
+        base_values = action[:3] if record.get("action_mode") == "a2w_joint_action10" else action[:2]
         print(
             "[DoorDP-FloatIK]"
             f" step={record['step']}"
             f" env={record['controlled_env_id']}/{record['num_envs']}"
             f" phase={record['phase_name']}"
             f" action_frame={record.get('action_frame')}"
-            f" action(vx,yaw,joints)=({action[0]:.3f}, {action[1]:.3f}, {record.get('joint_targets', [])})"
+            f" action(base,joints)=({np.round(base_values, 4).tolist()}, {record.get('joint_targets', [])})"
             f" ee_actual={ee['actual_pos_world']}",
             flush=True,
         )
@@ -4184,7 +4367,7 @@ def make_float_dp_recorder(
     pose_frame = normalize_float_dp_pose_frame(getattr(args, "ee_pose_frame", "base"))
     records_tracik_command_fk = (
         str(getattr(args, "arm_ik_solver", "gym_jacobian")) == "tracik"
-        and not float_dp_action_is_a2w_joint9(action_names)
+        and not float_dp_action_is_a2w_joint(action_names)
     )
     if state_mode == FLOAT_DP_STATE_MODE_PI05_CURRENT_STATE10:
         state_source = "current_vx_yaw_rate_ee_base_gripper"
@@ -4192,6 +4375,8 @@ def make_float_dp_recorder(
         state_source = "last_command_vx_vyaw_ee_base_gripper"
     elif state_mode == FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE9:
         state_source = "last_command_vx_vyaw_a2w_z1_joint_positions"
+    elif state_mode == FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE10:
+        state_source = "last_command_vx_vy_vyaw_a2w_z1_joint_positions"
     else:
         state_source = "full_float_ik_state_with_previous_action"
     metadata = {
@@ -4221,7 +4406,7 @@ def make_float_dp_recorder(
         "action_format": float_dp_action_mode_from_feature_names(action_names),
         "action_source": (
             "base_command_plus_a2w_z1_joint_targets"
-            if float_dp_action_is_a2w_joint9(action_names)
+            if float_dp_action_is_a2w_joint(action_names)
             else (
                 "base_command_plus_tracik_smoothed_command_fk"
                 if records_tracik_command_fk
@@ -4237,6 +4422,7 @@ def make_float_dp_recorder(
         "door_side_walls": bool(door_side_walls_enabled(args)),
         "door_use_urdf_rgba": bool(getattr(args, "door_use_urdf_rgba", False)),
         "phase_names": list(phase_names),
+        "rgb_masks_included": not bool(getattr(args, "dp_rgb_without_masks", False)),
         "keyframe_loss_enabled": not bool(getattr(args, "no_keyframe_loss_weights", False)),
         "keyframe_loss_weight": float(getattr(args, "keyframe_loss_weight", 8.0)),
         "keyframe_loss_radius": int(getattr(args, "keyframe_loss_radius", 3)),
@@ -4248,15 +4434,22 @@ def make_float_dp_recorder(
             "grasp": "first grasp_hold/close_gripper frame",
             "rotate": "first push_door frame, i.e. after rotate_handle completes",
         },
-        "handle_closed_angle": float(door.dof_lower[1]) if len(door.dof_lower) > 1 else 0.0,
+        "handle_closed_angle": (
+            float(door.dof_lower[door.handle_dof_index])
+            if door.handle_dof_index is not None
+            else 0.0
+        ),
         "door_closed_angle": (
-            float(door.dof_upper[0])
+            float(door.dof_upper[door.door_dof_index])
             if len(door.dof_upper) > 0 and float(args.door_motion_sign) < 0.0
-            else (float(door.dof_lower[0]) if len(door.dof_lower) > 0 else 0.0)
+            else (float(door.dof_lower[door.door_dof_index]) if len(door.dof_lower) > 0 else 0.0)
         ),
         "handle_unlock_threshold": float(getattr(door, "handle_unlock_threshold", math.radians(40.0))),
         "door_progress_goal_angle": math.radians(90.0),
     }
+    if hasattr(args, "rgb_visual_randomization"):
+        metadata["rgb_visual_randomization"] = args.rgb_visual_randomization
+        metadata["rgb_visual_episode"] = args.rgb_visual_episode
     if bool(getattr(args, "record_end_signal", False)):
         metadata.update(
             {
@@ -4629,8 +4822,12 @@ def setup_float_dp_policy_controller(
         getattr(dp_controller, "state_feature_names", [])
     )
     joint_state_checkpoint = bool(
-        checkpoint_state_version == FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE9
-        and controller_state_mode == FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE9
+        checkpoint_state_version
+        in {
+            FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE9,
+            FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE10,
+        }
+        and controller_state_mode == checkpoint_state_version
     )
     if checkpoint_state_version != str(state_version) and not joint_state_checkpoint:
         raise ValueError(
@@ -4817,13 +5014,15 @@ def collect_float_dp_policy_actions(gym, sim, env_states, dof_names, gripper_idx
             if gripper_idx is not None and gripper_idx < len(dof_pos_actual)
             else float(st.args.gripper_open)
         )
-        vx_state, yaw_rate_state = base_command_from_targets(
+        vx_state, vy_state, yaw_rate_state = base_command_from_targets_with_lateral(
             base_xy_current,
             yaw_current,
             getattr(st, "dp_policy_prev_base_xy", None),
             getattr(st, "dp_policy_prev_yaw", None),
             sample_dt,
         )
+        if state_mode == FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE10:
+            vy_state = executable_a2w_joint10_lateral_speed(vy_state)
         st.dp_policy_prev_base_xy = np.asarray(base_xy_current, dtype=np.float32).copy()
         st.dp_policy_prev_yaw = float(yaw_current)
         dp_state = make_float_dp_observation_state(
@@ -4839,6 +5038,7 @@ def collect_float_dp_policy_actions(gym, sim, env_states, dof_names, gripper_idx
             gripper_actual,
             st.last_dp_action,
             vx=vx_state,
+            vy=vy_state,
             state_mode=state_mode,
             base_pitch=float(getattr(st.args, "robot_pitch", 0.0)),
             pose_frame=getattr(dp_controller, "action_frame", "base"),
@@ -4984,7 +5184,7 @@ def record_float_dp_frame(gym, sim, st, dof_names, gripper_idx, dt, phase_id, do
     base_xy = st.traj.get("base_xy", st.base_start)
     yaw = float(st.traj.get("yaw", st.yaw_start))
     record_dt = float(dt) * float(record_stride)
-    vx_cmd, yaw_rate_cmd = base_command_from_targets(
+    vx_cmd, vy_cmd, yaw_rate_cmd = base_command_from_targets_with_lateral(
         base_xy,
         yaw,
         getattr(st, "dp_record_prev_base_xy", None),
@@ -5032,6 +5232,8 @@ def record_float_dp_frame(gym, sim, st, dof_names, gripper_idx, dt, phase_id, do
         return False
 
     state_mode = normalize_float_dp_state_mode(getattr(st.args, "dp_record_state_mode", FLOAT_DP_STATE_MODE_FULL))
+    if state_mode == FLOAT_DP_STATE_MODE_A2W_LAST_COMMAND_JOINT_STATE10:
+        vy_cmd = executable_a2w_joint10_lateral_speed(vy_cmd)
     dp_state = make_float_dp_observation_state(
         dof_names,
         dof_pos_actual,
@@ -5045,6 +5247,7 @@ def record_float_dp_frame(gym, sim, st, dof_names, gripper_idx, dt, phase_id, do
         gripper_actual,
         st.last_dp_action,
         vx=vx_cmd,
+        vy=vy_cmd,
         state_mode=state_mode,
         base_pitch=float(getattr(st.args, "robot_pitch", 0.0)),
         pose_frame=getattr(st.args, "ee_pose_frame", "base"),
@@ -5063,6 +5266,7 @@ def record_float_dp_frame(gym, sim, st, dof_names, gripper_idx, dt, phase_id, do
         dof_pos=st.dof_positions,
         base_pitch=float(getattr(st.args, "robot_pitch", 0.0)),
         pose_frame=getattr(st.args, "ee_pose_frame", "base"),
+        vy=vy_cmd,
     )
     replay_snapshot = make_float_replay_snapshot(
         st.args,
@@ -5132,7 +5336,7 @@ def record_float_dp_frame(gym, sim, st, dof_names, gripper_idx, dt, phase_id, do
     st.dp_record_prev_yaw = float(yaw)
     if bool(getattr(st, "base_door_collision_detected", False)):
         st.dp_record_success = False
-    elif door_success(door_pos_record, st.args):
+    elif door_success(door_pos_record, st.args, door=st.door):
         st.dp_record_success = True
     return True
 
@@ -5246,43 +5450,72 @@ def finish_float_dp_recorders(env_states, args):
     return saved, total_recorders
 
 
+def door_hinge_angle(door, dof_pos, default=0.0):
+    if dof_pos is None:
+        return float(default)
+    values = np.asarray(dof_pos).reshape(-1)
+    index = int(getattr(door, "door_dof_index", 0))
+    return float(values[index]) if 0 <= index < len(values) else float(default)
+
+
+def door_handle_angle(door, dof_pos, default=0.0):
+    if dof_pos is None:
+        return float(default)
+    index = getattr(door, "handle_dof_index", None)
+    values = np.asarray(dof_pos).reshape(-1)
+    return float(values[index]) if index is not None and 0 <= index < len(values) else float(default)
+
+
+def canonical_door_dof_positions(door, dof_pos):
+    """Return [selected hinge, optional selected handle] for diagnostics."""
+    values = np.asarray([] if dof_pos is None else dof_pos, dtype=np.float32).reshape(-1)
+    result = [door_hinge_angle(door, values)] if values.size else []
+    if getattr(door, "handle_dof_index", None) is not None:
+        result.append(door_handle_angle(door, values))
+    return np.asarray(result, dtype=np.float32)
+
+
 def closed_hinge_angle(door, args):
     if len(door.dof_lower) == 0 or len(door.dof_upper) == 0:
         return 0.0
-    return float(door.dof_upper[0]) if float(args.door_motion_sign) < 0.0 else float(door.dof_lower[0])
+    index = int(getattr(door, "door_dof_index", 0))
+    return float(door.dof_upper[index]) if float(args.door_motion_sign) < 0.0 else float(door.dof_lower[index])
 
 
 def door_hinge_open_ratio(door, door_angle, args):
     if len(door.dof_lower) == 0 or len(door.dof_upper) == 0:
         return 0.0
+    index = int(getattr(door, "door_dof_index", 0))
     if float(args.door_motion_sign) < 0.0:
-        closed_angle = float(door.dof_upper[0])
-        open_limit = float(door.dof_lower[0])
+        closed_angle = float(door.dof_upper[index])
+        open_limit = float(door.dof_lower[index])
     else:
-        closed_angle = float(door.dof_lower[0])
-        open_limit = float(door.dof_upper[0])
+        closed_angle = float(door.dof_lower[index])
+        open_limit = float(door.dof_upper[index])
     hinge_range = max(abs(open_limit - closed_angle), 1.0e-6)
     return float(np.clip(abs(float(door_angle) - closed_angle) / hinge_range, 0.0, 1.0))
 
 
-def door_open_degrees(door_pos, args):
+def door_open_degrees(door_pos, args, door=None):
     if door_pos is None or len(door_pos) == 0:
         return 0.0
-    return math.degrees(float(args.door_motion_sign) * float(door_pos[0]))
+    angle = door_hinge_angle(door, door_pos) if door is not None else float(door_pos[0])
+    return math.degrees(float(args.door_motion_sign) * angle)
 
 
-def door_success(door_pos, args):
-    return door_open_degrees(door_pos, args) >= float(args.pass_open_angle_deg)
+def door_success(door_pos, args, door=None):
+    return door_open_degrees(door_pos, args, door=door) >= float(args.pass_open_angle_deg)
 
 
 def handle_unlock_progress(door, handle_angle):
     """Return signed handle travel from its configured neutral/rest angle."""
     direction = -1.0 if float(getattr(door, "handle_unlock_direction_sign", 1.0)) < 0.0 else 1.0
     configured_rest = getattr(door, "handle_rest_angle", None)
+    handle_idx = getattr(door, "handle_dof_index", None)
     rest = (
         float(configured_rest)
         if configured_rest is not None
-        else (float(door.dof_lower[1]) if len(door.dof_lower) >= 2 else 0.0)
+        else (float(door.dof_lower[handle_idx]) if handle_idx is not None else 0.0)
     )
     return direction * (float(handle_angle) - rest)
 
@@ -5296,44 +5529,58 @@ def compute_door_efforts(door, dof_pos, dof_vel, args):
     if len(dof_pos) == 0:
         return efforts
 
-    door_angle = float(dof_pos[0])
+    hinge_idx = int(getattr(door, "door_dof_index", 0))
+    handle_idx = getattr(door, "handle_dof_index", None)
+    door_angle = float(dof_pos[hinge_idx])
     if bool(getattr(args, "door_twin_asset_probe", False)):
         door.open_stage = True
-    if len(dof_pos) < 2:
+    if handle_idx is None:
         door.open_stage = True
-        hinge_range = max(abs(float(door.dof_upper[0])), abs(float(door.dof_lower[0])), 1.0e-3)
+        hinge_range = max(
+            abs(float(door.dof_upper[hinge_idx])), abs(float(door.dof_lower[hinge_idx])), 1.0e-3
+        )
         if abs(door_angle) < args.door_auto_open_target_ratio * hinge_range:
             auto_torque = args.door_auto_open_force * args.door_motion_sign * args.door_auto_open_sign
         else:
             auto_torque = 0.0
-        efforts[0] = auto_torque - args.door_open_resistance * door_angle - args.door_open_damping * float(dof_vel[0])
+        efforts[hinge_idx] = (
+            auto_torque
+            - args.door_open_resistance * door_angle
+            - args.door_open_damping * float(dof_vel[hinge_idx])
+        )
         return efforts
 
-    handle_angle = float(dof_pos[1])
+    handle_angle = float(dof_pos[handle_idx])
     if handle_is_unlocked(door, handle_angle):
         door.open_stage = True
 
-    hinge_range = max(abs(float(door.dof_upper[0])), abs(float(door.dof_lower[0])), 1.0e-3)
+    hinge_range = max(
+        abs(float(door.dof_upper[hinge_idx])), abs(float(door.dof_lower[hinge_idx])), 1.0e-3
+    )
     if abs(door_angle) < args.door_auto_open_target_ratio * hinge_range:
         auto_torque = args.door_auto_open_force * args.door_motion_sign * args.door_auto_open_sign
     else:
         auto_torque = 0.0
 
     if door.open_stage:
-        efforts[0] = auto_torque - args.door_open_resistance * door_angle - args.door_open_damping * float(dof_vel[0])
+        efforts[hinge_idx] = (
+            auto_torque
+            - args.door_open_resistance * door_angle
+            - args.door_open_damping * float(dof_vel[hinge_idx])
+        )
     elif args.door_lock_force > 0.0:
-        efforts[0] = -args.door_motion_sign * args.door_lock_force
+        efforts[hinge_idx] = -args.door_motion_sign * args.door_lock_force
 
     configured_rest = getattr(door, "handle_rest_angle", None)
     handle_rest = (
         float(configured_rest)
         if configured_rest is not None
-        else float(door.dof_lower[1])
+        else float(door.dof_lower[handle_idx])
     )
     handle_displacement_from_rest = handle_angle - handle_rest
-    efforts[1] = (
+    efforts[handle_idx] = (
         -args.handle_spring_stiffness * handle_displacement_from_rest
-        - args.handle_spring_damping * float(dof_vel[1])
+        - args.handle_spring_damping * float(dof_vel[handle_idx])
     )
     return efforts
 
@@ -5344,8 +5591,9 @@ def enforce_locked_door_hinge(gym, env, door_actor, door, args):
     states = gym.get_actor_dof_states(env, door_actor, gymapi.STATE_ALL)
     if len(states) == 0:
         return
-    states["pos"][0] = closed_hinge_angle(door, args)
-    states["vel"][0] = 0.0
+    hinge_idx = int(getattr(door, "door_dof_index", 0))
+    states["pos"][hinge_idx] = closed_hinge_angle(door, args)
+    states["vel"][hinge_idx] = 0.0
     gym.set_actor_dof_states(env, door_actor, states, gymapi.STATE_ALL)
 
 

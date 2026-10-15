@@ -6,26 +6,26 @@ CONDA=/home/ps/miniconda3/bin/conda
 TXC_PY=/home/ps/miniconda3/envs/txc_vbc/bin/python
 cd "$REPO"
 
-RAW_REL=high-level/data/door_dp_raw/a2w_wc4_pull_joint9_noresistance_noisy_rand_200_seed615455575
+RAW_REL=high-level/data/door_dp_raw/a2w_wc4_pull_joint9_release65_novy_noinertia_noisy_rand_200_v3_seed615455575
 RAW="$REPO/$RAW_REL"
-DATASET_REPO=local/door_a2w_wc4_pull_joint9_noresistance_noisy_rand_200_interaction_state
+DATASET_REPO=local/door_a2w_wc4_pull_joint9_release65_novy_noinertia_noisy_rand_200_v3_interaction_state
 DATASET_ROOT="$REPO/high-level/data/lerobot/$DATASET_REPO"
 
-RECORD_LOG="$REPO/high-level/logs/pull-data-pipeline/record_wc4_pull_joint9_200_seed615455575_20260731.log"
+RECORD_LOG="$REPO/high-level/logs/pull-data-pipeline/record_wc4_pull_joint9_release65_novy_200_seed615455575_20260803.log"
 RECORD_PID_FILE="$RECORD_LOG.pid"
-PIPELINE_ROOT="$REPO/high-level/logs/pull-data-pipeline/wc4_pull_joint9_200_20260731"
+PIPELINE_ROOT="$REPO/high-level/logs/pull-data-pipeline/wc4_pull_joint9_release65_novy_200_full_validation_20260803"
 STATUS="$PIPELINE_ROOT/status.txt"
 MAIN_LOG="$PIPELINE_ROOT/pipeline.log"
 
-BASE_JOB=leroact_a2w_wc4_pull_joint9_noisy_rand200_baseline_seed1000_50k_chunk100_exec50_bs16_0731
-INTER_JOB=leroact_a2w_wc4_pull_joint9_noisy_rand200_plucker_fov55_interaction_decoderchunk_w005_seed1000_50k_chunk100_exec50_bs16_0731
+BASE_JOB=leroact_a2w_wc4_pull_joint9_release65_200_baseline_seed1000_50k_chunk100_exec50_bs16_0803_release65_novy_v3
+INTER_JOB=leroact_a2w_wc4_pull_joint9_release65_200_plucker_interaction_decoderchunk_w005_seed1000_50k_chunk100_exec50_bs16_0803_release65_novy_v3
 BASE_RUN="$REPO/high-level/dp/logs/lerobot-train/$BASE_JOB"
 INTER_RUN="$REPO/high-level/dp/logs/lerobot-train/$INTER_JOB"
 BASE_WRAP="$REPO/high-level/dp/logs/door-auto-wrapped/$BASE_JOB/050000"
 INTER_WRAP="$REPO/high-level/dp/logs/door-auto-wrapped/$INTER_JOB/050000"
 
-BASE_EVAL="$REPO/high-level/logs/door-policy-success/wc4_pull_joint9_rand200_baseline_seed615455575_open60_traverse0p8_64"
-INTER_EVAL="$REPO/high-level/logs/door-policy-success/wc4_pull_joint9_rand200_plucker_interaction_seed615455575_open60_traverse0p8_64"
+BASE_EVAL="$REPO/high-level/logs/door-policy-success/wc4_pull_release65_novy_200_baseline_seed615455575_open60_traverse0p8_64"
+INTER_EVAL="$REPO/high-level/logs/door-policy-success/wc4_pull_release65_novy_200_plucker_interaction_seed615455575_open60_traverse0p8_64"
 
 mkdir -p "$PIPELINE_ROOT"
 exec >>"$MAIN_LOG" 2>&1
@@ -70,8 +70,16 @@ required = {
     "gripper_handle_contact_both",
     "front_camera_pose_base",
     "wrist_camera_pose_base",
+    "pull_release_angle_observed_deg",
+    "pull_max_open_deg",
+    "pull_max_traversal_m",
+    "pull_max_abs_body_vy_mps",
 }
 frame_counts = []
+release_angles = []
+open_angles = []
+traversal_distances = []
+body_vy = []
 for path in episodes:
     with np.load(path, allow_pickle=True) as data:
         missing = sorted(required.difference(data.files))
@@ -84,6 +92,10 @@ for path in episodes:
         if action.shape != state.shape:
             raise RuntimeError(f"{path.name} action/state mismatch {action.shape}/{state.shape}")
         frame_counts.append(int(state.shape[0]))
+        release_angles.append(float(np.asarray(data["pull_release_angle_observed_deg"]).reshape(-1)[0]))
+        open_angles.append(float(np.asarray(data["pull_max_open_deg"]).reshape(-1)[0]))
+        traversal_distances.append(float(np.asarray(data["pull_max_traversal_m"]).reshape(-1)[0]))
+        body_vy.append(float(np.asarray(data["pull_max_abs_body_vy_mps"]).reshape(-1)[0]))
         for key in (
             "wrist_masked_depth",
             "front_masked_depth",
@@ -95,6 +107,15 @@ for path in episodes:
             if int(np.asarray(data[key]).shape[0]) != int(state.shape[0]):
                 raise RuntimeError(f"{path.name} field {key} is not frame-aligned")
 
+if min(release_angles) < 65.0:
+    raise RuntimeError(f"Release angle below 65 deg: min={min(release_angles)}")
+if min(open_angles) < 60.0:
+    raise RuntimeError(f"Door opening below 60 deg: min={min(open_angles)}")
+if min(traversal_distances) < 0.8:
+    raise RuntimeError(f"Traversal below 0.8 m: min={min(traversal_distances)}")
+if max(body_vy) > 1e-4:
+    raise RuntimeError(f"Body lateral speed exceeded 1e-4 m/s: max={max(body_vy)}")
+
 sidecar = json.loads((root / "door_dp_feature_names.json").read_text())
 if sidecar.get("state_format") != "a2w_last_command_joint_state9":
     raise RuntimeError(f"Unexpected state format: {sidecar.get('state_format')}")
@@ -102,7 +123,11 @@ if sidecar.get("door_dp_mode") != "ikpull":
     raise RuntimeError(f"Unexpected controller mode: {sidecar.get('door_dp_mode')}")
 print(
     f"RAW_VALID episodes={len(episodes)} frames={sum(frame_counts)} "
-    f"min_frames={min(frame_counts)} max_frames={max(frame_counts)}"
+    f"min_frames={min(frame_counts)} max_frames={max(frame_counts)} "
+    f"release_deg={min(release_angles):.4f}/{np.mean(release_angles):.4f}/{max(release_angles):.4f} "
+    f"open_deg={min(open_angles):.4f}/{np.mean(open_angles):.4f}/{max(open_angles):.4f} "
+    f"traversal_m={min(traversal_distances):.4f}/{np.mean(traversal_distances):.4f}/{max(traversal_distances):.4f} "
+    f"max_body_vy={max(body_vy):.8f}"
 )
 PY
 }
@@ -218,7 +243,7 @@ COMMON_ARGS=(
 )
 
 stage "TRAIN_BOTH"
-CUDA_VISIBLE_DEVICES=1 "$CONDA" run --no-capture-output -n b1z1_lerobot python \
+CUDA_VISIBLE_DEVICES=2 "$CONDA" run --no-capture-output -n b1z1_lerobot python \
     "$REPO/high-level/lerobot/src/lerobot/scripts/lerobot_train.py" \
     "${COMMON_ARGS[@]}" \
     --policy.plucker_conditioning=false \
@@ -228,7 +253,7 @@ CUDA_VISIBLE_DEVICES=1 "$CONDA" run --no-capture-output -n b1z1_lerobot python \
     >"$PIPELINE_ROOT/train_baseline.log" 2>&1 &
 base_pid=$!
 
-CUDA_VISIBLE_DEVICES=2 "$CONDA" run --no-capture-output -n b1z1_lerobot python \
+CUDA_VISIBLE_DEVICES=3 "$CONDA" run --no-capture-output -n b1z1_lerobot python \
     "$REPO/high-level/lerobot/src/lerobot/scripts/lerobot_train.py" \
     "${COMMON_ARGS[@]}" \
     --policy.plucker_conditioning=true \
@@ -261,7 +286,7 @@ fi
     fail "interaction 50K checkpoint missing"
 
 stage "EXPORT"
-CUDA_VISIBLE_DEVICES=1 "$CONDA" run --no-capture-output -n b1z1_lerobot python \
+CUDA_VISIBLE_DEVICES=2 "$CONDA" run --no-capture-output -n b1z1_lerobot python \
     "$REPO/high-level/dp/export_official_lerobot_act_to_door_checkpoint.py" \
     --official_checkpoint "$BASE_RUN/checkpoints/050000" \
     --root "$REPO/high-level/data/lerobot" \
@@ -272,7 +297,7 @@ CUDA_VISIBLE_DEVICES=1 "$CONDA" run --no-capture-output -n b1z1_lerobot python \
     --depth_only \
     >"$PIPELINE_ROOT/export_baseline.log" 2>&1 || fail "baseline export failed"
 
-CUDA_VISIBLE_DEVICES=2 "$CONDA" run --no-capture-output -n b1z1_lerobot python \
+CUDA_VISIBLE_DEVICES=3 "$CONDA" run --no-capture-output -n b1z1_lerobot python \
     "$REPO/high-level/dp/export_official_lerobot_act_to_door_checkpoint.py" \
     --official_checkpoint "$INTER_RUN/checkpoints/050000" \
     --root "$REPO/high-level/data/lerobot" \
@@ -297,9 +322,9 @@ stage "EVAL_BOTH"
     --pull_traversal_distance_m 0.8 \
     --base_seed 615455575 \
     --headless \
-    --graphics_device_id 1 \
-    --rl_device cuda:1 \
-    --sim_device cuda:1 \
+    --graphics_device_id 2 \
+    --rl_device cuda:2 \
+    --sim_device cuda:2 \
     --dp_action_horizon 25 \
     --dp_fps 25 \
     --depth_only \
@@ -335,9 +360,9 @@ base_eval_pid=$!
     --pull_traversal_distance_m 0.8 \
     --base_seed 615455575 \
     --headless \
-    --graphics_device_id 2 \
-    --rl_device cuda:2 \
-    --sim_device cuda:2 \
+    --graphics_device_id 3 \
+    --rl_device cuda:3 \
+    --sim_device cuda:3 \
     --dp_action_horizon 25 \
     --dp_fps 25 \
     --depth_only \

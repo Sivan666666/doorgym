@@ -41,9 +41,15 @@ try:
         INTERACTION_DOOR_PROGRESS_FEATURE,
         INTERACTION_HANDLE_PROGRESS_FEATURE,
         INTERACTION_STATE_FEATURES,
+        GRIPPER_HANDLE_CONTACT_LOWER_FEATURE,
+        GRIPPER_HANDLE_CONTACT_UPPER_FEATURE,
+        GRIPPER_HANDLE_CONTACT_BOTH_FEATURE,
+        GRIPPER_HANDLE_CONTACT_FEATURES,
         POINT_CLOUD_FEATURE,
         RAW_END_SIGNAL_KEY,
         RAW_ACTION_LOSS_WEIGHT_KEY,
+        RGB_ONLY_IMAGE_KEYS,
+        RGB_ONLY_LEROBOT_IMAGE_KEYS,
         WRIST_HANDLE_LATENT_FEATURE,
         WRIST_HANDLE_LATENT_VALID_FEATURE,
         WRIST_CAMERA_POSE_FEATURE,
@@ -88,9 +94,15 @@ except ImportError:
         INTERACTION_DOOR_PROGRESS_FEATURE,
         INTERACTION_HANDLE_PROGRESS_FEATURE,
         INTERACTION_STATE_FEATURES,
+        GRIPPER_HANDLE_CONTACT_LOWER_FEATURE,
+        GRIPPER_HANDLE_CONTACT_UPPER_FEATURE,
+        GRIPPER_HANDLE_CONTACT_BOTH_FEATURE,
+        GRIPPER_HANDLE_CONTACT_FEATURES,
         POINT_CLOUD_FEATURE,
         RAW_END_SIGNAL_KEY,
         RAW_ACTION_LOSS_WEIGHT_KEY,
+        RGB_ONLY_IMAGE_KEYS,
+        RGB_ONLY_LEROBOT_IMAGE_KEYS,
         WRIST_HANDLE_LATENT_FEATURE,
         WRIST_HANDLE_LATENT_VALID_FEATURE,
         WRIST_CAMERA_POSE_FEATURE,
@@ -117,8 +129,10 @@ HIGH_LEVEL_ROOT = DP_ROOT.parent
 
 RAW_STATE_ACTION_MODE = "raw"
 DIRECT_JOINT_STATE9_MODE = "joint_state9"
+DIRECT_JOINT_STATE10_MODE = "joint_state10"
 TRACIK_JOINT_STATE9_MODE = "tracik_joint_state9"
 JOINT_STATE9_MODES = (DIRECT_JOINT_STATE9_MODE, TRACIK_JOINT_STATE9_MODE)
+JOINT_STATE_MODES = (*JOINT_STATE9_MODES, DIRECT_JOINT_STATE10_MODE)
 TRACIK_JOINT_STATE9_NAMES = [
     "last_command_vx",
     "last_command_vyaw",
@@ -132,6 +146,30 @@ TRACIK_JOINT_STATE9_NAMES = [
 ]
 TRACIK_JOINT_ACTION9_NAMES = [
     "vx",
+    "yaw",
+    "joint1",
+    "joint2",
+    "joint3",
+    "joint4",
+    "joint5",
+    "joint6",
+    "jointGripper",
+]
+DIRECT_JOINT_STATE10_NAMES = [
+    "last_command_vx",
+    "last_command_vy",
+    "last_command_vyaw",
+    "joint1",
+    "joint2",
+    "joint3",
+    "joint4",
+    "joint5",
+    "joint6",
+    "jointGripper",
+]
+DIRECT_JOINT_ACTION10_NAMES = [
+    "vx",
+    "vy",
     "yaw",
     "joint1",
     "joint2",
@@ -161,7 +199,12 @@ def parse_args():
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument(
         "--state_action_mode",
-        choices=[RAW_STATE_ACTION_MODE, DIRECT_JOINT_STATE9_MODE, TRACIK_JOINT_STATE9_MODE],
+        choices=[
+            RAW_STATE_ACTION_MODE,
+            DIRECT_JOINT_STATE9_MODE,
+            DIRECT_JOINT_STATE10_MODE,
+            TRACIK_JOINT_STATE9_MODE,
+        ],
         default=RAW_STATE_ACTION_MODE,
         help=(
             "raw keeps the recorded state/action arrays and metadata. joint_state9 reads an "
@@ -172,6 +215,17 @@ def parse_args():
         ),
     )
     parser.add_argument("--rgb", action="store_true", help="Convert raw RGB+mask Door DP data. Required for RGB raw data.")
+    parser.add_argument(
+        "--rgb_only",
+        "--rgb_without_masks",
+        dest="rgb_only",
+        action="store_true",
+        help=(
+            "Convert RGB raw data but write only wrist/front RGB as policy observations. "
+            "Raw segmentation masks may still exist for privileged recording diagnostics, "
+            "but are omitted from the LeRobot dataset."
+        ),
+    )
     parser.add_argument(
         "--depth_only",
         dest="depth_only",
@@ -240,6 +294,14 @@ def parse_args():
         "--add_interaction_state",
         action="store_true",
         help="Derive current-frame contact/handle/door interaction targets from privileged raw arrays.",
+    )
+    parser.add_argument(
+        "--include_contact_labels",
+        action="store_true",
+        help=(
+            "Write raw PhysX/Gym lower-finger, upper-finger and both-finger handle-contact "
+            "labels as aux features without temporal smoothing."
+        ),
     )
     parser.add_argument("--interaction_contact_min_consecutive_frames", type=int, default=3)
     parser.add_argument("--interaction_handle_unlock_angle_deg", type=float, default=40.0)
@@ -599,6 +661,17 @@ def state_action_arrays(data, mode, path=None):
                 f"{label} joint_state9 requires action shape {states.shape}, got {actions.shape}"
             )
         return states, actions
+    if mode == DIRECT_JOINT_STATE10_MODE:
+        states = np.asarray(data["state"], dtype=np.float32)
+        actions = np.asarray(data["action"], dtype=np.float32)
+        label = str(path or "raw episode")
+        if states.ndim != 2 or states.shape[1] != 10:
+            raise ValueError(f"{label} joint_state10 requires state shape [T, 10], got {states.shape}")
+        if actions.ndim != 2 or actions.shape != states.shape:
+            raise ValueError(
+                f"{label} joint_state10 requires action shape {states.shape}, got {actions.shape}"
+            )
+        return states, actions
     if mode != TRACIK_JOINT_STATE9_MODE:
         raise ValueError(f"Unsupported state_action_mode={mode!r}")
 
@@ -840,6 +913,7 @@ def load_episode_payload(
     add_end_signal=False,
     end_signal_positive_phases=DEFAULT_END_SIGNAL_POSITIVE_PHASES,
     add_interaction_state=False,
+    include_contact_labels=False,
     interaction_contact_min_consecutive_frames=3,
     interaction_handle_unlock_angle_deg=40.0,
     interaction_door_goal_angle_deg=90.0,
@@ -895,13 +969,19 @@ def load_episode_payload(
             front_second = data[image_keys[1]].astype(np.uint8)
             wrist_first = np.zeros_like(wrist_second)
             front_first = np.zeros_like(front_second)
+        elif vision_mode == "rgb" and image_keys == RGB_ONLY_IMAGE_KEYS:
+            require_fields(data, image_keys, path)
+            wrist_second = data[image_keys[0]].astype(np.uint8)
+            front_second = data[image_keys[1]].astype(np.uint8)
+            wrist_first = np.zeros_like(wrist_second)
+            front_first = np.zeros_like(front_second)
         else:
             require_fields(data, image_keys[:2], path)
             wrist_first = data[image_keys[0]].astype(np.uint8)
             wrist_second = data[image_keys[1]].astype(np.uint8)
         if point_cloud_views is not None:
             pass
-        elif vision_mode == "rgb":
+        elif vision_mode == "rgb" and image_keys != RGB_ONLY_IMAGE_KEYS:
             require_fields(data, image_keys[2:], path)
             front_first = data[image_keys[2]].astype(np.uint8)
             front_second = data[image_keys[3]].astype(np.uint8)
@@ -909,6 +989,28 @@ def load_episode_payload(
             front_first = data[image_keys[2]].astype(np.uint8) if image_keys[2] in data else np.zeros_like(wrist_first)
             front_second = data[image_keys[3]].astype(np.uint8) if image_keys[3] in data else np.zeros_like(wrist_second)
         subtasks = data["subtask_index"].astype(np.int64).reshape(-1)
+        contact_labels = None
+        if include_contact_labels:
+            if "gripper_handle_contact_lower" in data.files and "gripper_handle_contact_upper" in data.files:
+                lower = np.asarray(data["gripper_handle_contact_lower"], dtype=np.float32).reshape(-1, 1)
+                upper = np.asarray(data["gripper_handle_contact_upper"], dtype=np.float32).reshape(-1, 1)
+            elif "gripper_handle_contact_active" in data.files:
+                active = np.asarray(data["gripper_handle_contact_active"], dtype=np.float32).reshape(-1, 2)
+                lower, upper = active[:, 0:1], active[:, 1:2]
+            else:
+                raise ValueError(
+                    f"Episode {path} cannot export per-finger contact labels; missing lower/upper or active fields."
+                )
+            both = (
+                np.asarray(data["gripper_handle_contact_both"], dtype=np.float32).reshape(-1, 1)
+                if "gripper_handle_contact_both" in data.files
+                else np.logical_and(lower > 0.5, upper > 0.5).astype(np.float32)
+            )
+            contact_labels = {
+                GRIPPER_HANDLE_CONTACT_LOWER_FEATURE: (lower > 0.5).astype(np.float32),
+                GRIPPER_HANDLE_CONTACT_UPPER_FEATURE: (upper > 0.5).astype(np.float32),
+                GRIPPER_HANDLE_CONTACT_BOTH_FEATURE: (both > 0.5).astype(np.float32),
+            }
         end_signal = None
         if add_end_signal:
             if RAW_END_SIGNAL_KEY in data.files:
@@ -941,9 +1043,9 @@ def load_episode_payload(
                     "Re-record with gripper-handle contact and replay snapshots enabled."
                 )
             door_dof_pos = np.asarray(data["replay_door_dof_pos"], dtype=np.float32)
-            if door_dof_pos.ndim != 2 or door_dof_pos.shape[1] < 2:
+            if door_dof_pos.ndim != 2 or door_dof_pos.shape[1] < 1:
                 raise ValueError(
-                    f"Episode {path} replay_door_dof_pos must have shape (T, >=2), got {door_dof_pos.shape}."
+                    f"Episode {path} replay_door_dof_pos must have shape (T, >=1), got {door_dof_pos.shape}."
                 )
 
             def source_scalar(key, fallback=None):
@@ -953,11 +1055,28 @@ def load_episode_payload(
                     return float(sidecar[key])
                 return fallback
 
+            door_dof_index = int(source_scalar("door_progress_dof_index", 0))
+            handle_dof_index = int(source_scalar("handle_progress_dof_index", 1))
+            handle_progress_constant = source_scalar("handle_progress_constant")
+            if not 0 <= door_dof_index < door_dof_pos.shape[1]:
+                raise ValueError(
+                    f"Episode {path} has invalid door_progress_dof_index={door_dof_index} "
+                    f"for {door_dof_pos.shape[1]} door DOFs."
+                )
+            if handle_progress_constant is None and not 0 <= handle_dof_index < door_dof_pos.shape[1]:
+                raise ValueError(
+                    f"Episode {path} has invalid handle_progress_dof_index={handle_dof_index} "
+                    f"for {door_dof_pos.shape[1]} door DOFs."
+                )
             handle_closed = source_scalar("handle_closed_angle")
             door_closed = source_scalar("door_closed_angle")
             if handle_closed is None or door_closed is None:
-                initial_handle = float(door_dof_pos[0, 1])
-                initial_door = float(door_dof_pos[0, 0])
+                initial_handle = (
+                    0.0
+                    if handle_progress_constant is not None
+                    else float(door_dof_pos[0, handle_dof_index])
+                )
+                initial_door = float(door_dof_pos[0, door_dof_index])
                 recovery_episode = bool(np.any(is_recovery > 0.5)) or "recovery_source_failure_rollout" in data.files
                 if recovery_episode and max(abs(initial_handle), abs(initial_door)) > math.radians(5.0):
                     raise ValueError(
@@ -982,6 +1101,9 @@ def load_episode_payload(
                 door_closed_angle=door_closed,
                 handle_unlock_delta_rad=handle_unlock_delta,
                 door_goal_delta_rad=door_goal_delta,
+                door_dof_index=door_dof_index,
+                handle_dof_index=handle_dof_index,
+                handle_progress_constant=handle_progress_constant,
             )
         has_front_pose = RAW_FRONT_CAMERA_POSE_KEY in data.files
         has_wrist_pose = RAW_WRIST_CAMERA_POSE_KEY in data.files
@@ -1132,6 +1254,8 @@ def load_episode_payload(
         raise ValueError(f"Episode {path} has end_signal length inconsistent with frame count.")
     if interaction_state is not None and any(value.shape[0] != n for value in interaction_state.values()):
         raise ValueError(f"Episode {path} has interaction-state length inconsistent with frame count.")
+    if contact_labels is not None and any(value.shape[0] != n for value in contact_labels.values()):
+        raise ValueError(f"Episode {path} has contact-label length inconsistent with frame count.")
     if point_cloud is not None and point_cloud.shape != (n, point_cloud_config.num_points, 3):
         raise ValueError(
             f"Episode {path} has invalid point-cloud shape {point_cloud.shape}; expected "
@@ -1158,6 +1282,7 @@ def load_episode_payload(
         "is_recovery": is_recovery,
         "end_signal": end_signal,
         "interaction_state": interaction_state,
+        "contact_labels": contact_labels,
         "point_cloud": point_cloud,
         "door_asset_name": door_asset_name,
         "front_camera_pose_base": front_camera_pose_base,
@@ -1231,9 +1356,13 @@ def main():
     sidecar = load_sidecar(raw_root)
     first = np.load(files[0], allow_pickle=True)
     validate_calibrated_camera_metadata(sidecar, first, files[0])
-    if args.state_action_mode in JOINT_STATE9_MODES:
-        state_names = list(TRACIK_JOINT_STATE9_NAMES)
-        action_names = list(TRACIK_JOINT_ACTION9_NAMES)
+    if args.state_action_mode in JOINT_STATE_MODES:
+        if args.state_action_mode == DIRECT_JOINT_STATE10_MODE:
+            state_names = list(DIRECT_JOINT_STATE10_NAMES)
+            action_names = list(DIRECT_JOINT_ACTION10_NAMES)
+        else:
+            state_names = list(TRACIK_JOINT_STATE9_NAMES)
+            action_names = list(TRACIK_JOINT_ACTION9_NAMES)
     else:
         if sidecar and "state" in sidecar:
             state_names = list(sidecar["state"])
@@ -1314,11 +1443,12 @@ def main():
     raw_fps = int(first["fps"]) if "fps" in first else 50
     fps = int(args.fps or (sidecar.get("fps") if sidecar else raw_fps))
     depth_only_explicit = "--depth_only" in sys.argv[1:]
-    if args.rgb and depth_only_explicit:
-        raise ValueError("--rgb and --depth_only are mutually exclusive.")
-    if args.rgb:
+    rgb_requested = bool(args.rgb or args.rgb_only)
+    if rgb_requested and depth_only_explicit:
+        raise ValueError("--rgb/--rgb_only and --depth_only are mutually exclusive.")
+    if rgb_requested:
         args.depth_only = False
-    vision_mode = "rgb" if args.rgb else ("depth_only" if args.depth_only else "depth")
+    vision_mode = "rgb" if rgb_requested else ("depth_only" if args.depth_only else "depth")
     if point_cloud_enabled and vision_mode == "rgb":
         raise ValueError(
             "Point-cloud conversion requires depth observations; RGB-only raw data has no metric depth field."
@@ -1326,10 +1456,14 @@ def main():
     raw_vision_mode = detect_raw_vision_mode(first, sidecar)
     raw_action_frame = detect_action_frame(first, sidecar)
     raw_ikpush_state_version = detect_ikpush_state_version(first, sidecar)
-    action_frame = "joint_command" if args.state_action_mode in JOINT_STATE9_MODES else raw_action_frame
+    action_frame = "joint_command" if args.state_action_mode in JOINT_STATE_MODES else raw_action_frame
     ikpush_state_version = (
-        "a2w_last_command_joint_state9"
-        if args.state_action_mode in JOINT_STATE9_MODES
+        (
+            "a2w_last_command_joint_state10"
+            if args.state_action_mode == DIRECT_JOINT_STATE10_MODE
+            else "a2w_last_command_joint_state9"
+        )
+        if args.state_action_mode in JOINT_STATE_MODES
         else raw_ikpush_state_version
     )
     controller_mode = detect_controller_mode(first, sidecar)
@@ -1341,10 +1475,21 @@ def main():
     if raw_vision_mode != vision_mode:
         raise ValueError(
             f"Raw data vision_mode={raw_vision_mode!r}, but converter was run with "
-            f"{'--rgb' if args.rgb else ('--depth_only' if args.depth_only else 'depth mode')}. "
+            f"{'--rgb' if rgb_requested else ('--depth_only' if args.depth_only else 'depth mode')}. "
             "Use the matching vision flag for the raw data."
         )
     image_keys = raw_image_keys_for_vision_mode(vision_mode)
+    if (
+        vision_mode == "rgb"
+        and sidecar
+        and list(sidecar.get("image_features", [])) == RGB_ONLY_IMAGE_KEYS
+    ):
+        image_keys = list(RGB_ONLY_IMAGE_KEYS)
+    output_image_keys = (
+        list(RGB_ONLY_LEROBOT_IMAGE_KEYS)
+        if vision_mode == "rgb" and args.rgb_only
+        else lerobot_image_keys_for_vision_mode(vision_mode)
+    )
     out_dir = Path(args.root) / args.repo_id
     existing_sidecar = load_sidecar(out_dir) if out_dir.exists() else None
     state_preprocess_config = None
@@ -1543,9 +1688,11 @@ def main():
         include_handle_latent=bool(args.add_handle_latent),
         include_end_signal=bool(args.add_end_signal),
         include_interaction_state=bool(args.add_interaction_state),
+        include_contact_labels=bool(args.include_contact_labels),
         include_images=not point_cloud_enabled,
         include_point_cloud=point_cloud_enabled,
         point_cloud_num_points=int(args.point_cloud_num_points),
+        image_feature_keys=output_image_keys,
         metadata={
             **inherited_metadata,
             "action_frame": action_frame,
@@ -1620,6 +1767,15 @@ def main():
                 if args.add_interaction_state
                 else {}
             ),
+            **(
+                {
+                    "gripper_handle_contact_features": list(GRIPPER_HANDLE_CONTACT_FEATURES),
+                    "gripper_handle_contact_finger_order": ["lower", "upper"],
+                    "gripper_handle_contact_version": "physx_pairwise_binary_v1",
+                }
+                if args.include_contact_labels
+                else {}
+            ),
             "keyframe_loss_weight": converted_keyframe_loss_weight,
             "keyframe_loss_radius": converted_keyframe_loss_radius,
             **(
@@ -1659,6 +1815,7 @@ def main():
         add_end_signal=bool(args.add_end_signal),
         end_signal_positive_phases=parse_csv_names(args.end_signal_positive_phases),
         add_interaction_state=bool(args.add_interaction_state),
+        include_contact_labels=bool(args.include_contact_labels),
         interaction_contact_min_consecutive_frames=int(args.interaction_contact_min_consecutive_frames),
         interaction_handle_unlock_angle_deg=float(args.interaction_handle_unlock_angle_deg),
         interaction_door_goal_angle_deg=float(args.interaction_door_goal_angle_deg),
@@ -1689,6 +1846,7 @@ def main():
         is_recovery = payload["is_recovery"]
         end_signal = payload.get("end_signal")
         interaction_state = payload.get("interaction_state")
+        contact_labels = payload.get("contact_labels")
         point_cloud = payload.get("point_cloud")
         if end_signal is not None:
             episode_positive = int(np.count_nonzero(end_signal > 0.5))
@@ -1788,6 +1946,15 @@ def main():
                 interaction_door_progress=(
                     None if interaction_state is None else interaction_state[INTERACTION_DOOR_PROGRESS_FEATURE][i]
                 ),
+                contact_lower=(
+                    None if contact_labels is None else contact_labels[GRIPPER_HANDLE_CONTACT_LOWER_FEATURE][i]
+                ),
+                contact_upper=(
+                    None if contact_labels is None else contact_labels[GRIPPER_HANDLE_CONTACT_UPPER_FEATURE][i]
+                ),
+                contact_both=(
+                    None if contact_labels is None else contact_labels[GRIPPER_HANDLE_CONTACT_BOTH_FEATURE][i]
+                ),
                 point_cloud=None if point_cloud is None else point_cloud[i],
             )
         recorder.save_episode()
@@ -1821,7 +1988,7 @@ def main():
         "fps": fps,
         "state": state_names,
         "action": action_names,
-        "image_features": [] if point_cloud_enabled else lerobot_image_keys_for_vision_mode(vision_mode),
+        "image_features": [] if point_cloud_enabled else output_image_keys,
         "source_raw_root": str(raw_root),
         "source_raw_roots": [str(root) for root in raw_roots],
         "action_frame": action_frame,
@@ -1892,6 +2059,10 @@ def main():
         sidecar_payload["interaction_door_goal_angle_deg"] = float(
             args.interaction_door_goal_angle_deg
         )
+    if args.include_contact_labels:
+        sidecar_payload["gripper_handle_contact_features"] = list(GRIPPER_HANDLE_CONTACT_FEATURES)
+        sidecar_payload["gripper_handle_contact_finger_order"] = ["lower", "upper"]
+        sidecar_payload["gripper_handle_contact_version"] = "physx_pairwise_binary_v1"
     if point_cloud_enabled:
         sidecar_payload.update(
             {

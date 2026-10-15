@@ -96,7 +96,16 @@ def auto_wrap_official_lerobot_checkpoint(checkpoint_path, args):
 
     run_name = str(train_config.get("job_name") or step_dir.parent.parent.name or "official_lerobot")
     step_name = step_dir.name
-    cache_root = DP_ROOT / "logs" / "door-auto-wrapped" / run_name / step_name
+    # Large PI0.5 wrappers can exceed 10 GiB each.  Keep the historical path as
+    # the default, but allow evaluation jobs on storage-constrained machines to
+    # place this derived cache on a larger volume.
+    auto_wrap_root_value = os.environ.get("DOOR_AUTO_WRAP_ROOT")
+    auto_wrap_root = (
+        Path(auto_wrap_root_value).expanduser().resolve()
+        if auto_wrap_root_value
+        else DP_ROOT / "logs" / "door-auto-wrapped"
+    )
+    cache_root = auto_wrap_root / run_name / step_name
     out_dir = cache_root / "model_latest"
     manifest_path = cache_root / "model_latest.pt"
     cached_meta_path = out_dir / "door_policy_meta.json"
@@ -117,11 +126,17 @@ def auto_wrap_official_lerobot_checkpoint(checkpoint_path, args):
             cached_end == requested_end
             and cached_interaction == requested_interaction
             and cached_interaction_mode == requested_interaction_mode
+            and bool(cached_policy.get("state_conditioning", False))
+            == bool(policy_config.get("state_conditioning", False))
+            and (
+                not policy_config.get("state_conditioning", False)
+                or cached_policy.get("preprocessing_mode") == "saved_lerobot"
+            )
         ):
             print(f"Using cached Door-wrapped checkpoint: {manifest_path}", flush=True)
             return manifest_path.resolve()
         print(
-            "Cached Door wrapper has stale auxiliary-head metadata; rebuilding it from the official checkpoint.",
+            "Cached Door wrapper has stale architecture/preprocessing metadata; rebuilding from the official checkpoint.",
             flush=True,
         )
 

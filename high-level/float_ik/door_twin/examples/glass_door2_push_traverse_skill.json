@@ -1,0 +1,89 @@
+{
+  "version": "door_skill_program_v1",
+  "metadata": {
+    "name": "glass_door2_push_traverse",
+    "asset_name": "glass_door2",
+    "source_round": "glass_door2_right_leaf_from_glass_door_20260810",
+    "purpose": "Open the right leaf of the paired glass door using its fixed vertical pull handle, then traverse through the opening.",
+    "notes": {
+      "source_skill": "glass_door_push_traverse_skill.json",
+      "selected_leaf": "right",
+      "selected_door_body": "door_1",
+      "selected_door_dof": "frame_to_door_1",
+      "locked_door_dof": "frame_to_door_0",
+      "base_speed_mps": 0.2,
+      "push_forward_distance_m": 1.2,
+      "traverse_forward_distance_m": 0.74,
+      "total_forward_distance_m": 1.94,
+      "dt_s": 0.02,
+      "handle_type": "vertical pull handle fixed on the right door leaf; no separate handle DOF",
+      "grasp_target": "lower half of the right vertical handle at local z 0.95 m",
+      "handle_goal_bias_world": [-0.035, -0.02, -0.015],
+      "grasp_offset_local": [-0.04, -0.02, -0.02],
+      "ee_roll_offset": 1.5707963267948966
+    }
+  },
+  "skill_program": [
+    {
+      "name": "MoveTo",
+      "stage": "approach",
+      "vx": 0.2,
+      "vyaw": 0.0,
+      "stop_distance": 0.16
+    },
+    {
+      "name": "ApproachDoor",
+      "base_offset": 0.16,
+      "yaw_align": true
+    },
+    {
+      "name": "MoveEEToHandle",
+      "pregrasp_offset": [0.16, -0.02, -0.02],
+      "grasp_offset": [-0.04, -0.02, -0.02],
+      "handle_goal_bias_world": [-0.035, -0.02, -0.015],
+      "ee_roll_offset": 1.5707963267948966,
+      "duration_steps": 50
+    },
+    {
+      "name": "CloseGripper",
+      "force": 0.8,
+      "duration_steps": 50
+    },
+    {
+      "name": "RotateHandle",
+      "angle": 0.05,
+      "duration_steps": 50,
+      "local_delta": [0.0, 0.0, 0.0]
+    },
+    {
+      "name": "PushDoor",
+      "distance": 1.1,
+      "duration_steps": 300,
+      "contact_bias": 0.025
+    },
+    {
+      "name": "MoveTo",
+      "stage": "push",
+      "vx": 0.2,
+      "vyaw": 0.0,
+      "distance": 1.2,
+      "duration_steps": 300
+    },
+    {
+      "name": "TraverseDoor",
+      "door_angle_target": 80
+    },
+    {
+      "name": "MoveTo",
+      "stage": "traverse",
+      "vx": 0.2,
+      "vyaw": 0.0,
+      "distance": 0.74,
+      "duration_steps": 185
+    },
+    {
+      "name": "ReleaseAndRetract",
+      "duration_steps": 150
+    }
+  ]
+}

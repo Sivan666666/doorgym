@@ -176,7 +176,6 @@ def import_lerobot_pi05_modules(policy_type: Optional[str] = None):
     _ensure_hf_cache_env()
     try:
         from lerobot.configs.types import FeatureType, NormalizationMode, PolicyFeature
-        from lerobot.datasets.lerobot_dataset import LeRobotDataset
         from lerobot.utils.constants import OBS_LANGUAGE_ATTENTION_MASK, OBS_LANGUAGE_TOKENS
         if _normalize_pi05_policy_type(policy_type) == "pi05_evo":
             from lerobot.policies.pi05_evo.configuration_pi05_evo import PI05EvoConfig as PI05Config
@@ -193,7 +192,6 @@ def import_lerobot_pi05_modules(policy_type: Optional[str] = None):
         "FeatureType": FeatureType,
         "NormalizationMode": NormalizationMode,
         "PolicyFeature": PolicyFeature,
-        "LeRobotDataset": LeRobotDataset,
         "PI05Config": PI05Config,
         "PI05Policy": PI05Policy,
         "OBS_LANGUAGE_TOKENS": OBS_LANGUAGE_TOKENS,
@@ -209,6 +207,19 @@ def _resolve_lerobot_root(root: Union[str, Path], repo_id: str) -> Path:
     if (nested / "meta" / "info.json").is_file():
         return nested
     return root
+
+
+def _dataset_image_keys(dataset_root: Union[str, Path], vision_mode: str) -> List[str]:
+    """Resolve the exact policy image features while preserving legacy fallbacks."""
+    sidecar = Path(dataset_root) / "door_dp_feature_names.json"
+    if sidecar.is_file():
+        try:
+            configured = json.loads(sidecar.read_text(encoding="utf-8")).get("image_features")
+            if configured:
+                return [str(key) for key in configured]
+        except Exception:
+            pass
+    return list(lerobot_image_keys_for_vision_mode(vision_mode))
 
 
 def _load_lerobot_dataset(root: Union[str, Path], repo_id: str):
@@ -659,7 +670,7 @@ class DoorPolicySequenceDataset(Dataset):
         self.vision_mode = normalize_vision_mode(vision_mode)
         meta = getattr(self.dataset, "meta", None)
         self.has_point_cloud = bool(meta is not None and OBS_POINT_CLOUD in getattr(meta, "features", {}))
-        self.image_keys = [] if self.has_point_cloud else lerobot_image_keys_for_vision_mode(self.vision_mode)
+        self.image_keys = [] if self.has_point_cloud else _dataset_image_keys(self.dataset_root, self.vision_mode)
         self.obs_horizon = int(obs_horizon)
         self.horizon = int(horizon)
         if self.horizon < self.obs_horizon:
@@ -755,7 +766,7 @@ class DoorPolicyChunkDataset(Dataset):
         self.vision_mode = normalize_vision_mode(vision_mode)
         meta = getattr(self.dataset, "meta", None)
         self.has_point_cloud = bool(meta is not None and OBS_POINT_CLOUD in getattr(meta, "features", {}))
-        self.image_keys = [] if self.has_point_cloud else lerobot_image_keys_for_vision_mode(self.vision_mode)
+        self.image_keys = [] if self.has_point_cloud else _dataset_image_keys(self.dataset_root, self.vision_mode)
         self.chunk_size = int(chunk_size)
         self.length = len(self.dataset)
         if self.length < self.chunk_size:
@@ -1313,6 +1324,7 @@ def make_lerobot_pi05_config(
     compile_mode: str = "max-autotune",
     freeze_vision_encoder: bool = False,
     train_expert_only: bool = False,
+    state_conditioning: bool = False,
 ):
     policy_type = _normalize_pi05_policy_type(policy_type)
     modules = import_lerobot_pi05_modules(policy_type)
@@ -1368,6 +1380,7 @@ def make_lerobot_pi05_config(
         "compile_mode": str(compile_mode),
         "freeze_vision_encoder": bool(freeze_vision_encoder),
         "train_expert_only": bool(train_expert_only),
+        "state_conditioning": bool(state_conditioning),
     }
     supported_fields = set(getattr(PI05Config, "__dataclass_fields__", {}))
     if supported_fields:
@@ -1397,9 +1410,12 @@ class LeRobotDiffusionDoorPolicyBackend:
         self.device = torch.device(device or getattr(config, "device", "cpu"))
         self.policy.to(self.device)
         self.vision_mode = normalize_vision_mode(vision_mode)
-        self.image_keys = lerobot_image_keys_for_vision_mode(self.vision_mode)
-        self.action_frame = str(action_frame or "world").lower()
         self.sidecar_config = dict(sidecar_config or {})
+        self.image_keys = list(
+            self.sidecar_config.get("image_features")
+            or lerobot_image_keys_for_vision_mode(self.vision_mode)
+        )
+        self.action_frame = str(action_frame or "world").lower()
         self.stats = _stats_to_cpu(stats)
         self.normalizer = DoorPolicyNormalizer(
             self.stats,
@@ -1443,7 +1459,10 @@ class LeRobotDiffusionDoorPolicyBackend:
         modules = import_lerobot_policy_modules()
         DiffusionPolicy = modules["DiffusionPolicy"]
         vision_mode = normalize_vision_mode(vision_mode)
-        image_keys = lerobot_image_keys_for_vision_mode(vision_mode)
+        image_keys = list(
+            (sidecar_config or {}).get("image_features")
+            or lerobot_image_keys_for_vision_mode(vision_mode)
+        )
         state_dim = int(state_dim or _feature_dim_from_stats(stats, OBS_STATE))
         action_dim = int(action_dim or _feature_dim_from_stats(stats, ACTION))
         device_str = str(device)
@@ -1776,13 +1795,16 @@ class LeRobotActDoorPolicyBackend:
         state_dim: Optional[int] = None,
         action_dim: Optional[int] = None,
         pretrained_path: Optional[str] = None,
+        image_features: Optional[Sequence[str]] = None,
         **policy_kwargs: Any,
     ) -> "LeRobotActDoorPolicyBackend":
         modules = import_lerobot_act_modules()
         ACTPolicy = modules["ACTPolicy"]
         vision_mode = normalize_vision_mode(vision_mode)
         point_cloud_conditioning = bool(policy_kwargs.get("point_cloud_conditioning", False))
-        image_keys = [] if point_cloud_conditioning else lerobot_image_keys_for_vision_mode(vision_mode)
+        image_keys = [] if point_cloud_conditioning else list(
+            image_features if image_features is not None else lerobot_image_keys_for_vision_mode(vision_mode)
+        )
         state_dim = int(state_dim or _feature_dim_from_stats(stats, OBS_STATE))
         action_dim = int(action_dim or _feature_dim_from_stats(stats, ACTION))
         config = make_lerobot_act_config(
@@ -2284,6 +2306,46 @@ class LeRobotActDoorPolicyBackend:
         return checkpoint_dir
 
 
+def validate_pi05_state_projection(policy: Any, policy_dir: Union[str, Path]) -> None:
+    """Reject dropped/random state tokens before wrapping or evaluating a fine-tuned model."""
+    from safetensors import safe_open
+
+    policy_dir = Path(policy_dir)
+    source_config = _read_json(policy_dir / "config.json")
+    expected = bool(source_config.get("state_conditioning", False))
+    actual = bool(getattr(policy.config, "state_conditioning", False))
+    if actual != expected:
+        raise ValueError(f"PI05 state_conditioning mismatch: checkpoint={expected}, runtime={actual}")
+    if not expected:
+        return
+    with safe_open(str(policy_dir / "model.safetensors"), framework="pt", device="cpu") as saved:
+        parameters = dict(policy.named_parameters())
+        for key in ("model.state_proj.weight", "model.state_proj.bias"):
+            if key not in saved.keys() or key not in parameters:
+                raise ValueError(f"PI05 continuous-state checkpoint is missing {key}")
+            value = parameters[key].detach().cpu()
+            reference = saved.get_tensor(key).to(dtype=value.dtype)
+            if not torch.equal(value, reference):
+                raise ValueError(f"PI05 state projection was not loaded exactly: {key}")
+    print("PI05 state projection verified: weight/bias exactly match checkpoint", flush=True)
+
+
+def validate_native_pi05_evo_weights(policy, policy_dir):
+    """Fail closed even if the native fork catches a from_pretrained error."""
+    from safetensors.torch import load_file
+
+    source = load_file(str(Path(policy_dir) / "model.safetensors"), device="cpu")
+    fixed = policy._fix_pytorch_state_dict_keys(source, policy.config)
+    fixed = {key if key.startswith("model.") else "model." + key: value for key, value in fixed.items()}
+    actual = policy.state_dict()
+    if set(actual) != set(fixed):
+        raise ValueError(f"Native Evo checkpoint keys mismatch: missing={set(actual)-set(fixed)}, "
+                         f"unexpected={set(fixed)-set(actual)}")
+    for key, value in actual.items():
+        if not torch.equal(value.detach().cpu(), fixed[key].to(dtype=value.dtype)):
+            raise ValueError(f"Native Evo checkpoint tensor was not loaded exactly: {key}")
+
+
 class LeRobotPI05DoorPolicyBackend:
     """Backend implementation backed by LeRobot's PI05Policy."""
 
@@ -2302,6 +2364,7 @@ class LeRobotPI05DoorPolicyBackend:
         task_prompt: str = "open the door",
         tokenizer_name: str = "google/paligemma-3b-pt-224",
         policy_type: str = "pi05",
+        processor_checkpoint: Optional[Union[str, Path]] = None,
     ):
         self.backend_name = _backend_from_pi05_policy_type(policy_type)
         self.policy_type = _normalize_pi05_policy_type(policy_type)
@@ -2311,9 +2374,12 @@ class LeRobotPI05DoorPolicyBackend:
         self.device = torch.device(device or getattr(config, "device", "cpu"))
         self.policy.to(self.device)
         self.vision_mode = normalize_vision_mode(vision_mode)
-        self.image_keys = lerobot_image_keys_for_vision_mode(self.vision_mode)
-        self.action_frame = str(action_frame or "world").lower()
         self.sidecar_config = dict(sidecar_config or {})
+        self.image_keys = list(
+            self.sidecar_config.get("image_features")
+            or lerobot_image_keys_for_vision_mode(self.vision_mode)
+        )
+        self.action_frame = str(action_frame or "world").lower()
         self.stats = _stats_to_cpu(stats)
         self.task_prompt = str(task_prompt)
         self.tokenizer_name = str(tokenizer_name)
@@ -2325,6 +2391,30 @@ class LeRobotPI05DoorPolicyBackend:
             self.device,
         )
         self._pi05_modules = import_lerobot_pi05_modules(self.policy_type)
+        self.preprocessor = None
+        self.postprocessor = None
+        if processor_checkpoint is not None:
+            # Reuse the saved training pipeline, including quantiles (without
+            # clipping), exact state digitization, task cleaning and tokenizer.
+            # Do not infer include_state_in_prompt from state_conditioning:
+            # a trained checkpoint may intentionally contain both state paths.
+            from lerobot.policies.factory import make_pre_post_processors
+            if self.policy_type == "pi05_evo":
+                from lerobot.policies.pi05_evo import processor_pi05_evo  # noqa: F401
+            else:
+                from lerobot.policies.pi05 import processor_pi05  # noqa: F401; register saved steps
+
+            self.preprocessor, self.postprocessor = make_pre_post_processors(
+                policy_cfg=config,
+                pretrained_path=str(processor_checkpoint),
+                preprocessor_overrides={
+                    "device_processor": {"device": str(self.device)},
+                    "tokenizer_processor": {"tokenizer_name": self.tokenizer_name},
+                },
+                postprocessor_overrides={"device_processor": {"device": str(self.device)}},
+            )
+        elif bool(getattr(config, "state_conditioning", False)):
+            raise ValueError("Continuous-state PI05 requires its saved training processors; re-export checkpoint.")
 
     @property
     def obs_horizon(self) -> int:
@@ -2359,13 +2449,17 @@ class LeRobotPI05DoorPolicyBackend:
         task_prompt: str = "open the door",
         tokenizer_name: str = "google/paligemma-3b-pt-224",
         policy_type: str = "pi05",
+        processor_checkpoint: Optional[Union[str, Path]] = None,
         **policy_kwargs: Any,
     ) -> "LeRobotPI05DoorPolicyBackend":
         policy_type = _normalize_pi05_policy_type(policy_type)
         modules = import_lerobot_pi05_modules(policy_type)
         PI05Policy = modules["PI05Policy"]
         vision_mode = normalize_vision_mode(vision_mode)
-        image_keys = lerobot_image_keys_for_vision_mode(vision_mode)
+        image_keys = list(
+            (sidecar_config or {}).get("image_features")
+            or lerobot_image_keys_for_vision_mode(vision_mode)
+        )
         state_dim = int(state_dim or _feature_dim_from_stats(stats, OBS_STATE))
         action_dim = int(action_dim or _feature_dim_from_stats(stats, ACTION))
         config = make_lerobot_pi05_config(
@@ -2379,7 +2473,13 @@ class LeRobotPI05DoorPolicyBackend:
             **policy_kwargs,
         )
         if pretrained_path:
-            policy = PI05Policy.from_pretrained(pretrained_path, config=config, strict=False)
+            policy = PI05Policy.from_pretrained(
+                pretrained_path, config=config, strict=bool(getattr(config, "state_conditioning", False))
+            )
+            if (Path(pretrained_path) / "config.json").is_file():
+                validate_pi05_state_projection(policy, pretrained_path)
+                if policy_type == "pi05_evo":
+                    validate_native_pi05_evo_weights(policy, pretrained_path)
         else:
             policy = PI05Policy(config)
         policy.to(str(device))
@@ -2394,6 +2494,7 @@ class LeRobotPI05DoorPolicyBackend:
             task_prompt,
             tokenizer_name,
             policy_type=policy_type,
+            processor_checkpoint=processor_checkpoint,
         )
 
     @classmethod
@@ -2407,7 +2508,19 @@ class LeRobotPI05DoorPolicyBackend:
         ckpt_dir = resolve_checkpoint_dir(checkpoint)
         meta = _read_json(ckpt_dir / CHECKPOINT_META)
         cfg = dict(meta.get("policy_config", {}))
+        source_dir = cfg.get("source_official_policy_dir")
+        if source_dir and (Path(source_dir) / "config.json").is_file():
+            source_cfg = _read_json(Path(source_dir) / "config.json")
+            if bool(source_cfg.get("state_conditioning", False)) != bool(cfg.get("state_conditioning", False)):
+                raise ValueError("Stale PI05 wrapper dropped state_conditioning; re-export the official checkpoint.")
         policy_type = _normalize_pi05_policy_type(cfg.get("policy_type", meta.get("backend", BACKEND_LEROBOT_PI05)))
+        tokenizer_name = str(cfg.get("tokenizer_name", "google/paligemma-3b-pt-224"))
+        if not Path(tokenizer_name).expanduser().exists():
+            # Exported checkpoints package the tokenizer next to model_latest/.
+            # Prefer it when metadata still names the training host's path.
+            packaged_tokenizer = ckpt_dir.parent / "tokenizer"
+            if packaged_tokenizer.is_dir():
+                tokenizer_name = str(packaged_tokenizer.resolve())
         modules = import_lerobot_pi05_modules(policy_type)
         PI05Policy = modules["PI05Policy"]
         if device is not None:
@@ -2438,13 +2551,17 @@ class LeRobotPI05DoorPolicyBackend:
             compile_mode=cfg.get("compile_mode", "max-autotune"),
             freeze_vision_encoder=bool(cfg.get("freeze_vision_encoder", False)),
             train_expert_only=bool(cfg.get("train_expert_only", False)),
+            state_conditioning=bool(cfg.get("state_conditioning", False)),
         )
         policy = PI05Policy.from_pretrained(
             ckpt_dir / CHECKPOINT_POLICY_DIR,
             config=config,
             local_files_only=True,
-            strict=False,
+            strict=bool(getattr(config, "state_conditioning", False)),
         )
+        validate_pi05_state_projection(policy, ckpt_dir / CHECKPOINT_POLICY_DIR)
+        if policy_type == "pi05_evo":
+            validate_native_pi05_evo_weights(policy, ckpt_dir / CHECKPOINT_POLICY_DIR)
         stats = torch.load(ckpt_dir / CHECKPOINT_STATS, map_location="cpu")
         return cls(
             policy,
@@ -2455,8 +2572,13 @@ class LeRobotPI05DoorPolicyBackend:
             meta.get("sidecar_config", {}),
             device=config.device,
             task_prompt=cfg.get("task_prompt", "open the door"),
-            tokenizer_name=cfg.get("tokenizer_name", "google/paligemma-3b-pt-224"),
+            tokenizer_name=tokenizer_name,
             policy_type=policy_type,
+            processor_checkpoint=(
+                ckpt_dir / CHECKPOINT_POLICY_DIR
+                if cfg.get("preprocessing_mode") == "saved_lerobot"
+                else None
+            ),
         )
 
     def _get_tokenizer(self):
@@ -2502,19 +2624,28 @@ class LeRobotPI05DoorPolicyBackend:
         return self
 
     def compute_loss(self, batch: Mapping[str, Any]) -> torch.Tensor:
-        batch_norm = self.normalizer.normalize_batch(batch, include_action=True)
-        batch_norm = self._add_language_tokens(batch_norm)
+        batch_norm = self._prepare_batch(batch, include_action=True)
         self.policy.train()
         loss, _ = self.policy(batch_norm)
         return loss
 
     @torch.no_grad()
     def predict_action_chunks_from_batch(self, batch: Mapping[str, Any], noise: Optional[torch.Tensor] = None) -> torch.Tensor:
-        batch_norm = self.normalizer.normalize_batch(batch, include_action=False)
-        batch_norm = self._add_language_tokens(batch_norm)
+        batch_norm = self._prepare_batch(batch, include_action=False)
         self.policy.eval()
         actions = self.policy.predict_action_chunk(batch_norm)
+        if self.postprocessor is not None:
+            return self.postprocessor(actions)
         return self.normalizer.denormalize_action(actions)
+
+    def _prepare_batch(self, batch: Mapping[str, Any], include_action: bool = False) -> Dict[str, Any]:
+        if self.preprocessor is None:
+            return self._add_language_tokens(self.normalizer.normalize_batch(batch, include_action=include_action))
+        inputs = dict(batch)
+        if not include_action:
+            inputs.pop(ACTION, None)
+        inputs["task"] = [self.task_prompt] * int(inputs[OBS_STATE].shape[0])
+        return self.preprocessor(inputs)
 
     def metadata(self, extra_config: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
         policy_config = {
@@ -2543,6 +2674,8 @@ class LeRobotPI05DoorPolicyBackend:
             "tokenizer_max_length": int(self.config.tokenizer_max_length),
             "tokenizer_name": self.tokenizer_name,
             "task_prompt": self.task_prompt,
+            "state_conditioning": bool(getattr(self.config, "state_conditioning", False)),
+            "preprocessing_mode": "saved_lerobot" if self.preprocessor is not None else "legacy_door",
             "gradient_checkpointing": bool(self.config.gradient_checkpointing),
             "compile_model": bool(getattr(self.config, "compile_model", False)),
             "compile_mode": getattr(self.config, "compile_mode", "max-autotune"),
@@ -2582,6 +2715,9 @@ class LeRobotPI05DoorPolicyBackend:
         policy_dir = checkpoint_dir / CHECKPOINT_POLICY_DIR
         policy_dir.mkdir(parents=True, exist_ok=True)
         self.policy.save_pretrained(policy_dir, push_to_hub=False)
+        if self.preprocessor is not None:
+            self.preprocessor.save_pretrained(policy_dir)
+            self.postprocessor.save_pretrained(policy_dir)
         meta = self.metadata(extra_config=extra_config)
         with (checkpoint_dir / CHECKPOINT_META).open("w", encoding="utf-8") as f:
             json.dump(_json_safe(meta), f, indent=2, ensure_ascii=False)
@@ -3187,6 +3323,9 @@ class DoorPolicyController:
         if front_second_rgb is None:
             front_second_rgb = np.zeros_like(second_rgb)
         if self.vision_mode == "depth_only":
+            item[self.image_keys[0]] = _image_to_chw_float_device(second_rgb, self.device, required=True)
+            item[self.image_keys[1]] = _image_to_chw_float_device(front_second_rgb, self.device, required=True)
+        elif self.vision_mode == "rgb" and len(self.image_keys) == 2:
             item[self.image_keys[0]] = _image_to_chw_float_device(second_rgb, self.device, required=True)
             item[self.image_keys[1]] = _image_to_chw_float_device(front_second_rgb, self.device, required=True)
         else:
